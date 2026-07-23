@@ -25,7 +25,7 @@ function getDayOfWeek(date) {
 }
 
 function getDefectColor(value) {
-  if (value === 0) return '#00B050';
+  if (value === 0) return '#00B051';
   if (value <= 4)  return '#92D050';
   if (value <= 8)  return '#FFFF00';
   if (value <= 15) return '#FFC000';
