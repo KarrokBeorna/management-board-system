@@ -26,9 +26,24 @@ function getDefectColor(value) {
   return '#FF0000';
 }
 
-// Компонент модального окна
 function VINModal({ defect, vins, loading, onClose }) {
   if (!defect) return null;
+
+  const uniqueCount = vins.length;
+
+  const exportToExcel = () => {
+    if (vins.length === 0) return;
+    const header = 'VIN';
+    const rows = vins.map(vin => [vin]);
+    const csvContent = [header, ...rows].map(e => e.join(',')).join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `VIN_${defect.PART_NAME}_${defect.PROBLEM_TYPE}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div style={modalOverlayStyle} onClick={onClose}>
@@ -44,15 +59,23 @@ function VINModal({ defect, vins, loading, onClose }) {
         ) : vins.length === 0 ? (
           <div style={{ color: '#D1D5DB' }}>Нет данных</div>
         ) : (
-          <div className="custom-scroll" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {vins.map((vin, idx) => (
-                <li key={idx} style={{ padding: '4px 8px', borderBottom: '1px solid #4B5563', color: '#FFF' }}>
-                  {vin}
-                </li>
-              ))}
-            </ul>
-          </div>
+          <>
+            <div style={{ color: '#D1D5DB', marginBottom: 10 }}>
+              Всего уникальных VIN: {uniqueCount}
+              <button onClick={exportToExcel} style={exportBtnStyle}>
+                Экспорт в Excel
+              </button>
+            </div>
+            <div className="custom-scroll" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {vins.map((vin, idx) => (
+                  <li key={idx} style={{ padding: '4px 8px', borderBottom: '1px solid #4B5563', color: '#FFF' }}>
+                    {vin}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -99,17 +122,22 @@ function DefectTable({ checkpoint, defects, carsCount, onDefectClick }) {
               {sorted.map((item, idx) => (
                 <tr
                   key={idx}
-                  style={{ backgroundColor: idx % 2 === 0 ? '#1F2937' : '#111827', cursor: 'pointer' }}
-                  onClick={() => onDefectClick(item)}
+                  style={{
+                    backgroundColor: idx % 2 === 0 ? '#1F2937' : '#111827',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => onDefectClick(checkpoint, item)}
                 >
                   <td style={tdStyle}>{item.MPP}</td>
-                  <td style={{
-                    ...tdStyle,
-                    backgroundColor: getDefectColor(item.DEFECTS_COUNT),
-                    color: item.DEFECTS_COUNT > 15 ? '#FFF' : '#000',
-                    fontWeight: 600,
-                    textAlign: 'center',
-                  }}>
+                  <td
+                    style={{
+                      ...tdStyle,
+                      backgroundColor: getDefectColor(item.DEFECTS_COUNT),
+                      color: item.DEFECTS_COUNT > 15 ? '#FFF' : '#000',
+                      fontWeight: 600,
+                      textAlign: 'center',
+                    }}
+                  >
                     {item.DEFECTS_COUNT}
                   </td>
                 </tr>
@@ -133,14 +161,12 @@ export default function DailyTopPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Модальное окно
-  const [selectedDefect, setSelectedDefect] = useState(null); // { MPP, PART_NAME, PROBLEM_TYPE, MODEL }
+  const [selectedDefect, setSelectedDefect] = useState(null);
   const [vins, setVins] = useState([]);
   const [vinsLoading, setVinsLoading] = useState(false);
 
   const todayStr = getTodayStr();
 
-  // Загрузка дефектов
   useEffect(() => {
     setLoading(true);
     setError(null);
@@ -154,15 +180,15 @@ export default function DailyTopPage() {
         };
 
         const [cp7Res, cp8Res] = await Promise.all([
-          fetch(buildUrl('CP7')).then(r => r.json()),
-          fetch(buildUrl('CP8')).then(r => r.json())
+          fetch(buildUrl('CP7')).then((r) => r.json()),
+          fetch(buildUrl('CP8')).then((r) => r.json()),
         ]);
 
         if (!Array.isArray(cp7Res) || !Array.isArray(cp8Res)) {
           throw new Error('Ответ сервера не является массивом');
         }
 
-        const allModels = new Set([...cp7Res, ...cp8Res].map(d => d.MODEL));
+        const allModels = new Set([...cp7Res, ...cp8Res].map((d) => d.MODEL));
         setModels(['ALL', ...Array.from(allModels).sort()]);
         setDefectsCP7(cp7Res);
         setDefectsCP8(cp8Res);
@@ -176,58 +202,53 @@ export default function DailyTopPage() {
     fetchData();
   }, [defectType, shift]);
 
-  // Количество машин
   useEffect(() => {
     const url =
       model === 'ALL'
         ? `${API_BASE}/api/cars-count?date=${todayStr}`
         : `${API_BASE}/api/cars-count?date=${todayStr}&model=${encodeURIComponent(model)}`;
     fetch(url)
-      .then(r => r.json())
-      .then(data => setCarsCount(data.CARS_COUNT || 0))
+      .then((r) => r.json())
+      .then((data) => setCarsCount(data.CARS_COUNT || 0))
       .catch(() => setCarsCount(0));
   }, [model, todayStr]);
 
-  // Обработчик клика по дефекту
-  const handleDefectClick = (defect) => {
-    const checkpoint = defect.CHECKPOINT || (defectsCP7.includes(defect) ? 'CP7' : 'CP8'); // определим чекпоинт, если нужно
-    // На самом деле мы знаем, из какой таблицы дефект, но проще взять текущий фильтр? 
-    // Но defect приходит из DefectTable, который знает свой checkpoint (мы его передаём как пропс).
-    // Передадим checkpoint в onDefectClick из DefectTable.
-    // Изменим DefectTable, чтобы он передавал не только item, но и свой checkpoint.
-    // В handleDefectClick будем принимать два аргумента: checkpoint и defect.
-    // Изменим вызов onDefectClick в DefectTable: onClick={() => onDefectClick(checkpoint, item)}
-  };
-
-  // Обновим DefectTable, добавив checkpoint в вызов onDefectClick
-  // Внесём правки в функцию DefectTable (выше), заменив onClick={() => onDefectClick(item)} на onClick={() => onDefectClick(checkpoint, item)}
-  // И в компоненте DailyTopPage изменим вызов <DefectTable ... onDefectClick={handleDefectClick} />
-
-  const handleDefectClickWithCheckpoint = (checkpoint, defect) => {
+  const handleDefectClick = (checkpoint, defect) => {
     setSelectedDefect({ ...defect, checkpoint });
     setVins([]);
     setVinsLoading(true);
+
+    const defectModel = defect.MODEL || defect.MPP?.split(' ')[0] || '';
 
     const params = new URLSearchParams({
       checkpoint,
       partName: defect.PART_NAME,
       problemType: defect.PROBLEM_TYPE,
+      model: defectModel,
     });
     if (defectType !== 'default') params.append('defectType', defectType);
     if (shift !== 'all') params.append('shift', shift);
-    if (model !== 'ALL') params.append('model', model); // текущая модель из фильтра
 
-    fetch(`${API_BASE}/api/daily-top-vins?${params.toString()}`)
-      .then(res => res.json())
-      .then(data => {
+    const url = `${API_BASE}/api/daily-top-vins?${params.toString()}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    fetch(url, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Ошибка сервера: ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
         setVins(Array.isArray(data) ? data : []);
         setVinsLoading(false);
       })
-      .catch(err => {
+      .catch((err) => {
         console.error('Ошибка загрузки VIN:', err);
         setVins([]);
         setVinsLoading(false);
-      });
+      })
+      .finally(() => clearTimeout(timeoutId));
   };
 
   const closeModal = () => {
@@ -236,7 +257,7 @@ export default function DailyTopPage() {
   };
 
   const filterByModel = (defects) =>
-    model === 'ALL' ? defects : defects.filter(d => d.MODEL === model);
+    model === 'ALL' ? defects : defects.filter((d) => d.MODEL === model);
 
   const containerStyle = {
     backgroundColor: '#111827',
@@ -256,22 +277,40 @@ export default function DailyTopPage() {
 
   return (
     <div style={containerStyle}>
-      <h1 style={{ fontSize: 20, marginBottom: 15 }}>Контроль качества — Топ дефектов за сегодня</h1>
+      <h1 style={{ fontSize: 20, marginBottom: 15 }}>
+        Контроль качества — Топ дефектов за сегодня
+      </h1>
       <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 14, color: '#D1D5DB' }}>Модель:</span>
-        <select value={model} onChange={e => setModel(e.target.value)} style={filterSelectStyle}>
-          {models.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все модели' : m}</option>)}
+        <select
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          style={filterSelectStyle}
+        >
+          {models.map((m) => (
+            <option key={m} value={m}>
+              {m === 'ALL' ? 'Все модели' : m}
+            </option>
+          ))}
         </select>
 
         <span style={{ fontSize: 14, color: '#D1D5DB' }}>Тип:</span>
-        <select value={defectType} onChange={e => setDefectType(e.target.value)} style={filterSelectStyle}>
+        <select
+          value={defectType}
+          onChange={(e) => setDefectType(e.target.value)}
+          style={filterSelectStyle}
+        >
           <option value="default">Default</option>
           <option value="offline">Offline</option>
           <option value="online">Online</option>
         </select>
 
         <span style={{ fontSize: 14, color: '#D1D5DB' }}>Смена:</span>
-        <select value={shift} onChange={e => setShift(e.target.value)} style={filterSelectStyle}>
+        <select
+          value={shift}
+          onChange={(e) => setShift(e.target.value)}
+          style={filterSelectStyle}
+        >
           <option value="all">Сутки</option>
           <option value="day">Дневная (7:50–16:40)</option>
           <option value="night">Вечерняя (16:40–1:30)</option>
@@ -283,17 +322,16 @@ export default function DailyTopPage() {
           checkpoint="CP7"
           defects={filterByModel(defectsCP7)}
           carsCount={carsCount}
-          onDefectClick={handleDefectClickWithCheckpoint}
+          onDefectClick={handleDefectClick}
         />
         <DefectTable
           checkpoint="CP8"
           defects={filterByModel(defectsCP8)}
           carsCount={carsCount}
-          onDefectClick={handleDefectClickWithCheckpoint}
+          onDefectClick={handleDefectClick}
         />
       </div>
 
-      {/* Модальное окно */}
       <VINModal
         defect={selectedDefect}
         vins={vins}
@@ -304,7 +342,6 @@ export default function DailyTopPage() {
   );
 }
 
-// Стили для модального окна
 const modalOverlayStyle = {
   position: 'fixed',
   top: 0,
@@ -335,7 +372,17 @@ const closeBtnStyle = {
   cursor: 'pointer',
 };
 
-// Стили таблицы (прежние)
+const exportBtnStyle = {
+  marginLeft: 15,
+  padding: '4px 12px',
+  background: '#2563EB',
+  color: '#FFF',
+  border: 'none',
+  borderRadius: 4,
+  cursor: 'pointer',
+  fontSize: 12,
+};
+
 const filterSelectStyle = {
   padding: '6px 12px',
   borderRadius: 6,
