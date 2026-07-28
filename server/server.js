@@ -55,9 +55,7 @@ async function checkNotesDatabaseConnection() {
   }
 }
 
-// =====================================================
-// СТАРЫЕ ЭНДПОИНТЫ
-// =====================================================
+// Старые эндпоинты
 app.get('/api/tables', async (req, res) => {
   try {
     const [rows] = await pool.query('SHOW TABLES');
@@ -92,91 +90,71 @@ app.get('/api/cars-count', async (req, res) => {
       params = [date];
     }
 
-    console.log(`→ Машины: model=${model || 'ALL'}, date=${date}`);
     const [rows] = await pool.query(sql, params);
-    console.log(`  Результат: ${rows[0]?.CARS_COUNT || 0}`);
-
     res.json({ CARS_COUNT: rows[0]?.CARS_COUNT || 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// Основной дашборд (Top DRR) – без смен
 app.get('/api/defects-dashboard', async (req, res) => {
   try {
     const { checkpoint, defectType } = req.query;
     const type = defectType || 'default';
-    console.log(`=== ЗАПРОС ДЕФЕКТОВ (checkpoint: ${checkpoint || 'ALL'}, type: ${type}) ===`);
 
     let whereClause;
 
-    const cp7BaseCondition = `
-      (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1')
-        OR QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9'))
-    `;
-    const cp8BaseCondition = `
-      QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')
-    `;
-
-    let checkpointCondition;
     if (checkpoint === 'CP7') {
-      checkpointCondition = cp7BaseCondition;
-    } else if (checkpoint === 'CP8') {
-      checkpointCondition = cp8BaseCondition;
-    } else {
-      checkpointCondition = `(${cp7BaseCondition} OR ${cp8BaseCondition})`;
-    }
-
-    if (type === 'default') {
-      if (checkpoint === 'CP7') {
-        whereClause = `
-          AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1')
-            OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1))
-        `;
-      } else if (checkpoint === 'CP8') {
-        whereClause = `
-          AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')
-        `;
-      } else {
-        whereClause = `
-          AND (
-            (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1')
-              OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1))
-            OR
-            (QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL'))
-          )
-        `;
+      if (type === 'default') {
+        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1') OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1))`;
+      } else if (type === 'offline') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1`;
+      } else if (type === 'online') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 0`;
       }
-    } else if (type === 'offline') {
-      whereClause = ` AND ${checkpointCondition} AND S_OFFLINE = 1`;
-    } else if (type === 'online') {
-      whereClause = ` AND ${checkpointCondition} AND S_OFFLINE = 0`;
+    } else if (checkpoint === 'CP8') {
+      if (type === 'default') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')`;
+      } else if (type === 'offline') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL') AND S_OFFLINE = 1`;
+      } else if (type === 'online') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL') AND S_OFFLINE = 0`;
+      }
+    } else { // ALL
+      if (type === 'default') {
+        whereClause = `AND ((QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1') OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1)) OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL'))`;
+      } else if (type === 'offline') {
+        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')) AND S_OFFLINE = 1`;
+      } else if (type === 'online') {
+        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')) AND S_OFFLINE = 0`;
+      }
     }
 
     const query = `
       SELECT 
-        PART_NAME,
-        PROBLEM_TYPE,
-        CONCAT(PART_NAME, ' ', PROBLEM_TYPE) AS PP,
+        QM_DEF.PART_NAME,
+        QM_DEF.PROBLEM_TYPE,
+        CONCAT(QM_DEF.PART_NAME, ' ', QM_DEF.PROBLEM_TYPE) AS PP,
         DATE(QM_DEF.CREATION_TIME) AS CREATION_TIME,
         wo.MODEL,
         COUNT(*) AS QTY_DEF
       FROM (
-        SELECT VIN, DATE(CREATION_TIME) AS CREATION_TIME, CHECK_POINT, POST_NAME,
-          (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-          PART_NAME, PROBLEM_TYPE
+        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
         FROM at_biw_qm_defect_info
         WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
         UNION ALL
-        SELECT VIN, DATE(CREATION_TIME) AS CREATION_TIME, CHECK_POINT, POST_NAME,
-          (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-          PART_NAME, PROBLEM_TYPE
+        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
         FROM at_paint_qm_defect_info
         WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
         UNION ALL
-        SELECT VIN, DATE(CREATION_TIME) AS CREATION_TIME, CHECK_POINT, POST_NAME,
-          (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-          PART_NAME, PROBLEM_TYPE
+        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
         FROM at_qm_defect_info
         WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
       ) QM_DEF
@@ -184,14 +162,12 @@ app.get('/api/defects-dashboard', async (req, res) => {
       WHERE 1=1 ${whereClause}
         AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
         AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
-      GROUP BY PART_NAME, PROBLEM_TYPE, DATE(QM_DEF.CREATION_TIME), wo.MODEL
+      GROUP BY QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, DATE(QM_DEF.CREATION_TIME), wo.MODEL
       ORDER BY CREATION_TIME DESC
       LIMIT 5000
     `;
 
     const [rows] = await pool.query(query);
-    console.log(`→ Получено строк: ${rows.length}`);
-
     const result = rows.map(row => ({
       CREATION_TIME: row.CREATION_TIME,
       MODEL: row.MODEL || 'UNKNOWN',
@@ -208,15 +184,201 @@ app.get('/api/defects-dashboard', async (req, res) => {
   }
 });
 
-// =====================================================
-// ЗАМЕТКИ
-// =====================================================
+// ================== НОВЫЙ ЭНДПОИНТ ДЛЯ DAILY TOP ==================
+app.get('/api/daily-top', async (req, res) => {
+  try {
+    const { checkpoint, defectType, shift } = req.query;
+    const type = defectType || 'default';
+    const shiftMode = shift || 'all';   // 'all', 'day', 'night'
+
+    let whereClause;
+
+    // Фильтр по чекпоинту и типу (такой же, как в основном дашборде)
+    if (checkpoint === 'CP7') {
+      if (type === 'default') {
+        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1') OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1))`;
+      } else if (type === 'offline') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1`;
+      } else if (type === 'online') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 0`;
+      }
+    } else if (checkpoint === 'CP8') {
+      if (type === 'default') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')`;
+      } else if (type === 'offline') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL') AND S_OFFLINE = 1`;
+      } else if (type === 'online') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL') AND S_OFFLINE = 0`;
+      }
+    } else { // ALL
+      if (type === 'default') {
+        whereClause = `AND ((QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1') OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1)) OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL'))`;
+      } else if (type === 'offline') {
+        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')) AND S_OFFLINE = 1`;
+      } else if (type === 'online') {
+        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')) AND S_OFFLINE = 0`;
+      }
+    }
+
+    // Фильтр по смене
+    let shiftCondition = '';
+    if (shiftMode === 'day') {
+      shiftCondition = `AND TIME(QM_DEF.CREATION_TIME) BETWEEN '07:50:00' AND '16:40:00'`;
+    } else if (shiftMode === 'night') {
+      shiftCondition = `AND (TIME(QM_DEF.CREATION_TIME) >= '16:40:00' OR TIME(QM_DEF.CREATION_TIME) < '01:30:00')`;
+    }
+    // shiftMode === 'all' – без дополнительного условия
+
+    const query = `
+      SELECT 
+        QM_DEF.PART_NAME,
+        QM_DEF.PROBLEM_TYPE,
+        CONCAT(QM_DEF.PART_NAME, ' ', QM_DEF.PROBLEM_TYPE) AS PP,
+        DATE(QM_DEF.CREATION_TIME) AS CREATION_TIME,
+        wo.MODEL,
+        COUNT(*) AS QTY_DEF
+      FROM (
+        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_biw_qm_defect_info
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+        UNION ALL
+        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_paint_qm_defect_info
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+        UNION ALL
+        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_qm_defect_info
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE 1=1 ${whereClause} ${shiftCondition}
+        AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
+        AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
+        AND DATE(QM_DEF.CREATION_TIME) = CURDATE()   -- только сегодня
+      GROUP BY QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, DATE(QM_DEF.CREATION_TIME), wo.MODEL
+      ORDER BY CREATION_TIME DESC
+      LIMIT 5000
+    `;
+
+    const [rows] = await pool.query(query);
+    const result = rows.map(row => ({
+      CREATION_TIME: row.CREATION_TIME,
+      MODEL: row.MODEL || 'UNKNOWN',
+      PART_NAME: row.PART_NAME || '',
+      PROBLEM_TYPE: row.PROBLEM_TYPE || '',
+      MPP: `${row.MODEL || 'UNKNOWN'} ${row.PP}`,
+      DEFECTS_COUNT: Number(row.QTY_DEF) || 0,
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('ОШИБКА DAILY TOP:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================== VIN ДЛЯ ДЕФЕКТА В DAILY TOP ==================
+app.get('/api/daily-top-vins', async (req, res) => {
+  try {
+    const { checkpoint, defectType, shift, partName, problemType, model } = req.query;
+    if (!partName || !problemType) return res.status(400).json({ error: 'partName и problemType обязательны' });
+
+    const type = defectType || 'default';
+    const shiftMode = shift || 'all';
+
+    let whereClause = '';
+    const params = [];
+
+    // Фильтр по чекпоинту и типу (аналогично daily-top)
+    if (checkpoint === 'CP7') {
+      if (type === 'default') {
+        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1') OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1))`;
+      } else if (type === 'offline') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1`;
+      } else if (type === 'online') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 0`;
+      }
+    } else if (checkpoint === 'CP8') {
+      if (type === 'default') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')`;
+      } else if (type === 'offline') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL') AND S_OFFLINE = 1`;
+      } else if (type === 'online') {
+        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL') AND S_OFFLINE = 0`;
+      }
+    } else { // ALL
+      if (type === 'default') {
+        whereClause = `AND ((QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1') OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1)) OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL'))`;
+      } else if (type === 'offline') {
+        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')) AND S_OFFLINE = 1`;
+      } else if (type === 'online') {
+        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')) AND S_OFFLINE = 0`;
+      }
+    }
+
+    // Добавляем фильтр по конкретному дефекту
+    whereClause += ` AND QM_DEF.PART_NAME = ? AND QM_DEF.PROBLEM_TYPE = ?`;
+    params.push(partName, problemType);
+    if (model) {
+      whereClause += ` AND wo.MODEL = ?`;
+      params.push(model);
+    }
+
+    // Смена
+    let shiftCondition = '';
+    if (shiftMode === 'day') {
+      shiftCondition = `AND TIME(QM_DEF.CREATION_TIME) BETWEEN '07:50:00' AND '16:40:00'`;
+    } else if (shiftMode === 'night') {
+      shiftCondition = `AND (TIME(QM_DEF.CREATION_TIME) >= '16:40:00' OR TIME(QM_DEF.CREATION_TIME) < '01:30:00')`;
+    }
+
+    const query = `
+      SELECT DISTINCT wo.VIN
+      FROM (
+        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_biw_qm_defect_info
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+        UNION ALL
+        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_paint_qm_defect_info
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+        UNION ALL
+        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_qm_defect_info
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE 1=1 ${whereClause} ${shiftCondition}
+        AND DATE(QM_DEF.CREATION_TIME) = CURDATE()
+      ORDER BY wo.VIN
+    `;
+
+    const [rows] = await pool.query(query, params);
+    res.json(rows.map(r => r.VIN));
+  } catch (err) {
+    console.error('ОШИБКА VIN:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Заметки
 app.get('/api/defect-notes', async (req, res) => {
   try {
     const [rows] = await notesPool.query('SELECT * FROM defect_user_notes');
     res.json(rows);
   } catch (err) {
-    console.error('Ошибка получения заметок:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -237,14 +399,10 @@ app.post('/api/defect-notes', async (req, res) => {
     await notesPool.query(sql, [mpp, responsible || '', action || '']);
     res.json({ success: true });
   } catch (err) {
-    console.error('Ошибка сохранения заметки:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// =====================================================
-// ЗАПУСК
-// =====================================================
 const PORT = process.env.PORT || 40000;
 
 async function startServer() {
