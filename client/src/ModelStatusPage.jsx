@@ -170,7 +170,7 @@ const BarChartBlock = ({ title, data, periodType, isLoading, visibleModels, yAxi
 
 // Таблица с серверным CPA (без изменений)
 const EditableTable = ({ visibleModels, cp7DpuDays, cp7DrrDays, cp8DpuDays, cp8DrrDays, selectedDate }) => {
-  const headers = ['Model', 'CP7 DPU OFF', 'CP7 DRR', 'CP8 DPU OFF', 'CP8 DRR (MES)', 'CPA Score'];
+  const headers = ['Model', 'CP7 DPU OFF', 'CP7 DRR', 'CP8 DPU OFF', 'CP8 DRR', 'CPA Score'];
 
   const [cpaValues, setCpaValues] = useState({});
   const [cpaLoaded, setCpaLoaded] = useState(false);
@@ -287,19 +287,19 @@ const EditableTable = ({ visibleModels, cp7DpuDays, cp7DrrDays, cp8DpuDays, cp8D
             <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#F9FAFB' : '#FFFFFF' }}>
               <td style={styles.td}>{row.model}</td>
               <td style={styles.td}>
-                <span style={{ fontSize: 15, fontWeight: 500 }}>{row.cp7DpuOff}</span>
+                <span style={{ fontSize: 20, fontWeight: 500 }}>{row.cp7DpuOff}</span>
                 {row.cp7DpuDate && <div style={{ fontSize: 10, color: '#6B7280' }}>{row.cp7DpuDate}</div>}
               </td>
               <td style={styles.td}>
-                <span style={{ fontSize: 15, fontWeight: 500 }}>{row.cp7Drr}</span>
+                <span style={{ fontSize: 20, fontWeight: 500 }}>{row.cp7Drr}</span>
                 {row.cp7DrrDate && <div style={{ fontSize: 10, color: '#6B7280' }}>{row.cp7DrrDate}</div>}
               </td>
               <td style={styles.td}>
-                <span style={{ fontSize: 15, fontWeight: 500 }}>{row.cp8DpuOff}</span>
+                <span style={{ fontSize: 20, fontWeight: 500 }}>{row.cp8DpuOff}</span>
                 {row.cp8DpuDate && <div style={{ fontSize: 10, color: '#6B7280' }}>{row.cp8DpuDate}</div>}
               </td>
               <td style={styles.td}>
-                <span style={{ fontSize: 15, fontWeight: 500 }}>{row.cp8DrrMes}</span>
+                <span style={{ fontSize: 20, fontWeight: 500 }}>{row.cp8DrrMes}</span>
                 {row.cp8DrrDate && <div style={{ fontSize: 10, color: '#6B7280' }}>{row.cp8DrrDate}</div>}
               </td>
               <td style={{ ...styles.td, padding: '4px' }}>
@@ -1015,14 +1015,14 @@ const styles = {
     textAlign: 'center',
     fontWeight: 600,
     color: '#374151',
-    fontSize: 13,
+    fontSize: 20,
   },
   td: {
     padding: '8px',
     borderBottom: '1px solid #E5E7EB',
     textAlign: 'center',
     color: '#1F2937',
-    fontSize: 15,
+    fontSize: 20,
     fontWeight: 500,
   },
   input: {
