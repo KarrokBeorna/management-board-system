@@ -5,6 +5,7 @@ import Layout from './Layout';
 import HomePage from './HomePage';
 import ReportPage from './ReportPage';
 import DailyTopPage from './DailyTopPage';
+import ModelStatusPage from './ModelStatusPage';
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/report" element={<ReportPage />} />
         <Route path="/daily-top" element={<DailyTopPage />} />
+        <Route path="/model-status" element={<ModelStatusPage />} />
       </Route>
     </Routes>
   );

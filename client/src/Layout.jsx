@@ -55,7 +55,8 @@ const mainFullScreen = {
 
 export default function Layout() {
   const location = useLocation();
-  const isFullScreen = location.pathname === '/report' || location.pathname === '/daily-top';
+  const isFullScreen = location.pathname === '/report' || location.pathname === '/daily-top' || location.pathname === '/model-status';
+  
 
   return (
     <>

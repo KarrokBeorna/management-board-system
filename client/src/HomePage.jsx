@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import tablePreview from './assets/table-preview.png'; // можно заменить на другую картинку
-import dailyTopPreview from './assets/daily-top-preview.png'; // новая картинка для второй карточки
+import tablePreview from './assets/table-preview.png';
+import dailyTopPreview from './assets/daily-top-preview.png';
+import modelStatusPreview from './assets/123.png'; // временная картинка
 
 const sectionStyle = {
   backgroundColor: 'white',
@@ -11,20 +12,20 @@ const sectionStyle = {
 };
 
 const headingStyle = {
-  color: '#303A4C',
-  fontSize: '18px',
+  color: '#1F2937',
+  fontSize: '20px',
   fontWeight: 'bold',
-  marginBottom: '20px',
+  marginBottom: '24px',
 };
 
 const gridStyle = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(2, 320px)',
+  gridTemplateColumns: 'repeat(4, 1fr)',
   gap: '20px',
 };
 
 const getCardStyle = (isHovered) => ({
-  width: '300px',
+  width: '100%',
   borderRadius: '8px',
   overflow: 'hidden',
   boxShadow: isHovered ? '0 8px 20px rgba(0,0,0,0.15)' : '0 2px 8px rgba(0,0,0,0.1)',
@@ -86,6 +87,9 @@ export default function HomePage() {
       <div style={gridStyle}>
         <ReportCard to="/report" imgSrc={tablePreview} caption="Top DRR Board" />
         <ReportCard to="/daily-top" imgSrc={dailyTopPreview} caption="Daily Top CP7/CP8" />
+        <ReportCard to="/model-status" imgSrc={modelStatusPreview} caption="Model Status" />
+        {/* четвёртая ячейка временно пустая */}
+        <div />
       </div>
     </div>
   );
