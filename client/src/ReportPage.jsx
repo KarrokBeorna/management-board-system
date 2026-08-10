@@ -42,12 +42,26 @@ function getDPUColor(value) {
   return '#FF0000';
 }
 
-function CarCell({ count }) {
-  return <div style={styles.cars}>{count !== null ? count : '...'}</div>;
+function CarCell({ count, sticky }) {
+  return (
+    <div style={{
+      ...styles.cars,
+      ...(sticky ? { position: 'sticky', top: 36, zIndex: 9 } : {})
+    }}>
+      {count !== null ? count : '...'}
+    </div>
+  );
 }
 
-function CarsWeekSum({ sum }) {
-  return <div style={styles.cars}>{sum !== null ? sum : '...'}</div>;
+function CarsWeekSum({ sum, sticky }) {
+  return (
+    <div style={{
+      ...styles.cars,
+      ...(sticky ? { position: 'sticky', top: 36, zIndex: 9 } : {})
+    }}>
+      {sum !== null ? sum : '...'}
+    </div>
+  );
 }
 
 export default function ReportPage() {
@@ -69,6 +83,9 @@ export default function ReportPage() {
   const [userNotes, setUserNotes] = useState({});
 
   const loadDataRef = useRef();
+
+  const [hiddenRows, setHiddenRows] = useState({});
+  const [selectedRow, setSelectedRow] = useState(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/defect-notes`)
@@ -179,7 +196,7 @@ export default function ReportPage() {
   useEffect(() => {
     const interval = setInterval(() => {
       if (loadDataRef.current) loadDataRef.current();
-    }, 60000);
+    }, 300000);
     return () => clearInterval(interval);
   }, []);
 
@@ -252,6 +269,16 @@ export default function ReportPage() {
     };
   }, [rawData, selectedModel, prevWeekDays, currWeekDays, isMonday, sortDay, sortCW, carsCounts]);
 
+  const handleToggleRow = (mpp) => {
+    setHiddenRows(prev => ({ ...prev, [mpp]: !prev[mpp] }));
+  };
+
+  const showAllRows = () => {
+    setHiddenRows({});
+  };
+
+  const hiddenCount = Object.values(hiddenRows).filter(Boolean).length;
+
   if (loading || carsLoading) return <div style={styles.loading}>Загрузка...</div>;
   if (error) return <div style={styles.error}>Ошибка: {error}</div>;
 
@@ -262,10 +289,8 @@ export default function ReportPage() {
   const responsibleOptions = ['', 'Сварка', 'Окраска', 'Сборка', 'Качество'];
   const actionOptions = ['', 'На контроле', 'Устранено', 'Требует проверки'];
 
-  const gridStyle = {
-    ...styles.grid,
-    gridTemplateColumns: 'minmax(300px, 2fr) 110px 110px repeat(7, 60px) 60px repeat(7, 60px) 60px'
-  };
+  const stickyTop1 = 0;
+  const stickyTop2 = 36;
 
   return (
     <div style={styles.app}>
@@ -300,13 +325,35 @@ export default function ReportPage() {
         {sortCW && <span style={styles.sortInfo}>Сорт: CW{sortCW==='prev'?prevWeekNum:currWeekNum} <button onClick={()=>setSortCW(null)} style={styles.clearBtn}>✕</button></span>}
       </div>
 
-      <div style={gridStyle}>
-        <div style={styles.dark}>Дефект</div>
-        <div style={styles.dark}>Ответственный</div>
-        <div style={styles.dark}>Действие</div>
+      <div style={styles.grid}>
+        {/* Первая строка заголовков */}
+        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop1, zIndex: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Дефект</span>
+          {hiddenCount > 0 && (
+            <button
+              onClick={showAllRows}
+              title="Показать все скрытые строки"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#60A5FA',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <span>👁️</span> {hiddenCount}
+            </button>
+          )}
+        </div>
+        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop1, zIndex: 10 }}>Ответственный</div>
+        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop1, zIndex: 10 }}>Действие</div>
 
         {prevWeekDays.map((d, i) => (
-          <div key={`ph${i}`} style={styles.hdr}>
+          <div key={`ph${i}`} style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
             <button
               onClick={() => { setSortCW(null); setSortDay(p => p?.week==='prev'&&p?.index===i?null:{week:'prev',index:i}); }}
               style={{
@@ -325,13 +372,12 @@ export default function ReportPage() {
             </button>
           </div>
         ))}
-
-        <div style={styles.hdr}>
+        <div style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
           <button onClick={() => { setSortDay(null); setSortCW(p => p==='prev'?null:'prev'); }} style={{...styles.sortBtn, background: sortCW==='prev'?'#2563EB':'transparent', color: sortCW==='prev'?'#FFF':'#D1D5DB'}}>CW{prevWeekNum}</button>
         </div>
 
         {currWeekDays.map((d, i) => (
-          <div key={`ch${i}`} style={styles.hdr}>
+          <div key={`ch${i}`} style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
             <button
               onClick={() => { setSortCW(null); setSortDay(p => p?.week==='curr'&&p?.index===i?null:{week:'curr',index:i}); }}
               style={{
@@ -350,36 +396,88 @@ export default function ReportPage() {
             </button>
           </div>
         ))}
-
-        <div style={styles.hdr}>
+        <div style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
           <button onClick={() => { setSortDay(null); setSortCW(p => p==='curr'?null:'curr'); }} style={{...styles.sortBtn, background: sortCW==='curr'?'#2563EB':'transparent', color: sortCW==='curr'?'#FFF':'#D1D5DB'}}>CW{currWeekNum}</button>
         </div>
 
-        <div style={styles.dark}>Кол-во машин</div>
-        <div style={styles.dark}></div>
-        <div style={styles.dark}></div>
-        {headerCarsPrev.map((v, i) => <CarCell key={`hcp${i}`} count={v} />)}
-        <CarsWeekSum sum={sumCarsPrev} />
-        {headerCarsCurr.map((v, i) => <CarCell key={`hcc${i}`} count={v} />)}
-        <CarsWeekSum sum={sumCarsCurr} />
+        {/* Вторая строка заголовков */}
+        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop2, zIndex: 9 }}>Кол-во машин</div>
+        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop2, zIndex: 9 }}></div>
+        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop2, zIndex: 9 }}></div>
+        {headerCarsPrev.map((v, i) => <CarCell key={`hcp${i}`} count={v} sticky />)}
+        <CarsWeekSum sum={sumCarsPrev} sticky />
+        {headerCarsCurr.map((v, i) => <CarCell key={`hcc${i}`} count={v} sticky />)}
+        <CarsWeekSum sum={sumCarsCurr} sticky />
 
-        {rows.map((row, ri) => {
+        {/* Строки данных */}
+        {rows.map((row) => {
+          if (hiddenRows[row.MPP]) return null;
           const dpuPrev = sumCarsPrev > 0 ? (row.totalPrevDef * 1000) / sumCarsPrev : 0;
           const dpuCurr = sumCarsCurr > 0 ? (row.totalCurrDef * 1000) / sumCarsCurr : 0;
           const note = userNotes[row.MPP] || { responsible: '', action: '' };
+          const isSelected = selectedRow === row.MPP;
+
+          const selectedBoxShadow = isSelected ? 'inset 0 0 0 2px #FFFFFF' : undefined;
 
           return (
             <React.Fragment key={row.MPP}>
-              <div style={styles.name}>{row.MPP}</div>
+              {/* Ячейка названия дефекта с кнопкой скрытия слева от таблицы */}
+              <div
+                style={{
+                  ...styles.name,
+                  position: 'relative',
+                  overflow: 'visible',
+                  boxShadow: selectedBoxShadow,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+                onClick={() => setSelectedRow(isSelected ? null : row.MPP)}
+              >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleRow(row.MPP);
+                  }}
+                  title="Свернуть строку"
+                  style={{
+                    position: 'absolute',
+                    left: -20,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#D1D5DB',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    width: 18,
+                    height: 18,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 0,
+                    zIndex: 1,
+                  }}
+                >
+                  ▾
+                </button>
+                <span style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {row.MPP}
+                </span>
+              </div>
 
-              <div style={styles.noteCell}>
+              <div style={{ ...styles.noteCell, boxShadow: selectedBoxShadow }}>
                 <select value={note.responsible} onChange={e => handleNoteSave(row.MPP, 'responsible', e.target.value)} style={styles.noteSelect}>
                   {responsibleOptions.map(opt => <option key={opt} value={opt}>{opt || '—'}</option>)}
                 </select>
                 {note.updated_at && <div style={styles.noteDate}>{new Date(note.updated_at).toLocaleDateString('ru-RU')}</div>}
               </div>
 
-              <div style={styles.noteCell}>
+              <div style={{ ...styles.noteCell, boxShadow: selectedBoxShadow }}>
                 <select value={note.action} onChange={e => handleNoteSave(row.MPP, 'action', e.target.value)} style={styles.noteSelect}>
                   {actionOptions.map(opt => <option key={opt} value={opt}>{opt || '—'}</option>)}
                 </select>
@@ -389,22 +487,56 @@ export default function ReportPage() {
               {row.cellsPrev.map((defects, ci) => {
                 const dateStr = prevWeekDays[ci].toISOString().split('T')[0];
                 const cars = carsCounts[dateStr] || 0;
-                const value = isDPU ? (cars > 0 ? (defects * 1000) / cars : 0) : defects;
+                let value = isDPU ? (cars > 0 ? (defects * 1000) / cars : 0) : defects;
+                if (isDPU && value > 1000) value = 980;
                 const bg = colorFunc(value);
                 const textColor = isDPU ? (value > 300 ? '#FFF' : '#000') : (value > 15 ? '#FFF' : '#000');
-                return <div key={`cp${ri}${ci}`} style={{...styles.val, background: bg, color: textColor}}>{isDPU ? formatDPU(value) : value}</div>;
+                return (
+                  <div key={`cp${row.MPP}${ci}`} style={{
+                    ...styles.val,
+                    background: bg,
+                    color: textColor,
+                    boxShadow: selectedBoxShadow,
+                  }}>
+                    {isDPU ? formatDPU(value) : value}
+                  </div>
+                );
               })}
-              <div style={{...styles.total, background: colorFunc(isDPU ? dpuPrev : row.totalPrevDef), color: (isDPU ? dpuPrev : row.totalPrevDef) > (isDPU ? 300 : 15) ? '#FFF' : '#000'}}>{isDPU ? formatDPU(dpuPrev) : row.totalPrevDef}</div>
+              <div style={{
+                ...styles.total,
+                background: colorFunc(isDPU ? dpuPrev : row.totalPrevDef),
+                color: (isDPU ? dpuPrev : row.totalPrevDef) > (isDPU ? 300 : 15) ? '#FFF' : '#000',
+                boxShadow: selectedBoxShadow,
+              }}>
+                {isDPU ? formatDPU(dpuPrev) : row.totalPrevDef}
+              </div>
 
               {row.cellsCurr.map((defects, ci) => {
                 const dateStr = currWeekDays[ci].toISOString().split('T')[0];
                 const cars = carsCounts[dateStr] || 0;
-                const value = isDPU ? (cars > 0 ? (defects * 1000) / cars : 0) : defects;
+                let value = isDPU ? (cars > 0 ? (defects * 1000) / cars : 0) : defects;
+                if (isDPU && value > 1000) value = 980;
                 const bg = colorFunc(value);
                 const textColor = isDPU ? (value > 300 ? '#FFF' : '#000') : (value > 15 ? '#FFF' : '#000');
-                return <div key={`cc${ri}${ci}`} style={{...styles.val, background: bg, color: textColor}}>{isDPU ? formatDPU(value) : value}</div>;
+                return (
+                  <div key={`cc${row.MPP}${ci}`} style={{
+                    ...styles.val,
+                    background: bg,
+                    color: textColor,
+                    boxShadow: selectedBoxShadow,
+                  }}>
+                    {isDPU ? formatDPU(value) : value}
+                  </div>
+                );
               })}
-              <div style={{...styles.total, background: colorFunc(isDPU ? dpuCurr : row.totalCurrDef), color: (isDPU ? dpuCurr : row.totalCurrDef) > (isDPU ? 300 : 15) ? '#FFF' : '#000'}}>{isDPU ? formatDPU(dpuCurr) : row.totalCurrDef}</div>
+              <div style={{
+                ...styles.total,
+                background: colorFunc(isDPU ? dpuCurr : row.totalCurrDef),
+                color: (isDPU ? dpuCurr : row.totalCurrDef) > (isDPU ? 300 : 15) ? '#FFF' : '#000',
+                boxShadow: selectedBoxShadow,
+              }}>
+                {isDPU ? formatDPU(dpuCurr) : row.totalCurrDef}
+              </div>
             </React.Fragment>
           );
         })}
@@ -426,7 +558,6 @@ const styles = {
     gridTemplateColumns: 'minmax(300px, 2fr) 110px 110px repeat(7, 60px) 60px repeat(7, 60px) 60px',
     border: '1px solid #4B5563',
     fontSize: 13,
-    overflowX: 'auto',
   },
   dark: { background: '#1F2937', padding: '6px 8px', fontWeight: 600, border: '1px solid #4B5563', display: 'flex', alignItems: 'center', fontSize: 11 },
   hdr: { background: '#374151', padding: 4, fontWeight: 600, border: '1px solid #4B5563', textAlign: 'center', fontSize: 11 },

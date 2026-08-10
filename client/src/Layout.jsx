@@ -42,21 +42,23 @@ function getCurrentDate() {
   return d.toLocaleDateString('ru-RU');
 }
 
-const mainDefault = {
-  maxWidth: '1300px',
-  margin: '0 auto',
-  padding: '20px',
-};
-
-const mainFullScreen = {
-  padding: '0',
-  height: 'calc(100vh - 60px)',
-};
-
 export default function Layout() {
   const location = useLocation();
-  const isFullScreen = location.pathname === '/report' || location.pathname === '/daily-top' || location.pathname === '/model-status';
-  
+  const isFullScreen = location.pathname === '/report' || location.pathname === '/daily-top' || location.pathname === '/model-status' || location.pathname === '/checkpoint-map';
+  const isHomePage = location.pathname === '/';
+
+  // Стили для main в зависимости от страницы
+  const mainStyle = isFullScreen
+    ? { padding: '0', height: 'calc(100vh - 60px)' }
+    : isHomePage
+      ? {
+          backgroundColor: '#f5f8fa',
+          minHeight: 'calc(100vh - 60px)',
+          width: '100%',
+          padding: '40px 20px',
+          boxSizing: 'border-box',
+        }
+      : { maxWidth: '1300px', margin: '0 auto', padding: '20px' };
 
   return (
     <>
@@ -70,7 +72,7 @@ export default function Layout() {
         <span>AGM - Quality</span>
         <span style={dateStyle}>{getCurrentDate()}</span>
       </header>
-      <main style={isFullScreen ? mainFullScreen : mainDefault}>
+      <main style={mainStyle}>
         <Outlet />
       </main>
     </>

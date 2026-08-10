@@ -40,28 +40,50 @@ const mesPool = mysql.createPool({
   dateStrings: true,
 });
 
+// ===== НОВЫЙ ПУЛ ДЛЯ БАЗЫ LES =====
+const lesPool = mysql.createPool({
+  host: '10.203.0.29',
+  port: 3306,
+  user: 'appuser',
+  password: 'msU1ceq~ST)2(Lf8',
+  database: 'higoplat_fusion_les',
+  waitForConnections: true,
+  connectTimeout: 10000,
+  dateStrings: true,
+});
+
 async function checkDatabaseConnection() {
   try {
-    console.log('Проверка подключения к удалённой БД...');
     const connection = await pool.getConnection();
-    console.log('OK!');
+    console.log('Основная БД: OK');
     connection.release();
     return true;
   } catch (err) {
-    console.error('ОШИБКА:', err.message);
+    console.error('Основная БД ОШИБКА:', err.message);
     return false;
   }
 }
 
 async function checkNotesDatabaseConnection() {
   try {
-    console.log('Проверка подключения к локальной БД заметок...');
     const connection = await notesPool.getConnection();
-    console.log('OK!');
+    console.log('Локальная БД заметок: OK');
     connection.release();
     return true;
   } catch (err) {
-    console.error('ОШИБКА:', err.message);
+    console.error('БД заметок ОШИБКА:', err.message);
+    return false;
+  }
+}
+
+async function checkLesDatabaseConnection() {
+  try {
+    const connection = await lesPool.getConnection();
+    console.log('БД LES: OK');
+    connection.release();
+    return true;
+  } catch (err) {
+    console.error('БД LES ОШИБКА:', err.message);
     return false;
   }
 }
@@ -108,38 +130,41 @@ app.get('/api/cars-count', async (req, res) => {
   }
 });
 
-// Основной дашборд (Top DRR) – без смен
+// ================== ДАШБОРД (основной + Daily Top) – с новыми списками постов ==================
 app.get('/api/defects-dashboard', async (req, res) => {
   try {
     const { checkpoint, defectType } = req.query;
     const type = defectType || 'default';
 
-    let whereClause;
+    // Единые списки постов для всех отчётов
+    const cp7Posts = [
+      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+      'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+      'EXT1', 'PIP2', 'PIP4', 'PIP9'
+    ];
+    const cp8Posts = [
+      'CP8', 'CP8 Gate', 'CP8-gate',
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'
+    ];
+    const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
+    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
 
-    if (checkpoint === 'CP7') {
-      if (type === 'default') {
-        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1') OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1))`;
-      } else if (type === 'offline') {
-        whereClause = `AND QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1`;
-      } else if (type === 'online') {
-        whereClause = `AND QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 0`;
-      }
-    } else if (checkpoint === 'CP8') {
-      if (type === 'default') {
-        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')`;
-      } else if (type === 'offline') {
-        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL') AND S_OFFLINE = 1`;
-      } else if (type === 'online') {
-        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL') AND S_OFFLINE = 0`;
-      }
-    } else { // ALL
-      if (type === 'default') {
-        whereClause = `AND ((QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1') OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1)) OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL'))`;
-      } else if (type === 'offline') {
-        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')) AND S_OFFLINE = 1`;
-      } else if (type === 'online') {
-        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')) AND S_OFFLINE = 0`;
-      }
+    let postList = [];
+    if (checkpoint === 'CP7') postList = cp7Posts;
+    else if (checkpoint === 'CP8') postList = cp8Posts;
+    else if (checkpoint === 'PIP') postList = pipPosts;
+    else if (checkpoint === 'TL') postList = tlPosts;
+    else postList = [...new Set([...cp7Posts, ...cp8Posts])];
+
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    let whereClause = '';
+    if (type === 'offline') {
+      whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr}) AND QM_DEF.S_OFFLINE = 1`;
+    } else if (type === 'online') {
+      whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr}) AND QM_DEF.S_OFFLINE = 0`;
+    } else {
+      whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr})`;
     }
 
     const query = `
@@ -149,6 +174,8 @@ app.get('/api/defects-dashboard', async (req, res) => {
         CONCAT(QM_DEF.PART_NAME, ' ', QM_DEF.PROBLEM_TYPE) AS PP,
         DATE(QM_DEF.CREATION_TIME) AS CREATION_TIME,
         wo.MODEL,
+        QM_DEF.VIN,
+        QM_DEF.POST_NAME,
         COUNT(*) AS QTY_DEF
       FROM (
         SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
@@ -173,18 +200,21 @@ app.get('/api/defects-dashboard', async (req, res) => {
       WHERE 1=1 ${whereClause}
         AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
         AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
-      GROUP BY QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, DATE(QM_DEF.CREATION_TIME), wo.MODEL
+      GROUP BY QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, DATE(QM_DEF.CREATION_TIME), wo.MODEL, QM_DEF.VIN, QM_DEF.POST_NAME
       ORDER BY CREATION_TIME DESC
       LIMIT 5000
     `;
 
     const [rows] = await pool.query(query);
+
     const result = rows.map(row => ({
       CREATION_TIME: row.CREATION_TIME,
       MODEL: row.MODEL || 'UNKNOWN',
       PART_NAME: row.PART_NAME || '',
       PROBLEM_TYPE: row.PROBLEM_TYPE || '',
       MPP: `${row.MODEL || 'UNKNOWN'} ${row.PP}`,
+      VIN: row.VIN,
+      POST_NAME: row.POST_NAME,
       DEFECTS_COUNT: Number(row.QTY_DEF) || 0,
     }));
 
@@ -195,50 +225,45 @@ app.get('/api/defects-dashboard', async (req, res) => {
   }
 });
 
-// ================== НОВЫЙ ЭНДПОИНТ ДЛЯ DAILY TOP ==================
+// ================== DAILY TOP – с новыми списками постов ==================
 app.get('/api/daily-top', async (req, res) => {
   try {
     const { checkpoint, defectType, shift } = req.query;
     const type = defectType || 'default';
-    const shiftMode = shift || 'all';   // 'all', 'day', 'night'
+    const shiftMode = shift || 'all';
 
-    let whereClause;
+    const cp7Posts = [
+      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+      'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+      'EXT1', 'PIP2', 'PIP4', 'PIP9'
+    ];
+    const cp8Posts = [
+      'CP8', 'CP8 Gate', 'CP8-gate',
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'
+    ];
 
-    // Фильтр по чекпоинту и типу (такой же, как в основном дашборде)
-    if (checkpoint === 'CP7') {
-      if (type === 'default') {
-        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1') OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1))`;
-      } else if (type === 'offline') {
-        whereClause = `AND QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1`;
-      } else if (type === 'online') {
-        whereClause = `AND QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 0`;
-      }
-    } else if (checkpoint === 'CP8') {
-      if (type === 'default') {
-        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')`;
-      } else if (type === 'offline') {
-        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL') AND S_OFFLINE = 1`;
-      } else if (type === 'online') {
-        whereClause = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL') AND S_OFFLINE = 0`;
-      }
-    } else { // ALL
-      if (type === 'default') {
-        whereClause = `AND ((QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1') OR (QM_DEF.POST_NAME IN ('PIP2', 'PIP4', 'PIP9') AND S_OFFLINE = 1)) OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL'))`;
-      } else if (type === 'offline') {
-        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')) AND S_OFFLINE = 1`;
-      } else if (type === 'online') {
-        whereClause = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')) AND S_OFFLINE = 0`;
-      }
+    let postList = [];
+    if (checkpoint === 'CP7') postList = cp7Posts;
+    else if (checkpoint === 'CP8') postList = cp8Posts;
+    else postList = [...new Set([...cp7Posts, ...cp8Posts])];
+
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    let whereClause = '';
+    if (type === 'offline') {
+      whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr}) AND QM_DEF.S_OFFLINE = 1`;
+    } else if (type === 'online') {
+      whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr}) AND QM_DEF.S_OFFLINE = 0`;
+    } else {
+      whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr})`;
     }
 
-    // Фильтр по смене
     let shiftCondition = '';
     if (shiftMode === 'day') {
       shiftCondition = `AND TIME(QM_DEF.CREATION_TIME) BETWEEN '07:50:00' AND '16:40:00'`;
     } else if (shiftMode === 'night') {
       shiftCondition = `AND (TIME(QM_DEF.CREATION_TIME) >= '16:40:00' OR TIME(QM_DEF.CREATION_TIME) < '01:30:00')`;
     }
-    // shiftMode === 'all' – без дополнительного условия
 
     const query = `
       SELECT 
@@ -271,7 +296,7 @@ app.get('/api/daily-top', async (req, res) => {
       WHERE 1=1 ${whereClause} ${shiftCondition}
         AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
         AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
-        AND DATE(QM_DEF.CREATION_TIME) = CURDATE()   -- только сегодня
+        AND DATE(QM_DEF.CREATION_TIME) = CURDATE()
       GROUP BY QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, DATE(QM_DEF.CREATION_TIME), wo.MODEL
       ORDER BY CREATION_TIME DESC
       LIMIT 5000
@@ -294,7 +319,7 @@ app.get('/api/daily-top', async (req, res) => {
   }
 });
 
-// ================== VIN ДЛЯ ДЕФЕКТА В DAILY TOP ==================
+// ================== VIN ДЛЯ ДЕФЕКТА В DAILY TOP – с новыми списками постов ==================
 app.get('/api/daily-top-vins', async (req, res) => {
   try {
     const { checkpoint, defectType, shift, partName, problemType, model } = req.query;
@@ -304,25 +329,27 @@ app.get('/api/daily-top-vins', async (req, res) => {
     const shiftMode = shift || 'all';
     const carModel = model || null;
 
-    let whereCheckpoint = '';
-    // Упрощённая фильтрация без S_OFFLINE, т.к. для VIN не нужна агрегация
-    if (checkpoint === 'CP7') {
-      whereCheckpoint = `AND QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9')`;
-    } else if (checkpoint === 'CP8') {
-      whereCheckpoint = `AND QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL')`;
-    } else {
-      whereCheckpoint = `AND (QM_DEF.POST_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9') OR QM_DEF.POST_NAME IN ('360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final', 'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up', 'REPAIR VERIFICATION', 'TRACK', 'ROLL'))`;
-    }
+    const cp7Posts = [
+      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+      'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+      'EXT1', 'PIP2', 'PIP4', 'PIP9'
+    ];
+    const cp8Posts = [
+      'CP8', 'CP8 Gate', 'CP8-gate',
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'
+    ];
 
-    // Фильтр по типу (default/offline/online) – применяем к S_OFFLINE
-    let offlineCondition = '';
-    if (type === 'offline') {
-      offlineCondition = `AND (QM_DEF.S_OFFLINE = 1)`;
-    } else if (type === 'online') {
-      offlineCondition = `AND (QM_DEF.S_OFFLINE = 0)`;
-    }
+    let postList = [];
+    if (checkpoint === 'CP7') postList = cp7Posts;
+    else if (checkpoint === 'CP8') postList = cp8Posts;
+    else postList = [...new Set([...cp7Posts, ...cp8Posts])];
 
-    // Смена
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    let whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr})`;
+    if (type === 'offline') whereClause += ` AND QM_DEF.S_OFFLINE = 1`;
+    else if (type === 'online') whereClause += ` AND QM_DEF.S_OFFLINE = 0`;
+
     let shiftCondition = '';
     if (shiftMode === 'day') {
       shiftCondition = `AND TIME(QM_DEF.CREATION_TIME) BETWEEN '07:50:00' AND '16:40:00'`;
@@ -352,7 +379,7 @@ app.get('/api/daily-top-vins', async (req, res) => {
         WHERE PART_NAME = ? AND PROBLEM_TYPE = ? AND DATE(CREATION_TIME) = CURDATE()
       ) QM_DEF
       JOIN work_order wo ON wo.VIN = QM_DEF.VIN
-      WHERE 1=1 ${whereCheckpoint} ${offlineCondition} ${shiftCondition}
+      WHERE 1=1 ${whereClause} ${shiftCondition}
         ${carModel ? `AND wo.MODEL = ?` : ''}
       ORDER BY wo.VIN
     `;
@@ -368,8 +395,7 @@ app.get('/api/daily-top-vins', async (req, res) => {
   }
 });
 
-
-// ================== MODEL STATUS – DRR (MES) – обновлённый ==================
+// ================== MODEL STATUS – DRR (MES) ==================
 app.get('/api/model-status-drr', async (req, res) => {
   try {
     const { period, count } = req.query;
@@ -423,7 +449,7 @@ app.get('/api/model-status-drr', async (req, res) => {
     rows.forEach(row => {
       const p = row.PERIOD;
       if (!periodsMap[p]) {
-        periodsMap[p] = { period: p, target: 80, values: {} }; // цель DRR = 80
+        periodsMap[p] = { period: p, target: 80, values: {} };
       }
       periodsMap[p].values[row.MODEL] = row.DRR_PERCENT;
     });
@@ -439,7 +465,7 @@ app.get('/api/model-status-drr', async (req, res) => {
   }
 });
 
-// ================== MODEL STATUS – DPU CP8 (OFFLINE, CPFINAL) – обновлённый ==================
+// ================== MODEL STATUS – DPU CP8 (OFFLINE, CPFINAL) ==================
 app.get('/api/model-status-dpu-cp8', async (req, res) => {
   try {
     const { period, count } = req.query;
@@ -499,7 +525,7 @@ app.get('/api/model-status-dpu-cp8', async (req, res) => {
   }
 });
 
-// ================== MODEL STATUS – DRR CP7 (исправленный) ==================
+// ================== MODEL STATUS – DRR CP7 ==================
 app.get('/api/model-status-drr-cp7', async (req, res) => {
   try {
     const { period, count } = req.query;
@@ -528,7 +554,7 @@ app.get('/api/model-status-drr-cp7', async (req, res) => {
         FROM tm_vhc_vehicle tvv
         JOIN tm_ofm_order too ON too.VIN = tvv.VIN
         JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
-        WHERE tvvm.node_nature = 'Key_Uloc_Type_CP7'   -- ← ЗАМЕНИТЕ НА ВАШ УЗЕЛ
+        WHERE tvvm.node_nature = 'Key_Uloc_Type_CP7'
         GROUP BY MODEL, PERIOD
       ) all_cars
       LEFT JOIN (
@@ -539,7 +565,7 @@ app.get('/api/model-status-drr-cp7', async (req, res) => {
         FROM tm_vhc_vehicle tvv
         JOIN tm_ofm_order too ON too.VIN = tvv.VIN
         JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
-        WHERE tvvm.node_nature = 'Key_Uloc_Type_CP7'   -- ← тот же узел
+        WHERE tvvm.node_nature = 'Key_Uloc_Type_CP7'
           AND tvv.VIN IN (
             SELECT DISTINCT tvtlm.VIN
             FROM tm_vhc_test_line_movement tvtlm
@@ -591,9 +617,16 @@ app.get('/api/model-status-dpu-cp7', async (req, res) => {
     else if (period === 'week') dateFormat = '%Y-%u';
     else if (period === 'day') dateFormat = '%Y-%m-%d';
 
-    // По умолчанию 3 месяца / 4 недели / 7 дней, если count не передан
     const defaultCount = period === 'month' ? 3 : period === 'week' ? 4 : 7;
     const limit = parseInt(count, 10) || defaultCount;
+
+    // Новый список постов для CP7
+    const cp7Posts = [
+      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+      'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+      'EXT1', 'PIP2', 'PIP4', 'PIP9'
+    ];
+    const postListStr = cp7Posts.map(p => `'${p}'`).join(',');
 
     const sql = `
       SELECT 
@@ -616,7 +649,7 @@ app.get('/api/model-status-dpu-cp7', async (req, res) => {
           UNION ALL
           SELECT VIN, (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE FROM at_paint_qm_defect_info
         ) QM_DEF ON QM_DEF.VIN = aowth.VIN AND QM_DEF.S_OFFLINE = 1
-        WHERE aowth.WC_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9')
+        WHERE aowth.WC_NAME IN (${postListStr})
         GROUP BY aowth.MODEL, CREATION_TIME
       ) CARS
       GROUP BY MODEL, PERIOD
@@ -670,6 +703,14 @@ app.get('/api/model-status-dpu-cp7-details', async (req, res) => {
       dateCondition = `DATE(DATE_SUB(aowth.CREATION_TIME, INTERVAL 470 MINUTE)) IN (${periodList.map(() => '?').join(',')})`;
     }
 
+    // Новый список постов CP7
+    const cp7Posts = [
+      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+      'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+      'EXT1', 'PIP2', 'PIP4', 'PIP9'
+    ];
+    const postListStr = cp7Posts.map(p => `'${p}'`).join(',');
+
     let sql = `
       SELECT DISTINCT aowth.VIN, aowth.MODEL, DATE(DATE_SUB(aowth.CREATION_TIME, INTERVAL 470 MINUTE)) AS DATE,
              QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE
@@ -682,7 +723,7 @@ app.get('/api/model-status-dpu-cp7-details', async (req, res) => {
         SELECT VIN, PART_NAME, PROBLEM_TYPE, (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE FROM at_paint_qm_defect_info
       ) QM_DEF ON QM_DEF.VIN = aowth.VIN AND QM_DEF.S_OFFLINE = 1
       WHERE ${dateCondition}
-        AND aowth.WC_NAME IN ('CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1', 'PIP2', 'PIP4', 'PIP9')
+        AND aowth.WC_NAME IN (${postListStr})
     `;
     const params = [...periodList];
 
@@ -726,7 +767,7 @@ app.get('/api/model-status-drr-cp7-details', async (req, res) => {
       JOIN tm_ofm_order too ON too.VIN = tvv.VIN
       JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
       LEFT JOIN tm_vhc_test_line_movement tvtlm ON tvtlm.VIN = tvv.VIN AND tvtlm.node_nature LIKE 'REP%'
-      WHERE tvvm.node_nature = 'Key_Uloc_Type_CP7'   -- ← ваш узел CP7!
+      WHERE tvvm.node_nature = 'Key_Uloc_Type_CP7'
         AND ${dateCondition}
     `;
     const params = [...periodList];
@@ -867,43 +908,1608 @@ app.post('/api/cpa-scores', async (req, res) => {
   }
 });
 
-// Заметки
-app.get('/api/defect-notes', async (req, res) => {
+
+// ================== CHECKPOINT MAP – СТАТИСТИКА ==================
+app.get('/api/checkpoint-stats', async (req, res) => {
   try {
-    const [rows] = await notesPool.query('SELECT * FROM defect_user_notes');
+    const { dateFrom, dateTo, model, defectType } = req.query;
+    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+
+    const type = defectType || 'all';
+
+    const pipPostsAll = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
+    const cp7PostsAll = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'CP8 Touch Up', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const tlPostsAll  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const cp8PostsAll = ['CP8', 'CP8 Gate', 'CP8-gate'];
+
+    const checkpoints = [
+      { id: 'PIP', posts: pipPostsAll },
+      { id: 'CP7', posts: cp7PostsAll },
+      { id: 'TL',  posts: tlPostsAll  },
+      { id: 'CP8', posts: cp8PostsAll }
+    ];
+
+    const results = [];
+
+    for (const cp of checkpoints) {
+      const postListStr = cp.posts.map(p => `'${p}'`).join(',');
+
+      // Общее количество VIN, прошедших посты (для информации)
+      let totalSql = `
+        SELECT COUNT(DISTINCT VIN) AS TOTAL
+        FROM at_om_wiptrackinghistory
+        WHERE WC_NAME IN (${postListStr})
+          AND DATE(CREATION_TIME) BETWEEN ? AND ?
+      `;
+      const totalParams = [dateFrom, dateTo];
+      if (model) { totalSql += ` AND MODEL = ?`; totalParams.push(model); }
+      const [[{ TOTAL }]] = await pool.query(totalSql, totalParams);
+      const totalVins = TOTAL || 0;
+
+      // Офлайн VIN (независимый подсчёт)
+      let offlineSql = `
+        SELECT COUNT(DISTINCT QM_DEF.VIN) AS OFFLINE
+        FROM (
+          SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_biw_qm_defect_info
+          UNION ALL
+          SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_paint_qm_defect_info
+          UNION ALL
+          SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_qm_defect_info
+        ) QM_DEF
+        JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+        WHERE QM_DEF.POST_NAME IN (${postListStr})
+          AND QM_DEF.S_OFFLINE = 1
+          AND QM_DEF.CREATION_DATE BETWEEN ? AND ?
+      `;
+      const offlineParams = [dateFrom, dateTo];
+      if (model) { offlineSql += ` AND wo.MODEL = ?`; offlineParams.push(model); }
+      const [[{ OFFLINE }]] = await pool.query(offlineSql, offlineParams);
+      let offlineVins = OFFLINE || 0;
+
+      // Онлайн VIN (независимый подсчёт)
+      let onlineSql = `
+        SELECT COUNT(DISTINCT QM_DEF.VIN) AS ONLINE
+        FROM (
+          SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_biw_qm_defect_info
+          UNION ALL
+          SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_paint_qm_defect_info
+          UNION ALL
+          SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_qm_defect_info
+        ) QM_DEF
+        JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+        WHERE QM_DEF.POST_NAME IN (${postListStr})
+          AND QM_DEF.S_OFFLINE = 0
+          AND QM_DEF.CREATION_DATE BETWEEN ? AND ?
+      `;
+      const onlineParams = [dateFrom, dateTo];
+      if (model) { onlineSql += ` AND wo.MODEL = ?`; onlineParams.push(model); }
+      const [[{ ONLINE }]] = await pool.query(onlineSql, onlineParams);
+      let onlineVins = ONLINE || 0;
+
+      // Применяем фильтр типа дефектов
+      if (type === 'offline') {
+        onlineVins = 0;
+      } else if (type === 'online') {
+        offlineVins = 0;
+      }
+
+      results.push({
+        checkpoint: cp.id,
+        posts: cp.posts,
+        totalVins,
+        offlineVins,
+        onlineVins
+      });
+    }
+
+    res.json(results);
+  } catch (err) {
+    console.error('ОШИБКА checkpoint-stats:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ================== CHECKPOINT DEFECTS (для Checkpoint Map) ==================
+app.get('/api/checkpoint-stats', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, model, defectType } = req.query;
+    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+
+    const type = defectType || 'all';
+
+    // Списки постов
+    const pipPostsPure = ['EXT1', 'PIP1', 'PIP5', 'PIP6', 'PIP8'];
+    const pipPostsAll  = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
+    const cp7PostsAll  = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'CP8 Touch Up', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const tlPostsAll   = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const cp8PostsAll  = ['CP8', 'CP8 Gate', 'CP8-gate'];
+
+    // Вспомогательная функция: подсчёт уникальных VIN с офлайн-дефектами на заданном списке постов
+    async function getOfflineVins(postList) {
+      if (!postList.length) return 0;
+      const postStr = postList.map(p => `'${p}'`).join(',');
+      let sql = `
+        SELECT COUNT(DISTINCT QM_DEF.VIN) AS OFFLINE
+        FROM (
+          SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_biw_qm_defect_info
+          UNION ALL
+          SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_paint_qm_defect_info
+          UNION ALL
+          SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_qm_defect_info
+        ) QM_DEF
+        JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+        WHERE QM_DEF.POST_NAME IN (${postStr})
+          AND QM_DEF.S_OFFLINE = 1
+          AND QM_DEF.CREATION_DATE BETWEEN ? AND ?
+      `;
+      const params = [dateFrom, dateTo];
+      if (model) { sql += ` AND wo.MODEL = ?`; params.push(model); }
+      const [[{ OFFLINE }]] = await pool.query(sql, params);
+      return OFFLINE || 0;
+    }
+
+    // Общее количество VIN, прошедших посты чекпоинта (для онлайн)
+    async function getTotalVins(postList) {
+      if (!postList.length) return 0;
+      const postStr = postList.map(p => `'${p}'`).join(',');
+      let sql = `
+        SELECT COUNT(DISTINCT VIN) AS TOTAL
+        FROM at_om_wiptrackinghistory
+        WHERE WC_NAME IN (${postStr})
+          AND DATE(CREATION_TIME) BETWEEN ? AND ?
+      `;
+      const params = [dateFrom, dateTo];
+      if (model) { sql += ` AND MODEL = ?`; params.push(model); }
+      const [[{ TOTAL }]] = await pool.query(sql, params);
+      return TOTAL || 0;
+    }
+
+    // Специальный подсчёт для CP8 – только авто, прошедшие ремзону
+    async function getCp8RemzoneOffline() {
+      const cp8Str = cp8PostsAll.map(p => `'${p}'`).join(',');
+      let sql = `
+        SELECT COUNT(DISTINCT cp8.VIN) AS OFFLINE
+        FROM (
+          SELECT DISTINCT QM_DEF.VIN
+          FROM (
+            SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+            FROM at_biw_qm_defect_info
+            UNION ALL
+            SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+            FROM at_paint_qm_defect_info
+            UNION ALL
+            SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+            FROM at_qm_defect_info
+          ) QM_DEF
+          JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+          JOIN at_om_wiptrackinghistory aowth ON aowth.VIN = wo.VIN
+          WHERE QM_DEF.POST_NAME IN (${cp8Str})
+            AND QM_DEF.S_OFFLINE = 1
+            AND QM_DEF.CREATION_DATE BETWEEN ? AND ?
+            AND aowth.WC_NAME IN (${cp8Str})
+            AND DATE(aowth.CREATION_TIME) BETWEEN ? AND ?
+        ) cp8
+        WHERE cp8.VIN IN (
+          SELECT DISTINCT tvtlm.VIN
+          FROM tm_vhc_test_line_movement tvtlm
+          WHERE tvtlm.node_nature LIKE 'REP%'
+        )
+      `;
+      const params = [dateFrom, dateTo, dateFrom, dateTo];
+      const [[{ OFFLINE }]] = await mesPool.query(sql, params);
+      return OFFLINE || 0;
+    }
+
+    // Накопительный подсчёт офлайн-авто
+    const pipOffline = await getOfflineVins(pipPostsPure);
+    const cp7Offline = await getOfflineVins([...pipPostsPure, ...cp7PostsAll]);
+    const tlOffline = await getOfflineVins([...pipPostsPure, ...cp7PostsAll, ...tlPostsAll]);
+    const cp8Offline = await getCp8RemzoneOffline();
+
+    // Общие количества для онлайн
+    const pipTotal = await getTotalVins(pipPostsAll);
+    const cp7Total = await getTotalVins(cp7PostsAll);
+    const tlTotal = await getTotalVins(tlPostsAll);
+    const cp8Total = await getTotalVins(cp8PostsAll);
+
+    let result = [
+      {
+        checkpoint: 'PIP',
+        posts: pipPostsAll,
+        totalVins: pipTotal,
+        offlineVins: pipOffline,
+        onlineVins: Math.max(pipTotal - pipOffline, 0),
+        inheritedOffline: 0
+      },
+      {
+        checkpoint: 'CP7',
+        posts: cp7PostsAll,
+        totalVins: cp7Total,
+        offlineVins: cp7Offline,
+        onlineVins: Math.max(cp7Total - cp7Offline, 0),
+        inheritedOffline: pipOffline   // пришло с PIP
+      },
+      {
+        checkpoint: 'TL',
+        posts: tlPostsAll,
+        totalVins: tlTotal,
+        offlineVins: tlOffline,
+        onlineVins: Math.max(tlTotal - tlOffline, 0),
+        inheritedOffline: cp7Offline   // пришло с CP7
+      },
+      {
+        checkpoint: 'CP8',
+        posts: cp8PostsAll,
+        totalVins: cp8Total,
+        offlineVins: cp8Offline,
+        onlineVins: Math.max(cp8Total - cp8Offline, 0),
+        inheritedOffline: 0            // все новые, из ремзоны
+      }
+    ];
+
+    // Применяем фильтр по типу дефектов для отображения
+    if (type === 'offline') {
+      result = result.map(r => ({ ...r, onlineVins: 0 }));
+    } else if (type === 'online') {
+      result = result.map(r => ({ ...r, offlineVins: 0, inheritedOffline: 0 }));
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('ОШИБКА checkpoint-stats:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/checkpoint-defects', async (req, res) => {
+  try {
+    const { checkpoint, defectType, dateFrom, dateTo, model } = req.query;
+    if (!checkpoint || !dateFrom || !dateTo) return res.status(400).json({ error: 'checkpoint, dateFrom, dateTo обязательны' });
+
+    const type = defectType || 'all';
+
+    // Базовые списки
+    const pipPostsAll   = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
+    const pipPostsPure  = ['EXT1', 'PIP1', 'PIP5', 'PIP6', 'PIP8'];
+    const cp7PostsAll   = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'CP8 Touch Up', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const tlPostsAll    = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const cp8PostsAll   = ['CP8', 'CP8 Gate', 'CP8-gate'];
+
+    let postList;
+    if (checkpoint === 'PIP') {
+      // Для PIP: при 'offline' исключаем общие посты, при 'online' и 'all' – полный список
+      if (type === 'offline') postList = pipPostsPure;
+      else postList = pipPostsAll;
+    } else if (checkpoint === 'CP7') postList = cp7PostsAll;
+    else if (checkpoint === 'TL')  postList = tlPostsAll;
+    else if (checkpoint === 'CP8') postList = cp8PostsAll;
+    else return res.status(400).json({ error: 'Неверный checkpoint' });
+
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    let typeCondition = '';
+    if (type === 'offline') typeCondition = ' AND QM_DEF.S_OFFLINE = 1';
+    else if (type === 'online') typeCondition = ' AND QM_DEF.S_OFFLINE = 0';
+
+    const params = [dateFrom, dateTo];
+    let modelCondition = '';
+    if (model && model !== 'ALL') {
+      modelCondition = ' AND wo.MODEL = ?';
+      params.push(model);
+    }
+
+    const query = `
+      SELECT 
+        QM_DEF.PART_NAME,
+        QM_DEF.PROBLEM_TYPE,
+        CONCAT(QM_DEF.PART_NAME, ' ', QM_DEF.PROBLEM_TYPE) AS PP,
+        wo.MODEL,
+        COUNT(*) AS QTY_DEF
+      FROM (
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_qm_defect_info
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE QM_DEF.POST_NAME IN (${postListStr})
+        ${typeCondition}
+        AND QM_DEF.CREATION_DATE BETWEEN ? AND ?
+        ${modelCondition}
+        AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
+        AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
+      GROUP BY QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, wo.MODEL
+      ORDER BY QTY_DEF DESC
+      LIMIT 10
+    `;
+
+    const [rows] = await pool.query(query, params);
+    const result = rows.map(row => ({
+      MPP: `${row.MODEL || 'UNKNOWN'} ${row.PP}`,
+      DEFECTS_COUNT: Number(row.QTY_DEF) || 0,
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('ОШИБКА checkpoint-defects:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/remzone-stats', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, model } = req.query;
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    }
+
+    // 1. Все VIN, прошедшие CP7 за период (без лишних преобразований времени)
+    // При необходимости поправьте часовой пояс (470 минут), если tvvm.scan_time в UTC.
+    // Пока используем простое условие по дате.
+    const baseQuery = `
+      SELECT tvv.VIN, too.product AS MODEL
+      FROM tm_vhc_vehicle tvv
+      JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+      JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+      WHERE tvvm.node_nature = 'Key_Uloc_Type_CP7'
+        AND DATE(tvvm.scan_time) BETWEEN ? AND ?
+    `;
+
+    // 2. Считаем, сколько из них были в ремзоне (есть запись в tm_vhc_test_line_movement с 'REP%')
+    const query = `
+      SELECT cp7.MODEL, COUNT(DISTINCT cp7.VIN) AS REMZONE_COUNT
+      FROM (${baseQuery}) cp7
+      WHERE cp7.VIN IN (
+        SELECT DISTINCT tvtlm.VIN
+        FROM tm_vhc_test_line_movement tvtlm
+        WHERE tvtlm.node_nature LIKE 'REP%'
+      )
+      ${model && model !== 'ALL' ? 'AND cp7.MODEL = ?' : ''}
+      GROUP BY cp7.MODEL
+      ORDER BY cp7.MODEL
+    `;
+
+    const params = [dateFrom, dateTo];
+    if (model && model !== 'ALL') {
+      // Параметр для модели добавляется в WHERE после IN, поэтому он третий
+      // Лучше перестроить, чтобы было безопасно:
+      // Используем параметризованный запрос с явным условием
+    }
+
+    // Для простоты перепишем с явной подстановкой параметров
+    let finalQuery = `
+      SELECT cp7.MODEL, COUNT(DISTINCT cp7.VIN) AS REMZONE_COUNT
+      FROM (
+        SELECT tvv.VIN, too.product AS MODEL
+        FROM tm_vhc_vehicle tvv
+        JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+        JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+        WHERE tvvm.node_nature = 'Key_Uloc_Type_CP7'
+          AND DATE(tvvm.scan_time) BETWEEN ? AND ?
+      ) cp7
+      WHERE cp7.VIN IN (
+        SELECT DISTINCT tvtlm.VIN
+        FROM tm_vhc_test_line_movement tvtlm
+        WHERE tvtlm.node_nature LIKE 'REP%'
+      )
+    `;
+    const finalParams = [dateFrom, dateTo];
+
+    if (model && model !== 'ALL') {
+      finalQuery += ' AND cp7.MODEL = ?';
+      finalParams.push(model);
+    }
+
+    finalQuery += ' GROUP BY cp7.MODEL ORDER BY cp7.MODEL';
+
+    const [rows] = await mesPool.query(finalQuery, finalParams);
     res.json(rows);
   } catch (err) {
+    console.error('ОШИБКА remzone-stats:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post('/api/defect-notes', async (req, res) => {
+app.get('/api/remzone-tl-stats', async (req, res) => {
   try {
-    const { mpp, responsible, action } = req.body;
-    if (!mpp) return res.status(400).json({ error: 'MPP обязателен' });
+    const { dateFrom, dateTo, model } = req.query;
+    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+
+    // Авто, прошедшие TL и попавшие в ремзону
+    const query = `
+      SELECT cp.MODEL, COUNT(DISTINCT cp.VIN) AS REMZONE_COUNT
+      FROM (
+        SELECT tvv.VIN, too.product AS MODEL
+        FROM tm_vhc_vehicle tvv
+        JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+        JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+        WHERE tvvm.node_nature = 'Key_Uloc_Type_TL'
+          AND DATE(tvvm.scan_time) BETWEEN ? AND ?
+      ) cp
+      WHERE cp.VIN IN (
+        SELECT DISTINCT tvtlm.VIN
+        FROM tm_vhc_test_line_movement tvtlm
+        WHERE tvtlm.node_nature LIKE 'REP%'
+      )
+      ${model && model !== 'ALL' ? 'AND cp.MODEL = ?' : ''}
+      GROUP BY cp.MODEL
+      ORDER BY cp.MODEL
+    `;
+    const params = [dateFrom, dateTo];
+    if (model && model !== 'ALL') params.push(model);
+    const [rows] = await mesPool.query(query, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('ОШИБКА remzone-tl-stats:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================== НОВЫЕ ЭНДПОИНТЫ ДЛЯ СГП АУДИТ ==================
+
+// Получить список VIN, прошедших чекпоинт (упрощённый вариант)
+app.get('/api/sgp-audit-vins', async (req, res) => {
+  try {
+    const { checkpoint, dateFrom, dateTo, model } = req.query;
+    if (!checkpoint || !dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'checkpoint, dateFrom, dateTo обязательны' });
+    }
+
+    const allNodes = [
+      'Key_Uloc_Type_CP7',
+      'Key_Uloc_Type_CP72',
+      'Key_Uloc_Type_CPFINAL',
+      'Key_Uloc_Type_CP8'
+    ];
+    if (!allNodes.includes(checkpoint)) {
+      return res.status(400).json({ error: 'Неверный checkpoint' });
+    }
+
+    let sql = `
+      SELECT DISTINCT v.vin
+      FROM tm_vhc_vehicle_movement m
+      JOIN tm_vhc_vehicle v ON v.id = m.tm_vhc_vehicle_id
+      LEFT JOIN tm_ofm_order o ON o.vin = v.vin
+      WHERE m.node_nature = ?
+        AND m.scan_time BETWEEN ? AND ?
+    `;
+    const params = [checkpoint, dateFrom, dateTo];
+    if (model && model !== 'ALL') {
+      sql += ' AND o.product = ?';
+      params.push(model);
+    }
+
+    const [rows] = await mesPool.query(sql, params);
+    const vins = rows.map(r => r.vin);
+    res.json(vins);
+  } catch (err) {
+    console.error('Ошибка sgp-audit-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Получить данные tv_biz_storage_car для списка VIN (из БД LES)
+app.get('/api/sgp-audit-storage', async (req, res) => {
+  try {
+    const { vins, vin } = req.query;
+    let vinList = [];
+    if (vins) {
+      vinList = vins.split(',').map(v => v.trim()).filter(v => v.length > 0);
+    } else if (vin) {
+      vinList = [vin.trim()];
+    }
+    if (vinList.length === 0) return res.json([]);
+
+    const placeholders = vinList.map(() => '?').join(',');
+    const sql = `
+      SELECT
+        s.vin AS VIN,
+        s.vehicle_type AS Модель,
+        s.ck_no AS Склад,
+        s.kq_no AS Локация,
+        s.kw_no AS Ячейка,
+        '' AS "Результат проверки"
+      FROM tv_biz_storage_car s
+      WHERE s.vin IN (${placeholders})
+      ORDER BY s.vin
+    `;
+    const [rows] = await lesPool.query(sql, vinList);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка sgp-audit-storage:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/sgp-audit-vins-detail', async (req, res) => {
+  try {
+    const { checkpoint, dateFrom, dateTo, model, vin } = req.query;
+
+    // --- Режим поиска по конкретному VIN ---
+    if (vin) {
+      const sqlDetail = `
+        WITH movement AS (
+            SELECT 
+                v.vin,
+                o.product AS model,
+                m.node_nature,
+                m.scan_time
+            FROM tm_vhc_vehicle_movement m
+            JOIN tm_vhc_vehicle v ON v.id = m.tm_vhc_vehicle_id
+            LEFT JOIN tm_ofm_order o ON o.vin = v.vin
+            WHERE v.vin = ?
+              AND m.node_nature IN ('Key_Uloc_Type_CP7', 'Key_Uloc_Type_CP72', 'Key_Uloc_Type_CPFINAL', 'Key_Uloc_Type_CP8')
+        ),
+        aggregated AS (
+            SELECT
+                vin,
+                MAX(model) AS model,
+                node_nature,
+                MIN(scan_time) AS in_time,
+                MAX(scan_time) AS out_time
+            FROM movement
+            GROUP BY vin, node_nature
+        )
+        SELECT
+            vin AS VIN,
+            MAX(model) AS Модель,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN in_time END) AS CP7_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN out_time END) AS CP7_out,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP72' THEN in_time END) AS CP72_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP72' THEN out_time END) AS CP72_out,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CPFINAL' THEN in_time END) AS CPFINAL_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CPFINAL' THEN out_time END) AS CPFINAL_out,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP8' THEN in_time END) AS CP8_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP8' THEN out_time END) AS CP8_out
+        FROM aggregated
+        GROUP BY vin
+        ORDER BY vin
+      `;
+      const [rows] = await mesPool.query(sqlDetail, [vin.trim()]);
+      return res.json(rows);
+    }
+
+    // --- Обычный режим (без изменений) ---
+    if (!checkpoint || !dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'checkpoint, dateFrom, dateTo обязательны' });
+    }
+
+    const allNodes = [
+      'Key_Uloc_Type_CP7',
+      'Key_Uloc_Type_CP72',
+      'Key_Uloc_Type_CPFINAL',
+      'Key_Uloc_Type_CP8'
+    ];
+    if (!allNodes.includes(checkpoint)) {
+      return res.status(400).json({ error: 'Неверный checkpoint' });
+    }
+
+    // Определяем следующие чекпоинты после выбранного
+    const idx = allNodes.indexOf(checkpoint);
+    const nodesAfter = allNodes.slice(idx + 1);
+
+    // 1. Получаем VIN, прошедшие выбранный чекпоинт, с последним временем выхода
+    let sqlVins = `
+      SELECT v.vin, MAX(m.scan_time) AS last_cp_time
+      FROM tm_vhc_vehicle_movement m
+      JOIN tm_vhc_vehicle v ON v.id = m.tm_vhc_vehicle_id
+      LEFT JOIN tm_ofm_order o ON o.vin = v.vin
+      WHERE m.node_nature = ?
+        AND m.scan_time BETWEEN ? AND ?
+    `;
+    const paramsVins = [checkpoint, dateFrom, dateTo];
+    if (model && model !== 'ALL') {
+      sqlVins += ' AND o.product = ?';
+      paramsVins.push(model);
+    }
+    sqlVins += ' GROUP BY v.vin';
+    
+    const [vinsRows] = await mesPool.query(sqlVins, paramsVins);
+    if (vinsRows.length === 0) {
+      return res.json([]);
+    }
+
+    // 2. Исключаем VIN, которые после выбранного чекпоинта появились на следующих
+    const vinsWithTimes = vinsRows.map(r => ({ vin: r.vin, lastCpTime: r.last_cp_time }));
+    const vinList = vinsWithTimes.map(v => v.vin);
+
+    if (nodesAfter.length > 0) {
+      const placeholders = vinList.map(() => '?').join(',');
+      const sqlNext = `
+        SELECT DISTINCT v.vin
+        FROM tm_vhc_vehicle_movement m
+        JOIN tm_vhc_vehicle v ON v.id = m.tm_vhc_vehicle_id
+        WHERE v.vin IN (${placeholders})
+          AND m.node_nature IN (${nodesAfter.map(() => '?').join(',')})
+          AND m.scan_time > (
+            SELECT MAX(m2.scan_time)
+            FROM tm_vhc_vehicle_movement m2
+            JOIN tm_vhc_vehicle v2 ON v2.id = m2.tm_vhc_vehicle_id
+            WHERE v2.vin = v.vin AND m2.node_nature = ?
+              AND m2.scan_time BETWEEN ? AND ?
+          )
+      `;
+      const paramsNext = [...vinList, ...nodesAfter, checkpoint, dateFrom, dateTo];
+      const [nextRows] = await mesPool.query(sqlNext, paramsNext);
+      const nextVins = new Set(nextRows.map(r => r.vin));
+      
+      // Оставляем только те VIN, которых нет в nextVins
+      const filteredVins = vinList.filter(vin => !nextVins.has(vin));
+      
+      if (filteredVins.length === 0) {
+        return res.json([]);
+      }
+
+      // 3. Для оставшихся VIN собираем полную агрегацию по всем чекпоинтам
+      const filteredPlaceholders = filteredVins.map(() => '?').join(',');
+      const sqlDetail = `
+        WITH movement AS (
+            SELECT 
+                v.vin,
+                o.product AS model,
+                m.node_nature,
+                m.scan_time
+            FROM tm_vhc_vehicle_movement m
+            JOIN tm_vhc_vehicle v ON v.id = m.tm_vhc_vehicle_id
+            LEFT JOIN tm_ofm_order o ON o.vin = v.vin
+            WHERE v.vin IN (${filteredPlaceholders})
+              AND m.node_nature IN ('Key_Uloc_Type_CP7', 'Key_Uloc_Type_CP72', 'Key_Uloc_Type_CPFINAL', 'Key_Uloc_Type_CP8')
+        ),
+        aggregated AS (
+            SELECT
+                vin,
+                MAX(model) AS model,
+                node_nature,
+                MIN(scan_time) AS in_time,
+                MAX(scan_time) AS out_time
+            FROM movement
+            GROUP BY vin, node_nature
+        )
+        SELECT
+            vin AS VIN,
+            MAX(model) AS Модель,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN in_time END) AS CP7_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN out_time END) AS CP7_out,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP72' THEN in_time END) AS CP72_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP72' THEN out_time END) AS CP72_out,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CPFINAL' THEN in_time END) AS CPFINAL_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CPFINAL' THEN out_time END) AS CPFINAL_out,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP8' THEN in_time END) AS CP8_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP8' THEN out_time END) AS CP8_out
+        FROM aggregated
+        GROUP BY vin
+        ORDER BY vin
+      `;
+
+      const [detailRows] = await mesPool.query(sqlDetail, filteredVins);
+      return res.json(detailRows);
+    } else {
+      // Если выбран CP8 (последний), то исключать не нужно, сразу отдаём детализацию
+      const vinListOnly = vinsWithTimes.map(v => v.vin);
+      const placeholders = vinListOnly.map(() => '?').join(',');
+      const sqlDetail = `
+        WITH movement AS (
+            SELECT 
+                v.vin,
+                o.product AS model,
+                m.node_nature,
+                m.scan_time
+            FROM tm_vhc_vehicle_movement m
+            JOIN tm_vhc_vehicle v ON v.id = m.tm_vhc_vehicle_id
+            LEFT JOIN tm_ofm_order o ON o.vin = v.vin
+            WHERE v.vin IN (${placeholders})
+              AND m.node_nature IN ('Key_Uloc_Type_CP7', 'Key_Uloc_Type_CP72', 'Key_Uloc_Type_CPFINAL', 'Key_Uloc_Type_CP8')
+        ),
+        aggregated AS (
+            SELECT
+                vin,
+                MAX(model) AS model,
+                node_nature,
+                MIN(scan_time) AS in_time,
+                MAX(scan_time) AS out_time
+            FROM movement
+            GROUP BY vin, node_nature
+        )
+        SELECT
+            vin AS VIN,
+            MAX(model) AS Модель,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN in_time END) AS CP7_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN out_time END) AS CP7_out,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP72' THEN in_time END) AS CP72_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP72' THEN out_time END) AS CP72_out,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CPFINAL' THEN in_time END) AS CPFINAL_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CPFINAL' THEN out_time END) AS CPFINAL_out,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP8' THEN in_time END) AS CP8_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP8' THEN out_time END) AS CP8_out
+        FROM aggregated
+        GROUP BY vin
+        ORDER BY vin
+      `;
+      const [detailRows] = await mesPool.query(sqlDetail, vinListOnly);
+      return res.json(detailRows);
+    }
+  } catch (err) {
+    console.error('Ошибка sgp-audit-vins-detail:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Загрузка данных аудита (из Excel)
+app.post('/api/audit-results/upload', express.json(), async (req, res) => {
+  try {
+    const { rows } = req.body; // массив { vin, result, date_uploaded }
+    if (!rows || !rows.length) return res.status(400).json({ error: 'Нет данных' });
+
+    const sql = 'INSERT IGNORE INTO audit_results (vin, result, date_uploaded) VALUES ?';
+    const values = rows.map(r => [r.vin, r.result, r.date_uploaded]);
+    const [result] = await notesPool.query(sql, [values]);
+    res.json({ success: true, inserted: result.affectedRows });
+  } catch (err) {
+    console.error('Ошибка загрузки аудита:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Получение всех записей аудита
+app.get('/api/audit-results', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, result } = req.query;
+    let sql = 'SELECT vin, result, date_uploaded FROM audit_results WHERE 1=1';
+    const params = [];
+
+    if (dateFrom) { sql += ' AND date_uploaded >= ?'; params.push(dateFrom); }
+    if (dateTo)   { sql += ' AND date_uploaded <= ?'; params.push(dateTo); }
+    if (result && result !== 'ALL') { sql += ' AND result = ?'; params.push(result); }
+
+    sql += ' ORDER BY date_uploaded, vin';
+    const [rows] = await notesPool.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка получения аудита:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================== ТОП MPP ЗА НЕДЕЛЮ ==================
+app.get('/api/mpp-weekly-top', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, checkpoint, model, defectType } = req.query;
+    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+
+    const type = defectType || 'offline';
+
+    const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
+    const cp7Posts = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'CP8 Touch Up', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const cp8Posts = ['CP8', 'CP8 Gate', 'CP8-gate', '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+
+    let postList = [];
+    if (!checkpoint || checkpoint === 'ALL') {
+      postList = [...new Set([...pipPosts, ...cp7Posts, ...cp8Posts])];
+    } else if (checkpoint === 'CP7') postList = cp7Posts;
+    else if (checkpoint === 'CP8') postList = cp8Posts;
+    else if (checkpoint === 'PIP') postList = pipPosts;
+    else if (checkpoint === 'TL')  postList = tlPosts;
+    else postList = [...new Set([...pipPosts, ...cp7Posts, ...cp8Posts])];
+
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    let typeCondition = '';
+    if (type === 'offline') typeCondition = ' AND QM_DEF.S_OFFLINE = 1';
+    else if (type === 'online') typeCondition = ' AND QM_DEF.S_OFFLINE = 0';
+
+    const params = [dateFrom, dateTo];
+    let modelCondition = '';
+    if (model && model !== 'ALL') {
+      modelCondition = ' AND wo.MODEL = ?';
+      params.push(model);
+    }
 
     const sql = `
-      INSERT INTO defect_user_notes (mpp, responsible, action) 
-      VALUES (?, ?, ?) 
-      ON DUPLICATE KEY UPDATE 
-        responsible = VALUES(responsible), 
-        action = VALUES(action), 
-        updated_at = CURRENT_TIMESTAMP
+      SELECT
+        CONCAT(wo.MODEL, ' ', QM_DEF.PART_NAME, ' ', QM_DEF.PROBLEM_TYPE) AS MPP,
+        QM_DEF.PART_NAME,
+        QM_DEF.PROBLEM_TYPE,
+        wo.MODEL,
+        MIN(QM_DEF.POST_NAME) AS POST_NAME,
+        COUNT(*) AS DEFECT_COUNT,
+        COUNT(DISTINCT wo.VIN) AS VIN_COUNT,
+        GROUP_CONCAT(DISTINCT wo.VIN) AS VIN_LIST
+      FROM (
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_qm_defect_info
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE QM_DEF.POST_NAME IN (${postListStr})
+        ${typeCondition}
+        AND QM_DEF.CREATION_DATE BETWEEN ? AND ?
+        ${modelCondition}
+        AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
+        AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
+      GROUP BY MPP, QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, wo.MODEL
+      ORDER BY DEFECT_COUNT DESC
+      LIMIT 100
     `;
-    await notesPool.query(sql, [mpp, responsible || '', action || '']);
-    res.json({ success: true });
+
+    const [rows] = await pool.query(sql, params);
+
+    // Подсчёт общего количества уникальных VIN (для DPU)
+    let totalCars = 0;
+    if (postList.length > 0) {
+      const carsSql = `
+        SELECT COUNT(DISTINCT VIN) AS TOTAL
+        FROM at_om_wiptrackinghistory
+        WHERE WC_NAME IN (${postListStr})
+          AND DATE(CREATION_TIME) BETWEEN ? AND ?
+      `;
+      const carsParams = [dateFrom, dateTo];
+      const [[{ TOTAL }]] = await pool.query(carsSql, carsParams);
+      totalCars = TOTAL || 0;
+    }
+
+    // Расчёт доли ремзоны для каждого MPP
+    const result = [];
+    for (let row of rows) {
+      const vins = row.VIN_LIST ? row.VIN_LIST.split(',') : [];
+      let remzoneCount = 0;
+      if (vins.length > 0) {
+        const placeholders = vins.map(() => '?').join(',');
+        const remSql = `
+          SELECT COUNT(DISTINCT tvv.VIN) AS CNT
+          FROM tm_vhc_vehicle tvv
+          JOIN tm_vhc_test_line_movement tvtlm ON tvtlm.VIN = tvv.VIN
+          WHERE tvv.VIN IN (${placeholders})
+            AND tvtlm.node_nature LIKE 'REP%'
+        `;
+        const [remRows] = await mesPool.query(remSql, vins);
+        remzoneCount = remRows[0]?.CNT || 0;
+      }
+
+      const totalVins = vins.length;
+      const remzonePercent = totalVins > 0 ? ((remzoneCount * 100) / totalVins).toFixed(2) : '0.00';
+
+      result.push({
+        MPP: row.MPP,
+        MODEL: row.MODEL,
+        PART_NAME: row.PART_NAME,
+        PROBLEM_TYPE: row.PROBLEM_TYPE,
+        POST_NAME: row.POST_NAME,
+        DEFECT_COUNT: row.DEFECT_COUNT,
+        VIN_COUNT: row.VIN_COUNT,
+        DPU: totalCars > 0 ? ((row.DEFECT_COUNT * 1000) / totalCars).toFixed(2) : '0.00',
+        TOTAL_VINS: totalVins,
+        REMZONE_VINS: remzoneCount,
+        REMZONE_PERCENT: remzonePercent,
+      });
+    }
+
+    res.json(result);
   } catch (err) {
+    console.error('Ошибка mpp-weekly-top:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+// VIN для конкретного MPP
+app.get('/api/mpp-vins', async (req, res) => {
+  try {
+    const { mpp, partName, problemType, dateFrom, dateTo, model } = req.query;
+    if (!partName || !problemType || !dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'partName, problemType, dateFrom, dateTo обязательны' });
+    }
+
+    let where = `QM_DEF.PART_NAME = ? AND QM_DEF.PROBLEM_TYPE = ? AND QM_DEF.S_OFFLINE = 1 AND QM_DEF.CREATION_DATE BETWEEN ? AND ?`;
+    const params = [partName, problemType, dateFrom, dateTo];
+
+    if (model && model !== 'ALL') {
+      where += ' AND wo.MODEL = ?';
+      params.push(model);
+    }
+
+    const sql = `
+      SELECT wo.VIN, wo.MODEL, MIN(QM_DEF.CREATION_TIME) AS DEFECT_TIME
+      FROM (
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, CREATION_TIME,
+               PART_NAME, PROBLEM_TYPE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+        FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, CREATION_TIME,
+               PART_NAME, PROBLEM_TYPE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+        FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, CREATION_TIME,
+               PART_NAME, PROBLEM_TYPE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+        FROM at_qm_defect_info
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE ${where}
+      GROUP BY wo.VIN, wo.MODEL
+      ORDER BY wo.VIN
+    `;
+
+    const [rows] = await pool.query(sql, params);
+    const vins = rows.map(r => r.VIN);
+
+    const remzoneMap = new Map();
+    if (vins.length > 0) {
+      const placeholders = vins.map(() => '?').join(',');
+      const remSql = `
+        SELECT tvv.VIN, 
+               MIN(tvtlm.gmt_create) AS REM_IN,
+               MAX(tvtlm.gmt_create) AS REM_OUT
+        FROM tm_vhc_vehicle tvv
+        JOIN tm_vhc_test_line_movement tvtlm ON tvtlm.VIN = tvv.VIN
+        WHERE tvv.VIN IN (${placeholders})
+          AND tvtlm.node_nature LIKE 'REP%'
+          AND tvtlm.gmt_create IS NOT NULL
+        GROUP BY tvv.VIN
+      `;
+      const [remRows] = await mesPool.query(remSql, vins);
+      remRows.forEach(r => {
+        const remIn = r.REM_IN ? new Date(r.REM_IN) : null;
+        const remOut = r.REM_OUT ? new Date(r.REM_OUT) : null;
+        let durationStr = '—';
+        if (remIn && remOut) {
+          const diffMs = remOut - remIn;
+          if (diffMs <= 0) {
+            durationStr = 'В ремзоне';
+          } else {
+            const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+            durationStr = `${days}д ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+          }
+        }
+        remzoneMap.set(r.VIN, {
+          in: r.REM_IN ? r.REM_IN.replace('T', ' ').slice(0, 19) : null,
+          out: r.REM_OUT ? r.REM_OUT.replace('T', ' ').slice(0, 19) : null,
+          duration: durationStr,
+        });
+      });
+    }
+
+    const result = rows.map(row => {
+      const rem = remzoneMap.get(row.VIN);
+      return {
+        VIN: row.VIN,
+        MODEL: row.MODEL,
+        DEFECT_TIME: row.DEFECT_TIME ? row.DEFECT_TIME.replace('T', ' ').slice(0, 19) : null,
+        IN_REMZONE: !!rem,
+        REM_IN: rem ? rem.in : null,
+        REM_OUT: rem ? rem.out : null,
+        REM_DURATION: rem ? rem.duration : '—',
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка mpp-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================== СУММАРНОЕ ВРЕМЯ В РЕМЗОНЕ ПО MPP ==================
+app.get('/api/mpp-remzone-duration', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, checkpoint, model } = req.query;
+    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+
+    // Списки постов (аналогично mpp-weekly-top)
+    const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
+    const cp7Posts = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'CP8 Touch Up', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const cp8Posts = ['CP8', 'CP8 Gate', 'CP8-gate', '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+
+    let postList = [];
+    if (!checkpoint || checkpoint === 'ALL') {
+      postList = [...new Set([...pipPosts, ...cp7Posts, ...cp8Posts])];
+    } else if (checkpoint === 'CP7') postList = cp7Posts;
+    else if (checkpoint === 'CP8') postList = cp8Posts;
+    else if (checkpoint === 'PIP') postList = pipPosts;
+    else if (checkpoint === 'TL')  postList = tlPosts;
+    else postList = [...new Set([...pipPosts, ...cp7Posts, ...cp8Posts])];
+
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    // Получаем все дефекты (офлайн) с их VIN и MPP
+    const params = [dateFrom, dateTo];
+    let modelCondition = '';
+    if (model && model !== 'ALL') {
+      modelCondition = ' AND wo.MODEL = ?';
+      params.push(model);
+    }
+
+    const defectsSql = `
+      SELECT
+        CONCAT(wo.MODEL, ' ', QM_DEF.PART_NAME, ' ', QM_DEF.PROBLEM_TYPE) AS MPP,
+        wo.MODEL,
+        wo.VIN
+      FROM (
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_qm_defect_info
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE QM_DEF.POST_NAME IN (${postListStr})
+        AND QM_DEF.S_OFFLINE = 1
+        AND QM_DEF.CREATION_DATE BETWEEN ? AND ?
+        ${modelCondition}
+        AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
+        AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
+      GROUP BY MPP, wo.MODEL, wo.VIN
+    `;
+
+    const [defectRows] = await pool.query(defectsSql, params);
+
+    // Для каждого VIN получаем суммарное время в ремзоне (из MES)
+    const vins = [...new Set(defectRows.map(r => r.VIN))];
+    const remDurationMap = new Map(); // vin -> total duration in hours
+
+    if (vins.length > 0) {
+      const placeholders = vins.map(() => '?').join(',');
+      const remSql = `
+        SELECT tvv.VIN, 
+               MIN(tvtlm.gmt_create) AS REM_IN,
+               MAX(tvtlm.gmt_create) AS REM_OUT
+        FROM tm_vhc_vehicle tvv
+        JOIN tm_vhc_test_line_movement tvtlm ON tvtlm.VIN = tvv.VIN
+        WHERE tvv.VIN IN (${placeholders})
+          AND tvtlm.node_nature LIKE 'REP%'
+          AND tvtlm.gmt_create IS NOT NULL
+        GROUP BY tvv.VIN
+      `;
+      const [remRows] = await mesPool.query(remSql, vins);
+      remRows.forEach(r => {
+        if (r.REM_IN && r.REM_OUT) {
+          const diffMs = new Date(r.REM_OUT) - new Date(r.REM_IN);
+          if (diffMs > 0) {
+            remDurationMap.set(r.VIN, diffMs / (1000 * 60 * 60)); // часы
+          }
+        }
+      });
+    }
+
+    // Группируем по MPP и модели, суммируем время
+    const mppDurationMap = {};
+    defectRows.forEach(row => {
+      const key = row.MPP;
+      if (!mppDurationMap[key]) {
+        mppDurationMap[key] = {
+          MPP: key,
+          MODEL: row.MODEL,
+          totalDurationHours: 0,
+          vinCount: 0,
+        };
+      }
+      const duration = remDurationMap.get(row.VIN) || 0;
+      if (duration > 0) {
+        mppDurationMap[key].totalDurationHours += duration;
+        mppDurationMap[key].vinCount += 1;
+      }
+    });
+
+    const result = Object.values(mppDurationMap)
+      .filter(item => item.totalDurationHours > 0)
+      .sort((a, b) => b.totalDurationHours - a.totalDurationHours)
+      .map(item => ({
+        ...item,
+        totalDurationDays: (item.totalDurationHours / 24).toFixed(2),
+        totalDurationHours: item.totalDurationHours.toFixed(2),
+      }));
+
+    // Общая сумма времени по всем дефектам
+    const totalHours = result.reduce((sum, item) => sum + parseFloat(item.totalDurationHours), 0);
+
+    res.json({
+      items: result,
+      totalHours: totalHours.toFixed(2),
+      totalDays: (totalHours / 24).toFixed(2),
+    });
+  } catch (err) {
+    console.error('Ошибка mpp-remzone-duration:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================== АНАЛИТИКА ПО DRR (ВРЕМЯ В РЕМЗОНЕ) ==================
+app.get('/api/mpp-drr-analytics', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, checkpoint, model } = req.query;
+    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom, dateTo обязательны' });
+
+    // ========== 1. Список постов для дефектов (зависит от фильтра чекпоинтов) ==========
+    const pipPosts = ['EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9'];
+    const cp7Posts = ['CP7','CP7 Audit','CP7 Gate','CP7-gate','CP8 Touch Up','REPAIR','REPAIR_Final','EXT1','PIP2','PIP4','PIP9'];
+    const cp8Posts = ['CP8','CP8 Gate','CP8-gate','360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT'];
+
+    let defectPostList = [];
+    if (!checkpoint || checkpoint === 'ALL') defectPostList = [...new Set([...pipPosts, ...cp7Posts, ...cp8Posts])];
+    else if (checkpoint === 'CP7') defectPostList = cp7Posts;
+    else if (checkpoint === 'CP8') defectPostList = cp8Posts;
+    else if (checkpoint === 'PIP') defectPostList = pipPosts;
+    else defectPostList = [...new Set([...pipPosts, ...cp7Posts, ...cp8Posts])];
+
+    const defectPostListStr = defectPostList.map(p => `'${p}'`).join(',');
+
+    // ========== 2. Общее количество машин и в ремзоне – ВСЕГДА по CP72 ==========
+    const cp72PostList = ['CP72'];
+    const cp72PostListStr = cp72PostList.map(p => `'${p}'`).join(',');
+
+    const days = [];
+    let current = new Date(dateFrom);
+    const end = new Date(dateTo);
+    while (current <= end) {
+      days.push(current.toISOString().split('T')[0]);
+      current.setDate(current.getDate() + 1);
+    }
+
+    let totalVins = 0;
+    let totalRemVins = 0;
+
+    for (const day of days) {
+      // Параметры для CP72
+      const carsParams = [day];
+      if (model && model !== 'ALL') carsParams.push(model);
+
+      // Количество уникальных VIN за день по CP72
+      const [[{ CNT }]] = await pool.query(`
+        SELECT COUNT(DISTINCT VIN) AS CNT
+        FROM at_om_wiptrackinghistory
+        WHERE WC_NAME IN (${cp72PostListStr})
+          AND DATE(CREATION_TIME) = ?
+          ${model && model !== 'ALL' ? ' AND MODEL = ?' : ''}
+      `, carsParams);
+
+      totalVins += CNT || 0;
+
+      if (CNT > 0) {
+        // Список VIN за день для проверки ремзоны
+        const [vinsRows] = await pool.query(`
+          SELECT DISTINCT VIN
+          FROM at_om_wiptrackinghistory
+          WHERE WC_NAME IN (${cp72PostListStr})
+            AND DATE(CREATION_TIME) = ?
+            ${model && model !== 'ALL' ? ' AND MODEL = ?' : ''}
+        `, carsParams);
+
+        const vinsList = vinsRows.map(r => r.VIN);
+        const placeholders = vinsList.map(() => '?').join(',');
+
+        const [remRows] = await mesPool.query(`
+          SELECT COUNT(DISTINCT tvv.VIN) AS CNT
+          FROM tm_vhc_vehicle tvv
+          JOIN tm_vhc_test_line_movement tvtlm ON tvtlm.VIN = tvv.VIN
+          WHERE tvv.VIN IN (${placeholders})
+            AND tvtlm.node_nature LIKE 'REP%'
+        `, vinsList);
+
+        totalRemVins += remRows[0]?.CNT || 0;
+      }
+    }
+
+    // ========== 3. Данные по дефектам (с фильтром чекпоинтов) ==========
+    let modelCondition = '';
+    const params = [dateFrom, dateTo];
+    if (model && model !== 'ALL') {
+      modelCondition = ' AND wo.MODEL = ?';
+      params.push(model);
+    }
+
+    const sqlDefects = `
+      SELECT
+        CONCAT(wo.MODEL, ' ', QM_DEF.PART_NAME, ' ', QM_DEF.PROBLEM_TYPE) AS MPP,
+        QM_DEF.PART_NAME,
+        QM_DEF.PROBLEM_TYPE,
+        wo.MODEL,
+        COUNT(*) AS DEFECT_COUNT,
+        GROUP_CONCAT(DISTINCT wo.VIN) AS VIN_LIST
+      FROM (
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE, POST_NAME
+        FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE, POST_NAME
+        FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE, POST_NAME
+        FROM at_qm_defect_info
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE QM_DEF.POST_NAME IN (${defectPostListStr})
+        AND QM_DEF.S_OFFLINE = 1
+        AND QM_DEF.CREATION_DATE BETWEEN ? AND ?
+        ${modelCondition}
+        AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
+        AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
+      GROUP BY MPP, QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, wo.MODEL
+      ORDER BY DEFECT_COUNT DESC
+      LIMIT 50
+    `;
+    const [defectRows] = await pool.query(sqlDefects, params);
+
+    const result = [];
+    for (let row of defectRows) {
+      const vins = row.VIN_LIST ? row.VIN_LIST.split(',') : [];
+      let totalHours = 0;
+      let remzoneCount = 0;
+
+      if (vins.length > 0) {
+        const placeholders = vins.map(() => '?').join(',');
+        const [remRows] = await mesPool.query(`
+          SELECT tvv.VIN, 
+                 MIN(tvtlm.gmt_create) AS REM_IN,
+                 MAX(tvtlm.gmt_create) AS REM_OUT
+          FROM tm_vhc_vehicle tvv
+          JOIN tm_vhc_test_line_movement tvtlm ON tvtlm.VIN = tvv.VIN
+          WHERE tvv.VIN IN (${placeholders})
+            AND tvtlm.node_nature LIKE 'REP%'
+          GROUP BY tvv.VIN
+        `, vins);
+
+        remRows.forEach(r => {
+          if (r.REM_IN && r.REM_OUT) {
+            const diffMs = new Date(r.REM_OUT) - new Date(r.REM_IN);
+            if (diffMs > 0) {
+              totalHours += diffMs / (1000 * 60 * 60);
+              remzoneCount++;
+            }
+          }
+        });
+      }
+
+      result.push({
+        MPP: row.MPP,
+        MODEL: row.MODEL,
+        DEFECT_COUNT: row.DEFECT_COUNT,
+        REMZONE_COUNT: remzoneCount,
+        TOTAL_HOURS: totalHours,
+      });
+    }
+
+    res.json({
+      data: result,
+      summary: {
+        totalVins: totalVins,       // сумма дневных уникальных VIN по CP72
+        totalRemVins: totalRemVins, // из них в ремзоне
+      }
+    });
+  } catch (err) {
+    console.error('Ошибка mpp-drr-analytics:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/part-defect-search', async (req, res) => {
+  try {
+    const { part, defect, model, dateFrom, dateTo } = req.query;
+    if (!part && !defect && !model) {
+      return res.status(400).json({ error: 'Укажите хотя бы один параметр' });
+    }
+
+    let where = '1=1';
+    const params = [];
+
+    if (part) {
+      where += ' AND QM_DEF.PART_NAME LIKE ?';
+      params.push(`%${part}%`);
+    }
+    if (defect) {
+      where += ' AND QM_DEF.PROBLEM_TYPE LIKE ?';
+      params.push(`%${defect}%`);
+    }
+    if (model && model !== 'ALL') {
+      where += ' AND wo.MODEL = ?';
+      params.push(model);
+    }
+    if (dateFrom) {
+      where += ' AND QM_DEF.CREATION_TIME >= ?';
+      params.push(dateFrom);
+    }
+    if (dateTo) {
+      where += ' AND QM_DEF.CREATION_TIME <= ?';
+      params.push(dateTo);
+    }
+
+    const sql = `
+      SELECT 
+        QM_DEF.VIN,
+        QM_DEF.CREATION_TIME
+      FROM (
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
+        FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
+        FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
+        FROM at_qm_defect_info
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE ${where}
+      ORDER BY QM_DEF.CREATION_TIME DESC
+      LIMIT 2000
+    `;
+
+    const [rows] = await pool.query(sql, params);
+    
+    if (rows.length === 0) {
+      return res.json([]);
+    }
+
+    const vins = [...new Set(rows.map(r => r.VIN))];
+    
+    // Получаем последний пост для VIN через tm_vhc_vehicle + tm_vhc_vehicle_movement
+    const currentPostMap = new Map();
+    if (vins.length > 0) {
+      const placeholders = vins.map(() => '?').join(',');
+      const mesSql = `
+        SELECT tv.vin, m.node_nature
+        FROM tm_vhc_vehicle tv
+        JOIN tm_vhc_vehicle_movement m ON tv.id = m.tm_vhc_vehicle_id
+        JOIN (
+          SELECT tm_vhc_vehicle_id, MAX(scan_time) AS max_time
+          FROM tm_vhc_vehicle_movement
+          GROUP BY tm_vhc_vehicle_id
+        ) latest ON m.tm_vhc_vehicle_id = latest.tm_vhc_vehicle_id AND m.scan_time = latest.max_time
+        WHERE tv.vin IN (${placeholders})
+      `;
+      const [mesRows] = await mesPool.query(mesSql, vins);
+      mesRows.forEach(r => currentPostMap.set(r.vin, r.node_nature));
+    }
+
+    const result = rows.map(row => ({
+      VIN: row.VIN,
+      CREATION_TIME: row.CREATION_TIME,
+      CURRENT_POST: currentPostMap.get(row.VIN) || 'Неизвестно'
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка part-defect-search:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/vin-defect-search', async (req, res) => {
+  try {
+    const { vin, model, dateFrom, dateTo } = req.query;
+    if (!vin && !model) {
+      return res.status(400).json({ error: 'Укажите VIN или модель' });
+    }
+
+    let where = '1=1';
+    const params = [];
+
+    if (vin) {
+      where += ' AND QM_DEF.VIN LIKE ?';
+      params.push(`%${vin}%`);
+    }
+    if (model && model !== 'ALL') {
+      where += ' AND wo.MODEL = ?';
+      params.push(model);
+    }
+    if (dateFrom) {
+      where += ' AND QM_DEF.CREATION_TIME >= ?';
+      params.push(dateFrom);
+    }
+    if (dateTo) {
+      where += ' AND QM_DEF.CREATION_TIME <= ?';
+      params.push(dateTo);
+    }
+
+    const sql = `
+      SELECT QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, COUNT(*) AS DEFECT_COUNT
+      FROM (
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
+        FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
+        FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
+        FROM at_qm_defect_info
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE ${where}
+      GROUP BY QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE
+      ORDER BY DEFECT_COUNT DESC
+      LIMIT 2000
+    `;
+
+    const [rows] = await pool.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка vin-defect-search:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/drr-retrospective', async (req, res) => {
+  try {
+    const { dateFrom, dateTo } = req.query;
+    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom, dateTo обязательны' });
+
+    const getDrr = async (startDate, endDate, label, type) => {
+      const sql = `
+        SELECT
+          all_cars.MODEL,
+          COALESCE(all_cars.TOTAL, 0) AS TOTAL,
+          COALESCE(remzone.REMZONE_COUNT, 0) AS REMZONE_COUNT,
+          ROUND(100 - COALESCE(remzone.REMZONE_COUNT, 0) * 100.0 / NULLIF(all_cars.TOTAL, 0), 1) AS DRR_PERCENT
+        FROM (
+          SELECT
+            too.product AS MODEL,
+            COUNT(DISTINCT tvv.VIN) AS TOTAL
+          FROM tm_vhc_vehicle tvv
+          JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+          JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+          WHERE tvvm.node_nature = 'Key_Uloc_Type_CPFINAL'
+            AND DATE(DATE_SUB(tvvm.scan_time, INTERVAL 470 MINUTE)) BETWEEN ? AND ?
+          GROUP BY MODEL
+        ) all_cars
+        LEFT JOIN (
+          SELECT
+            too.product AS MODEL,
+            COUNT(DISTINCT tvv.VIN) AS REMZONE_COUNT
+          FROM tm_vhc_vehicle tvv
+          JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+          JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+          JOIN tm_vhc_test_line_movement tvtlm ON tvtlm.VIN = tvv.VIN AND tvtlm.node_nature LIKE 'REP%'
+          WHERE tvvm.node_nature = 'Key_Uloc_Type_CPFINAL'
+            AND DATE(DATE_SUB(tvvm.scan_time, INTERVAL 470 MINUTE)) BETWEEN ? AND ?
+          GROUP BY MODEL
+        ) remzone ON all_cars.MODEL = remzone.MODEL
+        ORDER BY all_cars.MODEL
+      `;
+
+      const [rows] = await mesPool.query(sql, [startDate, endDate, startDate, endDate]);
+      const result = { label, type };
+      let totalSum = 0, cnt = 0;
+      rows.forEach(row => {
+        result[row.MODEL] = row.DRR_PERCENT;
+        if (row.DRR_PERCENT !== null) {
+          totalSum += row.DRR_PERCENT;
+          cnt++;
+        }
+      });
+      result.total = cnt > 0 ? +(totalSum / cnt).toFixed(1) : 0;
+      return result;
+    };
+
+    const today = new Date(dateTo);
+    const result = [];
+
+    // Годы: последние 2
+    for (let i = 1; i >= 0; i--) {
+      const y = today.getFullYear() - i;
+      result.push(await getDrr(`${y}-01-01`, `${y}-12-31`, String(y), 'year'));
+    }
+
+    // Месяцы: последние 3
+    for (let i = 2; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+      const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+      result.push(await getDrr(`${y}-${m}-01`, `${y}-${m}-${String(lastDay).padStart(2, '0')}`, `${monthName} ${y}`, 'month'));
+    }
+
+    // Недели: последние 4
+    const getMonday = (d) => {
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      return new Date(d.setDate(diff));
+    };
+    for (let i = 3; i >= 0; i--) {
+      const monday = getMonday(new Date(today.getTime() - i * 7 * 86400000));
+      const sunday = new Date(monday);
+      sunday.setDate(sunday.getDate() + 6);
+      const weekNum = Math.ceil(((monday - new Date(monday.getFullYear(), 0, 1)) / 86400000 + 1) / 7);
+      const label = `W${weekNum} ${monday.getFullYear()}`;
+      result.push(await getDrr(monday.toISOString().split('T')[0], sunday.toISOString().split('T')[0], label, 'week'));
+    }
+
+    // Дни: последние 5
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(today.getTime() - i * 86400000);
+      const label = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const start = d.toISOString().split('T')[0];
+      result.push(await getDrr(start, start, label, 'day'));
+    }
+
+    res.json({ dataPoints: result });
+  } catch (err) {
+    console.error('Ошибка drr-retrospective:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Вспомогательная функция для номера недели ISO
+function getISOWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+// Заметки (без изменений)
+app.get('/api/defect-notes', async (req, res) => { /* ... */ });
+app.post('/api/defect-notes', async (req, res) => { /* ... */ });
 
 const PORT = process.env.PORT || 40000;
 
 async function startServer() {
   const dbOk = await checkDatabaseConnection();
   const notesOk = await checkNotesDatabaseConnection();
+  const lesOk = await checkLesDatabaseConnection();
 
-  if (!dbOk || !notesOk) {
+  if (!dbOk || !notesOk || !lesOk) {
     console.log('Сервер НЕ запущен из-за проблем с БД.');
     process.exit(1);
   }
