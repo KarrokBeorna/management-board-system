@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ReferenceLine, Label, ResponsiveContainer,
+  ReferenceLine, Label, ResponsiveContainer, Cell
 } from 'recharts';
 
 const API_BASE = 'http://localhost:40000';
@@ -19,6 +19,13 @@ const typeColors = {
   month: '#F0FFF4',
   week: '#FFF7ED',
   day: '#FEF2F2',
+};
+
+const barTypeColors = {
+  year: '#0284C7',
+  month: '#16A34A',
+  week: '#EA580C',
+  day: '#DC2626',
 };
 
 const cardStyle = {
@@ -86,8 +93,13 @@ export default function DrrReportPage() {
   const barDataKey = selectedModel === 'ALL' ? 'maxValue' : selectedModel;
   const modelKeys = Object.keys(modelColors);
 
+  // Количество столбцов с данными (включая первый столбец "Модель")
+  const totalCols = chartData.length + 1;
+  // Одинаковая ширина для всех колонок
+  const colWidth = `${100 / totalCols}%`;
+
   return (
-    <div style={{ padding: 30, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
+    <div style={{ padding: '20px 30px 20px 16px', fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
       <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 30 }}>DRR Report</h1>
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 30 }}>
@@ -128,7 +140,7 @@ export default function DrrReportPage() {
             <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Загрузка данных...</p>
           ) : (
             <>
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={350}>
                 <BarChart data={chartData} margin={{ top: 20, right: 60, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="label" tick={{ fontSize: 12 }} />
@@ -139,9 +151,8 @@ export default function DrrReportPage() {
                   <Tooltip />
                   <Bar
                     dataKey={barDataKey}
-                    fill={selectedModel === 'ALL' ? '#2563EB' : modelColors[selectedModel] || '#2563EB'}
-                    barSize={20}
-                    radius={[4, 4, 0, 0]}
+                    barSize={28}
+                    radius={[6, 6, 0, 0]}
                     label={{
                       fill: '#DC2626',
                       fontSize: 12,
@@ -149,17 +160,27 @@ export default function DrrReportPage() {
                       position: 'top',
                       formatter: (v) => v !== null && v !== undefined ? `${v}%` : '',
                     }}
-                  />
+                  >
+                    {chartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={barTypeColors[entry.type]} />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
 
-              <div style={{ overflowX: 'auto', marginTop: 30 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <div style={{ overflowX: 'auto', marginTop: 12 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#F9FAFB' }}>
-                      <th style={thStyle}>Модель</th>
+                      <th style={{ ...thStyle, width: colWidth, paddingLeft: 16 }}>Модель</th>
                       {chartData.map((point, idx) => (
-                        <th key={idx} style={{ ...thStyle, backgroundColor: typeColors[point.type] }}>{point.label}</th>
+                        <th key={idx} style={{
+                          ...thStyle,
+                          width: colWidth,
+                          backgroundColor: typeColors[point.type]
+                        }}>
+                          {point.label}
+                        </th>
                       ))}
                     </tr>
                   </thead>
@@ -170,11 +191,16 @@ export default function DrrReportPage() {
                         fontWeight: modelKey === 'total' ? 700 : 400,
                         display: (selectedModel !== 'ALL' && modelKey === 'total') ? 'none' : undefined,
                       }}>
-                        <td style={tdStyle}>{modelKey === 'total' ? 'Total' : modelKey}</td>
+                        <td style={{ ...tdStyle, width: colWidth, paddingLeft: 16 }}>{modelKey === 'total' ? 'Total' : modelKey}</td>
                         {chartData.map((point, idx) => {
-                          const val = point[modelKey];
+                          const val = modelKey === 'total' ? point.maxValue : point[modelKey];
                           return (
-                            <td key={idx} style={{ ...tdStyle, backgroundColor: typeColors[point.type], color: val !== null && val !== undefined ? '#1F2937' : '#9CA3AF' }}>
+                            <td key={idx} style={{
+                              ...tdStyle,
+                              width: colWidth,
+                              backgroundColor: typeColors[point.type],
+                              color: val !== null && val !== undefined ? '#1F2937' : '#9CA3AF'
+                            }}>
                               {val !== null && val !== undefined ? `${val}%` : ''}
                             </td>
                           );
@@ -225,19 +251,25 @@ export default function DrrReportPage() {
 }
 
 const thStyle = {
-  padding: '10px 12px',
   textAlign: 'center',
   fontWeight: 600,
   color: '#374151',
   borderBottom: '2px solid #E5E7EB',
   background: '#F9FAFB',
   whiteSpace: 'nowrap',
+  padding: '6px 4px',
+  fontSize: '10px',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
 };
 
 const tdStyle = {
-  padding: '8px 12px',
   textAlign: 'center',
   borderBottom: '1px solid #F0F0F5',
   color: '#1F2937',
   whiteSpace: 'nowrap',
+  padding: '4px 4px',
+  fontSize: '10px',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
 };

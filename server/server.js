@@ -2393,6 +2393,7 @@ app.get('/api/drr-retrospective', async (req, res) => {
     const { dateFrom, dateTo } = req.query;
     if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom, dateTo обязательны' });
 
+    // Функция получения DRR для одного периода
     const getDrr = async (startDate, endDate, label, type) => {
       const sql = `
         SELECT
@@ -2440,6 +2441,15 @@ app.get('/api/drr-retrospective', async (req, res) => {
       return result;
     };
 
+    // Вспомогательная функция для номера недели ISO
+    const getISOWeek = (date) => {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    };
+
     const today = new Date(dateTo);
     const result = [];
 
@@ -2459,23 +2469,26 @@ app.get('/api/drr-retrospective', async (req, res) => {
       result.push(await getDrr(`${y}-${m}-01`, `${y}-${m}-${String(lastDay).padStart(2, '0')}`, `${monthName} ${y}`, 'month'));
     }
 
-    // Недели: последние 4
-    const getMonday = (d) => {
-      const day = d.getDay();
-      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-      return new Date(d.setDate(diff));
-    };
+    // Недели: последние 4 (правильный ISO-понедельник)
     for (let i = 3; i >= 0; i--) {
-      const monday = getMonday(new Date(today.getTime() - i * 7 * 86400000));
+      const now = new Date(today);
+      const dayOfWeek = now.getDay(); // 0=вс
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1) - i * 7);
       const sunday = new Date(monday);
-      sunday.setDate(sunday.getDate() + 6);
-      const weekNum = Math.ceil(((monday - new Date(monday.getFullYear(), 0, 1)) / 86400000 + 1) / 7);
+      sunday.setDate(monday.getDate() + 6);
+      const weekNum = getISOWeek(monday);
       const label = `W${weekNum} ${monday.getFullYear()}`;
-      result.push(await getDrr(monday.toISOString().split('T')[0], sunday.toISOString().split('T')[0], label, 'week'));
+      result.push(await getDrr(
+        monday.toISOString().split('T')[0],
+        sunday.toISOString().split('T')[0],
+        label,
+        'week'
+      ));
     }
 
-    // Дни: последние 5
-    for (let i = 5; i >= 0; i--) {
+    // Дни: последние 14
+    for (let i = 4; i >= 0; i--) {
       const d = new Date(today.getTime() - i * 86400000);
       const label = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
       const start = d.toISOString().split('T')[0];
@@ -2489,14 +2502,340 @@ app.get('/api/drr-retrospective', async (req, res) => {
   }
 });
 
-// Вспомогательная функция для номера недели ISO
-function getISOWeek(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-}
+app.get('/api/problem-grades', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT DISTINCT PROBLEM_GRADE
+      FROM (
+        SELECT PROBLEM_GRADE FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT PROBLEM_GRADE FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT PROBLEM_GRADE FROM at_qm_defect_info
+      ) t
+      WHERE PROBLEM_GRADE IS NOT NULL AND TRIM(PROBLEM_GRADE) <> ''
+      ORDER BY PROBLEM_GRADE
+    `);
+    const grades = rows.map(r => r.PROBLEM_GRADE).filter(Boolean);
+    res.json(grades);
+  } catch (err) {
+    console.error('Ошибка получения классов дефектов:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/daily-dashboard-week', async (req, res) => {
+  try {
+    const { weekStart, weekEnd } = req.query;
+
+    // Определяем неделю по умолчанию (текущую), если не передана
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+
+    const start = weekStart || monday.toISOString().split('T')[0];
+    const end   = weekEnd   || saturday.toISOString().split('T')[0];
+
+    const days = [];
+    for (let d = new Date(start); d <= new Date(end); d.setDate(d.getDate() + 1)) {
+      days.push(d.toISOString().split('T')[0]);
+    }
+
+    const cp7Posts = ['CP7','CP7 Audit','CP7 Gate','CP7-gate','CP8 Touch Up','REPAIR','REPAIR_Final','EXT1','PIP2','PIP4','PIP9','REPAIR VERIFICATION','Topcoat preparation'];
+    const cp8Posts = ['CP8','CP8 Gate','CP8-gate','360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT'];
+    const allCpPosts = [...cp7Posts, ...cp8Posts];
+    const postListStr = allCpPosts.map(p => `'${p}'`).join(',');
+
+    // DRR за день
+    const getMaxDrrForDay = async (date) => {
+      const [rows] = await mesPool.query(`
+        SELECT
+          ROUND(100 - COALESCE(remzone.REMZONE_COUNT, 0) * 100.0 / NULLIF(all_cars.TOTAL, 0), 1) AS DRR
+        FROM (
+          SELECT too.product AS MODEL, COUNT(DISTINCT tvv.VIN) AS TOTAL
+          FROM tm_vhc_vehicle tvv
+          JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+          JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+          WHERE tvvm.node_nature = 'Key_Uloc_Type_CPFINAL'
+            AND DATE(DATE_SUB(tvvm.scan_time, INTERVAL 470 MINUTE)) = ?
+          GROUP BY too.product
+        ) all_cars
+        LEFT JOIN (
+          SELECT too.product AS MODEL, COUNT(DISTINCT tvv.VIN) AS REMZONE_COUNT
+          FROM tm_vhc_vehicle tvv
+          JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+          JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+          JOIN tm_vhc_test_line_movement tvtlm ON tvtlm.VIN = tvv.VIN AND tvtlm.node_nature LIKE 'REP%'
+          WHERE tvvm.node_nature = 'Key_Uloc_Type_CPFINAL'
+            AND DATE(DATE_SUB(tvvm.scan_time, INTERVAL 470 MINUTE)) = ?
+          GROUP BY too.product
+        ) remzone ON all_cars.MODEL = remzone.MODEL
+      `, [date, date]);
+      const values = rows.map(r => r.DRR).filter(v => v !== null);
+      return values.length > 0 ? Math.max(...values) : 0;
+    };
+
+    // DPU за день
+    const getDpu = async (date) => {
+      const [carsRows] = await pool.query(`
+        SELECT COUNT(DISTINCT VIN) AS CARS
+        FROM at_om_wiptrackinghistory
+        WHERE WC_NAME IN (${postListStr}) AND DATE(CREATION_TIME) = ?
+      `, [date]);
+      const CARS = Number(carsRows?.[0]?.CARS) || 0;
+      const [defRows] = await pool.query(`
+        SELECT COUNT(*) AS DEFECTS
+        FROM (
+          SELECT VIN FROM at_biw_qm_defect_info WHERE DATE(CREATION_TIME) = ? AND (OFFLINE OR OFFLINE1 OR OFFLINE2) AND POST_NAME IN (${postListStr})
+          UNION ALL
+          SELECT VIN FROM at_paint_qm_defect_info WHERE DATE(CREATION_TIME) = ? AND (OFFLINE OR OFFLINE1 OR OFFLINE2) AND POST_NAME IN (${postListStr})
+          UNION ALL
+          SELECT VIN FROM at_qm_defect_info WHERE DATE(CREATION_TIME) = ? AND (OFFLINE OR OFFLINE1 OR OFFLINE2) AND POST_NAME IN (${postListStr})
+        ) t
+      `, [date, date, date]);
+      const DEFECTS = Number(defRows?.[0]?.DEFECTS) || 0;
+      return CARS > 0 ? (DEFECTS / CARS).toFixed(1) : '0.0';
+    };
+
+    // Недельный DRR
+    const [weekDrrRows] = await mesPool.query(`
+      SELECT
+        ROUND(100 - COALESCE(remzone.REMZONE_COUNT, 0) * 100.0 / NULLIF(all_cars.TOTAL, 0), 1) AS DRR
+      FROM (
+        SELECT too.product AS MODEL, COUNT(DISTINCT tvv.VIN) AS TOTAL
+        FROM tm_vhc_vehicle tvv
+        JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+        JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+        WHERE tvvm.node_nature = 'Key_Uloc_Type_CPFINAL'
+          AND DATE(DATE_SUB(tvvm.scan_time, INTERVAL 470 MINUTE)) BETWEEN ? AND ?
+        GROUP BY too.product
+      ) all_cars
+      LEFT JOIN (
+        SELECT too.product AS MODEL, COUNT(DISTINCT tvv.VIN) AS REMZONE_COUNT
+        FROM tm_vhc_vehicle tvv
+        JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+        JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+        JOIN tm_vhc_test_line_movement tvtlm ON tvtlm.VIN = tvv.VIN AND tvtlm.node_nature LIKE 'REP%'
+        WHERE tvvm.node_nature = 'Key_Uloc_Type_CPFINAL'
+          AND DATE(DATE_SUB(tvvm.scan_time, INTERVAL 470 MINUTE)) BETWEEN ? AND ?
+        GROUP BY too.product
+      ) remzone ON all_cars.MODEL = remzone.MODEL
+    `, [start, end, start, end]);
+    const weekDrr = weekDrrRows?.[0]?.DRR || 0;
+
+    // Недельный DPU
+    const [weekCarsRows] = await pool.query(`
+      SELECT COUNT(DISTINCT VIN) AS CARS
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME IN (${postListStr}) AND DATE(CREATION_TIME) BETWEEN ? AND ?
+    `, [start, end]);
+    const weekCars = Number(weekCarsRows?.[0]?.CARS) || 0;
+    const [weekDefRows] = await pool.query(`
+      SELECT COUNT(*) AS DEFECTS
+      FROM (
+        SELECT VIN FROM at_biw_qm_defect_info WHERE DATE(CREATION_TIME) BETWEEN ? AND ? AND (OFFLINE OR OFFLINE1 OR OFFLINE2) AND POST_NAME IN (${postListStr})
+        UNION ALL
+        SELECT VIN FROM at_paint_qm_defect_info WHERE DATE(CREATION_TIME) BETWEEN ? AND ? AND (OFFLINE OR OFFLINE1 OR OFFLINE2) AND POST_NAME IN (${postListStr})
+        UNION ALL
+        SELECT VIN FROM at_qm_defect_info WHERE DATE(CREATION_TIME) BETWEEN ? AND ? AND (OFFLINE OR OFFLINE1 OR OFFLINE2) AND POST_NAME IN (${postListStr})
+      ) t
+    `, [start, end, start, end, start, end]);
+    const weekDefects = Number(weekDefRows?.[0]?.DEFECTS) || 0;
+    const weekDpu = weekCars > 0 ? (weekDefects / weekCars).toFixed(1) : '0.0';
+
+    // Дневные значения
+    const drrValues = [];
+    const dpuValues = [];
+    for (const day of days) {
+      drrValues.push(await getMaxDrrForDay(day));
+      dpuValues.push(await getDpu(day));
+    }
+
+    const weekNum = (() => {
+      const target = new Date(start);
+      const dayNr = (target.getDay() + 6) % 7;
+      target.setDate(target.getDate() - dayNr + 3);
+      const firstThursday = target.valueOf();
+      target.setMonth(0, 1);
+      if (target.getDay() !== 4) target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+      return 1 + Math.ceil((firstThursday - target) / 604800000);
+    })();
+
+    res.json({
+      weekNumber: weekNum,
+      weekStart: start,
+      weekEnd: end,
+      days,
+      drr: drrValues,
+      dpu: dpuValues,
+      weekDrr,
+      weekDpu,
+    });
+  } catch (err) {
+    console.error('Ошибка daily-dashboard-week:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/daily-dashboard-top3', async (req, res) => {
+  try {
+    const { date } = req.query; // теперь только один параметр date
+
+    const cp7Posts = [
+      'CP7','CP7 Audit','CP7 Gate','CP7-gate','CP8 Touch Up','REPAIR','REPAIR_Final','EXT1','PIP2','PIP4','PIP9',
+      'REPAIR VERIFICATION','Topcoat preparation'
+    ];
+    const cp8Posts = [
+      'CP8','CP8 Gate','CP8-gate','360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT'
+    ];
+    const allCpPosts = [...cp7Posts, ...cp8Posts];
+    const postListStr = allCpPosts.map(p => `'${p}'`).join(',');
+
+    // Если дата не передана, берём вчера
+    let queryDate = date;
+    if (!queryDate) {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      queryDate = d.toISOString().split('T')[0];
+    }
+
+    const [rows] = await pool.query(`
+      SELECT CONCAT(wo.MODEL, ' - ', d.PART_NAME, ' - ', d.PROBLEM_TYPE) AS DEFECT, COUNT(*) AS CNT
+      FROM (
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS OFFLINE
+        FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS OFFLINE
+        FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS OFFLINE
+        FROM at_qm_defect_info
+      ) d
+      JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.POST_NAME IN (${postListStr}) AND d.OFFLINE = 1
+        AND DATE(d.CREATION_TIME) = ?
+      GROUP BY DEFECT
+      ORDER BY CNT DESC
+      LIMIT 3
+    `, [queryDate]);
+
+    res.json(rows.map(r => ({ defect: r.DEFECT, count: r.CNT })));
+  } catch (err) {
+    console.error('Ошибка daily-dashboard-top3:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/daily-dashboard-top5', async (req, res) => {
+  try {
+    const { date, grades } = req.query;
+
+    const cp7Posts = [
+      'CP7','CP7 Audit','CP7 Gate','CP7-gate','CP8 Touch Up','REPAIR','REPAIR_Final','EXT1','PIP2','PIP4','PIP9',
+      'REPAIR VERIFICATION','Topcoat preparation'
+    ];
+    const cp8Posts = [
+      'CP8','CP8 Gate','CP8-gate','360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT'
+    ];
+    const allCpPosts = [...cp7Posts, ...cp8Posts];
+    const postListStr = allCpPosts.map(p => `'${p}'`).join(',');
+
+    let queryDate = date;
+    if (!queryDate) {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      queryDate = d.toISOString().split('T')[0];
+    }
+
+    let where = `WHERE d.POST_NAME IN (${postListStr}) AND d.OFFLINE = 1 AND DATE(d.CREATION_TIME) = ?`;
+    const params = [queryDate];
+
+    if (grades) {
+      const gradesList = grades.split(',').map(g => g.trim()).filter(Boolean);
+      if (gradesList.length > 0) {
+        where += ` AND d.PROBLEM_GRADE IN (${gradesList.map(() => '?').join(',')})`;
+        params.push(...gradesList);
+      }
+    }
+
+    const [rows] = await pool.query(`
+      SELECT CONCAT(wo.MODEL, ' - ', d.PART_NAME, ' - ', d.PROBLEM_TYPE) AS DEFECT, COUNT(*) AS CNT
+      FROM (
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME, PROBLEM_GRADE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS OFFLINE
+        FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME, PROBLEM_GRADE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS OFFLINE
+        FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME, PROBLEM_GRADE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS OFFLINE
+        FROM at_qm_defect_info
+      ) d
+      JOIN work_order wo ON wo.VIN = d.VIN
+      ${where}
+      GROUP BY DEFECT
+      ORDER BY CNT DESC
+      LIMIT 5
+    `, params);
+
+    res.json(rows.map(r => ({ defect: r.DEFECT, count: r.CNT })));
+  } catch (err) {
+    console.error('Ошибка daily-dashboard-top5:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Проверка пароля
+app.post('/api/warranty/check-password', (req, res) => {
+  const { password } = req.body;
+  const correctPassword = '1234561'; // можно вынести в переменные окружения
+  if (password === correctPassword) {
+    res.json({ success: true });
+  } else {
+    res.status(403).json({ success: false, error: 'Неверный пароль' });
+  }
+});
+
+// Загрузка Excel-данных
+app.post('/api/warranty/upload', express.json(), async (req, res) => {
+  try {
+    const { rows } = req.body;
+    if (!rows || !rows.length) return res.status(400).json({ error: 'Нет данных' });
+
+    const sql = `INSERT INTO warranty_claims (vin, claim_number, claim_date, defect_description, status) VALUES ?`;
+    const values = rows.map(r => [
+      r.vin || r.VIN || '',
+      r.claim_number || r.claimNumber || '',
+      r.claim_date || r.claimDate || null,
+      r.defect_description || r.defectDescription || '',
+      r.status || ''
+    ]);
+    await notesPool.query(sql, [values]);
+    res.json({ success: true, inserted: rows.length });
+  } catch (err) {
+    console.error('Ошибка загрузки warranty:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Получение загруженных записей
+app.get('/api/warranty/claims', async (req, res) => {
+  try {
+    const [rows] = await notesPool.query('SELECT * FROM warranty_claims ORDER BY uploaded_at DESC LIMIT 1000');
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка получения warranty claims:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Заметки (без изменений)
 app.get('/api/defect-notes', async (req, res) => { /* ... */ });

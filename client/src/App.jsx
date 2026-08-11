@@ -10,6 +10,8 @@ import SgpAuditPage from './SgpAuditPage';
 import MppWeeklyTopPage from './MppWeeklyTopPage';
 import PartDefectSearchPage from './PartDefectSearchPage';
 import DrrReportPage from './DrrReportPage';
+import DailyDashboardPage from './DailyDashboardPage';
+import WarrantyPage from './WarrantyPage';
 
 export default function App() {
   return (
@@ -24,6 +26,8 @@ export default function App() {
         <Route path="/mpp-weekly-top" element={<MppWeeklyTopPage />} />
         <Route path="/part-defect-search" element={<PartDefectSearchPage />} />
         <Route path="/drr-report" element={<DrrReportPage />} />
+        <Route path="/daily-dashboard" element={<DailyDashboardPage />} />
+        <Route path="/warranty" element={<WarrantyPage />} />
       </Route>
     </Routes>
   );

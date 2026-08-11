@@ -8,7 +8,10 @@ import sgpAuditPreview from './assets/sgp.png';
 import mppWeeklyPreview from './assets/mppweek.png';
 import partDefectPreview from './assets/search.png';
 import externalReportPreview from './assets/kulik.png';
-import drrReportPreview from './assets/drrall.png'; // временная картинка
+import drrReportPreview from './assets/drrall.png';
+import dailyDashboardPreview from './assets/dailyq.png';
+import externalDReportPreview from './assets/dim.png';
+import warrantyPreview from './assets/123.png'; // временная картинка
 
 // Общие стили секций
 const sectionStyle = {
@@ -145,10 +148,10 @@ export default function HomePage() {
           <ReportCard to="/report" imgSrc={tablePreview} caption="Top DRR Board" accentColor="#3B82F6" />
           <ReportCard to="/daily-top" imgSrc={dailyTopPreview} caption="Daily Top CP7/CP8" accentColor="#8B5CF6" />
           <ReportCard to="/model-status" imgSrc={modelStatusPreview} caption="Model Status" accentColor="#F59E0B" />
-          <ReportCard to="/checkpoint-map" imgSrc={checkpointMapPreview} caption="Checkpoint Map" accentColor="#EF4444" />
           <ReportCard to="/mpp-weekly-top" imgSrc={mppWeeklyPreview} caption="DRR Defects Top CP7/СP8" accentColor="#10B981" />
           <ReportCard to="http://10.27.195.16/reports/024" imgSrc={externalReportPreview} caption="DRR по заводу" accentColor="#1638f9" />
           <ReportCard to="/drr-report" imgSrc={drrReportPreview} caption="DRR Report" accentColor="#fa0000" />
+          <ReportCard to="/daily-dashboard" imgSrc={dailyDashboardPreview} caption="Daily Dashboard" accentColor="#0cb428" />
         </div>
       </div>
 
@@ -163,7 +166,8 @@ export default function HomePage() {
         <div style={gridStyle}>
           <ReportCard to="/sgp-audit" imgSrc={sgpAuditPreview} caption="СГП Audit" accentColor="#10B981" />
           <ReportCard to="/part-defect-search" imgSrc={partDefectPreview} caption="Part/Defect Search" accentColor="#0e3bec" />
-          
+          <ReportCard to="http://10.27.195.25:5174/time-at-points" imgSrc={externalDReportPreview} caption="Chekpoint Passage" accentColor="#fc7b02" />
+          <ReportCard to="/warranty" imgSrc={warrantyPreview} caption="Warranty" accentColor="#6e0975" />
         </div>
       </div>
     </div>
