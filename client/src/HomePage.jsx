@@ -167,7 +167,7 @@ export default function HomePage() {
           <ReportCard to="/sgp-audit" imgSrc={sgpAuditPreview} caption="СГП Audit" accentColor="#10B981" />
           <ReportCard to="/part-defect-search" imgSrc={partDefectPreview} caption="Part/Defect Search" accentColor="#0e3bec" />
           <ReportCard to="http://10.27.195.25:5174/time-at-points" imgSrc={externalDReportPreview} caption="Chekpoint Passage" accentColor="#fc7b02" />
-          <ReportCard to="/warranty" imgSrc={warrantyPreview} caption="Warranty" accentColor="#6e0975" />
+          <ReportCard to="/warranty" imgSrc={warrantyPreview} caption="Warranty" accentColor="#c21ace" />
         </div>
       </div>
     </div>

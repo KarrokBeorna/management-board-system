@@ -479,6 +479,13 @@ app.get('/api/model-status-dpu-cp8', async (req, res) => {
     const defaultCount = period === 'month' ? 3 : period === 'week' ? 4 : 7;
     const limit = parseInt(count, 10) || defaultCount;
 
+    // Посты CP8 + Test Line (офлайн-дефекты и учёт авто)
+    const cp8tlPosts = [
+      'CP8', 'CP8 Gate', 'CP8-gate',
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'
+    ];
+    const postListStr = cp8tlPosts.map(p => `'${p}'`).join(',');
+
     const sql = `
       SELECT 
         MODEL,
@@ -496,7 +503,7 @@ app.get('/api/model-status-dpu-cp8', async (req, res) => {
         JOIN (
           SELECT VIN, (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE FROM at_qm_defect_info
         ) QM_DEF ON QM_DEF.VIN = aowth.VIN AND QM_DEF.S_OFFLINE = 1
-        WHERE aowth.WC_NAME = 'CPFINAL'
+        WHERE aowth.WC_NAME IN (${postListStr})
         GROUP BY aowth.MODEL, CREATION_TIME
       ) CARS
       GROUP BY MODEL, PERIOD
@@ -505,6 +512,7 @@ app.get('/api/model-status-dpu-cp8', async (req, res) => {
 
     const [rows] = await pool.query(sql, [dateFormat]);
 
+    const allModels = [...new Set(rows.map(r => r.MODEL))].sort();
     const periodsMap = {};
     rows.forEach(row => {
       const p = row.PERIOD;
@@ -512,6 +520,12 @@ app.get('/api/model-status-dpu-cp8', async (req, res) => {
         periodsMap[p] = { period: p, target: 2, values: {} };
       }
       periodsMap[p].values[row.MODEL] = row.DPU;
+    });
+
+    Object.values(periodsMap).forEach(entry => {
+      allModels.forEach(m => {
+        if (!(m in entry.values)) entry.values[m] = 0;
+      });
     });
 
     const sortedPeriods = Object.keys(periodsMap).sort();
@@ -620,13 +634,12 @@ app.get('/api/model-status-dpu-cp7', async (req, res) => {
     const defaultCount = period === 'month' ? 3 : period === 'week' ? 4 : 7;
     const limit = parseInt(count, 10) || defaultCount;
 
-    // Новый список постов для CP7
-    const cp7Posts = [
+    // Посты CP7 + PIP (офлайн-дефекты и учёт авто)
+    const cp7pipPosts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-      'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
-      'EXT1', 'PIP2', 'PIP4', 'PIP9'
+      'CP8 Touch Up', 'PIP1', 'PIP2', 'PIP9',
     ];
-    const postListStr = cp7Posts.map(p => `'${p}'`).join(',');
+    const postListStr = cp7pipPosts.map(p => `'${p}'`).join(',');
 
     const sql = `
       SELECT 

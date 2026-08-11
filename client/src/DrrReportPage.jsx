@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
   ReferenceLine, Label, ResponsiveContainer, Cell
 } from 'recharts';
 
@@ -12,6 +12,15 @@ const modelColors = {
   'JELAND J7': '#8B5CF6',
   'TENET A8': '#3B82F6',
   'JELAND J8': '#EC4899',
+};
+
+const modelShortNames = {
+  'ESTEO MX': 'MX',
+  'JELAND J6': 'J6',
+  'JELAND J7': 'J7',
+  'TENET A8': 'A8',
+  'JELAND J8': 'J8',
+  'total': 'Total'
 };
 
 const typeColors = {
@@ -93,9 +102,7 @@ export default function DrrReportPage() {
   const barDataKey = selectedModel === 'ALL' ? 'maxValue' : selectedModel;
   const modelKeys = Object.keys(modelColors);
 
-  // Количество столбцов с данными (включая первый столбец "Модель")
   const totalCols = chartData.length + 1;
-  // Одинаковая ширина для всех колонок
   const colWidth = `${100 / totalCols}%`;
 
   return (
@@ -141,14 +148,13 @@ export default function DrrReportPage() {
           ) : (
             <>
               <ResponsiveContainer width="100%" height={350}>
-                <BarChart data={chartData} margin={{ top: 20, right: 60, left: 20, bottom: 5 }}>
+                <BarChart data={chartData} margin={{ top: 20, right: 48, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="label" tick={{ fontSize: 12 }} />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
                   <ReferenceLine y={80} stroke="#EF4444" strokeDasharray="5 5">
                     <Label value="80%" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 700 }} />
                   </ReferenceLine>
-                  <Tooltip />
                   <Bar
                     dataKey={barDataKey}
                     barSize={28}
@@ -168,7 +174,8 @@ export default function DrrReportPage() {
                 </BarChart>
               </ResponsiveContainer>
 
-              <div style={{ overflowX: 'auto', marginTop: 12 }}>
+              {/* Таблица с правым отступом */}
+              <div style={{ overflowX: 'auto', marginTop: 12, paddingRight: 45 }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#F9FAFB' }}>
@@ -191,7 +198,9 @@ export default function DrrReportPage() {
                         fontWeight: modelKey === 'total' ? 700 : 400,
                         display: (selectedModel !== 'ALL' && modelKey === 'total') ? 'none' : undefined,
                       }}>
-                        <td style={{ ...tdStyle, width: colWidth, paddingLeft: 16 }}>{modelKey === 'total' ? 'Total' : modelKey}</td>
+                        <td style={{ ...tdStyle, width: colWidth, paddingLeft: 16 }}>
+                          {modelShortNames[modelKey] || modelKey}
+                        </td>
                         {chartData.map((point, idx) => {
                           const val = modelKey === 'total' ? point.maxValue : point[modelKey];
                           return (
@@ -258,7 +267,7 @@ const thStyle = {
   background: '#F9FAFB',
   whiteSpace: 'nowrap',
   padding: '6px 4px',
-  fontSize: '10px',
+  fontSize: '11px',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
 };
@@ -269,7 +278,7 @@ const tdStyle = {
   color: '#1F2937',
   whiteSpace: 'nowrap',
   padding: '4px 4px',
-  fontSize: '10px',
+  fontSize: '14px',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
 };
