@@ -11,7 +11,7 @@ import externalReportPreview from './assets/kulik.png';
 import drrReportPreview from './assets/drrall.png';
 import dailyDashboardPreview from './assets/dailyq.png';
 import externalDReportPreview from './assets/dim.png';
-import warrantyPreview from './assets/123.png'; // временная картинка
+import warrantyPreview from './assets/waran.png';
 
 // Общие стили секций
 const sectionStyle = {
@@ -167,7 +167,7 @@ export default function HomePage() {
           <ReportCard to="/sgp-audit" imgSrc={sgpAuditPreview} caption="СГП Audit" accentColor="#10B981" />
           <ReportCard to="/part-defect-search" imgSrc={partDefectPreview} caption="Part/Defect Search" accentColor="#0e3bec" />
           <ReportCard to="http://10.27.195.25:5174/time-at-points" imgSrc={externalDReportPreview} caption="Chekpoint Passage" accentColor="#fc7b02" />
-          <ReportCard to="/warranty" imgSrc={warrantyPreview} caption="Warranty" accentColor="#c21ace" />
+          <ReportCard to="/warranty" imgSrc={warrantyPreview} caption="Warranty" accentColor="#0cd72a" />
         </div>
       </div>
     </div>
