@@ -134,6 +134,18 @@ const renderLineLabel = (props) => {
   );
 };
 
+const formatUploadTime = (isoString) => {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return isoString;
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  const hh = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+  return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
+};
+
 export default function WarrantyPage() {
   // Аутентификация
   const [password, setPassword] = useState('');
@@ -172,9 +184,9 @@ export default function WarrantyPage() {
   const [categoriesData, setCategoriesData] = useState([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
 
-  // Фильтр по дате загрузки
-  const [uploadDates, setUploadDates] = useState([]);
-  const [selectedUploadDate, setSelectedUploadDate] = useState('');
+  // Фильтр по времени загрузки
+  const [uploadTimes, setUploadTimes] = useState([]);
+  const [selectedUploadTime, setSelectedUploadTime] = useState('');
 
   // Проверка пароля
   const handlePasswordSubmit = async (e) => {
@@ -247,8 +259,7 @@ export default function WarrantyPage() {
         setFileData([]);
         setPreview([]);
         fetchClaims();
-        // После успешной загрузки обновим список дат
-        loadUploadDates();
+        loadUploadTimes();
       } else {
         setUploadStatus({ type: 'error', message: 'Ошибка загрузки' });
       }
@@ -259,33 +270,32 @@ export default function WarrantyPage() {
     }
   };
 
-  // === Загрузка дат загрузки ===
-  const loadUploadDates = async () => {
+  // === Загрузка точных времен загрузки ===
+  const loadUploadTimes = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/warranty/upload-dates`);
-      const dates = await res.json();
-      setUploadDates(dates);
-      if (dates.length > 0 && !selectedUploadDate) {
-        setSelectedUploadDate(dates[0]); // последняя загрузка по умолчанию
+      const res = await fetch(`${API_BASE}/api/warranty/upload-times`);
+      const times = await res.json();
+      setUploadTimes(times);
+      if (times.length > 0 && !selectedUploadTime) {
+        setSelectedUploadTime(times[0]);
       }
     } catch (err) {
       console.error(err);
     }
   };
 
-  // Загружаем список дат при открытии аналитики
   useEffect(() => {
     if (authenticated && activeTab === 'analytics') {
-      loadUploadDates();
+      loadUploadTimes();
     }
   }, [authenticated, activeTab]);
 
-  // === Загрузка аналитики с фильтром по дате ===
-  const loadAnalytics1 = async (uploadDate) => {
+  // === Загрузка аналитики с фильтром по времени ===
+  const loadAnalytics1 = async (uploadedAt) => {
     setLoading1(true);
     try {
       const params = new URLSearchParams();
-      if (uploadDate) params.append('uploadDate', uploadDate);
+      if (uploadedAt) params.append('uploadedAt', uploadedAt);
       const res = await fetch(`${API_BASE}/api/warranty/analytics?${params.toString()}`);
       const json = await res.json();
       setData1Raw(json);
@@ -296,11 +306,11 @@ export default function WarrantyPage() {
     }
   };
 
-  const loadAnalytics2 = async (uploadDate) => {
+  const loadAnalytics2 = async (uploadedAt) => {
     setLoading2(true);
     try {
       const params = new URLSearchParams();
-      if (uploadDate) params.append('uploadDate', uploadDate);
+      if (uploadedAt) params.append('uploadedAt', uploadedAt);
       const res = await fetch(`${API_BASE}/api/warranty/analytics-by-model?${params.toString()}`);
       const json = await res.json();
       setData2Raw(json);
@@ -311,11 +321,11 @@ export default function WarrantyPage() {
     }
   };
 
-  const loadAnalytics3 = async (uploadDate) => {
+  const loadAnalytics3 = async (uploadedAt) => {
     setLoading3(true);
     try {
       const params = new URLSearchParams();
-      if (uploadDate) params.append('uploadDate', uploadDate);
+      if (uploadedAt) params.append('uploadedAt', uploadedAt);
       const res = await fetch(`${API_BASE}/api/warranty/analytics-by-sales-date?${params.toString()}`);
       const json = await res.json();
       setData3Raw(json);
@@ -326,11 +336,11 @@ export default function WarrantyPage() {
     }
   };
 
-  const loadCategories = async (uploadDate) => {
+  const loadCategories = async (uploadedAt) => {
     setLoadingCategories(true);
     try {
       const params = new URLSearchParams();
-      if (uploadDate) params.append('uploadDate', uploadDate);
+      if (uploadedAt) params.append('uploadedAt', uploadedAt);
       const res = await fetch(`${API_BASE}/api/warranty/categories-summary?${params.toString()}`);
       const json = await res.json();
       setCategoriesData(json);
@@ -341,33 +351,47 @@ export default function WarrantyPage() {
     }
   };
 
-  // Автоматическая перезагрузка всех данных при смене даты
   useEffect(() => {
-    if (selectedUploadDate && activeTab === 'analytics') {
-      loadAnalytics1(selectedUploadDate);
-      loadAnalytics2(selectedUploadDate);
-      loadAnalytics3(selectedUploadDate);
-      loadCategories(selectedUploadDate);
+    if (selectedUploadTime && activeTab === 'analytics') {
+      loadAnalytics1(selectedUploadTime);
+      loadAnalytics2(selectedUploadTime);
+      loadAnalytics3(selectedUploadTime);
+      loadCategories(selectedUploadTime);
     }
-  }, [selectedUploadDate, activeTab]);
+  }, [selectedUploadTime, activeTab]);
 
   // Преобразование данных для графиков
   const monthNames = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 
+  // График 1: Total (Prod Related) - per 1000
   const chartData1 = useMemo(() => {
     const filtered = data1Raw.filter(d => selectedModels1.includes(d.model));
     const grouped = {};
     filtered.forEach(d => {
       if (!grouped[d.month]) {
-        grouped[d.month] = { month: d.month, qty_sell: 0, mis_0: 0, mis_3: 0 };
+        grouped[d.month] = { 
+          month: d.month, 
+          qty_sell: 0, 
+          mis_0_count: 0, 
+          mis_3_count: 0 
+        };
       }
       grouped[d.month].qty_sell += Number(d.qty_sell) || 0;
-      grouped[d.month].mis_0 += Number(d.mis_0) || 0;
-      grouped[d.month].mis_3 += Number(d.mis_3) || 0;
+      grouped[d.month].mis_0_count += Number(d.mis_0) || 0;
+      grouped[d.month].mis_3_count += Number(d.mis_3) || 0;
     });
-    return Object.values(grouped).sort((a, b) => a.month.localeCompare(b.month));
+    
+    return Object.values(grouped)
+      .map(d => ({
+        month: d.month,
+        qty_sell: d.qty_sell,
+        mis_0: d.qty_sell > 0 ? (d.mis_0_count / d.qty_sell) * 1000 : 0,
+        mis_3: d.qty_sell > 0 ? (d.mis_3_count / d.qty_sell) * 1000 : 0,
+      }))
+      .sort((a, b) => a.month.localeCompare(b.month));
   }, [data1Raw, selectedModels1]);
 
+  // График 2: Model Based (Prod Related)
   const chartData2 = useMemo(() => {
     const filtered = data2Raw.filter(d => selectedModels2.includes(d.model));
     return filtered.map(d => {
@@ -384,6 +408,7 @@ export default function WarrantyPage() {
     });
   }, [data2Raw, selectedModels2]);
 
+  // График 3: 0 MIS/3MIS by sales date
   const chartData3 = useMemo(() => {
     const filtered = data3Raw.filter(d => selectedModels3.includes(d.model));
     const grouped = {};
@@ -548,22 +573,24 @@ export default function WarrantyPage() {
       {/* ========== ВКЛАДКА АНАЛИТИКИ ========== */}
       {activeTab === 'analytics' && (
         <>
-          {/* Фильтр по дате загрузки */}
+          {/* Фильтр по времени загрузки */}
           <div style={{ ...cardStyle, marginBottom: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <label style={{ fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
-                Дата загрузки данных:
+                Время загрузки данных:
               </label>
               <select
-                value={selectedUploadDate}
-                onChange={(e) => setSelectedUploadDate(e.target.value)}
-                style={{ ...inputStyle, minWidth: 180 }}
+                value={selectedUploadTime}
+                onChange={(e) => setSelectedUploadTime(e.target.value)}
+                style={{ ...inputStyle, minWidth: 200 }}
               >
-                {uploadDates.map(date => (
-                  <option key={date} value={date}>{date}</option>
+                {uploadTimes.map(timestamp => (
+                  <option key={timestamp} value={timestamp}>
+                    {formatUploadTime(timestamp)}
+                  </option>
                 ))}
               </select>
-              {uploadDates.length === 0 && (
+              {uploadTimes.length === 0 && (
                 <span style={{ color: '#9CA3AF', fontSize: 14 }}>Нет данных о загрузках</span>
               )}
             </div>
@@ -579,7 +606,7 @@ export default function WarrantyPage() {
               <button onClick={() => setShowModelFilter1(!showModelFilter1)} style={buttonStyle}>
                 {showModelFilter1 ? 'Скрыть фильтр' : 'Модели'}
               </button>
-              <button onClick={() => loadAnalytics1(selectedUploadDate)} disabled={loading1} style={buttonStyle}>
+              <button onClick={() => loadAnalytics1(selectedUploadTime)} disabled={loading1} style={buttonStyle}>
                 {loading1 ? '⏳ Загрузка...' : '▶ Загрузить аналитику'}
               </button>
             </div>
@@ -604,13 +631,13 @@ export default function WarrantyPage() {
                   <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} />
                   <Legend />
                   <Bar yAxisId="left" dataKey="qty_sell" fill="#3B82F6" name="Qty Sold" barSize={20}>
-                    <LabelList dataKey="qty_sell" position="top" style={{ fill: '#1F2937', fontSize: 15 }} />
+                    <LabelList dataKey="qty_sell" position="top" style={{ fill: '#1F2937', fontSize: 11 }} />
                   </Bar>
-                  <Line yAxisId="right" type="monotone" dataKey="mis_0" stroke="#F59E0B" strokeWidth={2} name="0mis" dot={{ r: 3 }}>
-                    <LabelList dataKey="mis_0" position="top" style={{ fill: '#3e2803', fontSize: 13 }} />
+                  <Line yAxisId="right" type="monotone" dataKey="mis_0" stroke="#F59E0B" strokeWidth={2} name="0mis per 1000" dot={{ r: 3 }}>
+                    <LabelList dataKey="mis_0" position="top" formatter={formatNumber} style={{ fill: '#F59E0B', fontSize: 10 }} />
                   </Line>
-                  <Line yAxisId="right" type="monotone" dataKey="mis_3" stroke="#10B981" strokeWidth={2} name="3mis" dot={{ r: 3 }}>
-                    <LabelList dataKey="mis_3" position="top" style={{ fill: '#216951', fontSize: 13 }} />
+                  <Line yAxisId="right" type="monotone" dataKey="mis_3" stroke="#10B981" strokeWidth={2} name="3mis per 1000" dot={{ r: 3 }}>
+                    <LabelList dataKey="mis_3" position="top" formatter={formatNumber} style={{ fill: '#10B981', fontSize: 10 }} />
                   </Line>
                   <ReferenceLine yAxisId="right" y={5} stroke="#EF4444" strokeWidth={2} strokeDasharray="5 5">
                     <Label value="0mis Target (5)" position="right" style={{ fill: '#EF4444', fontSize: 12 }} />
@@ -633,7 +660,7 @@ export default function WarrantyPage() {
               <button onClick={() => setShowModelFilter2(!showModelFilter2)} style={buttonStyle}>
                 {showModelFilter2 ? 'Скрыть фильтр' : 'Модели'}
               </button>
-              <button onClick={() => loadAnalytics2(selectedUploadDate)} disabled={loading2} style={buttonStyle}>
+              <button onClick={() => loadAnalytics2(selectedUploadTime)} disabled={loading2} style={buttonStyle}>
                 {loading2 ? '⏳ Загрузка...' : '▶ Загрузить аналитику'}
               </button>
             </div>
@@ -688,7 +715,7 @@ export default function WarrantyPage() {
               <button onClick={() => setShowModelFilter3(!showModelFilter3)} style={buttonStyle}>
                 {showModelFilter3 ? 'Скрыть фильтр' : 'Модели'}
               </button>
-              <button onClick={() => loadAnalytics3(selectedUploadDate)} disabled={loading3} style={buttonStyle}>
+              <button onClick={() => loadAnalytics3(selectedUploadTime)} disabled={loading3} style={buttonStyle}>
                 {loading3 ? '⏳ Загрузка...' : '▶ Загрузить аналитику'}
               </button>
             </div>
@@ -775,7 +802,7 @@ export default function WarrantyPage() {
               Топ категорий по количеству рекламаций
             </h2>
             <div style={{ marginBottom: 20 }}>
-              <button onClick={() => loadCategories(selectedUploadDate)} disabled={loadingCategories} style={buttonStyle}>
+              <button onClick={() => loadCategories(selectedUploadTime)} disabled={loadingCategories} style={buttonStyle}>
                 {loadingCategories ? '⏳ Загрузка...' : '📊 Загрузить данные'}
               </button>
             </div>

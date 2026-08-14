@@ -626,7 +626,7 @@ export default function SgpAuditPage() {
         </div>
       )}
 
-      {/* ========== Вкладка "Аналитика по аудиту" ========== */}
+      {/* ========== Вкладка "Аналитика по аудиту" ==========
       {activeTab === 'analytics' && (
         <div style={cardStyle}>
           <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -716,7 +716,7 @@ export default function SgpAuditPage() {
             </>
           )}
         </div>
-      )}
+      )} */}
     </div>
   );
 }

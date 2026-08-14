@@ -12,6 +12,7 @@ import PartDefectSearchPage from './PartDefectSearchPage';
 import DrrReportPage from './DrrReportPage';
 import DailyDashboardPage from './DailyDashboardPage';
 import WarrantyPage from './WarrantyPage';
+import TLMapPage from './TLMapPage';
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/drr-report" element={<DrrReportPage />} />
         <Route path="/daily-dashboard" element={<DailyDashboardPage />} />
         <Route path="/warranty" element={<WarrantyPage />} />
+        <Route path="/tl-map" element={<TLMapPage />} />
       </Route>
     </Routes>
   );

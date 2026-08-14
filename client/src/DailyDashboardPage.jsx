@@ -45,7 +45,7 @@ async function translateText(text, from = 'ru', to = 'en') {
 }
 
 export default function DailyDashboardPage() {
-  const [useEnglish, setUseEnglish] = useState(true);
+  const [useEnglish, setUseEnglish] = useState(false);
 
   const [weekData, setWeekData] = useState(null);
   const [loading, setLoading] = useState(true);

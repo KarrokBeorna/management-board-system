@@ -12,6 +12,7 @@ import drrReportPreview from './assets/drrall.png';
 import dailyDashboardPreview from './assets/dailyq.png';
 import externalDReportPreview from './assets/dim.png';
 import warrantyPreview from './assets/waran.png';
+import tlMapPreview from './assets/tlmap.png'; // Добавьте свою картинку
 
 // Общие стили секций
 const sectionStyle = {
@@ -152,6 +153,7 @@ export default function HomePage() {
           <ReportCard to="http://10.27.195.16/reports/024" imgSrc={externalReportPreview} caption="DRR по заводу" accentColor="#1638f9" />
           <ReportCard to="/drr-report" imgSrc={drrReportPreview} caption="DRR Report" accentColor="#fa0000" />
           <ReportCard to="/daily-dashboard" imgSrc={dailyDashboardPreview} caption="Daily Dashboard" accentColor="#0cb428" />
+          <ReportCard to="/tl-map" imgSrc={tlMapPreview} caption="TL Map" accentColor="#0ad5c8" />
         </div>
       </div>
 

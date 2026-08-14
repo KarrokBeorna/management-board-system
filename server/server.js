@@ -2625,6 +2625,7 @@ app.get('/api/daily-dashboard-week', async (req, res) => {
     };
 
     // Недельный DRR
+    // Недельный DRR – исправлено: берём максимум по моделям
     const [weekDrrRows] = await mesPool.query(`
       SELECT
         ROUND(100 - COALESCE(remzone.REMZONE_COUNT, 0) * 100.0 / NULLIF(all_cars.TOTAL, 0), 1) AS DRR
@@ -2648,7 +2649,9 @@ app.get('/api/daily-dashboard-week', async (req, res) => {
         GROUP BY too.product
       ) remzone ON all_cars.MODEL = remzone.MODEL
     `, [start, end, start, end]);
-    const weekDrr = weekDrrRows?.[0]?.DRR || 0;
+
+    const weekDrrValues = weekDrrRows.map(r => r.DRR).filter(v => v !== null);
+    const weekDrr = weekDrrValues.length > 0 ? Math.max(...weekDrrValues) : 0;
 
     // Недельный DPU
     const [weekCarsRows] = await pool.query(`
@@ -2948,7 +2951,7 @@ app.get('/api/warranty/claims', async (req, res) => {
 
 app.get('/api/warranty/analytics', async (req, res) => {
   try {
-    const { uploadDate } = req.query;
+    const { uploadedAt } = req.query;
     let sql = `
       SELECT 
         DATE_FORMAT(production_date, '%Y-%m') AS month,
@@ -2960,9 +2963,9 @@ app.get('/api/warranty/analytics', async (req, res) => {
       WHERE production_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
     `;
     const params = [];
-    if (uploadDate) {
-      sql += ` AND DATE(uploaded_at) = ?`;
-      params.push(uploadDate);
+    if (uploadedAt) {
+      sql += ` AND uploaded_at = ?`;
+      params.push(uploadedAt);
     }
     sql += ` GROUP BY month, model ORDER BY month, model`;
     const [rows] = await warrantyPool.query(sql, params);
@@ -2975,7 +2978,7 @@ app.get('/api/warranty/analytics', async (req, res) => {
 
 app.get('/api/warranty/analytics-by-model', async (req, res) => {
   try {
-    const { uploadDate } = req.query;
+    const { uploadedAt } = req.query;
     let sql = `
       SELECT 
         DATE_FORMAT(production_date, '%Y-%m') AS month,
@@ -2986,9 +2989,9 @@ app.get('/api/warranty/analytics-by-model', async (req, res) => {
       WHERE production_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
     `;
     const params = [];
-    if (uploadDate) {
-      sql += ` AND DATE(uploaded_at) = ?`;
-      params.push(uploadDate);
+    if (uploadedAt) {
+      sql += ` AND uploaded_at = ?`;
+      params.push(uploadedAt);
     }
     sql += ` GROUP BY month, model ORDER BY month, model`;
     const [rows] = await warrantyPool.query(sql, params);
@@ -3001,7 +3004,7 @@ app.get('/api/warranty/analytics-by-model', async (req, res) => {
 
 app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
   try {
-    const { uploadDate } = req.query;
+    const { uploadedAt } = req.query;
     let sql = `
       SELECT 
         DATE_FORMAT(warranty_start_date, '%Y-%m') AS month,
@@ -3013,9 +3016,9 @@ app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
       WHERE warranty_start_date IS NOT NULL
     `;
     const params = [];
-    if (uploadDate) {
-      sql += ` AND DATE(uploaded_at) = ?`;
-      params.push(uploadDate);
+    if (uploadedAt) {
+      sql += ` AND uploaded_at = ?`;
+      params.push(uploadedAt);
     }
     sql += ` GROUP BY month, model ORDER BY month, model`;
     const [rows] = await warrantyPool.query(sql, params);
@@ -3029,7 +3032,7 @@ app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
 // Топ категорий по моделям
 app.get('/api/warranty/categories-summary', async (req, res) => {
   try {
-    const { model, uploadDate } = req.query;
+    const { model, uploadedAt } = req.query;
     let sql = `
       SELECT model, category, SUM(claims_qty) AS total_claims
       FROM warranty_claims
@@ -3040,9 +3043,9 @@ app.get('/api/warranty/categories-summary', async (req, res) => {
       sql += ` AND model = ?`;
       params.push(model);
     }
-    if (uploadDate) {
-      sql += ` AND DATE(uploaded_at) = ?`;
-      params.push(uploadDate);
+    if (uploadedAt) {
+      sql += ` AND uploaded_at = ?`;
+      params.push(uploadedAt);
     }
     sql += ` GROUP BY model, category ORDER BY model, total_claims DESC`;
     const [rows] = await warrantyPool.query(sql, params);
@@ -3053,18 +3056,47 @@ app.get('/api/warranty/categories-summary', async (req, res) => {
   }
 });
 
-// Получить уникальные даты загрузки (только дата, без времени)
-app.get('/api/warranty/upload-dates', async (req, res) => {
+// Получить список уникальных точных времен загрузки
+app.get('/api/warranty/upload-times', async (req, res) => {
   try {
     const [rows] = await warrantyPool.query(`
-      SELECT DISTINCT DATE(uploaded_at) AS upload_date
+      SELECT DISTINCT uploaded_at
       FROM warranty_claims
       WHERE uploaded_at IS NOT NULL
-      ORDER BY upload_date DESC
+      ORDER BY uploaded_at DESC
     `);
-    res.json(rows.map(r => r.upload_date));
+    res.json(rows.map(r => r.uploaded_at));
   } catch (err) {
-    console.error('Ошибка получения дат загрузки:', err.message);
+    console.error('Ошибка получения времен загрузки:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Эндпоинт для TL Map
+app.get('/api/tl-map', async (req, res) => {
+  try {
+    const sql = `
+      SELECT 
+        tlo.vin,
+        tlo.node_nature AS vehicle_status,
+        SUBSTRING_INDEX(ord.product, ' ', -1) AS model,
+        IFNULL(LEFT(SUBSTRING_INDEX(mat.material_desc, '_', 1), 5), '???') AS spec,
+        RIGHT(ord.plan_unit_code, 4) AS lot,
+        SUBSTR(vh.material_no, 8, 2) AS color,
+        vh.sequence_number AS seq
+      FROM tm_vhc_test_line_online tlo
+      INNER JOIN tm_vhc_vehicle vh ON tlo.vin = vh.vin
+      LEFT JOIN tm_bas_material_relation mat ON mat.material_no = vh.material_no AND mat.is_deleted = 0
+      INNER JOIN tm_ofm_order ord ON tlo.vin = ord.vin
+      WHERE tlo.node_nature IN ('TLWA','TLRT','TLADAS','TLTT','CPA')
+        AND vh.vehicle_status IN ('Key_Uloc_Type_CP72', 'Key_Uloc_Type_CP7')
+      ORDER BY tlo.node_nature, tlo.vin
+    `;
+    
+    const [rows] = await mesPool.query(sql);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка TL Map:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
