@@ -3101,6 +3101,56 @@ app.get('/api/tl-map', async (req, res) => {
   }
 });
 
+// 1. Количество уникальных машин, прошедших через посты за сегодня
+app.get('/api/tl-map-passed-today', async (req, res) => {
+  try {
+    const sql = `
+      SELECT 
+        node_nature AS zone_name,
+        COUNT(DISTINCT vin) AS passed_count
+      FROM tm_vhc_test_line_movement
+      WHERE node_nature IN ('TLWA','TLRT','TLADAS','TLTT','CPA')
+        AND DATE(gmt_create) = CURDATE()
+        AND is_deleted = 0
+      GROUP BY node_nature
+    `;
+    const [rows] = await mesPool.query(sql);
+    const result = {};
+    rows.forEach(row => {
+      result[row.zone_name] = row.passed_count;
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка TL Map passed today:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Список ВСЕХ записей прохождения через пост за сегодня (для таблицы)
+app.get('/api/tl-map-passed-today-details', async (req, res) => {
+  try {
+    const { zone } = req.query;
+    const sql = `
+      SELECT 
+        tvtlm.vin,
+        tvtlm.vhc_model AS model,
+        tvtlm.material_no,
+        tvtlm.sequence_number AS seq,
+        tvtlm.gmt_create AS pass_time
+      FROM tm_vhc_test_line_movement tvtlm
+      WHERE tvtlm.node_nature = ?
+        AND DATE(tvtlm.gmt_create) = CURDATE()
+        AND tvtlm.is_deleted = 0
+      ORDER BY tvtlm.gmt_create DESC
+    `;
+    const [rows] = await mesPool.query(sql, [zone]);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка TL Map passed today details:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Заметки (без изменений)
 app.get('/api/defect-notes', async (req, res) => { /* ... */ });
 app.post('/api/defect-notes', async (req, res) => { /* ... */ });
