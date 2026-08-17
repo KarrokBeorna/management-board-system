@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
-const API_BASE = 'http://localhost:40000';
+const API_BASE = '';
 
 const cardStyle = {
   backgroundColor: '#FFFFFF',

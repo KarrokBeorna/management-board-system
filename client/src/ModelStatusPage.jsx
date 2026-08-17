@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import * as XLSX from 'xlsx';
 
-const API_BASE = 'http://localhost:40000';
+const API_BASE = '';
 
 const modelColors = {
   'ESTEO MX': '#F59E0B',

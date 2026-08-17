@@ -5,7 +5,7 @@ import {
   ResponsiveContainer, Line, ReferenceLine, LabelList, Label
 } from 'recharts';
 
-const API_BASE = 'http://localhost:40000';
+const API_BASE = '';
 
 // ====== СТИЛИ ======
 const cardStyle = {

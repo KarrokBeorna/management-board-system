@@ -4,7 +4,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 
-const API_BASE = 'http://localhost:40000';
+const API_BASE = '';
 
 const checkpointColors = {
   PIP: '#F59E0B',

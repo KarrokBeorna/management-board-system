@@ -13,6 +13,7 @@ import DrrReportPage from './DrrReportPage';
 import DailyDashboardPage from './DailyDashboardPage';
 import WarrantyPage from './WarrantyPage';
 import TLMapPage from './TLMapPage';
+import HoldsSgpPage from './HoldsSgpPage';
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/daily-dashboard" element={<DailyDashboardPage />} />
         <Route path="/warranty" element={<WarrantyPage />} />
         <Route path="/tl-map" element={<TLMapPage />} />
+        <Route path="/holds-sgp" element={<HoldsSgpPage />} />
       </Route>
     </Routes>
   );

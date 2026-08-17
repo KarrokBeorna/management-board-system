@@ -3151,6 +3151,138 @@ app.get('/api/tl-map-passed-today-details', async (req, res) => {
   }
 });
 
+app.get('/api/holds-sgp', async (req, res) => {
+  try {
+    const sql = `
+      SELECT 
+        qid.model AS model,
+        qid.issue_desc AS issue_desc,
+        COUNT(DISTINCT qid.vin) AS quantity,
+        MIN(qid.gmt_create) AS hold_date,
+        DATEDIFF(CURDATE(), MIN(qid.gmt_create)) AS days_waiting,
+        COALESCE(qid.clear_man, qid.create_man) AS responsible,
+        '' AS actions,
+        DATE_ADD(MIN(qid.gmt_create), INTERVAL 7 DAY) AS planned_date,
+        'В процессе' AS status,
+        '' AS comment
+      FROM higoplat_fusion_les.tv_quality_issue_detail qid
+      WHERE qid.is_deleted = 0
+        AND qid.status = 0
+        AND qid.clear_time IS NULL
+      GROUP BY 
+        qid.model,
+        qid.issue_desc,
+        COALESCE(qid.clear_man, qid.create_man)
+      ORDER BY 
+        qid.model,
+        MIN(qid.gmt_create) DESC
+    `;
+    
+    const [rows] = await lesPool.query(sql);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка Holds SGP:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/holds-sgp-retrospective', async (req, res) => {
+  try {
+    const { models } = req.query;
+    
+    let sql = `
+      SELECT 
+        qid.model AS model,
+        qid.issue_desc AS issue_desc,
+        DATE(qid.gmt_create) AS start_date,
+        DATE(qid.clear_time) AS end_date,
+        qid.vin
+      FROM higoplat_fusion_les.tv_quality_issue_detail qid
+      WHERE qid.is_deleted = 0
+        AND qid.status = 0
+    `;
+    
+    const params = [];
+    
+    if (models && models !== '') {
+      const modelList = models.split(',').map(m => m.trim()).filter(Boolean);
+      if (modelList.length > 0) {
+        sql += ` AND qid.model IN (${modelList.map(() => '?').join(',')})`;
+        params.push(...modelList);
+      }
+    }
+    
+    sql += ` ORDER BY qid.model, qid.issue_desc, qid.gmt_create`;
+    
+    const [rows] = await lesPool.query(sql, params);
+    
+    // Группируем по model + issue_desc
+    const groupedMap = {};
+    rows.forEach(row => {
+      const key = `${row.model}_|_${row.issue_desc}`;
+      if (!groupedMap[key]) {
+        groupedMap[key] = {
+          model: row.model,
+          issue_desc: row.issue_desc,
+          vins: [],
+        };
+      }
+      groupedMap[key].vins.push({
+        vin: row.vin,
+        startDate: row.start_date ? String(row.start_date).split('T')[0] : null,
+        endDate: row.end_date ? String(row.end_date).split('T')[0] : null,
+      });
+    });
+    
+    // Генерируем даты (14 дней включая сегодня)
+    const dates = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      dates.push(`${year}-${month}-${day}`);
+    }
+    
+    // Для каждой группы считаем количество на каждый день
+    const result = [];
+    Object.values(groupedMap).forEach(group => {
+      const rowResult = {
+        model: group.model,
+        issue_desc: group.issue_desc,
+      };
+      
+      dates.forEach(date => {
+        // Считаем VIN, которые активны на эту дату
+        const activeCount = group.vins.filter(v => {
+          if (!v.startDate) return false;
+          // VIN активен, если startDate <= date AND (endDate IS NULL OR endDate > date)
+          const started = v.startDate <= date;
+          const notEnded = !v.endDate || v.endDate > date;
+          return started && notEnded;
+        }).length;
+        
+        if (activeCount > 0) {
+          rowResult[date] = activeCount;
+        }
+      });
+      
+      // Добавляем только если есть хоть одно значение
+      if (dates.some(date => rowResult[date] && rowResult[date] > 0)) {
+        result.push(rowResult);
+      }
+    });
+    
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка Holds SGP retrospective:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Заметки (без изменений)
 app.get('/api/defect-notes', async (req, res) => { /* ... */ });
 app.post('/api/defect-notes', async (req, res) => { /* ... */ });
@@ -3167,7 +3299,9 @@ async function startServer() {
     process.exit(1);
   }
 
-  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+ });
 }
 
 startServer();

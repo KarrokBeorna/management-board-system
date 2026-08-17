@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 
-const API_BASE = 'http://localhost:40000';
+const API_BASE = '';
 
 const inputStyle = {
   padding: '8px 12px',

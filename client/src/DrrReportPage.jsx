@@ -4,7 +4,7 @@ import {
   ReferenceLine, Label, ResponsiveContainer, Cell
 } from 'recharts';
 
-const API_BASE = 'http://localhost:40000';
+const API_BASE = '';
 
 const modelColors = {
   'ESTEO MX': '#F59E0B',

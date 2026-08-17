@@ -1,7 +1,7 @@
 // ReportPage.jsx – основной дашборд (без фильтра смен)
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
-const API_BASE = 'http://localhost:40000';
+const API_BASE = '';
 
 function getWeekNumber(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));

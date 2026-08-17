@@ -12,7 +12,8 @@ import drrReportPreview from './assets/drrall.png';
 import dailyDashboardPreview from './assets/dailyq.png';
 import externalDReportPreview from './assets/dim.png';
 import warrantyPreview from './assets/waran.png';
-import tlMapPreview from './assets/tlmap.png'; // Добавьте свою картинку
+import tlMapPreview from './assets/tlmap.png';
+import HoldsSgpPage from './assets/hold.png';
 
 // Общие стили секций
 const sectionStyle = {
@@ -150,7 +151,6 @@ export default function HomePage() {
           <ReportCard to="/daily-top" imgSrc={dailyTopPreview} caption="Daily Top CP7/CP8" accentColor="#8B5CF6" />
           <ReportCard to="/model-status" imgSrc={modelStatusPreview} caption="Model Status" accentColor="#F59E0B" />
           <ReportCard to="/mpp-weekly-top" imgSrc={mppWeeklyPreview} caption="DRR Defects Top CP7/СP8" accentColor="#10B981" />
-          <ReportCard to="http://10.27.195.16/reports/024" imgSrc={externalReportPreview} caption="DRR по заводу" accentColor="#1638f9" />
           <ReportCard to="/drr-report" imgSrc={drrReportPreview} caption="DRR Report" accentColor="#fa0000" />
           <ReportCard to="/daily-dashboard" imgSrc={dailyDashboardPreview} caption="Daily Dashboard" accentColor="#0cb428" />
           <ReportCard to="/tl-map" imgSrc={tlMapPreview} caption="TL Map" accentColor="#0ad5c8" />
@@ -170,6 +170,8 @@ export default function HomePage() {
           <ReportCard to="/part-defect-search" imgSrc={partDefectPreview} caption="Part/Defect Search" accentColor="#0e3bec" />
           <ReportCard to="http://10.27.195.25:5174/time-at-points" imgSrc={externalDReportPreview} caption="Chekpoint Passage" accentColor="#fc7b02" />
           <ReportCard to="/warranty" imgSrc={warrantyPreview} caption="Warranty" accentColor="#0cd72a" />
+          <ReportCard to="/holds-sgp" imgSrc={HoldsSgpPage} caption="Holds СГП" accentColor="#f30b2e" />
+          <ReportCard to="http://10.27.195.16/reports/024" imgSrc={externalReportPreview} caption="DRR по заводу" accentColor="#1638f9" />
         </div>
       </div>
     </div>

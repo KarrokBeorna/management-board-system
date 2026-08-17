@@ -6,7 +6,7 @@ import {
   LineChart, Line
 } from 'recharts';
 
-const API_BASE = 'http://localhost:40000';
+const API_BASE = '';
 
 // ====== Вспомогательные функции ======
 const tableToHtml = (rows) => {

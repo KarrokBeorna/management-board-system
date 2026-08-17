@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';   // для экспорта в Excel
 
-const API_BASE = 'http://localhost:40000';
+const API_BASE = '';
 
 function getTodayStr() {
   const d = new Date();

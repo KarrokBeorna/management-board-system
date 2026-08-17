@@ -6,7 +6,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, LabelList
 } from 'recharts';
 
-const API_BASE = 'http://localhost:40000';
+const API_BASE = '';
 
 const inputStyle = {
   padding: '8px 12px',
