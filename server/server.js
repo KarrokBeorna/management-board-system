@@ -57,11 +57,11 @@ const lesPool = mysql.createPool({
 });
 
 const warrantyPool = mysql.createPool({
-  host: '127.0.0.1',        // или '127.0.0.1'
-  port: 3306,               // стандартный порт MySQL
-  user: 'root',             // ваш пользователь
-  password: '',             // пароль (пустая строка, если нет)
-  database: 'dashboard_notes',  // имя вашей базы
+  host: process.env.NOTES_HOST || '127.0.0.1',
+  port: parseInt(process.env.NOTES_PORT) || 3306,
+  user: process.env.NOTES_USER || 'root',
+  password: process.env.NOTES_PASSWORD || '',
+  database: process.env.NOTES_NAME || 'dashboard_notes',
   waitForConnections: true,
   connectTimeout: 10000,
   dateStrings: true,
