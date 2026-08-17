@@ -584,7 +584,7 @@ export default function WarrantyPage() {
                 onChange={(e) => setSelectedUploadTime(e.target.value)}
                 style={{ ...inputStyle, minWidth: 200 }}
               >
-                {uploadTimes.map(timestamp => (
+                {Array.isArray(uploadTimes) && uploadTimes.map(timestamp => (
                   <option key={timestamp} value={timestamp}>
                     {formatUploadTime(timestamp)}
                   </option>
