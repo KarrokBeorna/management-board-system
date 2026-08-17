@@ -274,13 +274,25 @@ export default function WarrantyPage() {
   const loadUploadTimes = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/warranty/upload-times`);
-      const times = await res.json();
-      setUploadTimes(times);
-      if (times.length > 0 && !selectedUploadTime) {
-        setSelectedUploadTime(times[0]);
+      if (!res.ok) {
+        console.error('Ошибка загрузки времен:', res.status);
+        setUploadTimes([]);
+        return;
+      }
+      const data = await res.json();
+      console.log('upload-times response:', data);
+      if (Array.isArray(data)) {
+        setUploadTimes(data);
+        if (data.length > 0 && !selectedUploadTime) {
+          setSelectedUploadTime(data[0]);
+        }
+      } else {
+        console.error('upload-times не массив:', data);
+        setUploadTimes([]);
       }
     } catch (err) {
-      console.error(err);
+      console.error('Ошибка upload-times:', err);
+      setUploadTimes([]);
     }
   };
 
