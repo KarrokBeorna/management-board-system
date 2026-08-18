@@ -7,7 +7,7 @@ const API_BASE = 'http://localhost:40000';
 const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
-  width: 100%,
+  width: '100%',
   margin: '0 auto',
   background: '#E5E7EB',
   minHeight: 'calc(100vh - 60px)',

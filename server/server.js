@@ -8,7 +8,8 @@ app.use(cors({
   origin: 'http://localhost:30000',
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 
 const pool = mysql.createPool({
@@ -43,6 +44,8 @@ const mesPool = mysql.createPool({
   connectTimeout: 10000,
   dateStrings: true,
 });
+
+console.log(process.env.NOTES_USER)
 
 // ===== НОВЫЙ ПУЛ ДЛЯ БАЗЫ LES =====
 const lesPool = mysql.createPool({
