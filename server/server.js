@@ -3297,10 +3297,14 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
   }
 });
 
-// Получение заметок
+// ================== ЗАМЕТКИ ==================
+
+// Получение всех заметок
 app.get('/api/defect-notes', async (req, res) => {
   try {
-    const [rows] = await notesPool.query('SELECT * FROM defect_user_notes');
+    const [rows] = await notesPool.query(
+      'SELECT * FROM defect_user_notes ORDER BY updated_at DESC'
+    );
     res.json(rows);
   } catch (err) {
     console.error('Ошибка получения заметок:', err.message);
@@ -3308,21 +3312,59 @@ app.get('/api/defect-notes', async (req, res) => {
   }
 });
 
-// Сохранение заметки
+// Сохранение или обновление заметки
 app.post('/api/defect-notes', async (req, res) => {
   try {
     const { mpp, responsible, action } = req.body;
     if (!mpp) return res.status(400).json({ error: 'mpp обязателен' });
 
-    await notesPool.query(`
-      INSERT INTO defect_user_notes (mpp, responsible, action) 
-      VALUES (?, ?, ?) 
-      ON DUPLICATE KEY UPDATE responsible = VALUES(responsible), action = VALUES(action), updated_at = CURRENT_TIMESTAMP
-    `, [mpp, responsible || '', action || '']);
+    // Проверяем существует ли запись
+    const [existing] = await notesPool.query(
+      'SELECT id FROM defect_user_notes WHERE mpp = ? LIMIT 1',
+      [mpp]
+    );
+
+    if (existing.length > 0) {
+      // Обновляем существующую
+      await notesPool.query(
+        'UPDATE defect_user_notes SET responsible = ?, action = ?, updated_at = CURRENT_TIMESTAMP WHERE mpp = ?',
+        [responsible || '', action || '', mpp]
+      );
+    } else {
+      // Вставляем новую
+      await notesPool.query(
+        'INSERT INTO defect_user_notes (mpp, responsible, action) VALUES (?, ?, ?)',
+        [mpp, responsible || '', action || '']
+      );
+    }
+
+    // Возвращаем обновленную запись
+    const [updated] = await notesPool.query(
+      'SELECT * FROM defect_user_notes WHERE mpp = ? LIMIT 1',
+      [mpp]
+    );
+
+    res.json({ success: true, note: updated[0] || null });
+  } catch (err) {
+    console.error('Ошибка сохранения заметки:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Удаление заметки (опционально)
+app.delete('/api/defect-notes/:mpp', async (req, res) => {
+  try {
+    const { mpp } = req.params;
+    if (!mpp) return res.status(400).json({ error: 'mpp обязателен' });
+
+    await notesPool.query(
+      'DELETE FROM defect_user_notes WHERE mpp = ?',
+      [mpp]
+    );
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Ошибка сохранения заметки:', err.message);
+    console.error('Ошибка удаления заметки:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

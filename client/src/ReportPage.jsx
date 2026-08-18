@@ -98,16 +98,33 @@ export default function ReportPage() {
       .catch(() => {});
   }, []);
 
-  const handleNoteSave = (mpp, field, value) => {
+  const handleNoteSave = async (mpp, field, value) => {
     const current = userNotes[mpp] || { responsible: '', action: '' };
     const updated = { ...current, [field]: value };
     setUserNotes(prev => ({ ...prev, [mpp]: updated }));
 
-    fetch(`${API_BASE}/api/defect-notes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mpp, responsible: updated.responsible, action: updated.action }),
-    }).catch(err => console.error('Ошибка сохранения:', err));
+    try {
+      const res = await fetch(`${API_BASE}/api/defect-notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          mpp, 
+          responsible: updated.responsible || '', 
+          action: updated.action || '' 
+        }),
+      });
+      
+      const json = await res.json();
+      if (json.success && json.note) {
+        // Обновляем updated_at из ответа
+        setUserNotes(prev => ({ 
+          ...prev, 
+          [mpp]: { ...prev[mpp], updated_at: json.note.updated_at } 
+        }));
+      }
+    } catch (err) {
+      console.error('Ошибка сохранения:', err);
+    }
   };
 
   const { prevWeekDays, currWeekDays, prevWeekNum, currWeekNum, isMonday } = useMemo(() => {
