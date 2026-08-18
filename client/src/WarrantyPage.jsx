@@ -596,13 +596,13 @@ export default function WarrantyPage() {
                 onChange={(e) => setSelectedUploadTime(e.target.value)}
                 style={{ ...inputStyle, minWidth: 200 }}
               >
-                {Array.isArray(uploadTimes) && uploadTimes.map(timestamp => (
+                {(Array.isArray(uploadTimes) ? uploadTimes : []).map(timestamp => (
                   <option key={timestamp} value={timestamp}>
                     {formatUploadTime(timestamp)}
                   </option>
                 ))}
               </select>
-              {uploadTimes.length === 0 && (
+              {(!Array.isArray(uploadTimes) || uploadTimes.length === 0) && (
                 <span style={{ color: '#9CA3AF', fontSize: 14 }}>Нет данных о загрузках</span>
               )}
             </div>
