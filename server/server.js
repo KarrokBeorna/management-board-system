@@ -2816,10 +2816,12 @@ app.get('/api/daily-dashboard-top5', async (req, res) => {
   }
 });
 
+// ================== WARRANTY ==================
+
 // Проверка пароля
 app.post('/api/warranty/check-password', (req, res) => {
   const { password } = req.body;
-  const correctPassword = '1234561'; // можно вынести в переменные окружения
+  const correctPassword = '1234561';
   if (password === correctPassword) {
     res.json({ success: true });
   } else {
@@ -2827,14 +2829,17 @@ app.post('/api/warranty/check-password', (req, res) => {
   }
 });
 
-// Загрузка Excel-данных
-app.post('/api/warranty/upload', express.json(), async (req, res) => {
+// Загрузка Excel-данных с разбивкой на батчи
+app.post('/api/warranty/upload', express.json({ limit: '100mb' }), async (req, res) => {
   try {
     const { rows } = req.body;
     if (!rows || !rows.length) return res.status(400).json({ error: 'Нет данных' });
 
-    const normalizeKey = (str) => String(str).trim().toLowerCase().replace(/\s+/g, ' ');
+    // Получаем следующий номер загрузки
+    const [batchRows] = await notesPool.query('SELECT MAX(batch_number) AS maxBatch FROM warranty_claims');
+    const nextBatch = (batchRows[0]?.maxBatch || 0) + 1;
 
+    const normalizeKey = (str) => String(str).trim().toLowerCase().replace(/\s+/g, ' ');
     const getVal = (row, ...possibleNames) => {
       for (const name of possibleNames) {
         if (row[name] !== undefined) return row[name];
@@ -2872,46 +2877,40 @@ app.post('/api/warranty/upload', express.json(), async (req, res) => {
       return Math.round((new Date(d1) - new Date(d2)) / 86400000);
     };
 
-    const values = rows.map(row => {
-      const vin_id               = getVal(row, 'vin_id', 'VIN', 'vin', 'Vin ID') || '';
-      const brand                = getVal(row, 'brand', 'Brand', 'Марка') || '';
-      const model                = getVal(row, 'model', 'Model', 'Модель') || '';
-      const production_date      = parseDate(getVal(row, 'production_date', 'Production Date', 'Дата производства'));
-      const sold_date            = parseDate(getVal(row, 'sold date', 'sold_date', 'Sold Date', 'Дата продажи'));
-      const claim_id             = getVal(row, 'Claim ID', 'claim_id', 'ClaimID') || '';
-      const document_number      = getVal(row, 'Document Number', 'document_number', 'Doc Number') || '';
-      const warranty_start_date  = parseDate(getVal(row, 'warranty start date', 'warranty_start_date', 'Warranty Start'));
+    // Формируем значения
+    const allValues = rows.map(row => {
+      const vin_id = getVal(row, 'vin_id', 'VIN', 'vin', 'Vin ID') || '';
+      const brand = getVal(row, 'brand', 'Brand', 'Марка') || '';
+      const model = getVal(row, 'model', 'Model', 'Модель') || '';
+      const production_date = parseDate(getVal(row, 'production_date', 'Production Date', 'Дата производства'));
+      const sold_date = parseDate(getVal(row, 'sold date', 'sold_date', 'Sold Date', 'Дата продажи'));
+      const claim_id = getVal(row, 'Claim ID', 'claim_id', 'ClaimID') || '';
+      const document_number = getVal(row, 'Document Number', 'document_number', 'Doc Number') || '';
+      const warranty_start_date = parseDate(getVal(row, 'warranty start date', 'warranty_start_date', 'Warranty Start'));
       const customer_complain_date = parseDate(getVal(row, 'Customer complain date', 'customer_complain_date', 'Complain Date'));
-      const claims_qty           = parseInt(getVal(row, 'Claims qty', 'claims_qty', 'Claims Qty')) || 0;
-      const diagnostic_result    = getVal(row, 'Diagnostic result', 'diagnostic_result', 'Diagnostic') || '';
-      const main_part            = getVal(row, 'Main part', 'main_part', 'Main Part') || '';
-      const main_part_name       = getVal(row, 'Main part name', 'main_part_name', 'Part Name') || '';
-      const category             = getVal(row, 'Категория', 'category', 'Category') || '';
-      const totalPaid            = parseFloat(getVal(row, 'Total amount paid to dealers RUR', 'total_amount_paid_dealers_rur', 'Стоимость', 'cost', 'Cost')) || 0;
+      const claims_qty = parseInt(getVal(row, 'Claims qty', 'claims_qty', 'Claims Qty')) || 0;
+      const diagnostic_result = getVal(row, 'Diagnostic result', 'diagnostic_result', 'Diagnostic') || '';
+      const main_part = getVal(row, 'Main part', 'main_part', 'Main Part') || '';
+      const main_part_name = getVal(row, 'Main part name', 'main_part_name', 'Part Name') || '';
+      const category = getVal(row, 'Категория', 'category', 'Category') || '';
+      const totalPaid = parseFloat(getVal(row, 'Total amount paid to dealers RUR', 'total_amount_paid_dealers_rur', 'Стоимость', 'cost', 'Cost')) || 0;
 
-      // Автоматические вычисления
       const qty_sell = vin_id ? 1 : 0;
-      const delta = customer_complain_date && warranty_start_date
-                      ? dayDiff(customer_complain_date, warranty_start_date)
-                      : 0;
-      const mis_0 = customer_complain_date && warranty_start_date
-                      ? (delta >= -60 && delta <= 7 ? 1 : 0)
-                      : 0;
-      const mis_3 = customer_complain_date && warranty_start_date
-                      ? (delta >= -60 && delta <= 90 ? 1 : 0)
-                      : 0;
+      const delta = customer_complain_date && warranty_start_date ? dayDiff(customer_complain_date, warranty_start_date) : 0;
+      const mis_0 = customer_complain_date && warranty_start_date ? (delta >= -60 && delta <= 7 ? 1 : 0) : 0;
+      const mis_3 = customer_complain_date && warranty_start_date ? (delta >= -60 && delta <= 90 ? 1 : 0) : 0;
       const mis_0_count = mis_0 * claims_qty;
       const mis_3_count = mis_3 * claims_qty;
       const sold_cars_qty = vin_id ? 1 : 0;
       const unique_vin_by_qr = vin_id ? 1 : 0;
 
-      // СТОЛБЦА cost БОЛЬШЕ НЕТ!
       return [
         vin_id, sold_cars_qty, unique_vin_by_qr, brand, model,
         production_date, sold_date, claim_id, document_number,
         warranty_start_date, customer_complain_date, claims_qty,
         diagnostic_result, main_part, main_part_name, mis_0, mis_3,
-        qty_sell, delta, mis_0_count, mis_3_count, category, totalPaid
+        qty_sell, delta, mis_0_count, mis_3_count, category, totalPaid,
+        nextBatch
       ];
     });
 
@@ -2920,14 +2919,40 @@ app.post('/api/warranty/upload', express.json(), async (req, res) => {
         (vin_id, sold_cars_qty, unique_vin_by_qr, brand, model, production_date, sold_date,
          claim_id, document_number, warranty_start_date, customer_complain_date, claims_qty,
          diagnostic_result, main_part, main_part_name, mis_0, mis_3, qty_sell, delta,
-         mis_0_count, mis_3_count, category, total_amount_paid_dealers_rur)
+         mis_0_count, mis_3_count, category, total_amount_paid_dealers_rur, batch_number)
       VALUES ?
     `;
 
-    await notesPool.query(sql, [values]);
-    res.json({ success: true, inserted: rows.length });
+    // Разбивка на батчи по 10000 строк
+    const batchSize = 10000;
+    let insertedCount = 0;
+
+    for (let i = 0; i < allValues.length; i += batchSize) {
+      const batch = allValues.slice(i, i + batchSize);
+      await notesPool.query(sql, [batch]);
+      insertedCount += batch.length;
+    }
+
+    res.json({ success: true, inserted: insertedCount, batchNumber: nextBatch });
   } catch (err) {
     console.error('Ошибка загрузки warranty:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Получение списка загрузок (batch_number)
+app.get('/api/warranty/batches', async (req, res) => {
+  try {
+    const [rows] = await notesPool.query(`
+      SELECT DISTINCT batch_number, COUNT(*) AS total_rows, MIN(uploaded_at) AS uploaded_at
+      FROM warranty_claims
+      WHERE batch_number IS NOT NULL
+      GROUP BY batch_number
+      ORDER BY batch_number DESC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка получения batches:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2935,9 +2960,15 @@ app.post('/api/warranty/upload', express.json(), async (req, res) => {
 // Получение загруженных записей
 app.get('/api/warranty/claims', async (req, res) => {
   try {
-    const [rows] = await notesPool.query(
-      'SELECT * FROM warranty_claims ORDER BY uploaded_at DESC LIMIT 1000'
-    );
+    const { batchNumber } = req.query;
+    let sql = 'SELECT * FROM warranty_claims';
+    const params = [];
+    if (batchNumber) {
+      sql += ' WHERE batch_number = ?';
+      params.push(batchNumber);
+    }
+    sql += ' ORDER BY id DESC LIMIT 1000';
+    const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
     console.error('Ошибка получения warranty claims:', err.message);
@@ -2945,9 +2976,10 @@ app.get('/api/warranty/claims', async (req, res) => {
   }
 });
 
+// Аналитика по batch_number
 app.get('/api/warranty/analytics', async (req, res) => {
   try {
-    const { uploadedAt } = req.query;
+    const { batchNumber } = req.query;
     let sql = `
       SELECT 
         DATE_FORMAT(production_date, '%Y-%m') AS month,
@@ -2959,11 +2991,11 @@ app.get('/api/warranty/analytics', async (req, res) => {
       WHERE production_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
     `;
     const params = [];
-    if (uploadedAt) {
-      sql += ` AND uploaded_at = ?`;
-      params.push(uploadedAt);
+    if (batchNumber) {
+      sql += ' AND batch_number = ?';
+      params.push(batchNumber);
     }
-    sql += ` GROUP BY month, model ORDER BY month, model`;
+    sql += ' GROUP BY month, model ORDER BY month, model';
     const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
@@ -2972,9 +3004,10 @@ app.get('/api/warranty/analytics', async (req, res) => {
   }
 });
 
+// Аналитика Model Based (Prod Related)
 app.get('/api/warranty/analytics-by-model', async (req, res) => {
   try {
-    const { uploadedAt } = req.query;
+    const { batchNumber } = req.query;
     let sql = `
       SELECT 
         DATE_FORMAT(production_date, '%Y-%m') AS month,
@@ -2985,11 +3018,11 @@ app.get('/api/warranty/analytics-by-model', async (req, res) => {
       WHERE production_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
     `;
     const params = [];
-    if (uploadedAt) {
-      sql += ` AND uploaded_at = ?`;
-      params.push(uploadedAt);
+    if (batchNumber) {
+      sql += ' AND batch_number = ?';
+      params.push(batchNumber);
     }
-    sql += ` GROUP BY month, model ORDER BY month, model`;
+    sql += ' GROUP BY month, model ORDER BY month, model';
     const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
@@ -2998,9 +3031,10 @@ app.get('/api/warranty/analytics-by-model', async (req, res) => {
   }
 });
 
+// Аналитика 0 MIS/3MIS by sales date
 app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
   try {
-    const { uploadedAt } = req.query;
+    const { batchNumber } = req.query;
     let sql = `
       SELECT 
         DATE_FORMAT(warranty_start_date, '%Y-%m') AS month,
@@ -3012,11 +3046,11 @@ app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
       WHERE warranty_start_date IS NOT NULL
     `;
     const params = [];
-    if (uploadedAt) {
-      sql += ` AND uploaded_at = ?`;
-      params.push(uploadedAt);
+    if (batchNumber) {
+      sql += ' AND batch_number = ?';
+      params.push(batchNumber);
     }
-    sql += ` GROUP BY month, model ORDER BY month, model`;
+    sql += ' GROUP BY month, model ORDER BY month, model';
     const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
@@ -3025,10 +3059,10 @@ app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
   }
 });
 
-// Топ категорий по моделям
+// Топ категорий
 app.get('/api/warranty/categories-summary', async (req, res) => {
   try {
-    const { model, uploadedAt } = req.query;
+    const { model, batchNumber } = req.query;
     let sql = `
       SELECT model, category, SUM(claims_qty) AS total_claims
       FROM warranty_claims
@@ -3036,34 +3070,18 @@ app.get('/api/warranty/categories-summary', async (req, res) => {
     `;
     const params = [];
     if (model && model !== 'ALL') {
-      sql += ` AND model = ?`;
+      sql += ' AND model = ?';
       params.push(model);
     }
-    if (uploadedAt) {
-      sql += ` AND uploaded_at = ?`;
-      params.push(uploadedAt);
+    if (batchNumber) {
+      sql += ' AND batch_number = ?';
+      params.push(batchNumber);
     }
-    sql += ` GROUP BY model, category ORDER BY model, total_claims DESC`;
+    sql += ' GROUP BY model, category ORDER BY model, total_claims DESC';
     const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
     console.error('Ошибка получения категорий:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Получить список уникальных точных времен загрузки
-app.get('/api/warranty/upload-times', async (req, res) => {
-  try {
-    const [rows] = await notesPool.query(`
-      SELECT DISTINCT uploaded_at
-      FROM warranty_claims
-      WHERE uploaded_at IS NOT NULL
-      ORDER BY uploaded_at DESC
-    `);
-    res.json(rows.map(r => r.uploaded_at));
-  } catch (err) {
-    console.error('Ошибка получения времен загрузки:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

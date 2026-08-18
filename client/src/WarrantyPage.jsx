@@ -94,7 +94,6 @@ const isDateColumn = (header) => {
 
 const ALL_MODELS = ['J6', 'J7', 'J8', 'MX', 'A8'];
 
-// Рендереры для графиков
 const CustomTick = ({ x, y, payload }) => {
   const [model, month, year] = payload.value.split('-');
   return (
@@ -147,48 +146,39 @@ const formatUploadTime = (isoString) => {
 };
 
 export default function WarrantyPage() {
-  // Аутентификация
   const [password, setPassword] = useState('');
   const [authenticated, setAuthenticated] = useState(false);
   const [passwordError, setPasswordError] = useState('');
 
-  // Вкладки
   const [activeTab, setActiveTab] = useState('upload');
 
-  // Загрузка
   const [fileData, setFileData] = useState([]);
   const [preview, setPreview] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null);
   const [claims, setClaims] = useState([]);
 
-  // График 1: Total (Prod Related)
   const [selectedModels1, setSelectedModels1] = useState(ALL_MODELS);
   const [showModelFilter1, setShowModelFilter1] = useState(false);
   const [data1Raw, setData1Raw] = useState([]);
   const [loading1, setLoading1] = useState(false);
 
-  // График 2: Model Based (Prod Related)
   const [selectedModels2, setSelectedModels2] = useState(ALL_MODELS);
   const [showModelFilter2, setShowModelFilter2] = useState(false);
   const [data2Raw, setData2Raw] = useState([]);
   const [loading2, setLoading2] = useState(false);
 
-  // График 3: 0 MIS/3MIS by sales date
   const [selectedModels3, setSelectedModels3] = useState(ALL_MODELS);
   const [showModelFilter3, setShowModelFilter3] = useState(false);
   const [data3Raw, setData3Raw] = useState([]);
   const [loading3, setLoading3] = useState(false);
 
-  // Топ категорий
   const [categoriesData, setCategoriesData] = useState([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
 
-  // Фильтр по времени загрузки
   const [uploadTimes, setUploadTimes] = useState([]);
   const [selectedUploadTime, setSelectedUploadTime] = useState('');
 
-  // Проверка пароля
   const handlePasswordSubmit = async (e) => {
     if (e) e.preventDefault();
     try {
@@ -213,13 +203,12 @@ export default function WarrantyPage() {
     try {
       const res = await fetch(`${API_BASE}/api/warranty/claims`);
       const json = await res.json();
-      setClaims(json);
+      setClaims(Array.isArray(json) ? json : []);
     } catch (err) {
       console.error(err);
     }
   };
 
-  // === Загрузка Excel ===
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -247,51 +236,57 @@ export default function WarrantyPage() {
     if (!fileData.length) return;
     setUploading(true);
     setUploadStatus(null);
+    
     try {
-      const res = await fetch(`${API_BASE}/api/warranty/upload`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: fileData }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        setUploadStatus({ type: 'success', message: `Загружено ${json.inserted} записей` });
-        setFileData([]);
-        setPreview([]);
-        fetchClaims();
-        loadUploadTimes();
-      } else {
-        setUploadStatus({ type: 'error', message: 'Ошибка загрузки' });
+      const batchSize = 10000;
+      let totalInserted = 0;
+      
+      for (let i = 0; i < fileData.length; i += batchSize) {
+        const batch = fileData.slice(i, i + batchSize);
+        
+        const res = await fetch(`${API_BASE}/api/warranty/upload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: batch }),
+        });
+        
+        const json = await res.json();
+        if (json.success) {
+          totalInserted += json.inserted;
+        } else {
+          throw new Error('Ошибка загрузки батча');
+        }
       }
+      
+      setUploadStatus({ type: 'success', message: `Загружено ${totalInserted} записей` });
+      setFileData([]);
+      setPreview([]);
+      fetchClaims();
+      loadUploadTimes();
     } catch (err) {
-      setUploadStatus({ type: 'error', message: 'Ошибка соединения' });
+      setUploadStatus({ type: 'error', message: 'Ошибка загрузки' });
     } finally {
       setUploading(false);
     }
   };
 
-  // === Загрузка точных времен загрузки ===
   const loadUploadTimes = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/warranty/upload-times`);
       if (!res.ok) {
-        console.error('Ошибка загрузки времен:', res.status);
         setUploadTimes([]);
         return;
       }
       const data = await res.json();
-      console.log('upload-times response:', data);
       if (Array.isArray(data)) {
         setUploadTimes(data);
         if (data.length > 0 && !selectedUploadTime) {
           setSelectedUploadTime(data[0]);
         }
       } else {
-        console.error('upload-times не массив:', data);
         setUploadTimes([]);
       }
     } catch (err) {
-      console.error('Ошибка upload-times:', err);
       setUploadTimes([]);
     }
   };
@@ -302,7 +297,6 @@ export default function WarrantyPage() {
     }
   }, [authenticated, activeTab]);
 
-  // === Загрузка аналитики с фильтром по времени ===
   const loadAnalytics1 = async (uploadedAt) => {
     setLoading1(true);
     try {
@@ -310,7 +304,7 @@ export default function WarrantyPage() {
       if (uploadedAt) params.append('uploadedAt', uploadedAt);
       const res = await fetch(`${API_BASE}/api/warranty/analytics?${params.toString()}`);
       const json = await res.json();
-      setData1Raw(json);
+      setData1Raw(Array.isArray(json) ? json : []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -325,7 +319,7 @@ export default function WarrantyPage() {
       if (uploadedAt) params.append('uploadedAt', uploadedAt);
       const res = await fetch(`${API_BASE}/api/warranty/analytics-by-model?${params.toString()}`);
       const json = await res.json();
-      setData2Raw(json);
+      setData2Raw(Array.isArray(json) ? json : []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -340,7 +334,7 @@ export default function WarrantyPage() {
       if (uploadedAt) params.append('uploadedAt', uploadedAt);
       const res = await fetch(`${API_BASE}/api/warranty/analytics-by-sales-date?${params.toString()}`);
       const json = await res.json();
-      setData3Raw(json);
+      setData3Raw(Array.isArray(json) ? json : []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -355,7 +349,7 @@ export default function WarrantyPage() {
       if (uploadedAt) params.append('uploadedAt', uploadedAt);
       const res = await fetch(`${API_BASE}/api/warranty/categories-summary?${params.toString()}`);
       const json = await res.json();
-      setCategoriesData(json);
+      setCategoriesData(Array.isArray(json) ? json : []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -372,27 +366,19 @@ export default function WarrantyPage() {
     }
   }, [selectedUploadTime, activeTab]);
 
-  // Преобразование данных для графиков
   const monthNames = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 
-  // График 1: Total (Prod Related) - per 1000
   const chartData1 = useMemo(() => {
     const filtered = data1Raw.filter(d => selectedModels1.includes(d.model));
     const grouped = {};
     filtered.forEach(d => {
       if (!grouped[d.month]) {
-        grouped[d.month] = { 
-          month: d.month, 
-          qty_sell: 0, 
-          mis_0_count: 0, 
-          mis_3_count: 0 
-        };
+        grouped[d.month] = { month: d.month, qty_sell: 0, mis_0_count: 0, mis_3_count: 0 };
       }
       grouped[d.month].qty_sell += Number(d.qty_sell) || 0;
       grouped[d.month].mis_0_count += Number(d.mis_0) || 0;
       grouped[d.month].mis_3_count += Number(d.mis_3) || 0;
     });
-    
     return Object.values(grouped)
       .map(d => ({
         month: d.month,
@@ -403,7 +389,6 @@ export default function WarrantyPage() {
       .sort((a, b) => a.month.localeCompare(b.month));
   }, [data1Raw, selectedModels1]);
 
-  // График 2: Model Based (Prod Related)
   const chartData2 = useMemo(() => {
     const filtered = data2Raw.filter(d => selectedModels2.includes(d.model));
     return filtered.map(d => {
@@ -420,7 +405,6 @@ export default function WarrantyPage() {
     });
   }, [data2Raw, selectedModels2]);
 
-  // График 3: 0 MIS/3MIS by sales date
   const chartData3 = useMemo(() => {
     const filtered = data3Raw.filter(d => selectedModels3.includes(d.model));
     const grouped = {};
@@ -483,7 +467,6 @@ export default function WarrantyPage() {
         </button>
       </div>
 
-      {/* ========== ВКЛАДКА ЗАГРУЗКИ ========== */}
       {activeTab === 'upload' && (
         <>
           <div style={cardStyle}>
@@ -582,10 +565,8 @@ export default function WarrantyPage() {
         </>
       )}
 
-      {/* ========== ВКЛАДКА АНАЛИТИКИ ========== */}
       {activeTab === 'analytics' && (
         <>
-          {/* Фильтр по времени загрузки */}
           <div style={{ ...cardStyle, marginBottom: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <label style={{ fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
@@ -744,7 +725,6 @@ export default function WarrantyPage() {
 
             {chartData3.length > 0 && (
               <div style={{ width: '100%', backgroundColor: '#fff', fontFamily: 'Arial, sans-serif' }}>
-                {/* График 3.1: per 1000 */}
                 <div style={{ width: '100%', height: 600, marginBottom: 100 }}>
                   <h3 style={{ color: '#333', fontSize: 16, marginLeft: 10 }}>0 MIS/3MIS per 1000 by sales date</h3>
                   <ResponsiveContainer width="100%" height="100%">
@@ -776,7 +756,6 @@ export default function WarrantyPage() {
                   </ResponsiveContainer>
                 </div>
 
-                {/* График 3.2: REPAIR Counts */}
                 <div style={{ width: '100%', height: 600 }}>
                   <h3 style={{ color: '#333', fontSize: 16, marginLeft: 10 }}>REPAIR Counts by Sales date</h3>
                   <ResponsiveContainer width="100%" height="100%">
@@ -807,7 +786,7 @@ export default function WarrantyPage() {
             )}
           </div>
 
-          {/* ===== ТОП КАТЕГОРИЙ ===== */}
+          {/* Топ категорий */}
           <div style={cardStyle}>
             <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>🏆</span>
@@ -884,7 +863,7 @@ export default function WarrantyPage() {
                 })}
               </div>
             ) : (
-              <p style={{ color: '#6B7280', textAlign: 'center', padding: 40 }}>Нет загруженных данных. Нажмите «Загрузить данные»</p>
+              <p style={{ color: '#6B7280', textAlign: 'center', padding: 40 }}>Нет загруженных данных</p>
             )}
           </div>
         </>
