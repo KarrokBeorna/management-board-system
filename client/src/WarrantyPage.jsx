@@ -241,6 +241,7 @@ export default function WarrantyPage() {
       const batchSize = 10000;
       let totalInserted = 0;
       
+      // Разбиваем fileData на части по 10000 строк и отправляем каждую отдельно
       for (let i = 0; i < fileData.length; i += batchSize) {
         const batch = fileData.slice(i, i + batchSize);
         
@@ -254,7 +255,7 @@ export default function WarrantyPage() {
         if (json.success) {
           totalInserted += json.inserted;
         } else {
-          throw new Error('Ошибка загрузки батча');
+          throw new Error(json.error || 'Ошибка загрузки батча');
         }
       }
       
@@ -264,7 +265,7 @@ export default function WarrantyPage() {
       fetchClaims();
       loadUploadTimes();
     } catch (err) {
-      setUploadStatus({ type: 'error', message: 'Ошибка загрузки' });
+      setUploadStatus({ type: 'error', message: `Ошибка загрузки: ${err.message}` });
     } finally {
       setUploading(false);
     }
