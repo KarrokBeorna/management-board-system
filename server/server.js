@@ -3297,7 +3297,6 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
   }
 });
 
-// Заметки (без изменений)
 // Получение заметок
 app.get('/api/defect-notes', async (req, res) => {
   try {
