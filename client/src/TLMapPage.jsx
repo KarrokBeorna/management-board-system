@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 
-const API_BASE = 'http://localhost:40000';
+const API_BASE = '';
 
 // ====== СТИЛИ ======
 const containerStyle = {
@@ -174,6 +174,14 @@ const itemsScrollStyle = {
   minHeight: 0,
 };
 
+const emptyZoneStyle = {
+  textAlign: 'center',
+  color: '#9CA3AF',
+  fontSize: 13,
+  padding: '20px 0',
+  fontWeight: 500,
+};
+
 const getColorByFirstLetter = (label) => {
   if (!label) return '#D1D5DB';
   const firstLetter = label.charAt(0).toUpperCase();
@@ -261,7 +269,7 @@ const formatSpec = (spec) => {
   return spec;
 };
 
-// ====== МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ ПО ЗОНЕ (текущие) ======
+// ====== МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ ПО ЗОНЕ ======
 function DetailsModal({ zoneName, label, count, details, onClose }) {
   const modalOverlayStyle = {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -527,12 +535,15 @@ export default function TLMapPage() {
       zonesMap[zone][spec]++;
     });
     
-    const zones = ZONE_ORDER.filter(zone => zonesMap[zone]).map(zoneName => ({
+    // ВСЕГДА создаем все 5 зон
+    const zones = ZONE_ORDER.map(zoneName => ({
       zoneName,
-      items: Object.keys(zonesMap[zoneName]).map(spec => ({
-        label: spec,
-        count: zonesMap[zoneName][spec],
-      })),
+      items: zonesMap[zoneName] 
+        ? Object.keys(zonesMap[zoneName]).map(spec => ({
+            label: spec,
+            count: zonesMap[zoneName][spec],
+          }))
+        : [],
     }));
     
     return { zones, detailsMap };
@@ -559,7 +570,6 @@ export default function TLMapPage() {
     XLSX.writeFile(wb, `TL_Map_${dateStr}.xlsx`);
   };
 
-  // Клик по бейджу — открыть таблицу с прошедшими за сегодня
   const handlePassedTodayClick = async (zoneName) => {
     try {
       const res = await fetch(`${API_BASE}/api/tl-map-passed-today-details?zone=${zoneName}`);
@@ -676,18 +686,22 @@ export default function TLMapPage() {
               </span>
             </div>
             <div className="items-scroll" style={itemsScrollStyle}>
-              {zone.items.map((item, idx) => (
-                <button
-                  key={`${zone.zoneName}-${item.label}-${idx}`}
-                  style={itemCardStyle(getColorByFirstLetter(item.label))}
-                  onClick={() => handleItemClick(zone.zoneName, item.label, item.count)}
-                  onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
-                >
-                  <span style={itemLabelStyle}>{item.label}</span>
-                  <span style={itemCountStyle}>{item.count}</span>
-                </button>
-              ))}
+              {zone.items.length > 0 ? (
+                zone.items.map((item, idx) => (
+                  <button
+                    key={`${zone.zoneName}-${item.label}-${idx}`}
+                    style={itemCardStyle(getColorByFirstLetter(item.label))}
+                    onClick={() => handleItemClick(zone.zoneName, item.label, item.count)}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+                  >
+                    <span style={itemLabelStyle}>{item.label}</span>
+                    <span style={itemCountStyle}>{item.count}</span>
+                  </button>
+                ))
+              ) : (
+                <div style={emptyZoneStyle}>Нет данных</div>
+              )}
             </div>
           </div>
         ))}

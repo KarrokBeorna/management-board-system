@@ -3298,8 +3298,35 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
 });
 
 // Заметки (без изменений)
-app.get('/api/defect-notes', async (req, res) => { /* ... */ });
-app.post('/api/defect-notes', async (req, res) => { /* ... */ });
+// Получение заметок
+app.get('/api/defect-notes', async (req, res) => {
+  try {
+    const [rows] = await notesPool.query('SELECT * FROM defect_user_notes');
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка получения заметок:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Сохранение заметки
+app.post('/api/defect-notes', async (req, res) => {
+  try {
+    const { mpp, responsible, action } = req.body;
+    if (!mpp) return res.status(400).json({ error: 'mpp обязателен' });
+
+    await notesPool.query(`
+      INSERT INTO defect_user_notes (mpp, responsible, action) 
+      VALUES (?, ?, ?) 
+      ON DUPLICATE KEY UPDATE responsible = VALUES(responsible), action = VALUES(action), updated_at = CURRENT_TIMESTAMP
+    `, [mpp, responsible || '', action || '']);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Ошибка сохранения заметки:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const PORT = process.env.PORT || 40000;
 
