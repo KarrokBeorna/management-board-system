@@ -56,17 +56,6 @@ const lesPool = mysql.createPool({
   dateStrings: true,
 });
 
-const warrantyPool = mysql.createPool({
-  host: process.env.NOTES_HOST || '127.0.0.1',
-  port: parseInt(process.env.NOTES_PORT) || 3306,
-  user: process.env.NOTES_USER || 'root',
-  password: process.env.NOTES_PASSWORD || '',
-  database: process.env.NOTES_NAME || 'dashboard_notes',
-  waitForConnections: true,
-  connectTimeout: 10000,
-  dateStrings: true,
-});
-
 async function checkDatabaseConnection() {
   try {
     const connection = await pool.getConnection();
@@ -2932,7 +2921,7 @@ app.post('/api/warranty/upload', express.json(), async (req, res) => {
       VALUES ?
     `;
 
-    await warrantyPool.query(sql, [values]);
+    await notesPool.query(sql, [values]);
     res.json({ success: true, inserted: rows.length });
   } catch (err) {
     console.error('Ошибка загрузки warranty:', err.message);
@@ -2943,7 +2932,7 @@ app.post('/api/warranty/upload', express.json(), async (req, res) => {
 // Получение загруженных записей
 app.get('/api/warranty/claims', async (req, res) => {
   try {
-    const [rows] = await warrantyPool.query(
+    const [rows] = await notesPool.query(
       'SELECT * FROM warranty_claims ORDER BY uploaded_at DESC LIMIT 1000'
     );
     res.json(rows);
@@ -2972,7 +2961,7 @@ app.get('/api/warranty/analytics', async (req, res) => {
       params.push(uploadedAt);
     }
     sql += ` GROUP BY month, model ORDER BY month, model`;
-    const [rows] = await warrantyPool.query(sql, params);
+    const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
     console.error('Ошибка warranty аналитики:', err.message);
@@ -2998,7 +2987,7 @@ app.get('/api/warranty/analytics-by-model', async (req, res) => {
       params.push(uploadedAt);
     }
     sql += ` GROUP BY month, model ORDER BY month, model`;
-    const [rows] = await warrantyPool.query(sql, params);
+    const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
     console.error('Ошибка аналитики по моделям:', err.message);
@@ -3025,7 +3014,7 @@ app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
       params.push(uploadedAt);
     }
     sql += ` GROUP BY month, model ORDER BY month, model`;
-    const [rows] = await warrantyPool.query(sql, params);
+    const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
     console.error('Ошибка аналитики по sales date:', err.message);
@@ -3052,7 +3041,7 @@ app.get('/api/warranty/categories-summary', async (req, res) => {
       params.push(uploadedAt);
     }
     sql += ` GROUP BY model, category ORDER BY model, total_claims DESC`;
-    const [rows] = await warrantyPool.query(sql, params);
+    const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
     console.error('Ошибка получения категорий:', err.message);
@@ -3063,7 +3052,7 @@ app.get('/api/warranty/categories-summary', async (req, res) => {
 // Получить список уникальных точных времен загрузки
 app.get('/api/warranty/upload-times', async (req, res) => {
   try {
-    const [rows] = await warrantyPool.query(`
+    const [rows] = await notesPool.query(`
       SELECT DISTINCT uploaded_at
       FROM warranty_claims
       WHERE uploaded_at IS NOT NULL
