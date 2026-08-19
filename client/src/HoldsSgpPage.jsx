@@ -131,10 +131,12 @@ const filterCheckboxStyle = {
   transition: 'all 0.2s',
 };
 
-const tableContainerStyle = {
-  maxHeight: 'calc(100vh - 250px)',
+// Новый стиль для таблицы с фиксированными заголовком и итогом
+const tableWrapperStyle = {
+  maxHeight: 'calc(100vh - 300px)',
   overflowY: 'auto',
   borderRadius: 8,
+  position: 'relative',
 };
 
 const thStyle = {
@@ -174,6 +176,10 @@ const totalRowStyle = {
   backgroundColor: '#F9FAFB',
   fontWeight: 800,
   borderTop: '2px solid #E5E7EB',
+  position: 'sticky',
+  bottom: 0,
+  zIndex: 10,
+  boxShadow: '0 -4px 6px -2px rgba(0,0,0,0.05)',
 };
 
 const loadingStyle = {
@@ -207,6 +213,13 @@ const formatShortDate = (dateStr) => {
   const dd = String(d.getDate()).padStart(2, '0');
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   return `${dd}.${mm}`;
+};
+
+// Функция для расчета плановой даты (+3 дня от текущей)
+const getPlannedDate = () => {
+  const now = new Date();
+  now.setDate(now.getDate() + 3);
+  return now;
 };
 
 export default function HoldsSgpPage() {
@@ -316,7 +329,15 @@ export default function HoldsSgpPage() {
     const filtered = selectedModels.length === 0 
       ? rawData 
       : rawData.filter(d => selectedModels.includes(d.model));
-    return filtered.sort((a, b) => b.quantity - a.quantity);
+    
+    // Добавляем плановую дату (+3 дня от текущей)
+    const plannedDate = getPlannedDate();
+    const withPlannedDate = filtered.map(d => ({
+      ...d,
+      planned_date: plannedDate,
+    }));
+    
+    return withPlannedDate.sort((a, b) => b.quantity - a.quantity);
   }, [rawData, selectedModels]);
 
   const handleModelToggle = (model) => {
@@ -450,7 +471,7 @@ export default function HoldsSgpPage() {
           )}
 
           <div style={cardStyle}>
-            <div style={tableContainerStyle}>
+            <div style={tableWrapperStyle}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
                 <thead>
                   <tr>
@@ -481,6 +502,8 @@ export default function HoldsSgpPage() {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+                <tfoot>
                   <tr style={totalRowStyle}>
                     <td style={{ ...tdStyle, fontWeight: 800 }}>Общий итог</td>
                     <td style={tdStyle}></td>
@@ -491,7 +514,7 @@ export default function HoldsSgpPage() {
                     <td style={tdStyle}></td>
                     <td style={tdStyle}></td>
                   </tr>
-                </tbody>
+                </tfoot>
               </table>
             </div>
           </div>
@@ -627,20 +650,6 @@ export default function HoldsSgpPage() {
                         </th>
                       ))}
                     </tr>
-                    <tr style={{ backgroundColor: '#FEF3C7', position: 'sticky', top: 34, zIndex: 25 }}>
-                      <td style={{ ...tdStyle, fontWeight: 800, fontSize: 10, position: 'sticky', left: 0, backgroundColor: '#FEF3C7', zIndex: 26 }}>
-                        ИТОГО
-                      </td>
-                      <td style={{ ...tdStyle, position: 'sticky', left: 0, backgroundColor: '#FEF3C7', zIndex: 26 }}></td>
-                      {retroDates.map(date => {
-                        const daySum = retroData.reduce((sum, row) => sum + (row[date] || 0), 0);
-                        return (
-                          <td key={date} style={{ ...tdStyle, textAlign: 'center', fontWeight: 800, fontSize: 10, backgroundColor: '#FEF3C7' }}>
-                            {daySum > 0 ? daySum : ''}
-                          </td>
-                        );
-                      })}
-                    </tr>
                   </thead>
                   <tbody>
                     {retroData.map((row, idx) => (
@@ -670,6 +679,20 @@ export default function HoldsSgpPage() {
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr style={{ ...totalRowStyle, position: 'sticky', bottom: 0, zIndex: 10 }}>
+                      <td style={{ ...tdStyle, fontWeight: 800, fontSize: 10 }}>Общий итог</td>
+                      <td style={tdStyle}></td>
+                      {retroDates.map(date => {
+                        const daySum = retroData.reduce((sum, row) => sum + (row[date] || 0), 0);
+                        return (
+                          <td key={date} style={{ ...tdStyle, textAlign: 'center', fontWeight: 800, fontSize: 10 }}>
+                            {daySum > 0 ? daySum : ''}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             ) : (

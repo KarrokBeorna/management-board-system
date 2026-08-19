@@ -3213,19 +3213,39 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
   try {
     const { models } = req.query;
     
+    // Генерируем последние 14 дней (включая сегодня)
+    const dates = [];
+    const today = new Date();
+    today.setHours(23, 59, 59, 999); // Конец текущего дня
+    
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      d.setHours(23, 59, 59, 999); // Конец дня
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      dates.push({
+        dateStr: `${year}-${month}-${day}`,
+        endOfDay: d
+      });
+    }
+    
+    // Получаем все записи (включая закрытые) за период + те, что могли быть созданы раньше, но закрыты позже
     let sql = `
       SELECT 
         qid.model AS model,
         qid.issue_desc AS issue_desc,
-        DATE(qid.gmt_create) AS start_date,
-        DATE(qid.clear_time) AS end_date,
-        qid.vin
+        qid.vin,
+        qid.gmt_create,
+        qid.clear_time
       FROM higoplat_fusion_les.tv_quality_issue_detail qid
       WHERE qid.is_deleted = 0
         AND qid.status = 0
+        AND qid.gmt_create <= ?
     `;
     
-    const params = [];
+    const params = [dates[dates.length - 1].endOfDay];
     
     if (models && models !== '') {
       const modelList = models.split(',').map(m => m.trim()).filter(Boolean);
@@ -3252,25 +3272,12 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
       }
       groupedMap[key].vins.push({
         vin: row.vin,
-        startDate: row.start_date ? String(row.start_date).split('T')[0] : null,
-        endDate: row.end_date ? String(row.end_date).split('T')[0] : null,
+        gmt_create: row.gmt_create ? new Date(row.gmt_create) : null,
+        clear_time: row.clear_time ? new Date(row.clear_time) : null,
       });
     });
     
-    // Генерируем даты (14 дней включая сегодня)
-    const dates = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      dates.push(`${year}-${month}-${day}`);
-    }
-    
-    // Для каждой группы считаем количество на каждый день
+    // Для каждой группы считаем количество активных VIN на конец каждого дня
     const result = [];
     Object.values(groupedMap).forEach(group => {
       const rowResult = {
@@ -3278,23 +3285,27 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
         issue_desc: group.issue_desc,
       };
       
-      dates.forEach(date => {
-        // Считаем VIN, которые активны на эту дату
+      dates.forEach(({ dateStr, endOfDay }) => {
+        // Считаем VIN, которые активны на конец этого дня
         const activeCount = group.vins.filter(v => {
-          if (!v.startDate) return false;
-          // VIN активен, если startDate <= date AND (endDate IS NULL OR endDate > date)
-          const started = v.startDate <= date;
-          const notEnded = !v.endDate || v.endDate > date;
-          return started && notEnded;
+          if (!v.gmt_create) return false;
+          
+          // VIN создан до или в этот день
+          const created = v.gmt_create <= endOfDay;
+          
+          // VIN не закрыт или закрыт после конца этого дня
+          const notCleared = !v.clear_time || v.clear_time > endOfDay;
+          
+          return created && notCleared;
         }).length;
         
         if (activeCount > 0) {
-          rowResult[date] = activeCount;
+          rowResult[dateStr] = activeCount;
         }
       });
       
       // Добавляем только если есть хоть одно значение
-      if (dates.some(date => rowResult[date] && rowResult[date] > 0)) {
+      if (dates.some(({ dateStr }) => rowResult[dateStr] && rowResult[dateStr] > 0)) {
         result.push(rowResult);
       }
     });
