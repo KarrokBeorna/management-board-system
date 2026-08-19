@@ -185,15 +185,32 @@ export default function DrrReportPage() {
         const sheet = workbook.Sheets[sheetName];
         const json = XLSX.utils.sheet_to_json(sheet);
         
-        // Ожидаем колонки: part_name, defect_type, shop
-        const mappings = json.map(row => ({
-          part_name: String(row.part_name || row['PartDefect'] || row['partdefect'] || '').trim(),
-          defect_type: String(row.defect_type || row['Тип'] || row['type'] || '').trim(),
-          shop: String(row.shop || row['Цех'] || '').trim().toUpperCase(),
-        })).filter(m => m.part_name && m.defect_type && ['AS', 'BS', 'PS'].includes(m.shop));
+        // Маппинг названий цехов
+        const shopMap = {
+          'BODY': 'BS',
+          'ASSEMBLY': 'AS',
+          'PAINT': 'PS',
+          'BS': 'BS',
+          'AS': 'AS',
+          'PS': 'PS',
+          'СБОРКА': 'AS',
+          'СВАРКА': 'BS',
+          'ОКРАСКА': 'PS',
+        };
+        
+        const mappings = json.map(row => {
+          const rawShop = String(row.shop || row['Цех'] || '').trim().toUpperCase();
+          const mappedShop = shopMap[rawShop] || null;
+          
+          return {
+            part_name: String(row.part_name || row['PartDefect'] || row['partdefect'] || '').trim(),
+            defect_type: String(row.defect_type || row['Тип'] || row['type'] || '').trim(),
+            shop: mappedShop,
+          };
+        }).filter(m => m.part_name && m.defect_type && m.shop);
         
         if (!mappings.length) {
-          alert('Не найдены данные. Ожидаются колонки: part_name, defect_type, shop');
+          alert('Не найдены данные. Проверьте колонки и значения цехов (BODY, ASSEMBLY, PAINT)');
           return;
         }
         
