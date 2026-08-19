@@ -63,7 +63,7 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
   }, []);
 
   const nonAllOptions = options.filter(o => o !== 'ALL');
-  const allSelected = selected.length === nonAllOptions.length;
+  const allSelected = selected.length === nonAllOptions.length && nonAllOptions.length > 0;
 
   const handleToggle = (value) => {
     if (value === 'ALL') {
@@ -180,31 +180,56 @@ export default function MppWeeklyTopPage() {
     setDateTo(yStr);
   }, []);
 
+  // ====== ЗАГРУЗКА ДАННЫХ С МНОЖЕСТВЕННЫМ ВЫБОРОМ ======
   const loadData = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ dateFrom, dateTo });
+      const checkpointList = selectedCheckpoints.length > 0 ? selectedCheckpoints : ['ALL'];
+      const modelList = selectedModels.length > 0 ? selectedModels : ['ALL'];
       
-      // Чекпоинты
-      if (selectedCheckpoints.length > 0 && selectedCheckpoints.length < availableCheckpoints.length) {
-        params.append('checkpoint', selectedCheckpoints.join(','));
-      } else {
-        params.append('checkpoint', 'ALL');
+      const allResults = [];
+      
+      for (const cp of checkpointList) {
+        for (const mdl of modelList) {
+          const params = new URLSearchParams({
+            dateFrom,
+            dateTo,
+            checkpoint: cp,
+            model: mdl,
+            defectType: 'offline',
+          });
+          
+          const res = await fetch(`${API_BASE}/api/mpp-weekly-top?${params.toString()}`);
+          if (!res.ok) throw new Error('Ошибка загрузки данных');
+          const json = await res.json();
+          
+          if (Array.isArray(json)) {
+            allResults.push(...json);
+          }
+        }
       }
       
-      // Модели
-      if (selectedModels.length > 0 && selectedModels.length < availableModels.length) {
-        params.append('model', selectedModels.join(','));
-      } else {
-        params.append('model', 'ALL');
-      }
+      // Объединяем дубликаты MPP
+      const uniqueMap = {};
+      allResults.forEach(row => {
+        if (!uniqueMap[row.MPP]) {
+          uniqueMap[row.MPP] = { ...row };
+        } else {
+          uniqueMap[row.MPP].DEFECT_COUNT += row.DEFECT_COUNT;
+          uniqueMap[row.MPP].VIN_COUNT += row.VIN_COUNT;
+          uniqueMap[row.MPP].TOTAL_VINS += row.TOTAL_VINS || 0;
+          uniqueMap[row.MPP].REMZONE_VINS += row.REMZONE_VINS || 0;
+        }
+      });
       
-      params.append('defectType', 'offline');
+      // Пересчитываем REMZONE_PERCENT
+      Object.values(uniqueMap).forEach(row => {
+        if (row.TOTAL_VINS > 0) {
+          row.REMZONE_PERCENT = ((row.REMZONE_VINS * 100) / row.TOTAL_VINS).toFixed(2);
+        }
+      });
       
-      const res = await fetch(`${API_BASE}/api/mpp-weekly-top?${params.toString()}`);
-      if (!res.ok) throw new Error('Ошибка загрузки данных');
-      const json = await res.json();
-      setData(Array.isArray(json) ? json : []);
+      setData(Object.values(uniqueMap));
     } catch (err) {
       alert(err.message);
     } finally {
@@ -318,31 +343,58 @@ export default function MppWeeklyTopPage() {
     }
   };
 
+  // ====== ЗАГРУЗКА АНАЛИТИКИ С МНОЖЕСТВЕННЫМ ВЫБОРОМ ======
   const loadAnalytics = async () => {
     setAnalyticsLoading(true);
     setAnalyticsError(null);
     try {
-      const params = new URLSearchParams({ dateFrom, dateTo });
+      const checkpointList = selectedCheckpoints.length > 0 ? selectedCheckpoints : ['ALL'];
+      const modelList = selectedModels.length > 0 ? selectedModels : ['ALL'];
       
-      // Чекпоинты
-      if (selectedCheckpoints.length > 0 && selectedCheckpoints.length < availableCheckpoints.length) {
-        params.append('checkpoint', selectedCheckpoints.join(','));
-      } else {
-        params.append('checkpoint', 'ALL');
+      let allData = [];
+      let totalVinsSum = 0;
+      let totalRemVinsSum = 0;
+      
+      for (const cp of checkpointList) {
+        for (const mdl of modelList) {
+          const params = new URLSearchParams({
+            dateFrom,
+            dateTo,
+            checkpoint: cp,
+            model: mdl,
+          });
+          
+          const res = await fetch(`${API_BASE}/api/mpp-drr-analytics?${params.toString()}`);
+          if (!res.ok) throw new Error('Ошибка загрузки аналитики');
+          const json = await res.json();
+          
+          if (json.data) {
+            allData.push(...json.data);
+          }
+          if (json.summary) {
+            totalVinsSum += json.summary.totalVins || 0;
+            totalRemVinsSum += json.summary.totalRemVins || 0;
+          }
+        }
       }
       
-      // Модели
-      if (selectedModels.length > 0 && selectedModels.length < availableModels.length) {
-        params.append('model', selectedModels.join(','));
-      } else {
-        params.append('model', 'ALL');
-      }
+      // Объединяем дубликаты MPP
+      const uniqueMap = {};
+      allData.forEach(row => {
+        if (!uniqueMap[row.MPP]) {
+          uniqueMap[row.MPP] = { ...row };
+        } else {
+          uniqueMap[row.MPP].DEFECT_COUNT += row.DEFECT_COUNT;
+          uniqueMap[row.MPP].REMZONE_COUNT += row.REMZONE_COUNT;
+          uniqueMap[row.MPP].TOTAL_HOURS += row.TOTAL_HOURS;
+        }
+      });
       
-      const res = await fetch(`${API_BASE}/api/mpp-drr-analytics?${params.toString()}`);
-      if (!res.ok) throw new Error('Ошибка загрузки аналитики');
-      const json = await res.json();
-      setAnalyticsData(json.data);
-      setAnalyticsSummary(json.summary);
+      setAnalyticsData(Object.values(uniqueMap));
+      setAnalyticsSummary({
+        totalVins: totalVinsSum,
+        totalRemVins: totalRemVinsSum,
+      });
     } catch (err) {
       setAnalyticsError(err.message);
     } finally {
