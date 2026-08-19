@@ -111,7 +111,6 @@ export default function DrrReportPage() {
   const [dataPoints, setDataPoints] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // === Состояния для вкладки "По цехам" ===
   const [shopTab, setShopTab] = useState('graphs');
   const [drrData, setDrrData] = useState(null);
   const [drrLoading, setDrrLoading] = useState(false);
@@ -122,7 +121,6 @@ export default function DrrReportPage() {
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
-  // Загрузка DRR по заводу
   useEffect(() => {
     if (activeTab !== 'factory') return;
     setLoading(true);
@@ -139,7 +137,6 @@ export default function DrrReportPage() {
       });
   }, [activeTab, dateFrom, dateTo]);
 
-  // Загрузка DRR по цехам
   const loadDrrByShop = async () => {
     setDrrLoading(true);
     try {
@@ -154,7 +151,6 @@ export default function DrrReportPage() {
     }
   };
 
-  // Загрузка топ дефектов цеха
   const loadShopData = async (shop) => {
     setShopLoading(true);
     try {
@@ -170,7 +166,6 @@ export default function DrrReportPage() {
     }
   };
 
-  // Импорт справочника из Excel
   const handleMappingImport = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -185,7 +180,6 @@ export default function DrrReportPage() {
         const sheet = workbook.Sheets[sheetName];
         const json = XLSX.utils.sheet_to_json(sheet);
         
-        // Маппинг названий цехов
         const shopMap = {
           'BODY': 'BS',
           'ASSEMBLY': 'AS',
@@ -203,8 +197,8 @@ export default function DrrReportPage() {
           const mappedShop = shopMap[rawShop] || null;
           
           return {
-            part_name: String(row.part_name || row['PartDefect'] || row['partdefect'] || '').trim(),
-            defect_type: String(row.defect_type || row['Тип'] || row['type'] || '').trim(),
+            part_name: String(row.part_name || row['PartDefect'] || '').trim(),
+            defect_type: String(row.defect_type || row['Тип'] || '').trim(),
             shop: mappedShop,
           };
         }).filter(m => m.part_name && m.defect_type && m.shop);
@@ -235,14 +229,12 @@ export default function DrrReportPage() {
     reader.readAsArrayBuffer(file);
   };
 
-  // При переключении на вкладку "По цехам"
   useEffect(() => {
     if (activeTab === 'workshops') {
       loadDrrByShop();
     }
   }, [activeTab]);
 
-  // При переключении на подстраницу цеха
   useEffect(() => {
     if (activeTab === 'workshops' && ['AS', 'BS', 'PS'].includes(shopTab)) {
       loadShopData(shopTab);
@@ -269,12 +261,20 @@ export default function DrrReportPage() {
   // Данные для графика по цехам
   const shopChartData = useMemo(() => {
     if (!drrData) return [];
-    return drrData.weeks.map((week, idx) => ({
-      week,
-      AS: parseFloat(drrData.AS[idx]) || 0,
-      BS: parseFloat(drrData.BS[idx]) || 0,
-      PS: parseFloat(drrData.PS[idx]) || 0,
-    }));
+    return drrData.weeks.map((week, idx) => {
+      const asValue = parseFloat(drrData.AS[idx]) || 0;
+      const bsValue = parseFloat(drrData.BS[idx]) || 0;
+      const psValue = parseFloat(drrData.PS[idx]) || 0;
+      
+      return {
+        week,
+        // AS инвертирован: показываем процент дефектов
+        AS: Math.max(0, Math.min(100, 100 - asValue)),
+        // BS и PS - оригинальные значения DRR (годные %)
+        BS: bsValue,
+        PS: psValue,
+      };
+    });
   }, [drrData]);
 
   // Данные для круговой диаграммы
@@ -439,7 +439,6 @@ export default function DrrReportPage() {
               background: shopTab === 'PS' ? '#10B981' : '#F3F4F6',
             }}>🎨 Цех окраски</button>
             
-            {/* Кнопка импорта справочника */}
             <label style={{
               ...buttonStyle,
               background: '#8B5CF6',
@@ -463,9 +462,9 @@ export default function DrrReportPage() {
                 <p style={{ textAlign: 'center', padding: 40 }}>Загрузка...</p>
               ) : shopChartData.length > 0 ? (
                 <>
-                  {/* AS */}
+                  {/* AS - процент дефектов (инвертированный) */}
                   <div style={cardStyle}>
-                    <h2 style={{ fontSize: 20, fontWeight: 700, color: '#F59E0B', marginBottom: 20 }}>🔧 Цех сборки (AS)</h2>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, color: '#F59E0B', marginBottom: 20 }}>🔧 Цех сборки (AS) — % дефектов</h2>
                     <ResponsiveContainer width="100%" height={250}>
                       <BarChart data={shopChartData} margin={{ top: 20, right: 20, left: 20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F5" />
@@ -479,14 +478,14 @@ export default function DrrReportPage() {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* BS */}
+                  {/* BS - DRR % (годные), ось Y узкая для выразительности */}
                   <div style={cardStyle}>
-                    <h2 style={{ fontSize: 20, fontWeight: 700, color: '#3B82F6', marginBottom: 20 }}>🔩 Цех сварки (BS)</h2>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, color: '#3B82F6', marginBottom: 20 }}>🔩 Цех сварки (BS) — DRR %</h2>
                     <ResponsiveContainer width="100%" height={250}>
                       <BarChart data={shopChartData} margin={{ top: 20, right: 20, left: 20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F5" />
                         <XAxis dataKey="week" />
-                        <YAxis domain={[0, 100]} />
+                        <YAxis domain={['dataMin - 3', 'dataMax + 3']} />
                         <Tooltip formatter={(v) => `${v}%`} />
                         <Bar dataKey="BS" fill="#3B82F6" barSize={40} radius={[8, 8, 0, 0]}>
                           <LabelList dataKey="BS" position="top" formatter={(v) => `${parseFloat(v).toFixed(2)}%`} style={{ fill: '#1F2937', fontSize: 11, fontWeight: 600 }} />
@@ -495,14 +494,14 @@ export default function DrrReportPage() {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* PS */}
+                  {/* PS - DRR % (годные), ось Y узкая для выразительности */}
                   <div style={cardStyle}>
-                    <h2 style={{ fontSize: 20, fontWeight: 700, color: '#10B981', marginBottom: 20 }}>🎨 Цех окраски (PS)</h2>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, color: '#10B981', marginBottom: 20 }}>🎨 Цех окраски (PS) — DRR %</h2>
                     <ResponsiveContainer width="100%" height={250}>
                       <BarChart data={shopChartData} margin={{ top: 20, right: 20, left: 20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F5" />
                         <XAxis dataKey="week" />
-                        <YAxis domain={[0, 100]} />
+                        <YAxis domain={['dataMin - 3', 'dataMax + 3']} />
                         <Tooltip formatter={(v) => `${v}%`} />
                         <Bar dataKey="PS" fill="#10B981" barSize={40} radius={[8, 8, 0, 0]}>
                           <LabelList dataKey="PS" position="top" formatter={(v) => `${parseFloat(v).toFixed(2)}%`} style={{ fill: '#1F2937', fontSize: 11, fontWeight: 600 }} />
@@ -540,47 +539,46 @@ export default function DrrReportPage() {
               {shopLoading ? (
                 <p style={{ textAlign: 'center', padding: 40 }}>Загрузка...</p>
               ) : shopData && shopData.data.length > 0 ? (
-                <>
-                  {/* Круговая диаграмма */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, marginBottom: 30 }}>
-                    <div style={{ flex: 1, minWidth: 300 }}>
-                      <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 20 }}>Топ категорий дефектов</h3>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <PieChart>
-                          <Pie
-                            data={pieData}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            outerRadius={100}
-                            label={({ name, percent }) => `${(percent * 100).toFixed(1)}%`}
-                            labelLine={{ stroke: '#9CA3AF', strokeWidth: 1 }}
-                          >
-                            {pieData.map((_, index) => (
-                              <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip />
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px 16px', marginTop: 16 }}>
-                        {pieData.map((d, i) => (
-                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#374151' }}>
-                            <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: PIE_COLORS[i % PIE_COLORS.length], display: 'inline-block' }} />
-                            {d.name}
-                          </div>
-                        ))}
-                      </div>
+                <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  {/* Круговая диаграмма слева */}
+                  <div style={{ flex: '0 0 300px', minWidth: 280 }}>
+                    <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 16 }}>Топ категорий дефектов</h3>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <PieChart>
+                        <Pie
+                          data={pieData}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={85}
+                          label={false}
+                          labelLine={false}
+                        >
+                          {pieData.map((_, index) => (
+                            <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    {/* Легенда снизу, каждый элемент с новой строки */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+                      {pieData.map((d, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#1F2937' }}>
+                          <span style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: PIE_COLORS[i % PIE_COLORS.length], display: 'inline-block', flexShrink: 0 }} />
+                          <span style={{ lineHeight: 1.3 }}>{d.name} ({d.value})</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
 
-                  {/* Таблица */}
-                  <div style={{ overflowX: 'auto' }}>
+                  {/* Таблица справа */}
+                  <div style={{ flex: 1, minWidth: 300, overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                       <thead>
                         <tr style={{ backgroundColor: '#F9FAFB' }}>
-                          <th style={thStyle}>Дефект</th>
+                          <th style={{ ...thStyle, textAlign: 'left', paddingLeft: 12 }}>Дефект</th>
                           {shopData.weeks.map(week => (
                             <th key={week} style={{ ...thStyle, textAlign: 'center' }}>{week}</th>
                           ))}
@@ -589,7 +587,7 @@ export default function DrrReportPage() {
                       <tbody>
                         {shopData.data.map((row, idx) => (
                           <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                            <td style={tdStyle}>{row.name}</td>
+                            <td style={{ ...tdStyle, textAlign: 'left', paddingLeft: 12 }}>{row.name}</td>
                             {shopData.weeks.map(week => (
                               <td key={week} style={{ ...tdStyle, textAlign: 'center', fontWeight: 600 }}>
                                 {row[week] || ''}
@@ -600,7 +598,7 @@ export default function DrrReportPage() {
                       </tbody>
                     </table>
                   </div>
-                </>
+                </div>
               ) : (
                 <p style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Нет данных. Загрузите справочник.</p>
               )}
