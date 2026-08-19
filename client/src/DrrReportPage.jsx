@@ -118,7 +118,7 @@ export default function DrrReportPage() {
   const [shopData, setShopData] = useState(null);
   const [shopLoading, setShopLoading] = useState(false);
   const [shopModel, setShopModel] = useState('ALL');
-  const [mappingText, setMappingText] = useState('');
+  const [importingMapping, setImportingMapping] = useState(false);
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
@@ -170,53 +170,58 @@ export default function DrrReportPage() {
     }
   };
 
-  // Загрузка справочника
-  const loadMapping = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/part-defect-shop-mapping`);
-      if (!res.ok) throw new Error('Ошибка загрузки справочника');
-      const json = await res.json();
-      setMappingText(json.map(m => `${m.part_name}\t${m.defect_type}\t${m.shop}`).join('\n'));
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Сохранение справочника
-  const saveMapping = async () => {
-    try {
-      const lines = mappingText.split('\n').filter(line => line.trim());
-      const mappings = lines.map(line => {
-        const parts = line.split('\t');
-        return {
-          part_name: parts[0]?.trim() || '',
-          defect_type: parts[1]?.trim() || '',
-          shop: parts[2]?.trim() || '',
-        };
-      }).filter(m => m.part_name && m.defect_type && m.shop);
-      
-      const res = await fetch(`${API_BASE}/api/part-defect-shop-mapping`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mappings }),
-      });
-      
-      if (res.ok) {
-        alert('Справочник обновлен');
-        loadMapping();
-      } else {
-        alert('Ошибка обновления');
+  // Импорт справочника из Excel
+  const handleMappingImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        setImportingMapping(true);
+        const data = new Uint8Array(event.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(sheet);
+        
+        // Ожидаем колонки: part_name, defect_type, shop
+        const mappings = json.map(row => ({
+          part_name: String(row.part_name || row['PartDefect'] || row['partdefect'] || '').trim(),
+          defect_type: String(row.defect_type || row['Тип'] || row['type'] || '').trim(),
+          shop: String(row.shop || row['Цех'] || '').trim().toUpperCase(),
+        })).filter(m => m.part_name && m.defect_type && ['AS', 'BS', 'PS'].includes(m.shop));
+        
+        if (!mappings.length) {
+          alert('Не найдены данные. Ожидаются колонки: part_name, defect_type, shop');
+          return;
+        }
+        
+        const res = await fetch(`${API_BASE}/api/part-defect-shop-mapping`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mappings }),
+        });
+        
+        if (res.ok) {
+          alert(`Загружено ${mappings.length} записей`);
+          loadDrrByShop();
+        } else {
+          alert('Ошибка загрузки');
+        }
+      } catch (err) {
+        alert('Ошибка: ' + err.message);
+      } finally {
+        setImportingMapping(false);
       }
-    } catch (err) {
-      alert('Ошибка: ' + err.message);
-    }
+    };
+    reader.readAsArrayBuffer(file);
   };
 
   // При переключении на вкладку "По цехам"
   useEffect(() => {
     if (activeTab === 'workshops') {
       loadDrrByShop();
-      loadMapping();
     }
   }, [activeTab]);
 
@@ -398,8 +403,8 @@ export default function DrrReportPage() {
       {/* ========== ПО ЦЕХАМ ========== */}
       {activeTab === 'workshops' && (
         <>
-          {/* Подвкладки */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+          {/* Подвкладки + кнопка импорта */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
             <button onClick={() => setShopTab('graphs')} style={{
               ...tabStyle(shopTab === 'graphs'),
               background: shopTab === 'graphs' ? '#2563EB' : '#F3F4F6',
@@ -416,10 +421,22 @@ export default function DrrReportPage() {
               ...tabStyle(shopTab === 'PS'),
               background: shopTab === 'PS' ? '#10B981' : '#F3F4F6',
             }}>🎨 Цех окраски</button>
-            <button onClick={() => { setShopTab('mapping'); loadMapping(); }} style={{
-              ...tabStyle(shopTab === 'mapping'),
-              background: shopTab === 'mapping' ? '#8B5CF6' : '#F3F4F6',
-            }}>📋 Справочник</button>
+            
+            {/* Кнопка импорта справочника */}
+            <label style={{
+              ...buttonStyle,
+              background: '#8B5CF6',
+              cursor: 'pointer',
+              marginLeft: 'auto',
+            }}>
+              {importingMapping ? '⏳ Импорт...' : '📋 Импорт справочника'}
+              <input
+                type="file"
+                accept=".xlsx, .xls"
+                onChange={handleMappingImport}
+                style={{ display: 'none' }}
+              />
+            </label>
           </div>
 
           {/* ===== ГРАФИКИ ЦЕХОВ ===== */}
@@ -478,7 +495,7 @@ export default function DrrReportPage() {
                   </div>
                 </>
               ) : (
-                <p style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Нет данных</p>
+                <p style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Нет данных. Загрузите справочник.</p>
               )}
             </>
           )}
@@ -568,37 +585,8 @@ export default function DrrReportPage() {
                   </div>
                 </>
               ) : (
-                <p style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Нет данных</p>
+                <p style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Нет данных. Загрузите справочник.</p>
               )}
-            </div>
-          )}
-
-          {/* ===== СПРАВОЧНИК ===== */}
-          {shopTab === 'mapping' && (
-            <div style={cardStyle}>
-              <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1F2937', marginBottom: 20 }}>📋 Справочник дефектов по цехам</h2>
-              <p style={{ fontSize: 14, color: '#6B7280', marginBottom: 16 }}>
-                Формат: <b>PartDefect</b> Tab <b>Тип</b> Tab <b>Цех</b> (AS, BS, PS)
-              </p>
-              <textarea
-                value={mappingText}
-                onChange={e => setMappingText(e.target.value)}
-                rows={20}
-                style={{
-                  width: '100%',
-                  padding: 12,
-                  borderRadius: 8,
-                  border: '1px solid #D1D5DB',
-                  fontSize: 14,
-                  fontFamily: 'monospace',
-                  resize: 'vertical',
-                }}
-              />
-              <div style={{ marginTop: 16 }}>
-                <button onClick={saveMapping} style={{ ...buttonStyle, background: '#059669' }}>
-                  💾 Сохранить справочник
-                </button>
-              </div>
             </div>
           )}
         </>
