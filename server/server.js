@@ -3,6 +3,15 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
 
+// Вспомогательная функция
+function getISOWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
 const app = express();
 app.use(cors({
   origin: 'http://localhost:30000',
@@ -3293,6 +3302,228 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Ошибка Holds SGP retrospective:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Справочник дефектов по цехам
+app.get('/api/part-defect-shop-mapping', async (req, res) => {
+  try {
+    const [rows] = await notesPool.query('SELECT * FROM part_defect_shop_mapping ORDER BY part_name, defect_type');
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка получения справочника:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Обновление справочника
+app.post('/api/part-defect-shop-mapping', async (req, res) => {
+  try {
+    const { mappings } = req.body;
+    if (!mappings || !mappings.length) return res.status(400).json({ error: 'Нет данных' });
+    
+    const sql = 'INSERT INTO part_defect_shop_mapping (part_name, defect_type, shop) VALUES ? ON DUPLICATE KEY UPDATE shop = VALUES(shop)';
+    const values = mappings.map(m => [m.part_name, m.defect_type, m.shop]);
+    
+    await notesPool.query(sql, [values]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Ошибка обновления справочника:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DRR по цехам
+app.get('/api/drr-by-shop', async (req, res) => {
+  try {
+    const { weeks = 10 } = req.query;
+    
+    // Получаем справочник
+    const [mappingRows] = await notesPool.query('SELECT * FROM part_defect_shop_mapping');
+    
+    // Группируем по цехам
+    const shopParts = {
+      AS: { partNames: [], defectTypes: [] },
+      BS: { partNames: [], defectTypes: [] },
+      PS: { partNames: [], defectTypes: [] },
+    };
+    
+    mappingRows.forEach(m => {
+      if (shopParts[m.shop]) {
+        shopParts[m.shop].partNames.push(m.part_name);
+        shopParts[m.shop].defectTypes.push(m.defect_type);
+      }
+    });
+    
+    // Функция получения DRR для цеха за неделю
+    const getShopDrr = async (shop, weekStart, weekEnd) => {
+      const parts = shopParts[shop];
+      if (!parts || parts.partNames.length === 0) return 0;
+      
+      const partListStr = parts.partNames.map(p => `'${p}'`).join(',');
+      const defectListStr = parts.defectTypes.map(d => `'${d}'`).join(',');
+      
+      // Общее количество VIN за неделю
+      const [carsRows] = await pool.query(`
+        SELECT COUNT(DISTINCT VIN) AS TOTAL
+        FROM at_om_wiptrackinghistory
+        WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
+      `, [weekStart, weekEnd]);
+      const totalCars = carsRows[0]?.TOTAL || 0;
+      
+      // VIN с офлайн дефектами этого цеха
+      const [defectRows] = await pool.query(`
+        SELECT COUNT(DISTINCT QM_DEF.VIN) AS DEFECT_VINS
+        FROM (
+          SELECT VIN, PART_NAME, PROBLEM_TYPE, (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_biw_qm_defect_info
+          UNION ALL
+          SELECT VIN, PART_NAME, PROBLEM_TYPE, (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_paint_qm_defect_info
+          UNION ALL
+          SELECT VIN, PART_NAME, PROBLEM_TYPE, (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_qm_defect_info
+        ) QM_DEF
+        WHERE QM_DEF.S_OFFLINE = 1
+          AND QM_DEF.PART_NAME IN (${partListStr})
+          AND QM_DEF.PROBLEM_TYPE IN (${defectListStr})
+          AND DATE(QM_DEF.CREATION_TIME) BETWEEN ? AND ?
+      `, [weekStart, weekEnd]);
+      
+      const defectVins = defectRows[0]?.DEFECT_VINS || 0;
+      
+      if (totalCars === 0) return 0;
+      return ((1 - (defectVins / totalCars)) * 100).toFixed(2);
+    };
+    
+    // Генерируем последние N недель
+    const result = {
+      weeks: [],
+      AS: [],
+      BS: [],
+      PS: [],
+    };
+    
+    const today = new Date();
+    const currentMonday = new Date(today);
+    const dayOfWeek = today.getDay();
+    currentMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    
+    for (let i = 0; i < weeks; i++) {
+      const monday = new Date(currentMonday);
+      monday.setDate(currentMonday.getDate() - i * 7);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      
+      const weekNum = getISOWeek(monday);
+      result.weeks.unshift(`CW${weekNum}`);
+      
+      result.AS.unshift(await getShopDrr('AS', monday.toISOString().split('T')[0], sunday.toISOString().split('T')[0]));
+      result.BS.unshift(await getShopDrr('BS', monday.toISOString().split('T')[0], sunday.toISOString().split('T')[0]));
+      result.PS.unshift(await getShopDrr('PS', monday.toISOString().split('T')[0], sunday.toISOString().split('T')[0]));
+    }
+    
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка DRR по цехам:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Топ дефектов по цеху за 5 недель
+app.get('/api/shop-top-defects', async (req, res) => {
+  try {
+    const { shop, model } = req.query;
+    if (!shop) return res.status(400).json({ error: 'shop обязателен' });
+    
+    // Получаем справочник для цеха
+    const [mappingRows] = await notesPool.query(
+      'SELECT part_name, defect_type FROM part_defect_shop_mapping WHERE shop = ?',
+      [shop]
+    );
+    
+    if (!mappingRows.length) return res.json({ weeks: [], data: [] });
+    
+    const partList = mappingRows.map(m => m.part_name);
+    const defectList = mappingRows.map(m => m.defect_type);
+    
+    const partListStr = partList.map(p => `'${p}'`).join(',');
+    const defectListStr = defectList.map(d => `'${d}'`).join(',');
+    
+    // Генерируем последние 5 недель
+    const today = new Date();
+    const currentMonday = new Date(today);
+    const dayOfWeek = today.getDay();
+    currentMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    
+    const weeks = [];
+    for (let i = 0; i < 5; i++) {
+      const monday = new Date(currentMonday);
+      monday.setDate(currentMonday.getDate() - i * 7);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      weeks.unshift({
+        weekNum: getISOWeek(monday),
+        start: monday.toISOString().split('T')[0],
+        end: sunday.toISOString().split('T')[0],
+      });
+    }
+    
+    // Для каждой недели получаем топ дефектов
+    const allResults = {};
+    
+    for (const week of weeks) {
+      let modelCondition = '';
+      const params = [];
+      if (model && model !== 'ALL') {
+        modelCondition = ' AND wo.MODEL = ?';
+        params.push(model);
+      }
+      
+      const sql = `
+        SELECT 
+          CONCAT(QM_DEF.PART_NAME, '_', QM_DEF.PROBLEM_TYPE) AS defect_name,
+          COUNT(*) AS defect_count
+        FROM (
+          SELECT VIN, PART_NAME, PROBLEM_TYPE, (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_biw_qm_defect_info
+          UNION ALL
+          SELECT VIN, PART_NAME, PROBLEM_TYPE, (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_paint_qm_defect_info
+          UNION ALL
+          SELECT VIN, PART_NAME, PROBLEM_TYPE, (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_qm_defect_info
+        ) QM_DEF
+        JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+        WHERE QM_DEF.S_OFFLINE = 1
+          AND QM_DEF.PART_NAME IN (${partListStr})
+          AND QM_DEF.PROBLEM_TYPE IN (${defectListStr})
+          AND DATE(QM_DEF.CREATION_TIME) BETWEEN ? AND ?
+          ${modelCondition}
+        GROUP BY defect_name
+        ORDER BY defect_count DESC
+      `;
+      
+      params.unshift(week.start, week.end);
+      const [rows] = await pool.query(sql, params);
+      
+      rows.forEach(row => {
+        if (!allResults[row.defect_name]) {
+          allResults[row.defect_name] = {};
+        }
+        allResults[row.defect_name][`CW${week.weekNum}`] = row.defect_count;
+      });
+    }
+    
+    const data = Object.entries(allResults).map(([name, counts]) => ({
+      name,
+      ...counts,
+    }));
+    
+    res.json({ weeks: weeks.map(w => `CW${w.weekNum}`), data });
+  } catch (err) {
+    console.error('Ошибка shop-top-defects:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
