@@ -478,7 +478,7 @@ export default function MppWeeklyTopPage() {
               {loading ? '⏳ Загрузка...' : '▶ Загрузить'}
             </button>
             <button onClick={exportFullReport} disabled={data.length === 0 || loading} style={{ ...buttonStyle, background: '#059669' }}>
-              📊 Экспорт отчёта
+              📊 Экспорт
             </button>
           </div>
 
