@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import tablePreview from './assets/table-preview.png';
 import dailyTopPreview from './assets/daily-top-preview.png';
@@ -15,7 +15,7 @@ import warrantyPreview from './assets/waran.png';
 import tlMapPreview from './assets/tlmap.png';
 import HoldsSgpPage from './assets/hold.png';
 
-// Общие стили секций
+// ====== СТИЛИ ======
 const sectionStyle = {
   backgroundColor: '#FFFFFF',
   borderRadius: 20,
@@ -23,6 +23,8 @@ const sectionStyle = {
   marginBottom: 32,
   boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.04), 0 8px 10px -6px rgba(0, 0, 0, 0.02)',
   border: '1px solid #F0F0F5',
+  transition: 'opacity 0.4s ease, transform 0.4s ease, max-height 0.5s ease, margin-bottom 0.4s ease, padding 0.4s ease',
+  overflow: 'hidden',
 };
 
 const headingStyle = {
@@ -40,6 +42,30 @@ const gridStyle = {
   gridTemplateColumns: 'repeat(4, 1fr)',
   gap: 24,
 };
+
+const tabBarStyle = {
+  display: 'flex',
+  gap: 6,
+  marginBottom: 32,
+  backgroundColor: '#E5E7EB',
+  borderRadius: 14,
+  padding: 6,
+  width: 'fit-content',
+};
+
+const tabStyle = (active) => ({
+  padding: '10px 28px',
+  borderRadius: 10,
+  border: 'none',
+  fontWeight: 600,
+  fontSize: 15,
+  background: active ? '#FFFFFF' : 'transparent',
+  color: active ? '#111827' : '#6B7280',
+  cursor: 'pointer',
+  boxShadow: active ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+  whiteSpace: 'nowrap',
+});
 
 const getCardStyle = (isHovered, accentColor) => ({
   width: '100%',
@@ -79,7 +105,7 @@ const getCaptionStyle = (isHovered, accentColor) => ({
   transition: 'background-color 0.3s ease',
 });
 
-// Компонент карточки (поддержка внешних ссылок)
+// ====== КОМПОНЕНТ КАРТОЧКИ ======
 function ReportCard({ to, imgSrc, caption, accentColor = '#2563EB' }) {
   const [isHovered, setIsHovered] = useState(false);
   const cardStyle = getCardStyle(isHovered, accentColor);
@@ -134,18 +160,90 @@ function ReportCard({ to, imgSrc, caption, accentColor = '#2563EB' }) {
   );
 }
 
+// ====== АНИМИРОВАННАЯ СЕКЦИЯ ======
+function AnimatedSection({ title, icon, iconBg, iconColor, children, visible }) {
+  const [shouldRender, setShouldRender] = useState(visible);
+  const [isAnimating, setIsAnimating] = useState(visible);
+
+  useEffect(() => {
+    if (visible) {
+      // Показываем секцию
+      setShouldRender(true);
+      // Небольшая задержка для срабатывания CSS transition
+      const timer = setTimeout(() => {
+        setIsAnimating(true);
+      }, 50);
+      return () => clearTimeout(timer);
+    } else {
+      // Скрываем с анимацией
+      setIsAnimating(false);
+      // После завершения анимации удаляем из DOM
+      const timer = setTimeout(() => {
+        setShouldRender(false);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [visible]);
+
+  if (!shouldRender) return null;
+
+  return (
+    <div style={{
+      ...sectionStyle,
+      opacity: isAnimating ? 1 : 0,
+      transform: isAnimating ? 'translateY(0)' : 'translateY(20px)',
+      maxHeight: isAnimating ? '3000px' : '0',
+      marginBottom: isAnimating ? 32 : 0,
+      padding: isAnimating ? 32 : '0 32px',
+    }}>
+      <h2 style={headingStyle}>
+        <span style={{
+          background: iconBg,
+          padding: '8px 14px',
+          borderRadius: 8,
+          color: iconColor,
+          fontSize: 18,
+        }}>
+          {icon}
+        </span>
+        {title}
+      </h2>
+      {children}
+    </div>
+  );
+}
+
+// ====== ОСНОВНОЙ КОМПОНЕНТ ======
 export default function HomePage() {
+  const [activeTab, setActiveTab] = useState('all'); // 'all' | 'reports' | 'services'
+
+  const showReports = activeTab === 'all' || activeTab === 'reports';
+  const showServices = activeTab === 'all' || activeTab === 'services';
+
   return (
     <div style={{ padding: 40, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
       
+      {/* Табы */}
+      <div style={tabBarStyle}>
+        <button onClick={() => setActiveTab('all')} style={tabStyle(activeTab === 'all')}>
+          Все
+        </button>
+        <button onClick={() => setActiveTab('reports')} style={tabStyle(activeTab === 'reports')}>
+          📊 Отчеты
+        </button>
+        <button onClick={() => setActiveTab('services')} style={tabStyle(activeTab === 'services')}>
+          🛠️ Сервисы
+        </button>
+      </div>
+
       {/* Секция "Отчёты" */}
-      <div style={sectionStyle}>
-        <h2 style={headingStyle}>
-          <span style={{ background: '#EEF2FF', padding: '8px 14px', borderRadius: 8, color: '#2563EB', fontSize: 18 }}>
-            📊
-          </span>
-          Отчёты
-        </h2>
+      <AnimatedSection
+        title="Отчёты"
+        icon="📊"
+        iconBg="#EEF2FF"
+        iconColor="#2563EB"
+        visible={showReports}
+      >
         <div style={gridStyle}>
           <ReportCard to="/report" imgSrc={tablePreview} caption="Top DRR Board" accentColor="#3B82F6" />
           <ReportCard to="/daily-top" imgSrc={dailyTopPreview} caption="Daily Top CP7/CP8" accentColor="#8B5CF6" />
@@ -155,16 +253,16 @@ export default function HomePage() {
           <ReportCard to="/daily-dashboard" imgSrc={dailyDashboardPreview} caption="Daily Dashboard" accentColor="#0cb428" />
           <ReportCard to="/tl-map" imgSrc={tlMapPreview} caption="TL Map" accentColor="#0ad5c8" />
         </div>
-      </div>
+      </AnimatedSection>
 
       {/* Секция "Сервисы" */}
-      <div style={sectionStyle}>
-        <h2 style={headingStyle}>
-          <span style={{ background: '#F0FDF4', padding: '8px 14px', borderRadius: 8, color: '#16A34A', fontSize: 18 }}>
-            🛠️
-          </span>
-          Сервисы
-        </h2>
+      <AnimatedSection
+        title="Сервисы"
+        icon="🛠️"
+        iconBg="#F0FDF4"
+        iconColor="#16A34A"
+        visible={showServices}
+      >
         <div style={gridStyle}>
           <ReportCard to="/sgp-audit" imgSrc={sgpAuditPreview} caption="СГП Audit" accentColor="#10B981" />
           <ReportCard to="/part-defect-search" imgSrc={partDefectPreview} caption="Part/Defect Search" accentColor="#0e3bec" />
@@ -173,7 +271,7 @@ export default function HomePage() {
           <ReportCard to="/holds-sgp" imgSrc={HoldsSgpPage} caption="Holds СГП" accentColor="#f30b2e" />
           <ReportCard to="http://10.27.195.16/reports/024" imgSrc={externalReportPreview} caption="DRR по заводу" accentColor="#1638f9" />
         </div>
-      </div>
+      </AnimatedSection>
     </div>
   );
 }
