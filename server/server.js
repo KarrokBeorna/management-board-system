@@ -3335,6 +3335,7 @@ app.post('/api/part-defect-shop-mapping', async (req, res) => {
 });
 
 // DRR по цехам
+// ================== DRR ПО ЦЕХАМ ==================
 app.get('/api/drr-by-shop', async (req, res) => {
   try {
     const { weeks = 10 } = req.query;
@@ -3347,34 +3348,20 @@ app.get('/api/drr-by-shop', async (req, res) => {
     }
     
     // Группируем по цехам
-    const shopMapping = {
-      AS: [],
-      BS: [],
-      PS: [],
-    };
-    
+    const shopMapping = { AS: [], BS: [], PS: [] };
     mappingRows.forEach(m => {
       if (shopMapping[m.shop]) {
-        shopMapping[m.shop].push({
-          part_name: m.part_name,
-          defect_type: m.defect_type,
-        });
+        shopMapping[m.shop].push({ part_name: m.part_name, defect_type: m.defect_type });
       }
     });
     
-    // Генерируем последние N недель (понедельник-воскресенье)
+    // Генерируем последние N недель
     const today = new Date();
     const currentMonday = new Date(today);
     const dayOfWeek = today.getDay();
     currentMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
     
-    const result = {
-      weeks: [],
-      AS: [],
-      BS: [],
-      PS: [],
-      hasMapping: true,
-    };
+    const result = { weeks: [], AS: [], BS: [], PS: [], hasMapping: true };
     
     for (let i = 0; i < weeks; i++) {
       const monday = new Date(currentMonday);
@@ -3388,7 +3375,6 @@ app.get('/api/drr-by-shop', async (req, res) => {
       
       result.weeks.unshift(`CW${weekNum}`);
       
-      // Для каждого цеха считаем DRR
       for (const shop of ['AS', 'BS', 'PS']) {
         const parts = shopMapping[shop];
         
@@ -3397,10 +3383,7 @@ app.get('/api/drr-by-shop', async (req, res) => {
           continue;
         }
         
-        // Строим условия для WHERE
-        const conditions = parts.map(() => '(QM_DEF.PART_NAME = ? AND QM_DEF.PROBLEM_TYPE = ?)').join(' OR ');
-        
-        // Общее количество VIN за неделю (все авто, прошедшие через IoT посты)
+        // Общее количество VIN за неделю
         const [carsRows] = await pool.query(`
           SELECT COUNT(DISTINCT VIN) AS TOTAL
           FROM at_om_wiptrackinghistory
@@ -3408,15 +3391,20 @@ app.get('/api/drr-by-shop', async (req, res) => {
         `, [weekStart, weekEnd]);
         const totalCars = carsRows[0]?.TOTAL || 0;
         
-        // VIN с оффлайн дефектами этого цеха
+        // Строим условия для каждого part+defect
+        const conditions = [];
         const params = [];
+        
         parts.forEach(p => {
+          conditions.push('(PART_NAME = ? AND PROBLEM_TYPE = ?)');
           params.push(p.part_name, p.defect_type);
         });
-        params.push(weekStart, weekEnd);
         
+        const whereClause = conditions.join(' OR ');
+        
+        // VIN с оффлайн дефектами
         const [defectRows] = await pool.query(`
-          SELECT COUNT(DISTINCT QM_DEF.VIN) AS DEFECT_VINS
+          SELECT COUNT(DISTINCT VIN) AS DEFECT_VINS
           FROM (
             SELECT VIN, PART_NAME, PROBLEM_TYPE, DATE(CREATION_TIME) AS CREATION_DATE,
                    (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
@@ -3434,14 +3422,14 @@ app.get('/api/drr-by-shop', async (req, res) => {
             WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
           ) QM_DEF
           WHERE QM_DEF.S_OFFLINE = 1
-            AND (${conditions})
-        `, [...params, weekStart, weekEnd, weekStart, weekEnd, weekStart, weekEnd]);
+            AND (${whereClause})
+        `, [weekStart, weekEnd, weekStart, weekEnd, weekStart, weekEnd, ...params]);
         
         const defectVins = defectRows[0]?.DEFECT_VINS || 0;
         
         let drr = 0;
         if (totalCars > 0) {
-          drr = ((1 - (defectVins / totalCars)) * 100);
+          drr = (1 - (defectVins / totalCars)) * 100;
         }
         
         result[shop].unshift(parseFloat(drr.toFixed(2)));
@@ -3455,7 +3443,7 @@ app.get('/api/drr-by-shop', async (req, res) => {
   }
 });
 
-// Топ дефектов по цеху за 5 недель
+// ================== ТОП ДЕФЕКТОВ ПО ЦЕХУ ==================
 app.get('/api/shop-top-defects', async (req, res) => {
   try {
     const { shop, model } = req.query;
@@ -3491,16 +3479,23 @@ app.get('/api/shop-top-defects', async (req, res) => {
     }
     
     // Строим условия
-    const conditions = mappingRows.map(() => '(QM_DEF.PART_NAME = ? AND QM_DEF.PROBLEM_TYPE = ?)').join(' OR ');
+    const conditions = [];
+    const mappingParams = [];
+    mappingRows.forEach(m => {
+      conditions.push('(PART_NAME = ? AND PROBLEM_TYPE = ?)');
+      mappingParams.push(m.part_name, m.defect_type);
+    });
+    const whereClause = conditions.join(' OR ');
     
     const allResults = {};
     
     for (const week of weeks) {
-      const params = [];
-      mappingRows.forEach(m => {
-        params.push(m.part_name, m.defect_type);
-      });
-      params.push(week.start, week.end);
+      const params = [
+        week.start, week.end,
+        week.start, week.end,
+        week.start, week.end,
+        ...mappingParams,
+      ];
       
       let modelCondition = '';
       if (model && model !== 'ALL') {
@@ -3530,7 +3525,7 @@ app.get('/api/shop-top-defects', async (req, res) => {
         ) QM_DEF
         JOIN work_order wo ON wo.VIN = QM_DEF.VIN
         WHERE QM_DEF.S_OFFLINE = 1
-          AND (${conditions})
+          AND (${whereClause})
           ${modelCondition}
         GROUP BY defect_name
         ORDER BY defect_count DESC
