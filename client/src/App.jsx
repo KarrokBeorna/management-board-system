@@ -14,6 +14,7 @@ import DailyDashboardPage from './DailyDashboardPage';
 import WarrantyPage from './WarrantyPage';
 import TLMapPage from './TLMapPage';
 import HoldsSgpPage from './HoldsSgpPage';
+import SgpManagementPage from './SgpManagementPage';
 import favicon from './assets/weblog.png';
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/model-status" element={<ModelStatusPage />} />
         <Route path="/checkpoint-map" element={<CheckpointMapPage />} />
         <Route path="/sgp-audit" element={<SgpAuditPage />} />
+        <Route path="/sgp-management" element={<SgpManagementPage />} />
         <Route path="/mpp-weekly-top" element={<MppWeeklyTopPage />} />
         <Route path="/part-defect-search" element={<PartDefectSearchPage />} />
         <Route path="/drr-report" element={<DrrReportPage />} />

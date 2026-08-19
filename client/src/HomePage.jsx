@@ -14,6 +14,7 @@ import externalDReportPreview from './assets/dim.png';
 import warrantyPreview from './assets/waran.png';
 import tlMapPreview from './assets/tlmap.png';
 import HoldsSgpPage from './assets/hold.png';
+import sgpManagementPreview from './assets/123.png'; // Добавьте вашу картинку
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -265,6 +266,7 @@ export default function HomePage() {
       >
         <div style={gridStyle}>
           <ReportCard to="/sgp-audit" imgSrc={sgpAuditPreview} caption="СГП Audit" accentColor="#10B981" />
+          <ReportCard to="/sgp-management" imgSrc={sgpManagementPreview} caption="СГП Management" accentColor="#8B5CF6" />
           <ReportCard to="/part-defect-search" imgSrc={partDefectPreview} caption="Part/Defect Search" accentColor="#0e3bec" />
           <ReportCard to="http://10.27.195.25:5174/time-at-points" imgSrc={externalDReportPreview} caption="Chekpoint Passage" accentColor="#fc7b02" />
           <ReportCard to="/warranty" imgSrc={warrantyPreview} caption="Warranty" accentColor="#0cd72a" />
