@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import {
@@ -47,14 +47,111 @@ const formatHours = (value) =>
 const truncate = (str, maxLen = 28) =>
   str.length > maxLen ? str.substring(0, maxLen - 3) + '...' : str;
 
+// ====== МУЛЬТИСЕЛЕКТ ======
+function MultiSelect({ options, selected, onChange, placeholder }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const nonAllOptions = options.filter(o => o !== 'ALL');
+  const allSelected = selected.length === nonAllOptions.length;
+
+  const handleToggle = (value) => {
+    if (value === 'ALL') {
+      if (allSelected) {
+        onChange([]);
+      } else {
+        onChange(nonAllOptions);
+      }
+    } else {
+      const updated = selected.includes(value)
+        ? selected.filter(v => v !== value)
+        : [...selected, value];
+      onChange(updated);
+    }
+  };
+
+  const displayText = selected.length === 0 || allSelected
+    ? placeholder
+    : selected.join(', ');
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          ...inputStyle,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          minWidth: 150,
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
+          {displayText}
+        </span>
+        <span style={{ fontSize: 10, color: '#6B7280' }}>▼</span>
+      </button>
+      {isOpen && (
+        <div style={{
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          marginTop: 4,
+          background: '#FFFFFF',
+          borderRadius: 12,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          padding: 12,
+          minWidth: 200,
+          zIndex: 100,
+          border: '1px solid #F0F0F5',
+          maxHeight: 300,
+          overflowY: 'auto',
+        }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={() => handleToggle('ALL')}
+            />
+            Все
+          </label>
+          {nonAllOptions.map(option => (
+            <label key={option} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', cursor: 'pointer', fontSize: 14 }}>
+              <input
+                type="checkbox"
+                checked={selected.includes(option)}
+                onChange={() => handleToggle(option)}
+              />
+              {option}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MppWeeklyTopPage() {
   const [activeTab, setActiveTab] = useState('report');
 
   // Фильтры
-  const [dateFrom, setDateFrom] = useState('2026-08-03');
-  const [dateTo, setDateTo] = useState('2026-08-09');
-  const [checkpoint, setCheckpoint] = useState('ALL');
-  const [model, setModel] = useState('ALL');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
+  const [selectedModels, setSelectedModels] = useState([]);
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expandedMpp, setExpandedMpp] = useState(null);
@@ -71,12 +168,39 @@ export default function MppWeeklyTopPage() {
   const [hiddenRows, setHiddenRows] = useState({});
   const hiddenCount = Object.values(hiddenRows).filter(Boolean).length;
 
-  const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
+  const availableModels = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
+  const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
+
+  // Установка дат по умолчанию (вчера)
+  useEffect(() => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yStr = yesterday.toISOString().split('T')[0];
+    setDateFrom(yStr);
+    setDateTo(yStr);
+  }, []);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ dateFrom, dateTo, checkpoint, model, defectType: 'offline' });
+      const params = new URLSearchParams({ dateFrom, dateTo });
+      
+      // Чекпоинты
+      if (selectedCheckpoints.length > 0 && selectedCheckpoints.length < availableCheckpoints.length) {
+        params.append('checkpoint', selectedCheckpoints.join(','));
+      } else {
+        params.append('checkpoint', 'ALL');
+      }
+      
+      // Модели
+      if (selectedModels.length > 0 && selectedModels.length < availableModels.length) {
+        params.append('model', selectedModels.join(','));
+      } else {
+        params.append('model', 'ALL');
+      }
+      
+      params.append('defectType', 'offline');
+      
       const res = await fetch(`${API_BASE}/api/mpp-weekly-top?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
@@ -198,7 +322,22 @@ export default function MppWeeklyTopPage() {
     setAnalyticsLoading(true);
     setAnalyticsError(null);
     try {
-      const params = new URLSearchParams({ dateFrom, dateTo, checkpoint, model });
+      const params = new URLSearchParams({ dateFrom, dateTo });
+      
+      // Чекпоинты
+      if (selectedCheckpoints.length > 0 && selectedCheckpoints.length < availableCheckpoints.length) {
+        params.append('checkpoint', selectedCheckpoints.join(','));
+      } else {
+        params.append('checkpoint', 'ALL');
+      }
+      
+      // Модели
+      if (selectedModels.length > 0 && selectedModels.length < availableModels.length) {
+        params.append('model', selectedModels.join(','));
+      } else {
+        params.append('model', 'ALL');
+      }
+      
       const res = await fetch(`${API_BASE}/api/mpp-drr-analytics?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки аналитики');
       const json = await res.json();
@@ -211,9 +350,10 @@ export default function MppWeeklyTopPage() {
     }
   };
 
+  // Загрузка при открытии вкладки и когда даты готовы
   useEffect(() => {
-    if (activeTab === 'report') loadData();
-  }, [activeTab]);
+    if (activeTab === 'report' && dateFrom && dateTo) loadData();
+  }, [activeTab, dateFrom, dateTo]);
 
   // Группировка по моделям для круговой диаграммы
   const modelData = useMemo(() => {
@@ -265,20 +405,22 @@ export default function MppWeeklyTopPage() {
               <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
-              Чекпоинт:
-              <select value={checkpoint} onChange={e => setCheckpoint(e.target.value)} style={inputStyle}>
-                <option value="ALL">Все</option>
-                <option value="CP7">CP7</option>
-                <option value="CP8">CP8</option>
-                <option value="PIP">PIP</option>
-                <option value="TL">TL</option>
-              </select>
+              Чекпоинты:
+              <MultiSelect
+                options={['ALL', ...availableCheckpoints]}
+                selected={selectedCheckpoints}
+                onChange={setSelectedCheckpoints}
+                placeholder="Все"
+              />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
-              Модель:
-              <select value={model} onChange={e => setModel(e.target.value)} style={inputStyle}>
-                {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
-              </select>
+              Модели:
+              <MultiSelect
+                options={['ALL', ...availableModels]}
+                selected={selectedModels}
+                onChange={setSelectedModels}
+                placeholder="Все"
+              />
             </label>
             <button onClick={loadData} disabled={loading} style={buttonStyle}>
               {loading ? '⏳ Загрузка...' : '▶ Загрузить'}
@@ -442,18 +584,22 @@ export default function MppWeeklyTopPage() {
               <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
-              Чекпоинт:
-              <select value={checkpoint} onChange={e => setCheckpoint(e.target.value)} style={inputStyle}>
-                <option value="ALL">Все</option>
-                <option value="CP7">CP7</option>
-                <option value="CP8">CP8</option>
-              </select>
+              Чекпоинты:
+              <MultiSelect
+                options={['ALL', ...availableCheckpoints]}
+                selected={selectedCheckpoints}
+                onChange={setSelectedCheckpoints}
+                placeholder="Все"
+              />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
-              Модель:
-              <select value={model} onChange={e => setModel(e.target.value)} style={inputStyle}>
-                {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
-              </select>
+              Модели:
+              <MultiSelect
+                options={['ALL', ...availableModels]}
+                selected={selectedModels}
+                onChange={setSelectedModels}
+                placeholder="Все"
+              />
             </label>
             <button onClick={loadAnalytics} disabled={analyticsLoading} style={buttonStyle}>
               {analyticsLoading ? '⏳ Загрузка...' : '▶ Загрузить аналитику'}
