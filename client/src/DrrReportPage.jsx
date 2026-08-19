@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   ReferenceLine, Label, ResponsiveContainer, Cell,
-  PieChart, Pie, Tooltip, LabelList
+  PieChart, Pie, Tooltip, LabelList, Legend
 } from 'recharts';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -540,10 +540,12 @@ export default function DrrReportPage() {
                 <p style={{ textAlign: 'center', padding: 40 }}>Загрузка...</p>
               ) : shopData && shopData.data.length > 0 ? (
                 <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                  {/* Круговая диаграмма слева */}
-                  <div style={{ flex: '0 0 300px', minWidth: 280 }}>
-                    <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 16 }}>Топ категорий дефектов</h3>
-                    <ResponsiveContainer width="100%" height={260}>
+                  {/* Круговая диаграмма слева - 40% */}
+                  <div style={{ flex: '0 0 40%', minWidth: 280 }}>
+                    <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 16, fontSize: 18 }}>
+                      Доля дефектов {shopTab}
+                    </h3>
+                    <ResponsiveContainer width="100%" height={300}>
                       <PieChart>
                         <Pie
                           data={pieData}
@@ -551,19 +553,24 @@ export default function DrrReportPage() {
                           nameKey="name"
                           cx="50%"
                           cy="50%"
-                          outerRadius={85}
-                          label={false}
-                          labelLine={false}
+                          outerRadius={100}
+                          label={true}
+                          labelLine={true}
                         >
                           {pieData.map((_, index) => (
                             <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                           ))}
                         </Pie>
                         <Tooltip />
+                        <Legend 
+                          verticalAlign="bottom" 
+                          height={36}
+                          wrapperStyle={{ fontSize: '14px' }}
+                        />
                       </PieChart>
                     </ResponsiveContainer>
                     {/* Легенда снизу, каждый элемент с новой строки */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
                       {pieData.map((d, i) => (
                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#1F2937' }}>
                           <span style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: PIE_COLORS[i % PIE_COLORS.length], display: 'inline-block', flexShrink: 0 }} />
@@ -573,8 +580,11 @@ export default function DrrReportPage() {
                     </div>
                   </div>
 
-                  {/* Таблица справа */}
-                  <div style={{ flex: 1, minWidth: 300, overflowX: 'auto' }}>
+                  {/* Таблица справа - 60% */}
+                  <div style={{ flex: '0 0 60%', minWidth: 300, overflowX: 'auto' }}>
+                    <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 16, fontSize: 18 }}>
+                      Топы дефектов {shopTab}
+                    </h3>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                       <thead>
                         <tr style={{ backgroundColor: '#F9FAFB' }}>
@@ -587,7 +597,7 @@ export default function DrrReportPage() {
                       <tbody>
                         {shopData.data.map((row, idx) => (
                           <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                            <td style={{ ...tdStyle, textAlign: 'left', paddingLeft: 12 }}>{row.name}</td>
+                            <td style={{ ...tdStyle, textAlign: 'left', paddingLeft: 12, whiteSpace: 'normal', wordBreak: 'break-word' }}>{row.name}</td>
                             {shopData.weeks.map(week => (
                               <td key={week} style={{ ...tdStyle, textAlign: 'center', fontWeight: 600 }}>
                                 {row[week] || ''}
