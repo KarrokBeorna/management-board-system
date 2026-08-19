@@ -14,6 +14,7 @@ import DailyDashboardPage from './DailyDashboardPage';
 import WarrantyPage from './WarrantyPage';
 import TLMapPage from './TLMapPage';
 import HoldsSgpPage from './HoldsSgpPage';
+import favicon from './assets/weblog.png';
 
 export default function App() {
   return (
