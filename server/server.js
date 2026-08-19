@@ -3331,6 +3331,37 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
   }
 });
 
+// Получение VIN для конкретного холда на конкретную дату
+app.get('/api/holds-sgp-retrospective-vins', async (req, res) => {
+  try {
+    const { model, issue_desc, date } = req.query;
+    if (!model || !issue_desc || !date) {
+      return res.status(400).json({ error: 'model, issue_desc, date обязательны' });
+    }
+    
+    // Конец указанного дня
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+    
+    const sql = `
+      SELECT DISTINCT qid.vin
+      FROM higoplat_fusion_les.tv_quality_issue_detail qid
+      WHERE qid.is_deleted = 0
+        AND qid.model = ?
+        AND qid.issue_desc = ?
+        AND qid.gmt_create <= ?
+        AND (qid.clear_time > ? OR qid.clear_time IS NULL)
+      ORDER BY qid.vin
+    `;
+    
+    const [rows] = await lesPool.query(sql, [model, issue_desc, endOfDay, endOfDay]);
+    res.json(rows.map(r => r.vin));
+  } catch (err) {
+    console.error('Ошибка получения VIN для ретроспективы:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Справочник дефектов по цехам
 app.get('/api/part-defect-shop-mapping', async (req, res) => {
   try {

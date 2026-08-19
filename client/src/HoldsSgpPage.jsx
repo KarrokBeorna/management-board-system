@@ -237,6 +237,12 @@ export default function HoldsSgpPage() {
   const [showRetroModelFilter, setShowRetroModelFilter] = useState(false);
   const [selectedRetroModels, setSelectedRetroModels] = useState([]);
   const [retroDates, setRetroDates] = useState([]);
+  
+  // Модальное окно для VIN
+  const [showVinModal, setShowVinModal] = useState(false);
+  const [vinModalTitle, setVinModalTitle] = useState('');
+  const [vinList, setVinList] = useState([]);
+  const [vinLoading, setVinLoading] = useState(false);
 
   const allModels = useMemo(() => {
     const models = [...new Set(rawData.map(d => d.model))].filter(Boolean);
@@ -314,6 +320,73 @@ export default function HoldsSgpPage() {
       loadRetrospective();
     }
   }, [activeTab]);
+
+  // Функция для получения VIN по клику на цифру
+  const handleVinClick = async (model, issueDesc, date) => {
+    setVinLoading(true);
+    setShowVinModal(true);
+    setVinModalTitle(`${model} - ${issueDesc} (${formatShortDate(date)})`);
+    
+    try {
+      const params = new URLSearchParams({
+        model,
+        issue_desc: issueDesc,
+        date,
+      });
+      
+      const res = await fetch(`${API_BASE}/api/holds-sgp-retrospective-vins?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки VIN');
+      const vins = await res.json();
+      setVinList(vins);
+    } catch (err) {
+      console.error('Ошибка загрузки VIN:', err);
+      setVinList([]);
+    } finally {
+      setVinLoading(false);
+    }
+  };
+
+  // Функция для экспорта ретроспективы
+  const handleExportRetrospective = () => {
+    if (!retroData.length || !retroDates.length) return;
+    
+    const exportData = [];
+    
+    // Добавляем строку с итогами
+    const totalRow = { 'Модель': 'Общий итог', 'Описание': '' };
+    retroDates.forEach(date => {
+      const daySum = retroData.reduce((sum, row) => sum + (row[date] || 0), 0);
+      totalRow[formatShortDate(date)] = daySum || '';
+    });
+    exportData.push(totalRow);
+    
+    // Добавляем данные
+    retroData.forEach(row => {
+      const dataRow = {
+        'Модель': row.model,
+        'Описание': row.issue_desc,
+      };
+      retroDates.forEach(date => {
+        dataRow[formatShortDate(date)] = row[date] || '';
+      });
+      exportData.push(dataRow);
+    });
+    
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Ретроспектива холдов');
+    
+    // Настройка ширины колонок
+    ws['!cols'] = [
+      { wch: 20 },
+      { wch: 60 },
+      ...retroDates.map(() => ({ wch: 8 })),
+    ];
+    
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    XLSX.writeFile(wb, `Ретроспектива_холдов_${dateStr}.xlsx`);
+  };
 
   const filteredData = useMemo(() => {
     const filtered = selectedModels.length === 0 
@@ -591,7 +664,10 @@ export default function HoldsSgpPage() {
               <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1F2937', margin: 0 }}>
                 📈 Ретроспектива холдов (14 дней)
               </h2>
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button style={exportButtonStyle} onClick={handleExportRetrospective}>
+                  📥 Экспорт таблицы
+                </button>
                 <button 
                   style={{
                     ...buttonStyle,
@@ -652,15 +728,26 @@ export default function HoldsSgpPage() {
                         {retroDates.map(date => {
                           const val = row[date];
                           return (
-                            <td key={date} style={{
-                              ...tdStyle,
-                              textAlign: 'center',
-                              fontWeight: 700,
-                              fontSize: 10,
-                              padding: '6px 2px',
-                              backgroundColor: val > 0 ? '#FEF3C7' : (idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'),
-                              color: val > 0 ? '#92400E' : '#D1D5DB',
-                            }}>
+                            <td 
+                              key={date} 
+                              style={{
+                                ...tdStyle,
+                                textAlign: 'center',
+                                fontWeight: 700,
+                                fontSize: 10,
+                                padding: '6px 2px',
+                                backgroundColor: val > 0 ? '#FEF3C7' : (idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'),
+                                color: val > 0 ? '#92400E' : '#D1D5DB',
+                                cursor: val > 0 ? 'pointer' : 'default',
+                                transition: 'all 0.2s',
+                              }}
+                              onClick={() => {
+                                if (val > 0) {
+                                  handleVinClick(row.model, row.issue_desc, date);
+                                }
+                              }}
+                              title={val > 0 ? 'Нажмите для просмотра VIN' : ''}
+                            >
                               {val || ''}
                             </td>
                           );
@@ -693,6 +780,84 @@ export default function HoldsSgpPage() {
             )}
           </div>
         </>
+      )}
+
+      {/* Модальное окно с VIN */}
+      {showVinModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: '#FFFFFF',
+            borderRadius: 16,
+            padding: 24,
+            maxWidth: 600,
+            width: '90%',
+            maxHeight: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1F2937' }}>
+                VIN номера
+              </h3>
+              <button 
+                onClick={() => setShowVinModal(false)}
+                style={{
+                  border: 'none',
+                  background: 'none',
+                  fontSize: 24,
+                  cursor: 'pointer',
+                  color: '#6B7280',
+                  padding: '0 4px',
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ fontSize: 14, color: '#4B5563', marginBottom: 16, wordBreak: 'break-word' }}>
+              {vinModalTitle}
+            </div>
+            {vinLoading ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+                Загрузка VIN...
+              </div>
+            ) : vinList.length > 0 ? (
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...thStyle, textAlign: 'center' }}>№</th>
+                      <th style={{ ...thStyle, textAlign: 'center' }}>VIN</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vinList.map((vin, idx) => (
+                      <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                        <td style={{ ...tdStyle, textAlign: 'center', width: 50 }}>{idx + 1}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, letterSpacing: '0.5px' }}>{vin}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+                Нет данных
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
