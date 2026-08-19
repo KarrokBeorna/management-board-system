@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   ReferenceLine, Label, ResponsiveContainer, Cell,
-  PieChart, Pie, Tooltip, LabelList, Legend
+  PieChart, Pie, Tooltip, LabelList
 } from 'recharts';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -539,9 +539,9 @@ export default function DrrReportPage() {
               {shopLoading ? (
                 <p style={{ textAlign: 'center', padding: 40 }}>Загрузка...</p>
               ) : shopData && shopData.data.length > 0 ? (
-                <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
                   {/* Круговая диаграмма слева - 40% */}
-                  <div style={{ flex: '0 0 40%', minWidth: 280 }}>
+                  <div style={{ flex: '0 0 40%', maxWidth: '40%' }}>
                     <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 16, fontSize: 18 }}>
                       Доля дефектов {shopTab}
                     </h3>
@@ -552,28 +552,30 @@ export default function DrrReportPage() {
                           dataKey="value"
                           nameKey="name"
                           cx="50%"
-                          cy="50%"
-                          outerRadius={100}
-                          label={true}
-                          labelLine={true}
+                          cy="45%"
+                          outerRadius={90}
+                          label={{
+                            fill: '#1F2937',
+                            fontSize: 12,
+                            formatter: (value) => `${value}`
+                          }}
+                          labelLine={{
+                            stroke: '#6B7280',
+                            strokeWidth: 1
+                          }}
                         >
                           {pieData.map((_, index) => (
                             <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                           ))}
                         </Pie>
                         <Tooltip />
-                        <Legend 
-                          verticalAlign="bottom" 
-                          height={36}
-                          wrapperStyle={{ fontSize: '14px' }}
-                        />
                       </PieChart>
                     </ResponsiveContainer>
-                    {/* Легенда снизу, каждый элемент с новой строки */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
+                    {/* Легенда снизу, каждый элемент с новой строки, выравнивание по левому краю */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16, alignItems: 'flex-start' }}>
                       {pieData.map((d, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#1F2937' }}>
-                          <span style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: PIE_COLORS[i % PIE_COLORS.length], display: 'inline-block', flexShrink: 0 }} />
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 14, color: '#1F2937', textAlign: 'left' }}>
+                          <span style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: PIE_COLORS[i % PIE_COLORS.length], display: 'inline-block', flexShrink: 0, marginTop: 3 }} />
                           <span style={{ lineHeight: 1.3 }}>{d.name} ({d.value})</span>
                         </div>
                       ))}
@@ -581,7 +583,7 @@ export default function DrrReportPage() {
                   </div>
 
                   {/* Таблица справа - 60% */}
-                  <div style={{ flex: '0 0 60%', minWidth: 300, overflowX: 'auto' }}>
+                  <div style={{ flex: '0 0 60%', maxWidth: '60%', overflowX: 'auto' }}>
                     <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 16, fontSize: 18 }}>
                       Топы дефектов {shopTab}
                     </h3>
@@ -597,7 +599,7 @@ export default function DrrReportPage() {
                       <tbody>
                         {shopData.data.map((row, idx) => (
                           <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                            <td style={{ ...tdStyle, textAlign: 'left', paddingLeft: 12, whiteSpace: 'normal', wordBreak: 'break-word' }}>{row.name}</td>
+                            <td style={{ ...tdStyle, textAlign: 'left', paddingLeft: 12, whiteSpace: 'normal', wordBreak: 'break-word', minWidth: 150 }}>{row.name}</td>
                             {shopData.weeks.map(week => (
                               <td key={week} style={{ ...tdStyle, textAlign: 'center', fontWeight: 600 }}>
                                 {row[week] || ''}
