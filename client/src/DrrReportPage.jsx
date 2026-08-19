@@ -552,7 +552,7 @@ export default function DrrReportPage() {
                           dataKey="value"
                           nameKey="name"
                           cx="50%"
-                          cy="45%"
+                          cy="50%"
                           outerRadius={120}
                           label={{
                             fill: '#1F2937',
