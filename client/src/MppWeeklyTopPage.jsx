@@ -90,16 +90,23 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
         onClick={() => setIsOpen(!isOpen)}
         style={{
           ...inputStyle,
+          width: 120,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 8,
-          minWidth: 150,
+          gap: 4,
           cursor: 'pointer',
           textAlign: 'left',
+          padding: '8px 10px',
         }}
       >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
+        <span style={{
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          maxWidth: 80,
+          fontSize: 13,
+        }}>
           {displayText}
         </span>
         <span style={{ fontSize: 10, color: '#6B7280' }}>▼</span>
@@ -184,8 +191,16 @@ export default function MppWeeklyTopPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const checkpointList = selectedCheckpoints.length > 0 ? selectedCheckpoints : ['ALL'];
-      const modelList = selectedModels.length > 0 ? selectedModels : ['ALL'];
+      const allCheckpointsSelected = selectedCheckpoints.length === availableCheckpoints.length;
+      const allModelsSelected = selectedModels.length === availableModels.length;
+      
+      const checkpointList = (selectedCheckpoints.length === 0 || allCheckpointsSelected) 
+        ? ['ALL'] 
+        : selectedCheckpoints;
+      
+      const modelList = (selectedModels.length === 0 || allModelsSelected) 
+        ? ['ALL'] 
+        : selectedModels;
       
       const allResults = [];
       
@@ -348,8 +363,16 @@ export default function MppWeeklyTopPage() {
     setAnalyticsLoading(true);
     setAnalyticsError(null);
     try {
-      const checkpointList = selectedCheckpoints.length > 0 ? selectedCheckpoints : ['ALL'];
-      const modelList = selectedModels.length > 0 ? selectedModels : ['ALL'];
+      const allCheckpointsSelected = selectedCheckpoints.length === availableCheckpoints.length;
+      const allModelsSelected = selectedModels.length === availableModels.length;
+      
+      const checkpointList = (selectedCheckpoints.length === 0 || allCheckpointsSelected) 
+        ? ['ALL'] 
+        : selectedCheckpoints;
+      
+      const modelList = (selectedModels.length === 0 || allModelsSelected) 
+        ? ['ALL'] 
+        : selectedModels;
       
       let allData = [];
       let totalVinsSum = 0;
@@ -448,15 +471,15 @@ export default function MppWeeklyTopPage() {
       {activeTab === 'report' && (
         <div style={cardStyle}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
               Начало:
               <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
               Конец:
               <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
               Чекпоинты:
               <MultiSelect
                 options={['ALL', ...availableCheckpoints]}
@@ -465,7 +488,7 @@ export default function MppWeeklyTopPage() {
                 placeholder="Все"
               />
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
               Модели:
               <MultiSelect
                 options={['ALL', ...availableModels]}
@@ -474,12 +497,15 @@ export default function MppWeeklyTopPage() {
                 placeholder="Все"
               />
             </label>
-            <button onClick={loadData} disabled={loading} style={buttonStyle}>
-              {loading ? '⏳ Загрузка...' : '▶ Загрузить'}
-            </button>
-            <button onClick={exportFullReport} disabled={data.length === 0 || loading} style={{ ...buttonStyle, background: '#059669' }}>
-              📊 Экспорт
-            </button>
+            
+            <div style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
+              <button onClick={loadData} disabled={loading} style={buttonStyle}>
+                {loading ? '⏳ Загрузка...' : '▶ Загрузить'}
+              </button>
+              <button onClick={exportFullReport} disabled={data.length === 0 || loading} style={{ ...buttonStyle, background: '#059669' }}>
+                📊 Экспорт
+              </button>
+            </div>
           </div>
 
           {data.length > 0 && (
@@ -627,15 +653,15 @@ export default function MppWeeklyTopPage() {
           </h2>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
               Начало:
               <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
               Конец:
               <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
               Чекпоинты:
               <MultiSelect
                 options={['ALL', ...availableCheckpoints]}
@@ -644,7 +670,7 @@ export default function MppWeeklyTopPage() {
                 placeholder="Все"
               />
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
               Модели:
               <MultiSelect
                 options={['ALL', ...availableModels]}
@@ -653,9 +679,12 @@ export default function MppWeeklyTopPage() {
                 placeholder="Все"
               />
             </label>
-            <button onClick={loadAnalytics} disabled={analyticsLoading} style={buttonStyle}>
-              {analyticsLoading ? '⏳ Загрузка...' : '▶ Загрузить аналитику'}
-            </button>
+            
+            <div style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
+              <button onClick={loadAnalytics} disabled={analyticsLoading} style={buttonStyle}>
+                {analyticsLoading ? '⏳ Загрузка...' : '▶ Загрузить аналитику'}
+              </button>
+            </div>
           </div>
 
           {analyticsError && <p style={{ color: '#DC2626' }}>❌ {analyticsError}</p>}
