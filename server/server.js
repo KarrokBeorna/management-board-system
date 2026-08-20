@@ -2838,15 +2838,11 @@ app.post('/api/warranty/check-password', (req, res) => {
   }
 });
 
-// Загрузка Excel-данных с разбивкой на батчи
+// Загрузка Excel-данных
 app.post('/api/warranty/upload', express.json({ limit: '100mb' }), async (req, res) => {
   try {
     const { rows } = req.body;
     if (!rows || !rows.length) return res.status(400).json({ error: 'Нет данных' });
-
-    // Получаем следующий номер загрузки
-    const [batchRows] = await notesPool.query('SELECT MAX(batch_number) AS maxBatch FROM warranty_claims');
-    const nextBatch = (batchRows[0]?.maxBatch || 0) + 1;
 
     const normalizeKey = (str) => String(str).trim().toLowerCase().replace(/\s+/g, ' ');
     const getVal = (row, ...possibleNames) => {
@@ -2886,7 +2882,7 @@ app.post('/api/warranty/upload', express.json({ limit: '100mb' }), async (req, r
       return Math.round((new Date(d1) - new Date(d2)) / 86400000);
     };
 
-    // Формируем значения
+    // Формируем значения (без batch_number)
     const allValues = rows.map(row => {
       const vin_id = getVal(row, 'vin_id', 'VIN', 'vin', 'Vin ID') || '';
       const brand = getVal(row, 'brand', 'Brand', 'Марка') || '';
@@ -2918,8 +2914,7 @@ app.post('/api/warranty/upload', express.json({ limit: '100mb' }), async (req, r
         production_date, sold_date, claim_id, document_number,
         warranty_start_date, customer_complain_date, claims_qty,
         diagnostic_result, main_part, main_part_name, mis_0, mis_3,
-        qty_sell, delta, mis_0_count, mis_3_count, category, totalPaid,
-        nextBatch
+        qty_sell, delta, mis_0_count, mis_3_count, category, totalPaid
       ];
     });
 
@@ -2928,7 +2923,7 @@ app.post('/api/warranty/upload', express.json({ limit: '100mb' }), async (req, r
         (vin_id, sold_cars_qty, unique_vin_by_qr, brand, model, production_date, sold_date,
          claim_id, document_number, warranty_start_date, customer_complain_date, claims_qty,
          diagnostic_result, main_part, main_part_name, mis_0, mis_3, qty_sell, delta,
-         mis_0_count, mis_3_count, category, total_amount_paid_dealers_rur, batch_number)
+         mis_0_count, mis_3_count, category, total_amount_paid_dealers_rur)
       VALUES ?
     `;
 
@@ -2942,26 +2937,25 @@ app.post('/api/warranty/upload', express.json({ limit: '100mb' }), async (req, r
       insertedCount += batch.length;
     }
 
-    res.json({ success: true, inserted: insertedCount, batchNumber: nextBatch });
+    res.json({ success: true, inserted: insertedCount });
   } catch (err) {
     console.error('Ошибка загрузки warranty:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Получение списка загрузок (batch_number)
-app.get('/api/warranty/batches', async (req, res) => {
+// Получение списка загрузок (по uploaded_at)
+app.get('/api/warranty/upload-times', async (req, res) => {
   try {
     const [rows] = await notesPool.query(`
-      SELECT DISTINCT batch_number, COUNT(*) AS total_rows, MIN(uploaded_at) AS uploaded_at
+      SELECT DISTINCT uploaded_at
       FROM warranty_claims
-      WHERE batch_number IS NOT NULL
-      GROUP BY batch_number
-      ORDER BY batch_number DESC
+      WHERE uploaded_at IS NOT NULL
+      ORDER BY uploaded_at DESC
     `);
-    res.json(rows);
+    res.json(rows.map(r => r.uploaded_at));
   } catch (err) {
-    console.error('Ошибка получения batches:', err.message);
+    console.error('Ошибка получения upload times:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -2969,12 +2963,12 @@ app.get('/api/warranty/batches', async (req, res) => {
 // Получение загруженных записей
 app.get('/api/warranty/claims', async (req, res) => {
   try {
-    const { batchNumber } = req.query;
+    const { uploadedAt } = req.query;
     let sql = 'SELECT * FROM warranty_claims';
     const params = [];
-    if (batchNumber) {
-      sql += ' WHERE batch_number = ?';
-      params.push(batchNumber);
+    if (uploadedAt) {
+      sql += ' WHERE uploaded_at = ?';
+      params.push(uploadedAt);
     }
     sql += ' ORDER BY id DESC LIMIT 1000';
     const [rows] = await notesPool.query(sql, params);
@@ -2985,14 +2979,13 @@ app.get('/api/warranty/claims', async (req, res) => {
   }
 });
 
-// Аналитика по batch_number
+// Аналитика Total (Prod Related)
 app.get('/api/warranty/analytics', async (req, res) => {
   try {
-    const { batchNumber } = req.query;
+    const { uploadedAt } = req.query;
     let sql = `
       SELECT 
         DATE_FORMAT(production_date, '%Y-%m') AS month,
-        model,
         SUM(qty_sell) AS qty_sell,
         SUM(mis_0_count) AS mis_0,
         SUM(mis_3_count) AS mis_3
@@ -3000,11 +2993,11 @@ app.get('/api/warranty/analytics', async (req, res) => {
       WHERE production_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
     `;
     const params = [];
-    if (batchNumber) {
-      sql += ' AND batch_number = ?';
-      params.push(batchNumber);
+    if (uploadedAt) {
+      sql += ' AND uploaded_at = ?';
+      params.push(uploadedAt);
     }
-    sql += ' GROUP BY month, model ORDER BY month, model';
+    sql += ' GROUP BY month ORDER BY month';
     const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
@@ -3016,7 +3009,7 @@ app.get('/api/warranty/analytics', async (req, res) => {
 // Аналитика Model Based (Prod Related)
 app.get('/api/warranty/analytics-by-model', async (req, res) => {
   try {
-    const { batchNumber } = req.query;
+    const { uploadedAt } = req.query;
     let sql = `
       SELECT 
         DATE_FORMAT(production_date, '%Y-%m') AS month,
@@ -3027,9 +3020,9 @@ app.get('/api/warranty/analytics-by-model', async (req, res) => {
       WHERE production_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
     `;
     const params = [];
-    if (batchNumber) {
-      sql += ' AND batch_number = ?';
-      params.push(batchNumber);
+    if (uploadedAt) {
+      sql += ' AND uploaded_at = ?';
+      params.push(uploadedAt);
     }
     sql += ' GROUP BY month, model ORDER BY month, model';
     const [rows] = await notesPool.query(sql, params);
@@ -3043,11 +3036,10 @@ app.get('/api/warranty/analytics-by-model', async (req, res) => {
 // Аналитика 0 MIS/3MIS by sales date
 app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
   try {
-    const { batchNumber } = req.query;
+    const { uploadedAt } = req.query;
     let sql = `
       SELECT 
         DATE_FORMAT(warranty_start_date, '%Y-%m') AS month,
-        model,
         SUM(qty_sell) AS qty_sell,
         SUM(mis_0_count) AS mis_0_count,
         SUM(mis_3_count) AS mis_3_count
@@ -3055,11 +3047,11 @@ app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
       WHERE warranty_start_date IS NOT NULL
     `;
     const params = [];
-    if (batchNumber) {
-      sql += ' AND batch_number = ?';
-      params.push(batchNumber);
+    if (uploadedAt) {
+      sql += ' AND uploaded_at = ?';
+      params.push(uploadedAt);
     }
-    sql += ' GROUP BY month, model ORDER BY month, model';
+    sql += ' GROUP BY month ORDER BY month';
     const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
@@ -3071,7 +3063,7 @@ app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
 // Топ категорий
 app.get('/api/warranty/categories-summary', async (req, res) => {
   try {
-    const { model, batchNumber } = req.query;
+    const { model, uploadedAt } = req.query;
     let sql = `
       SELECT model, category, SUM(claims_qty) AS total_claims
       FROM warranty_claims
@@ -3082,9 +3074,9 @@ app.get('/api/warranty/categories-summary', async (req, res) => {
       sql += ' AND model = ?';
       params.push(model);
     }
-    if (batchNumber) {
-      sql += ' AND batch_number = ?';
-      params.push(batchNumber);
+    if (uploadedAt) {
+      sql += ' AND uploaded_at = ?';
+      params.push(uploadedAt);
     }
     sql += ' GROUP BY model, category ORDER BY model, total_claims DESC';
     const [rows] = await notesPool.query(sql, params);
