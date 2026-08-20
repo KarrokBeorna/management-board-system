@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -48,11 +48,6 @@ const inputStyle = {
   background: '#F9FAFB',
 };
 
-const timeInputStyle = {
-  ...inputStyle,
-  width: '90px',
-};
-
 const buttonStyle = {
   padding: '8px 20px',
   borderRadius: 8,
@@ -89,182 +84,43 @@ const cpNames = [
   { value: 'Key_Uloc_Type_CP8', label: 'CP8' },
 ];
 
-// ====== Компонент TimePointsTable ======
-const TimePointsTable = ({ vehicles, expandedVin, onToggle }) => {
-  const [componentsCache, setComponentsCache] = useState({});
-  const [loadingComponents, setLoadingComponents] = useState(false);
+const filterButtonStyle = (active) => ({
+  padding: '6px 12px',
+  borderRadius: 6,
+  border: active ? '2px solid #3B82F6' : '1px solid #D1D5DB',
+  fontWeight: 600,
+  fontSize: 12,
+  background: active ? '#EFF6FF' : '#FFFFFF',
+  color: active ? '#1D4ED8' : '#6B7280',
+  cursor: 'pointer',
+  transition: 'all 0.2s',
+  whiteSpace: 'nowrap',
+});
 
-  const formatDateTime = (dt) => {
-    if (!dt) return '-';
-    const d = new Date(dt);
-    if (isNaN(d.getTime())) return dt;
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yyyy = d.getFullYear();
-    const hh = String(d.getHours()).padStart(2, '0');
-    const min = String(d.getMinutes()).padStart(2, '0');
-    const ss = String(d.getSeconds()).padStart(2, '0');
-    return `${dd}.${mm}.${yyyy} ${hh}:${min}:${ss}`;
-  };
+const filterDropdownStyle = {
+  position: 'absolute',
+  top: '100%',
+  left: 0,
+  zIndex: 1000,
+  backgroundColor: '#FFFFFF',
+  border: '1px solid #E5E7EB',
+  borderRadius: 8,
+  boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
+  maxHeight: 250,
+  overflowY: 'auto',
+  minWidth: 200,
+  padding: 8,
+};
 
-  const loadComponents = async (vin, materialCode) => {
-    if (componentsCache[vin]) return;
-    setLoadingComponents(true);
-    try {
-      const maskedCode = materialCode ? materialCode.substring(0, 7) + '**' + materialCode.substring(9) : '';
-      const res = await fetch(`${API_BASE}/api/time-points/${vin}/components?materialCode=${encodeURIComponent(maskedCode)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setComponentsCache(prev => ({ ...prev, [vin]: data }));
-      }
-    } catch (err) {
-      console.error('Ошибка загрузки компонентов:', err);
-    } finally {
-      setLoadingComponents(false);
-    }
-  };
-
-  useEffect(() => {
-    if (expandedVin && vehicles.length > 0) {
-      const vehicle = vehicles.find(v => v.vin === expandedVin);
-      if (vehicle) {
-        loadComponents(vehicle.vin, vehicle.material_code);
-      }
-    }
-  }, [expandedVin, vehicles]);
-
-  const columns = [
-    { key: 'vin', label: 'VIN' },
-    { key: 'material_code', label: 'Material Code' },
-    { key: 'sequence_number', label: 'Sequence' },
-    { key: 'batch_num', label: 'Batch Number' },
-    { key: 'kd_material_no', label: 'KD' },
-    { key: 'model', label: 'Model' },
-    { key: 'material_desc', label: 'Комплектация' },
-    { key: 'colour', label: 'Цвет' },
-    { key: 'location', label: 'Расположение' },
-    { key: 'CP5', label: 'CP5', isTime: true },
-    { key: 'CP6', label: 'CP6', isTime: true },
-    { key: 'TRIMIN', label: 'TRIMIN', isTime: true },
-    { key: 'CP7', label: 'CP7', isTime: true },
-    { key: 'CP72', label: 'CP72', isTime: true },
-    { key: 'TLWA', label: 'TLWA', isTime: true },
-    { key: 'TLRT', label: 'TLRT', isTime: true },
-    { key: 'TLADAS', label: 'TLADAS', isTime: true },
-    { key: 'TLTT', label: 'TLTT', isTime: true },
-    { key: 'CPFINAL', label: 'CPFINAL', isTime: true },
-    { key: 'CP8', label: 'CP8', isTime: true },
-    { key: 'in_storage_time', label: 'Inbound', isTime: true },
-    { key: 'out_storage_time', label: 'Outbound', isTime: true },
-  ];
-
-  return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, minWidth: 2800 }}>
-      <thead>
-        <tr style={{ backgroundColor: '#F9FAFB' }}>
-          {columns.map(col => (
-            <th key={col.key} style={{ 
-              padding: '10px 8px', 
-              textAlign: 'left', 
-              fontWeight: 700, 
-              color: '#374151', 
-              borderBottom: '2px solid #E5E7EB',
-              whiteSpace: 'nowrap',
-              position: 'sticky',
-              top: 0,
-              background: '#F9FAFB',
-              zIndex: 10,
-              fontSize: 11,
-            }}>
-              {col.label}
-            </th>
-          ))}
-          <th style={{ padding: '10px 8px', textAlign: 'center', fontWeight: 700, color: '#374151', borderBottom: '2px solid #E5E7EB', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: '#F9FAFB', zIndex: 10, fontSize: 11 }}>
-            Компоненты
-          </th>
-          <th style={{ padding: '10px 8px', textAlign: 'center', fontWeight: 700, color: '#374151', borderBottom: '2px solid #E5E7EB', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: '#F9FAFB', zIndex: 10, fontSize: 11 }}>
-            Замещения
-          </th>
-          <th style={{ width: 30, position: 'sticky', top: 0, background: '#F9FAFB', zIndex: 10 }}></th>
-        </tr>
-      </thead>
-      <tbody>
-        {vehicles.map((vehicle, idx) => {
-          const isExpanded = expandedVin === vehicle.vin;
-          return (
-            <React.Fragment key={vehicle.vin}>
-              <tr 
-                style={{ 
-                  backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
-                  cursor: 'pointer',
-                }}
-                onClick={() => onToggle(vehicle.vin)}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'}
-              >
-                {columns.map(col => (
-                  <td key={col.key} style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: 10, whiteSpace: 'nowrap' }}>
-                    {col.isTime ? formatDateTime(vehicle[col.key]) : (vehicle[col.key] || '-')}
-                  </td>
-                ))}
-                <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: 11, textAlign: 'center', whiteSpace: 'nowrap' }}>
-                  {vehicle.count_scanned_components || 0}/{vehicle.count_components || 0}
-                </td>
-                <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: 11, textAlign: 'center' }}>
-                  {vehicle.replaced_components || '-'}
-                </td>
-                <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', textAlign: 'center' }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ 
-                    transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', 
-                    transition: 'transform 0.3s',
-                    display: 'inline-block',
-                  }}>
-                    <path d="M8 10L12 14L16 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </td>
-              </tr>
-              {isExpanded && (
-                <tr>
-                  <td colSpan={columns.length + 3} style={{ padding: '16px', backgroundColor: '#F9FAFB' }}>
-                    {loadingComponents ? (
-                      <div style={{ textAlign: 'center', padding: 20, color: '#6B7280' }}>Загрузка компонентов...</div>
-                    ) : componentsCache[vehicle.vin] && componentsCache[vehicle.vin].length > 0 ? (
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                        <thead>
-                          <tr style={{ backgroundColor: '#E5E7EB' }}>
-                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '1px solid #D1D5DB', fontWeight: 700 }}>Компонент</th>
-                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '1px solid #D1D5DB', fontWeight: 700 }}>Описание</th>
-                            <th style={{ padding: '8px', textAlign: 'center', borderBottom: '1px solid #D1D5DB', fontWeight: 700 }}>Статус</th>
-                            <th style={{ padding: '8px', textAlign: 'center', borderBottom: '1px solid #D1D5DB', fontWeight: 700 }}>Время сканирования</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {componentsCache[vehicle.vin].map((comp, i) => (
-                            <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                              <td style={{ padding: '8px', borderBottom: '1px solid #E5E7EB', fontSize: 11 }}>{comp.material_code || '-'}</td>
-                              <td style={{ padding: '8px', borderBottom: '1px solid #E5E7EB', fontSize: 11 }}>{comp.material_desc || '-'}</td>
-                              <td style={{ padding: '8px', borderBottom: '1px solid #E5E7EB', textAlign: 'center', fontSize: 11 }}>
-                                {comp.scanned ? '✅' : '❌'}
-                              </td>
-                              <td style={{ padding: '8px', borderBottom: '1px solid #E5E7EB', textAlign: 'center', fontSize: 11 }}>
-                                {comp.scan_time ? formatDateTime(comp.scan_time) : '-'}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div style={{ textAlign: 'center', padding: 20, color: '#6B7280' }}>Нет данных о компонентах</div>
-                    )}
-                  </td>
-                </tr>
-              )}
-            </React.Fragment>
-          );
-        })}
-      </tbody>
-    </table>
-  );
+const filterOptionStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '6px 10px',
+  cursor: 'pointer',
+  borderRadius: 4,
+  fontSize: 13,
+  transition: 'background 0.15s',
 };
 
 export default function SgpAuditPage() {
@@ -277,8 +133,13 @@ export default function SgpAuditPage() {
   const [timePointsLoading, setTimePointsLoading] = useState(false);
   const [timePointsError, setTimePointsError] = useState(null);
   const [timePointsPage, setTimePointsPage] = useState(0);
-  const [expandedVin, setExpandedVin] = useState(null);
   const timePointsPageSize = 50;
+  
+  // Фильтры Time Points
+  const [tpVinSearch, setTpVinSearch] = useState('');
+  const [tpFilters, setTpFilters] = useState({});
+  const [activeFilterColumn, setActiveFilterColumn] = useState(null);
+  const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
 
   // ====== Общие состояния VIN-поиска ======
   const [vinSearch, setVinSearch] = useState('');
@@ -309,12 +170,37 @@ export default function SgpAuditPage() {
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
+  // ====== Форматирование даты ======
+  const formatDateTime = (dt) => {
+    if (!dt) return '-';
+    const d = new Date(dt);
+    if (isNaN(d.getTime())) return dt;
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `${dd}.${mm}.${yyyy} ${hh}:${min}:${ss}`;
+  };
+
   // ====== Загрузка Time Points ======
-  const loadTimePoints = async () => {
+  const loadTimePoints = async (filters = {}) => {
     setTimePointsLoading(true);
     setTimePointsError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/time-points`);
+      const params = new URLSearchParams();
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined && value !== '' && !(Array.isArray(value) && value.length === 0)) {
+          if (Array.isArray(value)) {
+            params.append(key, value.join(','));
+          } else {
+            params.append(key, String(value));
+          }
+        }
+      });
+      
+      const res = await fetch(`${API_BASE}/api/time-points?${params.toString()}`);
       if (!res.ok) {
         const errorText = await res.text();
         console.error('Server error:', errorText);
@@ -334,15 +220,97 @@ export default function SgpAuditPage() {
 
   useEffect(() => {
     if (activeTab === 'timepoints') {
-      loadTimePoints();
+      loadTimePoints(tpFilters);
     }
   }, [activeTab]);
 
-  const handleTimePointsToggle = (vin) => {
-    setExpandedVin(prev => prev === vin ? null : vin);
+  // ====== Получение уникальных значений для фильтров ======
+  const getUniqueValues = (column) => {
+    const values = [...new Set(timePointsData.map(d => d[column]).filter(v => v !== null && v !== undefined && v !== ''))];
+    return values.sort();
   };
 
-  // ====== VIN-поиск ======
+  // ====== Обработка фильтров ======
+  const handleFilterHeaderClick = (column, event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setFilterDropdownPos({
+      top: rect.bottom + 4,
+      left: rect.left,
+    });
+    
+    if (activeFilterColumn === column) {
+      setActiveFilterColumn(null);
+    } else {
+      setActiveFilterColumn(column);
+    }
+  };
+
+  const handleFilterToggle = (column, value) => {
+    setTpFilters(prev => {
+      const currentValues = prev[column] || [];
+      let newValues;
+      
+      if (currentValues.includes(value)) {
+        newValues = currentValues.filter(v => v !== value);
+      } else {
+        newValues = [...currentValues, value];
+      }
+      
+      return { ...prev, [column]: newValues };
+    });
+  };
+
+  const handleFilterClear = (column) => {
+    setTpFilters(prev => {
+      const newPrev = { ...prev };
+      delete newPrev[column];
+      return newPrev;
+    });
+    setActiveFilterColumn(null);
+  };
+
+  // ====== Применение фильтров и поиск ======
+  const handleTpSearch = () => {
+    const filters = { ...tpFilters };
+    if (tpVinSearch.trim()) {
+      filters.vin = tpVinSearch.trim();
+    }
+    loadTimePoints(filters);
+  };
+
+  const handleTpClear = () => {
+    setTpFilters({});
+    setTpVinSearch('');
+    loadTimePoints({});
+  };
+
+  // ====== Колонки таблицы ======
+  const timePointColumns = [
+    { key: 'vin', label: 'VIN', filterable: true },
+    { key: 'material_code', label: 'Material Code', filterable: true },
+    { key: 'sequence_number', label: 'Sequence', filterable: true },
+    { key: 'batch_num', label: 'Batch Number', filterable: true },
+    { key: 'kd_material_no', label: 'KD', filterable: true },
+    { key: 'model', label: 'Model', filterable: true },
+    { key: 'material_desc', label: 'Комплектация', filterable: true },
+    { key: 'colour', label: 'Цвет', filterable: true },
+    { key: 'location', label: 'Расположение', filterable: true },
+    { key: 'CP5', label: 'CP5', isTime: true, filterableTime: true },
+    { key: 'CP6', label: 'CP6', isTime: true, filterableTime: true },
+    { key: 'TRIMIN', label: 'TRIMIN', isTime: true, filterableTime: true },
+    { key: 'CP7', label: 'CP7', isTime: true, filterableTime: true },
+    { key: 'CP72', label: 'CP72', isTime: true, filterableTime: true },
+    { key: 'TLWA', label: 'TLWA', isTime: true, filterableTime: true },
+    { key: 'TLRT', label: 'TLRT', isTime: true, filterableTime: true },
+    { key: 'TLADAS', label: 'TLADAS', isTime: true, filterableTime: true },
+    { key: 'TLTT', label: 'TLTT', isTime: true, filterableTime: true },
+    { key: 'CPFINAL', label: 'CPFINAL', isTime: true, filterableTime: true },
+    { key: 'CP8', label: 'CP8', isTime: true, filterableTime: true },
+    { key: 'in_storage_time', label: 'Inbound', isTime: true, filterableTime: true },
+    { key: 'out_storage_time', label: 'Outbound', isTime: true, filterableTime: true },
+  ];
+
+  // ====== VIN-поиск для checkpoints ======
   const handleVinSearch = () => {
     if (!vinSearch.trim()) {
       setIsVinMode(false);
@@ -588,7 +556,168 @@ export default function SgpAuditPage() {
         </button>
       </div>
 
-      {/* Блок VIN-поиска (только для вкладки checkpoints) */}
+      {/* ========== Вкладка "Время прохождения точек" ========== */}
+      {activeTab === 'timepoints' && (
+        <div style={cardStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', margin: 0 }}>
+              ⏱️ Время прохождения точек
+            </h2>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={{ ...buttonStyle, background: '#059669' }} onClick={() => exportExcel(timePointsData, 'time_points')}>
+                📊 Excel
+              </button>
+              <button style={buttonStyle} onClick={handleTpSearch}>
+                🔍 Поиск
+              </button>
+              <button style={{ ...buttonStyle, background: '#9CA3AF' }} onClick={handleTpClear}>
+                ✕ Очистить
+              </button>
+            </div>
+          </div>
+
+          {/* Фильтры */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 20, alignItems: 'center' }}>
+            {/* VIN поиск */}
+            <input
+              type="text"
+              value={tpVinSearch}
+              onChange={(e) => setTpVinSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleTpSearch(); }}
+              placeholder="VIN..."
+              style={{ ...inputStyle, width: 180 }}
+            />
+          </div>
+
+          {/* Таблица */}
+          {timePointsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка данных...</div>
+          ) : timePointsError ? (
+            <div style={{ textAlign: 'center', padding: 40, color: '#DC2626' }}>❌ {timePointsError}</div>
+          ) : timePointsData.length > 0 ? (
+            <>
+              <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 400px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, minWidth: 2800 }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#F9FAFB' }}>
+                      {timePointColumns.map(col => (
+                        <th 
+                          key={col.key} 
+                          style={{ 
+                            padding: '10px 8px', 
+                            textAlign: 'left', 
+                            fontWeight: 700, 
+                            color: '#374151', 
+                            borderBottom: '2px solid #E5E7EB',
+                            whiteSpace: 'nowrap',
+                            position: 'sticky',
+                            top: 0,
+                            background: tpFilters[col.key]?.length > 0 ? '#DBEAFE' : '#F9FAFB',
+                            zIndex: 10,
+                            fontSize: 11,
+                            cursor: col.filterable ? 'pointer' : 'default',
+                          }}
+                          onClick={col.filterable ? (e) => handleFilterHeaderClick(col.key, e) : undefined}
+                        >
+                          {col.label}
+                          {tpFilters[col.key]?.length > 0 && ` (${tpFilters[col.key].length})`}
+                          {col.filterable && ' ▼'}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {timePointsData.slice(timePointsPage * timePointsPageSize, (timePointsPage + 1) * timePointsPageSize).map((vehicle, idx) => (
+                      <tr 
+                        key={vehicle.vin}
+                        style={{ 
+                          backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
+                        onMouseLeave={e => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'}
+                      >
+                        {timePointColumns.map(col => (
+                          <td key={col.key} style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: 10, whiteSpace: 'nowrap' }}>
+                            {col.isTime ? formatDateTime(vehicle[col.key]) : (vehicle[col.key] || '-')}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
+                <span style={{ fontSize: 14, color: '#6B7280' }}>Всего записей: {timePointsData.length}</span>
+                {Math.ceil(timePointsData.length / timePointsPageSize) > 1 && (
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                    <button 
+                      onClick={() => setTimePointsPage(p => Math.max(0, p - 1))} 
+                      disabled={timePointsPage === 0} 
+                      style={{ ...buttonStyle, background: '#9CA3AF' }}
+                    >
+                      ← Назад
+                    </button>
+                    <span style={{ fontWeight: 500 }}>{timePointsPage + 1} / {Math.ceil(timePointsData.length / timePointsPageSize)}</span>
+                    <button 
+                      onClick={() => setTimePointsPage(p => Math.min(Math.ceil(timePointsData.length / timePointsPageSize) - 1, p + 1))} 
+                      disabled={timePointsPage === Math.ceil(timePointsData.length / timePointsPageSize) - 1} 
+                      style={{ ...buttonStyle, background: '#9CA3AF' }}
+                    >
+                      Вперёд →
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+              Нет данных. Нажмите "Поиск" для загрузки.
+            </div>
+          )}
+
+          {/* Выпадающий фильтр */}
+          {activeFilterColumn && timePointsData.length > 0 && (
+            <div style={{
+              ...filterDropdownStyle,
+              top: filterDropdownPos.top,
+              left: filterDropdownPos.left,
+            }}>
+              <div 
+                style={{ ...filterOptionStyle, fontWeight: 700, borderBottom: '1px solid #E5E7EB', marginBottom: 4 }}
+                onClick={() => handleFilterClear(activeFilterColumn)}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+              >
+                ✕ Очистить фильтр
+              </div>
+              {getUniqueValues(activeFilterColumn).map(val => {
+                const isChecked = tpFilters[activeFilterColumn]?.includes(val);
+                return (
+                  <div 
+                    key={val}
+                    style={{
+                      ...filterOptionStyle,
+                      background: isChecked ? '#EFF6FF' : 'transparent',
+                    }}
+                    onClick={() => handleFilterToggle(activeFilterColumn, val)}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = isChecked ? '#EFF6FF' : 'transparent'}
+                  >
+                    <input 
+                      type="checkbox" 
+                      checked={isChecked}
+                      readOnly
+                    />
+                    {val}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Блок VIN-поиска для checkpoints */}
       {activeTab === 'checkpoints' && (
         <div style={{ marginBottom: 24, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', border: '1px solid #F0F0F5' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -626,67 +755,6 @@ export default function SgpAuditPage() {
         </div>
       )}
 
-      {/* ========== Вкладка "Время прохождения точек" ========== */}
-      {activeTab === 'timepoints' && (
-        <div style={cardStyle}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', margin: 0 }}>
-              ⏱️ Время прохождения точек
-            </h2>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button style={{ ...buttonStyle, background: '#059669' }} onClick={() => exportExcel(timePointsData, 'time_points')}>
-                📊 Excel
-              </button>
-              <button style={buttonStyle} onClick={loadTimePoints}>
-                🔄 Обновить
-              </button>
-            </div>
-          </div>
-
-          {timePointsLoading ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка данных...</div>
-          ) : timePointsError ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#DC2626' }}>❌ {timePointsError}</div>
-          ) : timePointsData.length > 0 ? (
-            <>
-              <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 350px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
-                <TimePointsTable 
-                  vehicles={timePointsData.slice(timePointsPage * timePointsPageSize, (timePointsPage + 1) * timePointsPageSize)}
-                  expandedVin={expandedVin}
-                  onToggle={handleTimePointsToggle}
-                />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
-                <span style={{ fontSize: 14, color: '#6B7280' }}>Всего записей: {timePointsData.length}</span>
-                {Math.ceil(timePointsData.length / timePointsPageSize) > 1 && (
-                  <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                    <button 
-                      onClick={() => setTimePointsPage(p => Math.max(0, p - 1))} 
-                      disabled={timePointsPage === 0} 
-                      style={{ ...buttonStyle, background: '#9CA3AF' }}
-                    >
-                      ← Назад
-                    </button>
-                    <span style={{ fontWeight: 500 }}>{timePointsPage + 1} / {Math.ceil(timePointsData.length / timePointsPageSize)}</span>
-                    <button 
-                      onClick={() => setTimePointsPage(p => Math.min(Math.ceil(timePointsData.length / timePointsPageSize) - 1, p + 1))} 
-                      disabled={timePointsPage === Math.ceil(timePointsData.length / timePointsPageSize) - 1} 
-                      style={{ ...buttonStyle, background: '#9CA3AF' }}
-                    >
-                      Вперёд →
-                    </button>
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
-              Нет данных. Нажмите "Обновить" для загрузки.
-            </div>
-          )}
-        </div>
-      )}
-
       {/* ========== Вкладка "Аудит чекпоинтов (хранение)" ========== */}
       {activeTab === 'checkpoints' && (
         <div style={cardStyle}>
@@ -699,12 +767,12 @@ export default function SgpAuditPage() {
             <label style={labelStyle}>
               <span style={{ whiteSpace: 'nowrap' }}>Начало периода</span>
               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} disabled={isFilterDisabled} />
-              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} style={timeInputStyle} disabled={isFilterDisabled} />
+              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} style={{ ...inputStyle, width: '90px' }} disabled={isFilterDisabled} />
             </label>
             <label style={labelStyle}>
               <span style={{ whiteSpace: 'nowrap' }}>Конец периода</span>
               <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={inputStyle} disabled={isFilterDisabled} />
-              <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} style={timeInputStyle} disabled={isFilterDisabled} />
+              <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} style={{ ...inputStyle, width: '90px' }} disabled={isFilterDisabled} />
             </label>
             <label style={labelStyle}>
               Модель
