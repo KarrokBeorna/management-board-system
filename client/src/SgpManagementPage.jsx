@@ -189,10 +189,8 @@ export default function SgpManagementPage() {
   const [error, setError] = useState(null);
   const [activeModel, setActiveModel] = useState('ALL');
   
-  // Фильтры (множественный выбор)
   const [blockStatusFilter, setBlockStatusFilter] = useState([]);
   const [resolutionStatusFilter, setResolutionStatusFilter] = useState([]);
-  // По умолчанию включен фильтр In stock
   const [storageStatusFilter, setStorageStatusFilter] = useState(['In stock']);
 
   const fetchData = async () => {
@@ -202,8 +200,7 @@ export default function SgpManagementPage() {
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
       
-      // НЕ группируем по VIN - отображаем как есть из БД
-      // Просто нормализуем storage_status: In stock (blocked) -> In stock
+      // Нормализуем storage_status: In stock (blocked) -> In stock
       const normalizedData = json.map(row => ({
         ...row,
         storage_status: row.storage_status === 'In stock (blocked)' ? 'In stock' : row.storage_status,
@@ -228,12 +225,19 @@ export default function SgpManagementPage() {
     return models;
   }, [rawData]);
 
+  // Количество In stock для каждой модели
+  const getInStockCount = (model) => {
+    if (model === 'ALL') {
+      return rawData.filter(d => d.storage_status === 'In stock').length;
+    }
+    return rawData.filter(d => d.model === model && d.storage_status === 'In stock').length;
+  };
+
   const filteredByModel = useMemo(() => {
     if (activeModel === 'ALL') return rawData;
     return rawData.filter(d => d.model === activeModel);
   }, [rawData, activeModel]);
 
-  // Применение фильтров
   const filteredData = useMemo(() => {
     let result = filteredByModel;
     
@@ -252,14 +256,13 @@ export default function SgpManagementPage() {
     return result;
   }, [filteredByModel, blockStatusFilter, resolutionStatusFilter, storageStatusFilter]);
 
-  // Сброс фильтров при смене модели
   useEffect(() => {
     setBlockStatusFilter([]);
     setResolutionStatusFilter([]);
     setStorageStatusFilter(['In stock']);
   }, [activeModel]);
 
-  // Статистика по выбранной модели (In stock - только со статусом In stock)
+  // Статистика по выбранной модели (In stock)
   const stats = useMemo(() => {
     const totalInStock = filteredByModel.filter(d => d.storage_status === 'In stock').length;
     const totalOutbound = filteredByModel.filter(d => d.storage_status === 'Outbound').length;
@@ -379,23 +382,23 @@ export default function SgpManagementPage() {
         </div>
       </div>
 
-      {/* Переключатель моделей - чипсы */}
+      {/* Переключатель моделей - чипсы с количеством In stock */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 24, flexWrap: 'wrap' }}>
         <div style={modelChipStyle(activeModel === 'ALL')} onClick={() => setActiveModel('ALL')}>
           <span style={{ fontWeight: 800 }}>Все модели</span>
           <span style={{ 
-            background: activeModel === 'ALL' ? '#3B82F6' : '#E5E7EB',
-            color: activeModel === 'ALL' ? '#FFFFFF' : '#6B7280',
+            background: activeModel === 'ALL' ? '#10B981' : '#D1FAE5',
+            color: activeModel === 'ALL' ? '#FFFFFF' : '#065F46',
             borderRadius: 10,
             padding: '1px 8px',
             fontSize: 11,
             fontWeight: 700,
           }}>
-            {rawData.length}
+            {getInStockCount('ALL')}
           </span>
         </div>
         {allModels.map(model => {
-          const count = rawData.filter(d => d.model === model).length;
+          const inStockCount = getInStockCount(model);
           return (
             <div 
               key={model} 
@@ -404,14 +407,14 @@ export default function SgpManagementPage() {
             >
               <span>{model}</span>
               <span style={{ 
-                background: activeModel === model ? '#3B82F6' : '#E5E7EB',
-                color: activeModel === model ? '#FFFFFF' : '#6B7280',
+                background: activeModel === model ? '#10B981' : '#D1FAE5',
+                color: activeModel === model ? '#FFFFFF' : '#065F46',
                 borderRadius: 10,
                 padding: '1px 8px',
                 fontSize: 11,
                 fontWeight: 700,
               }}>
-                {count}
+                {inStockCount}
               </span>
             </div>
           );
