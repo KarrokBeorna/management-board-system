@@ -183,6 +183,19 @@ const filterLabelStyle = {
   marginRight: 4,
 };
 
+// Форматирование даты
+const formatDateTime = (dateStr) => {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
+};
+
 export default function SgpManagementPage() {
   const [rawData, setRawData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -200,7 +213,6 @@ export default function SgpManagementPage() {
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
       
-      // Нормализуем storage_status: In stock (blocked) -> In stock
       const normalizedData = json.map(row => ({
         ...row,
         storage_status: row.storage_status === 'In stock (blocked)' ? 'In stock' : row.storage_status,
@@ -225,7 +237,6 @@ export default function SgpManagementPage() {
     return models;
   }, [rawData]);
 
-  // Количество In stock для каждой модели
   const getInStockCount = (model) => {
     if (model === 'ALL') {
       return rawData.filter(d => d.storage_status === 'In stock').length;
@@ -262,7 +273,6 @@ export default function SgpManagementPage() {
     setStorageStatusFilter(['In stock']);
   }, [activeModel]);
 
-  // Статистика по выбранной модели (In stock)
   const stats = useMemo(() => {
     const totalInStock = filteredByModel.filter(d => d.storage_status === 'In stock').length;
     const totalOutbound = filteredByModel.filter(d => d.storage_status === 'Outbound').length;
@@ -297,6 +307,7 @@ export default function SgpManagementPage() {
       'Статус устранения': d.resolution_status || '',
       'Статус хранения': d.storage_status || '',
       'Расположение': d.location || '',
+      'Время постановки': d.hold_time ? formatDateTime(d.hold_time) : '—',
     }));
     
     exportData.push({
@@ -307,6 +318,7 @@ export default function SgpManagementPage() {
       'Статус устранения': '',
       'Статус хранения': '',
       'Расположение': filteredData.length,
+      'Время постановки': '',
     });
     
     const ws = XLSX.utils.json_to_sheet(exportData);
@@ -314,8 +326,8 @@ export default function SgpManagementPage() {
     const sheetName = activeModel === 'ALL' ? 'Все модели' : activeModel;
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
     ws['!cols'] = [
-      { wch: 20 }, { wch: 15 }, { wch: 12 }, { wch: 50 },
-      { wch: 15 }, { wch: 15 }, { wch: 25 },
+      { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 50 },
+      { wch: 14 }, { wch: 14 }, { wch: 15 }, { wch: 18 },
     ];
     
     const now = new Date();
@@ -332,6 +344,7 @@ export default function SgpManagementPage() {
       'Статус устранения': d.resolution_status || '',
       'Статус хранения': d.storage_status || '',
       'Расположение': d.location || '',
+      'Время постановки': d.hold_time ? formatDateTime(d.hold_time) : '—',
     }));
     
     exportData.push({
@@ -342,14 +355,15 @@ export default function SgpManagementPage() {
       'Статус устранения': '',
       'Статус хранения': '',
       'Расположение': rawData.length,
+      'Время постановки': '',
     });
     
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Все модели');
     ws['!cols'] = [
-      { wch: 20 }, { wch: 15 }, { wch: 12 }, { wch: 50 },
-      { wch: 15 }, { wch: 15 }, { wch: 25 },
+      { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 50 },
+      { wch: 14 }, { wch: 14 }, { wch: 15 }, { wch: 18 },
     ];
     
     const now = new Date();
@@ -366,6 +380,10 @@ export default function SgpManagementPage() {
       </div>
     );
   }
+
+  // Все столбцы кроме "Причина" имеют одинаковую ширину
+  const equalColumnWidth = '11%';
+  const reasonColumnWidth = '34%';
 
   return (
     <div style={containerStyle}>
@@ -505,13 +523,14 @@ export default function SgpManagementPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
             <thead>
               <tr>
-                <th style={{ ...thStyle, width: '17%' }}>VIN</th>
-                <th style={{ ...thStyle, width: '11%' }}>Модель</th>
-                <th style={{ ...thStyle, width: '9%' }}>Статус блок</th>
-                <th style={{ ...thStyle, width: '22%' }}>Причина</th>
-                <th style={{ ...thStyle, width: '11%' }}>Статус устранения</th>
-                <th style={{ ...thStyle, width: '13%' }}>Статус хранения</th>
-                <th style={{ ...thStyle, width: '17%' }}>Расположение</th>
+                <th style={{ ...thStyle, width: equalColumnWidth }}>VIN</th>
+                <th style={{ ...thStyle, width: equalColumnWidth }}>Модель</th>
+                <th style={{ ...thStyle, width: equalColumnWidth }}>Статус блок</th>
+                <th style={{ ...thStyle, width: reasonColumnWidth }}>Причина</th>
+                <th style={{ ...thStyle, width: equalColumnWidth }}>Статус устранения</th>
+                <th style={{ ...thStyle, width: equalColumnWidth }}>Статус хранения</th>
+                <th style={{ ...thStyle, width: equalColumnWidth }}>Расположение</th>
+                <th style={{ ...thStyle, width: equalColumnWidth }}>Время постановки</th>
               </tr>
             </thead>
             <tbody>
@@ -521,12 +540,13 @@ export default function SgpManagementPage() {
                   <td style={{ ...tdStyle, fontWeight: 700 }}>{row.model}</td>
                   <td style={tdStyle}>
                     <span style={{
-                      padding: '4px 10px',
+                      padding: '4px 8px',
                       borderRadius: 999,
                       fontSize: 11,
                       fontWeight: 700,
                       backgroundColor: row.block_status === 'Блок' ? '#FEE2E2' : '#D1FAE5',
                       color: row.block_status === 'Блок' ? '#991B1B' : '#065F46',
+                      whiteSpace: 'nowrap',
                     }}>
                       {row.block_status}
                     </span>
@@ -540,12 +560,16 @@ export default function SgpManagementPage() {
                       fontWeight: 700,
                       backgroundColor: row.resolution_status === 'Устранено' ? '#F0FDF4' : '#FEF3C7',
                       color: row.resolution_status === 'Устранено' ? '#065F46' : '#92400E',
+                      whiteSpace: 'nowrap',
                     }}>
                       {row.resolution_status || '—'}
                     </span>
                   </td>
                   <td style={{ ...tdStyle, fontSize: 12 }}>{row.storage_status || '—'}</td>
                   <td style={{ ...tdStyle, fontSize: 12 }}>{row.location || '—'}</td>
+                  <td style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }}>
+                    {row.hold_time ? formatDateTime(row.hold_time) : '—'}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -558,6 +582,7 @@ export default function SgpManagementPage() {
                 <td style={tdStyle}></td>
                 <td style={tdStyle}></td>
                 <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 800 }}>{filteredData.length}</td>
+                <td style={tdStyle}></td>
               </tr>
             </tfoot>
           </table>

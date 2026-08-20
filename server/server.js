@@ -3614,7 +3614,6 @@ app.get('/api/shop-top-defects', async (req, res) => {
 });
 
 // SGP Management - данные по всем моделям
-// SGP Management - данные по всем моделям
 app.get('/api/sgp-management', async (req, res) => {
   try {
     const sql = `
@@ -3623,6 +3622,7 @@ app.get('/api/sgp-management', async (req, res) => {
         s.vehicle_type AS model,
         IF(s.block_msg IS NOT NULL AND s.block_msg <> '', 'Блок', 'Не блок') AS block_status,
         q.issue_desc AS reason,
+        q.gmt_create AS hold_time,
         CASE 
             WHEN q.status = 1 THEN 'Устранено'
             WHEN q.status = 0 THEN 'Не устранено'
@@ -3642,15 +3642,14 @@ app.get('/api/sgp-management', async (req, res) => {
     
     const [rows] = await lesPool.query(sql);
     
-    // НЕ группируем - возвращаем как есть, каждая строка отдельно
-    // Просто нормализуем storage_status
     const result = rows.map(row => ({
       vin: row.vin,
       model: row.model,
       block_status: row.block_status,
       reason: row.reason || '',
+      hold_time: row.hold_time || null,
       resolution_status: row.resolution_status || '—',
-      storage_status: row.storage_status === 'In stock (blocked)' ? 'In stock' : row.storage_status,
+      storage_status: row.storage_status,
       location: row.location || '—',
     }));
     
