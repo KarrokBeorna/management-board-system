@@ -98,10 +98,13 @@ const TimePointsTable = ({ vehicles, expandedVin, onToggle }) => {
     if (!dt) return '-';
     const d = new Date(dt);
     if (isNaN(d.getTime())) return dt;
-    return d.toLocaleString('ru-RU', { 
-      day: '2-digit', month: '2-digit', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', second: '2-digit'
-    });
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `${dd}.${mm}.${yyyy} ${hh}:${min}:${ss}`;
   };
 
   const loadComponents = async (vin, materialCode) => {
@@ -205,7 +208,7 @@ const TimePointsTable = ({ vehicles, expandedVin, onToggle }) => {
                   </td>
                 ))}
                 <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: 11, textAlign: 'center', whiteSpace: 'nowrap' }}>
-                  {vehicle.count_scanned_components}/{vehicle.count_components}
+                  {vehicle.count_scanned_components || 0}/{vehicle.count_components || 0}
                 </td>
                 <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: 11, textAlign: 'center' }}>
                   {vehicle.replaced_components || '-'}
@@ -294,19 +297,6 @@ export default function SgpAuditPage() {
   const [cpPage, setCpPage] = useState(0);
   const rowsPerPage = 100;
 
-  // ====== Состояние для "Детальный аудит" ======
-  const [detailSelectedCp, setDetailSelectedCp] = useState('Key_Uloc_Type_CP7');
-  const [detailStartDate, setDetailStartDate] = useState('');
-  const [detailStartTime, setDetailStartTime] = useState('00:00');
-  const [detailEndDate, setDetailEndDate] = useState('');
-  const [detailEndTime, setDetailEndTime] = useState('23:59');
-  const [detailModel, setDetailModel] = useState('ALL');
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState(null);
-  const [detailData, setDetailData] = useState([]);
-  const [detailPage, setDetailPage] = useState(0);
-  const detailRowsPerPage = 100;
-
   // ====== Состояние для "Аналитика по аудиту" ======
   const [auditStartDate, setAuditStartDate] = useState('');
   const [auditEndDate, setAuditEndDate] = useState('');
@@ -325,7 +315,11 @@ export default function SgpAuditPage() {
     setTimePointsError(null);
     try {
       const res = await fetch(`${API_BASE}/api/time-points`);
-      if (!res.ok) throw new Error('Ошибка загрузки данных');
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Server error:', errorText);
+        throw new Error(`Ошибка загрузки данных (${res.status})`);
+      }
       const json = await res.json();
       setTimePointsData(Array.isArray(json) ? json : []);
       setTimePointsPage(0);
@@ -356,12 +350,9 @@ export default function SgpAuditPage() {
     }
     setIsVinMode(true);
     setStartDate(''); setEndDate('');
-    setDetailStartDate(''); setDetailEndDate('');
-    setCpModel('ALL'); setDetailModel('ALL');
+    setCpModel('ALL');
     if (activeTab === 'checkpoints') {
       loadStorageByVin();
-    } else if (activeTab === 'detail') {
-      loadDetailByVin();
     }
   };
 
@@ -369,7 +360,6 @@ export default function SgpAuditPage() {
     setVinSearch('');
     setIsVinMode(false);
     setCpData([]);
-    setDetailData([]);
   };
 
   const isFilterDisabled = isVinMode;
@@ -386,21 +376,6 @@ export default function SgpAuditPage() {
       setCpError(err.message);
     } finally {
       setCpLoading(false);
-    }
-  };
-
-  const loadDetailByVin = async () => {
-    setDetailLoading(true);
-    setDetailError(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/sgp-audit-vins-detail?vin=${encodeURIComponent(vinSearch.trim())}`);
-      if (!res.ok) throw new Error('Ошибка получения данных');
-      const json = await res.json();
-      setDetailData(Array.isArray(json) ? json : []);
-    } catch (err) {
-      setDetailError(err.message);
-    } finally {
-      setDetailLoading(false);
     }
   };
 
@@ -432,28 +407,6 @@ export default function SgpAuditPage() {
       });
       setCpData(tableData);
     } catch (err) { setCpError(err.message); } finally { setCpLoading(false); }
-  };
-
-  const runDetailAudit = async () => {
-    if (isVinMode) return;
-    if (!detailStartDate || !detailEndDate || new Date(detailEndDate) < new Date(detailStartDate)) return;
-    setDetailLoading(true);
-    setDetailError(null);
-    setDetailPage(0);
-    const startDateTime = `${detailStartDate} ${detailStartTime || '00:00'}:00`;
-    const endDateTime = `${detailEndDate} ${detailEndTime || '23:59'}:59`;
-    try {
-      const params = new URLSearchParams({
-        checkpoint: detailSelectedCp,
-        dateFrom: startDateTime,
-        dateTo: endDateTime,
-      });
-      if (detailModel !== 'ALL') params.append('model', detailModel);
-      const res = await fetch(`${API_BASE}/api/sgp-audit-vins-detail?${params.toString()}`);
-      if (!res.ok) throw new Error(`Ошибка получения данных: ${res.status}`);
-      const data = await res.json();
-      setDetailData(Array.isArray(data) ? data : []);
-    } catch (err) { setDetailError(err.message); } finally { setDetailLoading(false); }
   };
 
   const handleFileUpload = async (e) => {
@@ -612,16 +565,10 @@ export default function SgpAuditPage() {
 
       {/* Подкарточки До СР8 / После СР8 */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 30 }}>
-        <button 
-          onClick={() => setActiveSubTab('before')} 
-          style={tabStyle(activeSubTab === 'before')}
-        >
+        <button onClick={() => setActiveSubTab('before')} style={tabStyle(activeSubTab === 'before')}>
           До СР8
         </button>
-        <button 
-          onClick={() => navigate('/sgp-management')} 
-          style={tabStyle(false)}
-        >
+        <button onClick={() => navigate('/sgp-management')} style={tabStyle(false)}>
           После СР8
         </button>
       </div>
@@ -636,17 +583,13 @@ export default function SgpAuditPage() {
           Время прохождения точек
         </button>
 
-        <button onClick={() => setActiveTab('detail')} style={tabStyle(activeTab === 'detail')}>
-          Детальный аудит
-        </button>
-
         <button onClick={() => setActiveTab('analytics')} style={tabStyle(activeTab === 'analytics')}>
           Аналитика по аудиту
         </button>
       </div>
 
-      {/* Блок VIN-поиска (только для вкладок checkpoints и detail) */}
-      {(activeTab === 'checkpoints' || activeTab === 'detail') && (
+      {/* Блок VIN-поиска (только для вкладки checkpoints) */}
+      {activeTab === 'checkpoints' && (
         <div style={{ marginBottom: 24, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', border: '1px solid #F0F0F5' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
@@ -823,90 +766,6 @@ export default function SgpAuditPage() {
             </div>
           )}
           {!cpLoading && cpData.length === 0 && startDate && endDate && (
-            <p style={{ color: '#6B7280', textAlign: 'center', marginTop: 30 }}>Нет данных за выбранный период</p>
-          )}
-        </div>
-      )}
-
-      {/* ========== Вкладка "Детальный аудит" ========== */}
-      {activeTab === 'detail' && (
-        <div style={cardStyle}>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>⏱️</span>
-            Детальный аудит перемещений
-          </h2>
-          {renderCpSelector(detailSelectedCp, setDetailSelectedCp)}
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14, marginBottom: 8 }}>
-            <label style={labelStyle}>
-              <span style={{ whiteSpace: 'nowrap' }}>Начало периода</span>
-              <input type="date" value={detailStartDate} onChange={e => setDetailStartDate(e.target.value)} style={inputStyle} disabled={isFilterDisabled} />
-              <input type="time" value={detailStartTime} onChange={e => setDetailStartTime(e.target.value)} style={timeInputStyle} disabled={isFilterDisabled} />
-            </label>
-            <label style={labelStyle}>
-              <span style={{ whiteSpace: 'nowrap' }}>Конец периода</span>
-              <input type="date" value={detailEndDate} onChange={e => setDetailEndDate(e.target.value)} style={inputStyle} disabled={isFilterDisabled} />
-              <input type="time" value={detailEndTime} onChange={e => setDetailEndTime(e.target.value)} style={timeInputStyle} disabled={isFilterDisabled} />
-            </label>
-            <label style={labelStyle}>
-              Модель
-              <select value={detailModel} onChange={e => setDetailModel(e.target.value)} style={inputStyle} disabled={isFilterDisabled}>
-                {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
-              </select>
-            </label>
-            <button
-              onClick={runDetailAudit}
-              disabled={isFilterDisabled || !detailStartDate || !detailEndDate || detailLoading}
-              style={{
-                ...buttonStyle,
-                opacity: !isFilterDisabled && detailStartDate && detailEndDate && !detailLoading ? 1 : 0.6,
-                pointerEvents: !isFilterDisabled && detailStartDate && detailEndDate && !detailLoading ? 'auto' : 'none',
-                background: !isFilterDisabled && detailStartDate && detailEndDate && !detailLoading ? '#2563EB' : '#9CA3AF',
-              }}
-            >
-              {detailLoading ? '⏳ Загрузка...' : '▶ Загрузить аудит'}
-            </button>
-          </div>
-          {detailEndDate && new Date(detailEndDate) < new Date(detailStartDate) && (
-            <p style={{ color: '#DC2626', fontSize: 13, marginTop: 8 }}>Конечная дата не может быть раньше начальной</p>
-          )}
-          {detailError && <p style={{ color: '#DC2626', marginTop: 18 }}>❌ Ошибка: {detailError}</p>}
-          {detailData.length > 0 && (
-            <div style={{ marginTop: 32 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                <span style={{ fontWeight: 600, color: '#1F2937' }}>Найдено записей: {detailData.length}</span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => exportExcel(detailData, 'аудит_перемещения')} style={{ ...buttonStyle, background: '#059669' }}>📊 Excel</button>
-                  <button onClick={() => exportWord(detailData, 'аудит_перемещения')} style={{ ...buttonStyle, background: '#7C3AED' }}>📄 Word</button>
-                </div>
-              </div>
-              <div style={{ borderRadius: 10, overflowX: 'auto', border: '1px solid #E5E7EB' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ backgroundColor: '#F9FAFB' }}>
-                      {detailData.length > 0 && Object.keys(detailData[0]).map(h => <th key={h} style={thStyle}>{h}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailData.slice(detailPage * detailRowsPerPage, (detailPage + 1) * detailRowsPerPage).map((row, i) => (
-                      <tr key={i} style={{ backgroundColor: i % 2 ? '#F9FAFB' : '#FFFFFF' }}
-                        onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
-                        onMouseLeave={e => e.currentTarget.style.backgroundColor = i % 2 ? '#F9FAFB' : '#FFFFFF'}>
-                        {Object.keys(row).map(key => <td key={key} style={tdStyle}>{row[key] ?? ''}</td>)}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {Math.ceil(detailData.length / detailRowsPerPage) > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 18 }}>
-                  <button onClick={() => setDetailPage(p => Math.max(0, p - 1))} disabled={detailPage === 0} style={{ ...buttonStyle, background: '#9CA3AF' }}>← Назад</button>
-                  <span style={{ alignSelf: 'center', fontWeight: 500 }}>{detailPage + 1} / {Math.ceil(detailData.length / detailRowsPerPage)}</span>
-                  <button onClick={() => setDetailPage(p => Math.min(Math.ceil(detailData.length / detailRowsPerPage) - 1, p + 1))} disabled={detailPage === Math.ceil(detailData.length / detailRowsPerPage) - 1} style={{ ...buttonStyle, background: '#9CA3AF' }}>Вперёд →</button>
-                </div>
-              )}
-            </div>
-          )}
-          {!detailLoading && detailData.length === 0 && detailStartDate && detailEndDate && (
             <p style={{ color: '#6B7280', textAlign: 'center', marginTop: 30 }}>Нет данных за выбранный период</p>
           )}
         </div>
