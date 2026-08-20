@@ -692,10 +692,10 @@ export default function WarrantyPage() {
                       <LabelList dataKey="mis_3" content={renderLineLabel} fill="#10B981" />
                     </Line>
                     <ReferenceLine yAxisId="right" y={5} stroke="#EF4444" strokeWidth={3} strokeDasharray="5 5">
-                      <Label value="0mis Target (5)" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 'bold' }} />
+                      <Label value="0mis Target (5)" position="right" style={{ fill: '#EF4444', fontSize: 11, fontWeight: 'bold' }} />
                     </ReferenceLine>
                     <ReferenceLine yAxisId="right" y={25} stroke="#8B5CF6" strokeWidth={3} strokeDasharray="5 5">
-                      <Label value="3mis Target (25)" position="right" style={{ fill: '#8B5CF6', fontSize: 14, fontWeight: 'bold' }} />
+                      <Label value="3mis Target (25)" position="right" style={{ fill: '#8B5CF6', fontSize: 11, fontWeight: 'bold' }} />
                     </ReferenceLine>
                   </ComposedChart>
                 </ResponsiveContainer>
