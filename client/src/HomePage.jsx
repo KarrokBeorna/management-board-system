@@ -14,7 +14,7 @@ import externalDReportPreview from './assets/dim.png';
 import warrantyPreview from './assets/waran.png';
 import tlMapPreview from './assets/tlmap.png';
 import HoldsSgpPage from './assets/hold.png';
-import sgpManagementPreview from './assets/123.png'; // Добавьте вашу картинку
+import sgpManagementPreview from './assets/cp8.png'; // Добавьте вашу картинку
 
 // ====== СТИЛИ ======
 const sectionStyle = {
