@@ -3665,146 +3665,8 @@ app.get('/api/sgp-management', async (req, res) => {
 
 // ================== TIME POINTS (ВРЕМЯ ПРОХОЖДЕНИЯ ТОЧЕК) ==================
 
-// Получение списка автомобилей с временами прохождения точек
 app.get('/api/time-points', async (req, res) => {
   try {
-    const {
-      vin,
-      materialCode,
-      batchNum,
-      partNo,
-      seqFrom,
-      seqTo,
-      kdMaterialNo,
-      model,
-      materialDesc,
-      colour,
-      componentFilter,
-      scanStatus,
-      cp5From, cp5To,
-      cp6From, cp6To,
-      trimInFrom, trimInTo,
-      cp7From, cp7To,
-      cp72From, cp72To,
-      cpFinalFrom, cpFinalTo,
-      cp8From, cp8To,
-      inboundFrom, inboundTo,
-      outboundFrom, outboundTo,
-      currentLocations,
-      excludeLocations,
-      missingComponents,
-      scannedComponents,
-    } = req.query;
-
-    let where = '1=1';
-    const params = [];
-
-    if (vin) {
-      where += ' AND v.vin LIKE ?';
-      params.push(`%${vin}%`);
-    }
-    if (materialCode) {
-      where += ' AND v.material_no LIKE ?';
-      params.push(`%${materialCode}%`);
-    }
-    if (batchNum) {
-      where += ' AND o.batch_num LIKE ?';
-      params.push(`%${batchNum}%`);
-    }
-    if (partNo) {
-      where += ' AND v.material_no LIKE ?';
-      params.push(`%${partNo}%`);
-    }
-    if (seqFrom) {
-      where += ' AND v.sequence_number >= ?';
-      params.push(parseInt(seqFrom));
-    }
-    if (seqTo) {
-      where += ' AND v.sequence_number <= ?';
-      params.push(parseInt(seqTo));
-    }
-    if (kdMaterialNo) {
-      const kdList = kdMaterialNo.split(',').filter(Boolean);
-      if (kdList.length > 0) {
-        where += ` AND o.kd_material_no IN (${kdList.map(() => '?').join(',')})`;
-        params.push(...kdList);
-      }
-    }
-    if (model) {
-      const modelList = model.split(',').filter(Boolean);
-      if (modelList.length > 0) {
-        where += ` AND o.product IN (${modelList.map(() => '?').join(',')})`;
-        params.push(...modelList);
-      }
-    }
-    if (materialDesc) {
-      const descList = materialDesc.split(',').filter(Boolean);
-      if (descList.length > 0) {
-        where += ` AND m.material_desc IN (${descList.map(() => '?').join(',')})`;
-        params.push(...descList);
-      }
-    }
-    if (colour) {
-      where += ' AND SUBSTRING(v.material_no, 8, 2) = ?';
-      params.push(colour);
-    }
-
-    // Фильтры по временам прохождения точек
-    const timeFilters = [
-      { key: 'CP5', from: cp5From, to: cp5To, column: 't.CP5_time' },
-      { key: 'CP6', from: cp6From, to: cp6To, column: 't.CP6_time' },
-      { key: 'TRIMIN', from: trimInFrom, to: trimInTo, column: 't.TRIMIN_time' },
-      { key: 'CP7', from: cp7From, to: cp7To, column: 't.CP7_time' },
-      { key: 'CP72', from: cp72From, to: cp72To, column: 't.CP72_time' },
-      { key: 'CPFINAL', from: cpFinalFrom, to: cpFinalTo, column: 't.CPFINAL_time' },
-      { key: 'CP8', from: cp8From, to: cp8To, column: 't.CP8_time' },
-      { key: 'Inbound', from: inboundFrom, to: inboundTo, column: 't.in_storage_time' },
-      { key: 'Outbound', from: outboundFrom, to: outboundTo, column: 't.out_storage_time' },
-    ];
-
-    timeFilters.forEach(({ from, to, column }) => {
-      if (from) {
-        where += ` AND ${column} >= ?`;
-        params.push(from);
-      }
-      if (to) {
-        where += ` AND ${column} <= ?`;
-        params.push(to);
-      }
-    });
-
-    // Определение текущего расположения
-    const locationCase = `
-      CASE
-        WHEN t.out_storage_time IS NOT NULL THEN 'Продан'
-        WHEN t.in_storage_time IS NOT NULL AND t.out_storage_time IS NULL THEN 'На складе'
-        WHEN t.CP8_time IS NOT NULL THEN 'CP8'
-        WHEN t.CPFINAL_time IS NOT NULL THEN 'CPFINAL'
-        WHEN t.TLTT_time IS NOT NULL OR t.TLADAS_time IS NOT NULL OR t.TLRT_time IS NOT NULL OR t.TLWA_time IS NOT NULL THEN 'На тестах'
-        WHEN t.CP72_time IS NOT NULL THEN 'CP72'
-        WHEN t.CP7_time IS NOT NULL THEN 'CP7'
-        WHEN t.TRIMIN_time IS NOT NULL THEN 'TRIMIN'
-        WHEN t.CP6_time IS NOT NULL THEN 'CP6'
-        WHEN t.CP5_time IS NOT NULL THEN 'CP5'
-        ELSE 'Планирование'
-      END
-    `;
-
-    if (currentLocations) {
-      const locList = currentLocations.split(',').filter(Boolean);
-      if (locList.length > 0) {
-        where += ` AND ${locationCase} IN (${locList.map(() => '?').join(',')})`;
-        params.push(...locList);
-      }
-    }
-    if (excludeLocations) {
-      const exclList = excludeLocations.split(',').filter(Boolean);
-      if (exclList.length > 0) {
-        where += ` AND ${locationCase} NOT IN (${exclList.map(() => '?').join(',')})`;
-        params.push(...exclList);
-      }
-    }
-
     const sql = `
       SELECT
         v.vin,
@@ -3815,7 +3677,19 @@ app.get('/api/time-points', async (req, res) => {
         o.product AS model,
         m.material_desc,
         SUBSTRING(v.material_no, 8, 2) AS colour,
-        ${locationCase} AS location,
+        CASE
+          WHEN t.out_storage_time IS NOT NULL THEN 'Продан'
+          WHEN t.in_storage_time IS NOT NULL AND t.out_storage_time IS NULL THEN 'На складе'
+          WHEN t.CP8_time IS NOT NULL THEN 'CP8'
+          WHEN t.CPFINAL_time IS NOT NULL THEN 'CPFINAL'
+          WHEN t.TLTT_time IS NOT NULL OR t.TLADAS_time IS NOT NULL OR t.TLRT_time IS NOT NULL OR t.TLWA_time IS NOT NULL THEN 'На тестах'
+          WHEN t.CP72_time IS NOT NULL THEN 'CP72'
+          WHEN t.CP7_time IS NOT NULL THEN 'CP7'
+          WHEN t.TRIMIN_time IS NOT NULL THEN 'TRIMIN'
+          WHEN t.CP6_time IS NOT NULL THEN 'CP6'
+          WHEN t.CP5_time IS NOT NULL THEN 'CP5'
+          ELSE 'Планирование'
+        END AS location,
         t.CP5_time AS CP5,
         t.CP6_time AS CP6,
         t.TRIMIN_time AS TRIMIN,
@@ -3829,9 +3703,9 @@ app.get('/api/time-points', async (req, res) => {
         t.CP8_time AS CP8,
         t.in_storage_time,
         t.out_storage_time,
-        COALESCE(c.scanned_count, 0) AS count_scanned_components,
-        COALESCE(c.total_count, 0) AS count_components,
-        COALESCE(c.replaced_count, 0) AS replaced_components
+        0 AS count_scanned_components,
+        0 AS count_components,
+        0 AS replaced_components
       FROM tm_vhc_vehicle v
       JOIN tm_ofm_order o ON o.vin = v.vin
       LEFT JOIN tm_bas_material_relation m ON m.material_no = v.material_no AND m.is_deleted = 0
@@ -3843,68 +3717,41 @@ app.get('/api/time-points', async (req, res) => {
           MAX(CASE WHEN node_nature = 'Key_Uloc_Type_TRIMIN' THEN scan_time END) AS TRIMIN_time,
           MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN scan_time END) AS CP7_time,
           MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP72' THEN scan_time END) AS CP72_time,
-          MAX(CASE WHEN node_nature IN ('TLWA','TLRT','TLADAS','TLTT') AND node_nature = 'TLWA' THEN scan_time END) AS TLWA_time,
-          MAX(CASE WHEN node_nature IN ('TLWA','TLRT','TLADAS','TLTT') AND node_nature = 'TLRT' THEN scan_time END) AS TLRT_time,
-          MAX(CASE WHEN node_nature IN ('TLWA','TLRT','TLADAS','TLTT') AND node_nature = 'TLADAS' THEN scan_time END) AS TLADAS_time,
-          MAX(CASE WHEN node_nature IN ('TLWA','TLRT','TLADAS','TLTT') AND node_nature = 'TLTT' THEN scan_time END) AS TLTT_time,
+          MAX(CASE WHEN node_nature = 'TLWA' THEN scan_time END) AS TLWA_time,
+          MAX(CASE WHEN node_nature = 'TLRT' THEN scan_time END) AS TLRT_time,
+          MAX(CASE WHEN node_nature = 'TLADAS' THEN scan_time END) AS TLADAS_time,
+          MAX(CASE WHEN node_nature = 'TLTT' THEN scan_time END) AS TLTT_time,
           MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CPFINAL' THEN scan_time END) AS CPFINAL_time,
           MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP8' THEN scan_time END) AS CP8_time,
-          MAX(CASE WHEN node_nature LIKE 'Key_Car_In_Storage_Status%' AND node_nature = 'Key_Car_In_Storage_Status_1' THEN scan_time END) AS in_storage_time,
-          MAX(CASE WHEN node_nature LIKE 'Key_Car_In_Storage_Status%' AND node_nature = 'Key_Car_In_Storage_Status_3' THEN scan_time END) AS out_storage_time
+          MAX(CASE WHEN node_nature = 'Key_Car_In_Storage_Status_1' THEN scan_time END) AS in_storage_time,
+          MAX(CASE WHEN node_nature = 'Key_Car_In_Storage_Status_3' THEN scan_time END) AS out_storage_time
         FROM tm_vhc_vehicle_movement
         GROUP BY vin
       ) t ON t.vin = v.vin
-      LEFT JOIN (
-        SELECT
-          vin,
-          COUNT(*) AS total_count,
-          SUM(CASE WHEN is_scanned = 1 THEN 1 ELSE 0 END) AS scanned_count,
-          SUM(CASE WHEN is_replaced = 1 THEN 1 ELSE 0 END) AS replaced_count
-        FROM tm_vhc_component
-        GROUP BY vin
-      ) c ON c.vin = v.vin
-      WHERE ${where}
       ORDER BY v.sequence_number DESC
       LIMIT 5000
     `;
 
-    const [rows] = await mesPool.query(sql, params);
-    
-    // Применяем фильтры по компонентам после основного запроса
-    let result = rows;
-    
-    if (componentFilter === 'scanned') {
-      result = result.filter(r => r.count_scanned_components === r.count_components && r.count_components > 0);
-    } else if (componentFilter === 'notScanned') {
-      result = result.filter(r => r.count_scanned_components < r.count_components);
-    }
-    
-    if (scanStatus === 'complete') {
-      result = result.filter(r => r.count_scanned_components === r.count_components && r.count_components > 0);
-    } else if (scanStatus === 'incomplete') {
-      result = result.filter(r => r.count_scanned_components < r.count_components);
-    } else if (scanStatus === 'hasReplaced') {
-      result = result.filter(r => r.replaced_components > 0);
-    } else if (scanStatus === 'noReplaced') {
-      result = result.filter(r => r.replaced_components === 0);
-    }
-
-    res.json(result);
+    const [rows] = await mesPool.query(sql);
+    res.json(rows);
   } catch (err) {
     console.error('Ошибка time-points:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Получение компонентов автомобиля
+// Получение компонентов автомобиля (заглушка - возвращает пустой массив)
 app.get('/api/time-points/:vin/components', async (req, res) => {
   try {
+    // Проверяем существование таблицы
+    const [tables] = await mesPool.query("SHOW TABLES LIKE 'tm_vhc_component'");
+    if (tables.length === 0) {
+      // Таблица не существует - возвращаем пустой массив
+      return res.json([]);
+    }
+    
     const { vin } = req.params;
     const { materialCode } = req.query;
-    
-    if (!vin || !materialCode) {
-      return res.status(400).json({ error: 'vin и materialCode обязательны' });
-    }
     
     const sql = `
       SELECT
