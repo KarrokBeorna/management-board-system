@@ -119,7 +119,7 @@ const tdStyle = {
   borderBottom: '1px solid #F3F4F6',
   color: '#1F2937',
   fontSize: 13,
-  verticalAlign: 'top',
+  verticalAlign: 'middle',
 };
 
 const totalRowStyle = {
@@ -196,26 +196,20 @@ export default function SgpManagementPage() {
       const json = await res.json();
       
       // Группируем по VIN
-      // Каждая запись в json - это отдельная строка из БД
-      // Для одного VIN может быть несколько записей (разные причины)
       const groupedMap = {};
       
       json.forEach(row => {
         const vin = row.vin;
         
         if (!groupedMap[vin]) {
-          // Первая запись для этого VIN - создаем новую группу
           groupedMap[vin] = {
             vin: row.vin,
             model: row.model,
             block_status: row.block_status,
-            // Массив для хранения всех причин и их статусов
             details: [],
           };
         }
         
-        // Добавляем причину и статус устранения в массив
-        // Также сохраняем статус хранения и расположение для каждой записи
         groupedMap[vin].details.push({
           reason: row.reason || '',
           resolution_status: row.resolution_status || '—',
@@ -224,7 +218,6 @@ export default function SgpManagementPage() {
         });
       });
       
-      // Преобразуем в массив
       const groupedData = Object.values(groupedMap);
       setData(groupedData);
       setError(null);
@@ -250,23 +243,18 @@ export default function SgpManagementPage() {
     return data.filter(d => d.model === activeModel);
   }, [data, activeModel]);
 
-  // Получение уникальных значений для фильтров
-  // Для block_status - из основного объекта
-  // Для storage_status - из details массива
   const getUniqueValues = (field) => {
     let values = [];
     
     if (field === 'block_status') {
       values = filteredByModel.map(d => d.block_status);
     } else if (field === 'storage_status') {
-      // Собираем все storage_status из details
       filteredByModel.forEach(d => {
         d.details.forEach(detail => {
           values.push(detail.storage_status);
         });
       });
     } else if (field === 'resolution_status') {
-      // Собираем все resolution_status из details
       filteredByModel.forEach(d => {
         d.details.forEach(detail => {
           values.push(detail.resolution_status);
@@ -279,7 +267,6 @@ export default function SgpManagementPage() {
     return [...new Set(values.filter(v => v !== null && v !== undefined && v !== ''))].sort();
   };
 
-  // Фильтрация данных
   const filteredData = useMemo(() => {
     let result = filteredByModel;
     
@@ -290,10 +277,8 @@ export default function SgpManagementPage() {
           if (field === 'block_status') {
             return d.block_status === filterValue;
           } else if (field === 'storage_status') {
-            // Проверяем, есть ли хотя бы одна запись с таким storage_status
             return d.details.some(detail => detail.storage_status === filterValue);
           } else if (field === 'resolution_status') {
-            // Проверяем, есть ли хотя бы одна запись с таким resolution_status
             return d.details.some(detail => detail.resolution_status === filterValue);
           } else {
             const val = d[field];
@@ -314,9 +299,7 @@ export default function SgpManagementPage() {
     setActiveFilterColumn(null);
   }, [activeModel]);
 
-  // Статистика по отфильтрованной модели
   const stats = useMemo(() => {
-    // In stock - если хотя бы одна запись в details имеет storage_status = 'In stock'
     const totalInStock = filteredByModel.filter(d => 
       d.details.some(detail => detail.storage_status === 'In stock')
     ).length;
@@ -327,29 +310,23 @@ export default function SgpManagementPage() {
     return { totalInStock, totalBlock, totalNotBlock };
   }, [filteredByModel]);
 
-  // Экспорт текущей таблицы
   const handleExportCurrent = () => {
     const exportData = [];
     
     filteredData.forEach(d => {
-      // Для каждого VIN создаем строку с объединенными данными
-      const reasons = d.details.map(detail => detail.reason).filter(r => r).join(' | ');
-      const resolutionStatuses = d.details.map(detail => detail.resolution_status).join(' | ');
-      const storageStatuses = d.details.map(detail => detail.storage_status).join(' | ');
-      const locations = d.details.map(detail => detail.location).join(' | ');
-      
-      exportData.push({
-        'VIN': d.vin,
-        'Модель': d.model,
-        'Статус блок': d.block_status,
-        'Причина': reasons,
-        'Статус устранения': resolutionStatuses,
-        'Статус хранения': storageStatuses,
-        'Расположение': locations,
+      d.details.forEach((detail, i) => {
+        exportData.push({
+          'VIN': i === 0 ? d.vin : '',
+          'Модель': i === 0 ? d.model : '',
+          'Статус блок': i === 0 ? d.block_status : '',
+          'Причина': detail.reason,
+          'Статус устранения': detail.resolution_status,
+          'Статус хранения': detail.storage_status,
+          'Расположение': detail.location,
+        });
       });
     });
     
-    // Добавляем строку ИТОГО
     exportData.push({
       'VIN': 'ИТОГО',
       'Модель': '',
@@ -374,24 +351,20 @@ export default function SgpManagementPage() {
     XLSX.writeFile(wb, `SGP_Management_${activeModel === 'ALL' ? 'All' : activeModel}_${dateStr}.xlsx`);
   };
 
-  // Экспорт всех моделей
   const handleExportAll = () => {
     const exportData = [];
     
     data.forEach(d => {
-      const reasons = d.details.map(detail => detail.reason).filter(r => r).join(' | ');
-      const resolutionStatuses = d.details.map(detail => detail.resolution_status).join(' | ');
-      const storageStatuses = d.details.map(detail => detail.storage_status).join(' | ');
-      const locations = d.details.map(detail => detail.location).join(' | ');
-      
-      exportData.push({
-        'VIN': d.vin,
-        'Модель': d.model,
-        'Статус блок': d.block_status,
-        'Причина': reasons,
-        'Статус устранения': resolutionStatuses,
-        'Статус хранения': storageStatuses,
-        'Расположение': locations,
+      d.details.forEach((detail, i) => {
+        exportData.push({
+          'VIN': i === 0 ? d.vin : '',
+          'Модель': i === 0 ? d.model : '',
+          'Статус блок': i === 0 ? d.block_status : '',
+          'Причина': detail.reason,
+          'Статус устранения': detail.resolution_status,
+          'Статус хранения': detail.storage_status,
+          'Расположение': detail.location,
+        });
       });
     });
     
@@ -554,105 +527,100 @@ export default function SgpManagementPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredData.map((row, idx) => (
-                <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                  {/* VIN - объединенная ячейка */}
-                  <td style={{ ...tdStyle, fontWeight: 600, fontSize: 12 }}>{row.vin}</td>
-                  
-                  {/* Модель - объединенная ячейка */}
-                  <td style={{ ...tdStyle, fontWeight: 700 }}>{row.model}</td>
-                  
-                  {/* Статус блок - объединенная ячейка */}
-                  <td style={tdStyle}>
-                    <span style={{
-                      padding: '4px 10px',
-                      borderRadius: 999,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      backgroundColor: row.block_status === 'Блок' ? '#FEE2E2' : '#D1FAE5',
-                      color: row.block_status === 'Блок' ? '#991B1B' : '#065F46',
+              {filteredData.map((row, rowIdx) => {
+                const detailsCount = row.details.length;
+                
+                return row.details.map((detail, detailIdx) => (
+                  <tr key={`${rowIdx}-${detailIdx}`} style={{ 
+                    backgroundColor: rowIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
+                    borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                  }}>
+                    {/* VIN - только первая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontWeight: 600, 
+                      fontSize: 12,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
                     }}>
-                      {row.block_status}
-                    </span>
-                  </td>
-                  
-                  {/* Причина - отдельные строки внутри ячейки */}
-                  <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4' }}>
-                    {row.details.length > 0 ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {row.details.map((detail, i) => (
-                          <div key={i} style={{
-                            padding: '4px 8px',
-                            borderRadius: 4,
-                            backgroundColor: i % 2 === 0 ? '#F8FAFC' : '#F1F5F9',
-                            border: '1px solid #E2E8F0',
-                          }}>
-                            {detail.reason || '—'}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span style={{ color: '#9CA3AF' }}>—</span>
-                    )}
-                  </td>
-                  
-                  {/* Статус устранения - отдельные строки */}
-                  <td style={{ ...tdStyle, fontSize: 12 }}>
-                    {row.details.length > 0 ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {row.details.map((detail, i) => (
-                          <div key={i} style={{
-                            padding: '4px 8px',
-                            borderRadius: 4,
-                            backgroundColor: detail.resolution_status === 'Устранено' ? '#F0FDF4' : '#FEF3C7',
-                            border: '1px solid ' + (detail.resolution_status === 'Устранено' ? '#86EFAC' : '#FCD34D'),
-                            fontWeight: 700,
-                            color: detail.resolution_status === 'Устранено' ? '#065F46' : '#92400E',
-                          }}>
-                            {detail.resolution_status}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span style={{ color: '#9CA3AF' }}>—</span>
-                    )}
-                  </td>
-                  
-                  {/* Статус хранения - отдельные строки */}
-                  <td style={{ ...tdStyle, fontSize: 12 }}>
-                    {row.details.length > 0 ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {row.details.map((detail, i) => (
-                          <div key={i} style={{
-                            padding: '4px 8px',
-                          }}>
-                            {detail.storage_status}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span style={{ color: '#9CA3AF' }}>—</span>
-                    )}
-                  </td>
-                  
-                  {/* Расположение - отдельные строки */}
-                  <td style={{ ...tdStyle, fontSize: 12 }}>
-                    {row.details.length > 0 ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {row.details.map((detail, i) => (
-                          <div key={i} style={{
-                            padding: '4px 8px',
-                          }}>
-                            {detail.location}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span style={{ color: '#9CA3AF' }}>—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                      {detailIdx === 0 ? row.vin : ''}
+                    </td>
+                    
+                    {/* Модель - только первая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontWeight: 700,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      {detailIdx === 0 ? row.model : ''}
+                    </td>
+                    
+                    {/* Статус блок - только первая строка */}
+                    <td style={{ 
+                      ...tdStyle,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      {detailIdx === 0 ? (
+                        <span style={{
+                          padding: '4px 10px',
+                          borderRadius: 999,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          backgroundColor: row.block_status === 'Блок' ? '#FEE2E2' : '#D1FAE5',
+                          color: row.block_status === 'Блок' ? '#991B1B' : '#065F46',
+                        }}>
+                          {row.block_status}
+                        </span>
+                      ) : ''}
+                    </td>
+                    
+                    {/* Причина - каждая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontSize: 12, 
+                      lineHeight: '1.4',
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      {detail.reason || '—'}
+                    </td>
+                    
+                    {/* Статус устранения - каждая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontSize: 12,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      <span style={{
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        backgroundColor: detail.resolution_status === 'Устранено' ? '#F0FDF4' : '#FEF3C7',
+                        color: detail.resolution_status === 'Устранено' ? '#065F46' : '#92400E',
+                      }}>
+                        {detail.resolution_status}
+                      </span>
+                    </td>
+                    
+                    {/* Статус хранения - каждая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontSize: 12,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      {detail.storage_status}
+                    </td>
+                    
+                    {/* Расположение - каждая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontSize: 12,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      {detail.location}
+                    </td>
+                  </tr>
+                ));
+              })}
             </tbody>
             <tfoot>
               <tr style={totalRowStyle}>
