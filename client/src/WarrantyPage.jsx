@@ -54,6 +54,20 @@ const tabStyle = (active) => ({
   transition: 'all 0.2s',
 });
 
+const subTabStyle = (active) => ({
+  padding: '8px 20px',
+  borderRadius: 8,
+  border: 'none',
+  fontWeight: 600,
+  fontSize: 13,
+  background: active ? '#3B82F6' : '#F3F4F6',
+  color: active ? '#FFFFFF' : '#6B7280',
+  cursor: 'pointer',
+  boxShadow: active ? '0 2px 8px rgba(59,130,246,0.25)' : 'none',
+  transition: 'all 0.2s',
+  whiteSpace: 'nowrap',
+});
+
 // ====== КОНСТАНТЫ ======
 const FIELDS = [
   'vin_id', 'sold_cars_qty', 'unique_vin_by_qr', 'brand', 'model',
@@ -109,7 +123,7 @@ const renderBlueLabel = (props) => {
   const { x, y, width, height, value } = props;
   if (!value || value === 0) return null;
   return (
-    <text x={x + width / 2} y={y + height / 2} dy={4} textAnchor="middle" fill="#000000" fontWeight="bold" fontSize={11}>
+    <text x={x + width / 2} y={y + height / 2} dy={4} textAnchor="middle" fill="#000000" fontWeight="bold" fontSize={14}>
       {value}
     </text>
   );
@@ -123,13 +137,36 @@ const formatNumber = (val) => {
   return num.toFixed(1);
 };
 
+// Улучшенный рендер для числовых меток на линиях
 const renderLineLabel = (props) => {
   const { x, y, value, fill } = props;
   if (value === null || value === undefined) return null;
+  
+  // Белый фон для читаемости
   return (
-    <text x={x} y={y - 17} textAnchor="middle" fill={fill} fontSize={12} fontWeight="bold">
-      {formatNumber(value)}
-    </text>
+    <g>
+      <rect 
+        x={x - 20} 
+        y={y - 22} 
+        width={40} 
+        height={18} 
+        rx={4} 
+        fill="white" 
+        stroke={fill} 
+        strokeWidth={1}
+        opacity={0.95}
+      />
+      <text 
+        x={x} 
+        y={y - 8} 
+        textAnchor="middle" 
+        fill={fill} 
+        fontSize={13} 
+        fontWeight="bold"
+      >
+        {formatNumber(value)}
+      </text>
+    </g>
   );
 };
 
@@ -151,6 +188,7 @@ export default function WarrantyPage() {
   const [passwordError, setPasswordError] = useState('');
 
   const [activeTab, setActiveTab] = useState('upload');
+  const [activeSubTab, setActiveSubTab] = useState('total'); // 'total' | 'model' | 'sales' | 'categories'
 
   const [fileData, setFileData] = useState([]);
   const [preview, setPreview] = useState([]);
@@ -241,7 +279,6 @@ export default function WarrantyPage() {
       const batchSize = 10000;
       let totalInserted = 0;
       
-      // Разбиваем fileData на части по 10000 строк и отправляем каждую отдельно
       for (let i = 0; i < fileData.length; i += batchSize) {
         const batch = fileData.slice(i, i + batchSize);
         
@@ -358,14 +395,21 @@ export default function WarrantyPage() {
     }
   };
 
+  // Загрузка данных при выборе времени загрузки
   useEffect(() => {
     if (selectedUploadTime && activeTab === 'analytics') {
-      loadAnalytics1(selectedUploadTime);
-      loadAnalytics2(selectedUploadTime);
-      loadAnalytics3(selectedUploadTime);
-      loadCategories(selectedUploadTime);
+      // Загружаем только активную подвкладку
+      if (activeSubTab === 'total') {
+        loadAnalytics1(selectedUploadTime);
+      } else if (activeSubTab === 'model') {
+        loadAnalytics2(selectedUploadTime);
+      } else if (activeSubTab === 'sales') {
+        loadAnalytics3(selectedUploadTime);
+      } else if (activeSubTab === 'categories') {
+        loadCategories(selectedUploadTime);
+      }
     }
-  }, [selectedUploadTime, activeTab]);
+  }, [selectedUploadTime, activeSubTab, activeTab]);
 
   const monthNames = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 
@@ -384,8 +428,8 @@ export default function WarrantyPage() {
       .map(d => ({
         month: d.month,
         qty_sell: d.qty_sell,
-        mis_0: d.qty_sell > 0 ? (d.mis_0_count / d.qty_sell) * 1000 : 0,
-        mis_3: d.qty_sell > 0 ? (d.mis_3_count / d.qty_sell) * 1000 : 0,
+        mis_0: d.qty_sell > 0 ? ((d.mis_0_count / d.qty_sell) * 1000).toFixed(1) : 0,
+        mis_3: d.qty_sell > 0 ? ((d.mis_3_count / d.qty_sell) * 1000).toFixed(1) : 0,
       }))
       .sort((a, b) => a.month.localeCompare(b.month));
   }, [data1Raw, selectedModels1]);
@@ -590,283 +634,297 @@ export default function WarrantyPage() {
             </div>
           </div>
 
-          {/* График 1: Total (Prod Related) */}
-          <div style={cardStyle}>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>📊</span>
-              Total (Prod Related)
-            </h2>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
-              <button onClick={() => setShowModelFilter1(!showModelFilter1)} style={buttonStyle}>
-                {showModelFilter1 ? 'Скрыть фильтр' : 'Модели'}
-              </button>
-              <button onClick={() => loadAnalytics1(selectedUploadTime)} disabled={loading1} style={buttonStyle}>
-                {loading1 ? '⏳ Загрузка...' : '▶ Загрузить аналитику'}
-              </button>
-            </div>
-
-            {showModelFilter1 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                {ALL_MODELS.map(model => (
-                  <label key={model} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={selectedModels1.includes(model)} onChange={() => handleModelToggle1(model)} />
-                    {model}
-                  </label>
-                ))}
-              </div>
-            )}
-
-            {chartData1.length > 0 && (
-              <ResponsiveContainer width="100%" height={400}>
-                <ComposedChart data={chartData1} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                  <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 12 }} />
-                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} />
-                  <Legend />
-                  <Bar yAxisId="left" dataKey="qty_sell" fill="#3B82F6" name="Qty Sold" barSize={20}>
-                    <LabelList dataKey="qty_sell" position="top" style={{ fill: '#1F2937', fontSize: 11 }} />
-                  </Bar>
-                  <Line yAxisId="right" type="monotone" dataKey="mis_0" stroke="#F59E0B" strokeWidth={2} name="0mis per 1000" dot={{ r: 3 }}>
-                    <LabelList dataKey="mis_0" position="top" formatter={formatNumber} style={{ fill: '#F59E0B', fontSize: 10 }} />
-                  </Line>
-                  <Line yAxisId="right" type="monotone" dataKey="mis_3" stroke="#10B981" strokeWidth={2} name="3mis per 1000" dot={{ r: 3 }}>
-                    <LabelList dataKey="mis_3" position="top" formatter={formatNumber} style={{ fill: '#10B981', fontSize: 10 }} />
-                  </Line>
-                  <ReferenceLine yAxisId="right" y={5} stroke="#EF4444" strokeWidth={2} strokeDasharray="5 5">
-                    <Label value="0mis Target (5)" position="right" style={{ fill: '#EF4444', fontSize: 12 }} />
-                  </ReferenceLine>
-                  <ReferenceLine yAxisId="right" y={25} stroke="#8B5CF6" strokeWidth={2} strokeDasharray="5 5">
-                    <Label value="3mis Target (25)" position="right" style={{ fill: '#8B5CF6', fontSize: 12 }} />
-                  </ReferenceLine>
-                </ComposedChart>
-              </ResponsiveContainer>
-            )}
+          {/* Подвкладки аналитики */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+            <button onClick={() => setActiveSubTab('total')} style={subTabStyle(activeSubTab === 'total')}>
+              📊 Total (Prod Related)
+            </button>
+            <button onClick={() => setActiveSubTab('model')} style={subTabStyle(activeSubTab === 'model')}>
+              📊 Model Based (Prod Related)
+            </button>
+            <button onClick={() => setActiveSubTab('sales')} style={subTabStyle(activeSubTab === 'sales')}>
+              📊 0 MIS/3MIS by sales date
+            </button>
+            <button onClick={() => setActiveSubTab('categories')} style={subTabStyle(activeSubTab === 'categories')}>
+              🏆 Топ категорий
+            </button>
           </div>
 
-          {/* График 2: Model Based (Prod Related) */}
-          <div style={cardStyle}>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>📊</span>
-              Model Based (Prod Related)
-            </h2>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
-              <button onClick={() => setShowModelFilter2(!showModelFilter2)} style={buttonStyle}>
-                {showModelFilter2 ? 'Скрыть фильтр' : 'Модели'}
-              </button>
-              <button onClick={() => loadAnalytics2(selectedUploadTime)} disabled={loading2} style={buttonStyle}>
-                {loading2 ? '⏳ Загрузка...' : '▶ Загрузить аналитику'}
-              </button>
-            </div>
-
-            {showModelFilter2 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                {ALL_MODELS.map(model => (
-                  <label key={model} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={selectedModels2.includes(model)} onChange={() => handleModelToggle2(model)} />
-                    {model}
-                  </label>
-                ))}
+          {/* Total (Prod Related) */}
+          {activeSubTab === 'total' && (
+            <div style={cardStyle}>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>📊</span>
+                Total (Prod Related)
+              </h2>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
+                <button onClick={() => setShowModelFilter1(!showModelFilter1)} style={buttonStyle}>
+                  {showModelFilter1 ? 'Скрыть фильтр' : 'Модели'}
+                </button>
               </div>
-            )}
 
-            {chartData2.length > 0 && (
-              <div style={{ width: '100%', height: 600, backgroundColor: '#fff', fontFamily: 'Arial, sans-serif' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={chartData2} margin={{ top: 40, right: 20, bottom: 60, left: 10 }}>
-                    <CartesianGrid stroke="#d9d9d9" vertical={true} horizontal={true} />
-                    <YAxis yAxisId="left" domain={[0, 'auto']} tickCount={9}
-                      tick={{ fill: '#000', fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tickCount={9}
-                      tick={{ fill: '#000', fontSize: 12 }} axisLine={false} tickLine={false} />
-                    <XAxis type="category" dataKey="id" tick={CustomTick}
-                      axisLine={{ stroke: '#ccc' }} tickLine={false} interval={0} height={60} />
-                    <Legend verticalAlign="bottom" align="center" iconType="square" iconSize={12}
-                      wrapperStyle={{ padding: '10px 0', fontSize: '12px', fontWeight: 'bold' }}
-                      payload={[
-                        { value: '3mis Repairs', type: 'square', color: '#ED7D31' },
-                        { value: 'qty Sold by Prod', type: 'square', color: '#4472C4' },
-                      ]} />
-                    <Bar yAxisId="left" dataKey="sold" fill="#4472C4" barSize={24} name="qty Sold by Prod" stackId="a">
-                      <LabelList content={renderBlueLabel} />
+              {showModelFilter1 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                  {ALL_MODELS.map(model => (
+                    <label key={model} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={selectedModels1.includes(model)} onChange={() => handleModelToggle1(model)} />
+                      {model}
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {chartData1.length > 0 ? (
+                <ResponsiveContainer width="100%" height={500}>
+                  <ComposedChart data={chartData1} margin={{ top: 40, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                    <XAxis dataKey="month" tick={{ fontSize: 13, fontWeight: 600 }} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 13 }} label={{ value: 'Qty Sold', angle: -90, position: 'insideLeft', fontSize: 14, fontWeight: 'bold' }} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 13 }} label={{ value: 'MIS per 1000', angle: 90, position: 'insideRight', fontSize: 14, fontWeight: 'bold' }} />
+                    <Legend wrapperStyle={{ fontSize: 14, fontWeight: 600 }} />
+                    <Bar yAxisId="left" dataKey="qty_sell" fill="#3B82F6" name="Qty Sold" barSize={30}>
+                      <LabelList dataKey="qty_sell" position="top" style={{ fill: '#1F2937', fontSize: 14, fontWeight: 'bold' }} />
                     </Bar>
-                    <Bar yAxisId="left" dataKey="repairs" fill="#ED7D31" barSize={24} name="3mis Repairs" stackId="a">
-                      <LabelList dataKey="repairs" position="top" style={{ fontSize: 20, fill: '#FFC000', fontWeight: 'bold' }} />
-                    </Bar>
+                    <Line yAxisId="right" type="monotone" dataKey="mis_0" stroke="#F59E0B" strokeWidth={4} name="0mis per 1000" dot={{ r: 8, fill: '#F59E0B', stroke: '#FFFFFF', strokeWidth: 2 }}>
+                      <LabelList dataKey="mis_0" content={renderLineLabel} fill="#F59E0B" />
+                    </Line>
+                    <Line yAxisId="right" type="monotone" dataKey="mis_3" stroke="#10B981" strokeWidth={4} name="3mis per 1000" dot={{ r: 8, fill: '#10B981', stroke: '#FFFFFF', strokeWidth: 2 }}>
+                      <LabelList dataKey="mis_3" content={renderLineLabel} fill="#10B981" />
+                    </Line>
+                    <ReferenceLine yAxisId="right" y={5} stroke="#EF4444" strokeWidth={3} strokeDasharray="5 5">
+                      <Label value="0mis Target (5)" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 'bold' }} />
+                    </ReferenceLine>
+                    <ReferenceLine yAxisId="right" y={25} stroke="#8B5CF6" strokeWidth={3} strokeDasharray="5 5">
+                      <Label value="3mis Target (25)" position="right" style={{ fill: '#8B5CF6', fontSize: 14, fontWeight: 'bold' }} />
+                    </ReferenceLine>
                   </ComposedChart>
                 </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-
-          {/* График 3: 0 MIS/3MIS by sales date */}
-          <div style={cardStyle}>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>📊</span>
-              0 MIS/3MIS by sales date
-            </h2>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
-              <button onClick={() => setShowModelFilter3(!showModelFilter3)} style={buttonStyle}>
-                {showModelFilter3 ? 'Скрыть фильтр' : 'Модели'}
-              </button>
-              <button onClick={() => loadAnalytics3(selectedUploadTime)} disabled={loading3} style={buttonStyle}>
-                {loading3 ? '⏳ Загрузка...' : '▶ Загрузить аналитику'}
-              </button>
+              ) : (
+                <p style={{ color: '#6B7280', textAlign: 'center', padding: 40 }}>Нет данных для отображения</p>
+              )}
             </div>
-            {showModelFilter3 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                {ALL_MODELS.map(model => (
-                  <label key={model} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={selectedModels3.includes(model)} onChange={() => handleModelToggle3(model)} />
-                    {model}
-                  </label>
-                ))}
-              </div>
-            )}
+          )}
 
-            {chartData3.length > 0 && (
-              <div style={{ width: '100%', backgroundColor: '#fff', fontFamily: 'Arial, sans-serif' }}>
-                <div style={{ width: '100%', height: 600, marginBottom: 100 }}>
-                  <h3 style={{ color: '#333', fontSize: 16, marginLeft: 10 }}>0 MIS/3MIS per 1000 by sales date</h3>
+          {/* Model Based (Prod Related) */}
+          {activeSubTab === 'model' && (
+            <div style={cardStyle}>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>📊</span>
+                Model Based (Prod Related)
+              </h2>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
+                <button onClick={() => setShowModelFilter2(!showModelFilter2)} style={buttonStyle}>
+                  {showModelFilter2 ? 'Скрыть фильтр' : 'Модели'}
+                </button>
+              </div>
+
+              {showModelFilter2 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                  {ALL_MODELS.map(model => (
+                    <label key={model} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={selectedModels2.includes(model)} onChange={() => handleModelToggle2(model)} />
+                      {model}
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {chartData2.length > 0 ? (
+                <div style={{ width: '100%', height: 600, backgroundColor: '#fff', fontFamily: 'Arial, sans-serif' }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData3} margin={{ top: 30, right: 20, bottom: 80, left: 0 }}>
-                      <CartesianGrid stroke="#ddd" vertical={false} horizontal={true} />
-                      <YAxis yAxisId="left" domain={[0, 'auto']} tick={{ fill: '#666', fontSize: 11 }} axisLine={false} tickLine={false} />
-                      <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tick={{ fill: '#666', fontSize: 11 }} axisLine={false} tickLine={false} />
-                      <XAxis dataKey="month" axisLine={{ stroke: '#ccc' }} tickLine={false} tick={{ fill: '#333', fontSize: 11 }} />
-                      <Legend verticalAlign="bottom" align="center" iconType="rect" iconSize={12} wrapperStyle={{ fontSize: 12, color: '#555', paddingTop: 20 }}
+                    <ComposedChart data={chartData2} margin={{ top: 40, right: 20, bottom: 60, left: 10 }}>
+                      <CartesianGrid stroke="#d9d9d9" vertical={true} horizontal={true} />
+                      <YAxis yAxisId="left" domain={[0, 'auto']} tickCount={9}
+                        tick={{ fill: '#000', fontSize: 14, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
+                      <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tickCount={9}
+                        tick={{ fill: '#000', fontSize: 14, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
+                      <XAxis type="category" dataKey="id" tick={CustomTick}
+                        axisLine={{ stroke: '#ccc' }} tickLine={false} interval={0} height={60} />
+                      <Legend verticalAlign="bottom" align="center" iconType="square" iconSize={14}
+                        wrapperStyle={{ padding: '10px 0', fontSize: 14, fontWeight: 'bold' }}
                         payload={[
-                          { value: 'qty Sold', type: 'rect', color: '#BCD0EF' },
-                          { value: '0mis per 1000', type: 'line', color: '#F48F45' },
-                          { value: '3mis per 1000', type: 'line', color: '#A9A9A9' },
-                          { value: '0mis targ', type: 'plainline', color: '#FF0000' },
-                          { value: '3mis targ', type: 'plainline', color: '#000000' },
+                          { value: '3mis Repairs', type: 'square', color: '#ED7D31' },
+                          { value: 'qty Sold by Prod', type: 'square', color: '#4472C4' },
                         ]} />
-                      <ReferenceLine yAxisId="right" y={5} stroke="#FF0000" strokeDasharray="3 3" />
-                      <ReferenceLine yAxisId="right" y={25} stroke="#000000" strokeDasharray="3 3" />
-                      <Bar yAxisId="left" dataKey="qty" fill="#BCD0EF" barSize={40} name="qty Sold">
-                        <LabelList dataKey="qty" position="top" style={{ fill: '#3464A4', fontSize: 12, fontWeight: 'bold' }} formatter={formatNumber} />
+                      <Bar yAxisId="left" dataKey="sold" fill="#4472C4" barSize={24} name="qty Sold by Prod" stackId="a">
+                        <LabelList content={renderBlueLabel} />
                       </Bar>
-                      <Line yAxisId="right" type="linear" dataKey="mis0per1000" stroke="#F48F45" strokeWidth={3} dot={{ r: 5 }} name="0mis per 1000">
-                        <LabelList dataKey="mis0per1000" content={renderLineLabel} fill="#F48F45" />
-                      </Line>
-                      <Line yAxisId="right" type="linear" dataKey="mis3per1000" stroke="#A9A9A9" strokeWidth={3} dot={{ r: 5 }} name="3mis per 1000">
-                        <LabelList dataKey="mis3per1000" content={renderLineLabel} fill="#A9A9A9" />
-                      </Line>
+                      <Bar yAxisId="left" dataKey="repairs" fill="#ED7D31" barSize={24} name="3mis Repairs" stackId="a">
+                        <LabelList dataKey="repairs" position="top" style={{ fontSize: 16, fill: '#FFC000', fontWeight: 'bold' }} />
+                      </Bar>
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
+              ) : (
+                <p style={{ color: '#6B7280', textAlign: 'center', padding: 40 }}>Нет данных для отображения</p>
+              )}
+            </div>
+          )}
 
-                <div style={{ width: '100%', height: 600 }}>
-                  <h3 style={{ color: '#333', fontSize: 16, marginLeft: 10 }}>REPAIR Counts by Sales date</h3>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData3} margin={{ top: 30, right: 20, bottom: 80, left: 0 }}>
-                      <CartesianGrid stroke="#ddd" vertical={false} horizontal={true} />
-                      <YAxis yAxisId="left" domain={[0, 'auto']} tick={{ fill: '#666', fontSize: 11 }} axisLine={false} tickLine={false} />
-                      <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tick={{ fill: '#666', fontSize: 11 }} axisLine={false} tickLine={false} />
-                      <XAxis dataKey="month" axisLine={{ stroke: '#ccc' }} tickLine={false} tick={{ fill: '#333', fontSize: 11 }} />
-                      <Legend verticalAlign="bottom" align="center" iconType="rect" iconSize={12} wrapperStyle={{ fontSize: 12, color: '#555', paddingTop: 20 }}
-                        payload={[
-                          { value: 'qty Sold', type: 'rect', color: '#BCD0EF' },
-                          { value: '0mis repairs', type: 'line', color: '#F48F45' },
-                          { value: '3mis repairs', type: 'line', color: '#A9A9A9' },
-                        ]} />
-                      <Bar yAxisId="left" dataKey="qty" fill="#BCD0EF" barSize={40} name="qty Sold">
-                        <LabelList dataKey="qty" position="top" style={{ fill: '#3464A4', fontSize: 12, fontWeight: 'bold' }} formatter={formatNumber} />
-                      </Bar>
-                      <Line yAxisId="right" type="linear" dataKey="mis0Count" stroke="#F48F45" strokeWidth={3} dot={{ r: 5 }} name="0mis repairs">
-                        <LabelList dataKey="mis0Count" content={renderLineLabel} fill="#F48F45" />
-                      </Line>
-                      <Line yAxisId="right" type="linear" dataKey="mis3Count" stroke="#A9A9A9" strokeWidth={3} dot={{ r: 5 }} name="3mis repairs">
-                        <LabelList dataKey="mis3Count" content={renderLineLabel} fill="#A9A9A9" />
-                      </Line>
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
+          {/* 0 MIS/3MIS by sales date */}
+          {activeSubTab === 'sales' && (
+            <div style={cardStyle}>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>📊</span>
+                0 MIS/3MIS by sales date
+              </h2>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
+                <button onClick={() => setShowModelFilter3(!showModelFilter3)} style={buttonStyle}>
+                  {showModelFilter3 ? 'Скрыть фильтр' : 'Модели'}
+                </button>
               </div>
-            )}
-          </div>
+              {showModelFilter3 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                  {ALL_MODELS.map(model => (
+                    <label key={model} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={selectedModels3.includes(model)} onChange={() => handleModelToggle3(model)} />
+                      {model}
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {chartData3.length > 0 ? (
+                <div style={{ width: '100%', backgroundColor: '#fff', fontFamily: 'Arial, sans-serif' }}>
+                  <div style={{ width: '100%', height: 600, marginBottom: 100 }}>
+                    <h3 style={{ color: '#333', fontSize: 18, marginLeft: 10, fontWeight: 'bold' }}>0 MIS/3MIS per 1000 by sales date</h3>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={chartData3} margin={{ top: 40, right: 20, bottom: 80, left: 0 }}>
+                        <CartesianGrid stroke="#ddd" vertical={false} horizontal={true} />
+                        <YAxis yAxisId="left" domain={[0, 'auto']} tick={{ fill: '#666', fontSize: 14, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
+                        <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tick={{ fill: '#666', fontSize: 14, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
+                        <XAxis dataKey="month" axisLine={{ stroke: '#ccc' }} tickLine={false} tick={{ fill: '#333', fontSize: 13, fontWeight: 'bold' }} />
+                        <Legend verticalAlign="bottom" align="center" iconType="rect" iconSize={14} wrapperStyle={{ fontSize: 14, color: '#555', paddingTop: 20, fontWeight: 'bold' }}
+                          payload={[
+                            { value: 'qty Sold', type: 'rect', color: '#BCD0EF' },
+                            { value: '0mis per 1000', type: 'line', color: '#F48F45' },
+                            { value: '3mis per 1000', type: 'line', color: '#A9A9A9' },
+                          ]} />
+                        <ReferenceLine yAxisId="right" y={5} stroke="#FF0000" strokeDasharray="3 3" strokeWidth={2} />
+                        <ReferenceLine yAxisId="right" y={25} stroke="#000000" strokeDasharray="3 3" strokeWidth={2} />
+                        <Bar yAxisId="left" dataKey="qty" fill="#BCD0EF" barSize={40} name="qty Sold">
+                          <LabelList dataKey="qty" position="top" style={{ fill: '#3464A4', fontSize: 14, fontWeight: 'bold' }} formatter={formatNumber} />
+                        </Bar>
+                        <Line yAxisId="right" type="linear" dataKey="mis0per1000" stroke="#F48F45" strokeWidth={4} dot={{ r: 8, fill: '#F48F45', stroke: '#FFFFFF', strokeWidth: 2 }} name="0mis per 1000">
+                          <LabelList dataKey="mis0per1000" content={renderLineLabel} fill="#F48F45" />
+                        </Line>
+                        <Line yAxisId="right" type="linear" dataKey="mis3per1000" stroke="#A9A9A9" strokeWidth={4} dot={{ r: 8, fill: '#A9A9A9', stroke: '#FFFFFF', strokeWidth: 2 }} name="3mis per 1000">
+                          <LabelList dataKey="mis3per1000" content={renderLineLabel} fill="#A9A9A9" />
+                        </Line>
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div style={{ width: '100%', height: 600 }}>
+                    <h3 style={{ color: '#333', fontSize: 18, marginLeft: 10, fontWeight: 'bold' }}>REPAIR Counts by Sales date</h3>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={chartData3} margin={{ top: 40, right: 20, bottom: 80, left: 0 }}>
+                        <CartesianGrid stroke="#ddd" vertical={false} horizontal={true} />
+                        <YAxis yAxisId="left" domain={[0, 'auto']} tick={{ fill: '#666', fontSize: 14, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
+                        <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tick={{ fill: '#666', fontSize: 14, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
+                        <XAxis dataKey="month" axisLine={{ stroke: '#ccc' }} tickLine={false} tick={{ fill: '#333', fontSize: 13, fontWeight: 'bold' }} />
+                        <Legend verticalAlign="bottom" align="center" iconType="rect" iconSize={14} wrapperStyle={{ fontSize: 14, color: '#555', paddingTop: 20, fontWeight: 'bold' }}
+                          payload={[
+                            { value: 'qty Sold', type: 'rect', color: '#BCD0EF' },
+                            { value: '0mis repairs', type: 'line', color: '#F48F45' },
+                            { value: '3mis repairs', type: 'line', color: '#A9A9A9' },
+                          ]} />
+                        <Bar yAxisId="left" dataKey="qty" fill="#BCD0EF" barSize={40} name="qty Sold">
+                          <LabelList dataKey="qty" position="top" style={{ fill: '#3464A4', fontSize: 14, fontWeight: 'bold' }} formatter={formatNumber} />
+                        </Bar>
+                        <Line yAxisId="right" type="linear" dataKey="mis0Count" stroke="#F48F45" strokeWidth={4} dot={{ r: 8, fill: '#F48F45', stroke: '#FFFFFF', strokeWidth: 2 }} name="0mis repairs">
+                          <LabelList dataKey="mis0Count" content={renderLineLabel} fill="#F48F45" />
+                        </Line>
+                        <Line yAxisId="right" type="linear" dataKey="mis3Count" stroke="#A9A9A9" strokeWidth={4} dot={{ r: 8, fill: '#A9A9A9', stroke: '#FFFFFF', strokeWidth: 2 }} name="3mis repairs">
+                          <LabelList dataKey="mis3Count" content={renderLineLabel} fill="#A9A9A9" />
+                        </Line>
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              ) : (
+                <p style={{ color: '#6B7280', textAlign: 'center', padding: 40 }}>Нет данных для отображения</p>
+              )}
+            </div>
+          )}
 
           {/* Топ категорий */}
-          <div style={cardStyle}>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>🏆</span>
-              Топ категорий по количеству рекламаций
-            </h2>
-            <div style={{ marginBottom: 20 }}>
-              <button onClick={() => loadCategories(selectedUploadTime)} disabled={loadingCategories} style={buttonStyle}>
-                {loadingCategories ? '⏳ Загрузка...' : '📊 Загрузить данные'}
-              </button>
-            </div>
+          {activeSubTab === 'categories' && (
+            <div style={cardStyle}>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>🏆</span>
+                Топ категорий по количеству рекламаций
+              </h2>
 
-            {categoriesData.length > 0 ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 20 }}>
-                {['ALL', ...ALL_MODELS].map(modelFilter => {
-                  const filtered = modelFilter === 'ALL'
-                    ? categoriesData
-                    : categoriesData.filter(d => d.model === modelFilter);
-                  const sorted = [...filtered].sort((a, b) => b.total_claims - a.total_claims);
-                  
-                  return (
-                    <div key={modelFilter} style={{
-                      backgroundColor: '#FAFBFC',
-                      borderRadius: 12,
-                      padding: 16,
-                      border: '1px solid #E5E7EB',
-                      boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
-                    }}>
-                      <h3 style={{
-                        margin: '0 0 12px 0',
-                        fontSize: 18,
-                        fontWeight: 700,
-                        color: '#1F2937',
-                        borderBottom: '2px solid #2563EB',
-                        paddingBottom: 6,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8
+              {categoriesData.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 20 }}>
+                  {['ALL', ...ALL_MODELS].map(modelFilter => {
+                    const filtered = modelFilter === 'ALL'
+                      ? categoriesData
+                      : categoriesData.filter(d => d.model === modelFilter);
+                    const sorted = [...filtered].sort((a, b) => b.total_claims - a.total_claims);
+                    
+                    return (
+                      <div key={modelFilter} style={{
+                        backgroundColor: '#FAFBFC',
+                        borderRadius: 12,
+                        padding: 16,
+                        border: '1px solid #E5E7EB',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
                       }}>
-                        <span style={{
-                          background: '#2563EB',
-                          color: 'white',
-                          borderRadius: 8,
-                          padding: '2px 12px',
-                          fontSize: 14
+                        <h3 style={{
+                          margin: '0 0 12px 0',
+                          fontSize: 18,
+                          fontWeight: 700,
+                          color: '#1F2937',
+                          borderBottom: '2px solid #2563EB',
+                          paddingBottom: 6,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8
                         }}>
-                          {modelFilter === 'ALL' ? 'Все модели' : modelFilter}
-                        </span>
-                      </h3>
-                      
-                      {sorted.length > 0 ? (
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                          <thead>
-                            <tr style={{ backgroundColor: '#F3F4F6' }}>
-                              <th style={{ padding: '8px 6px', textAlign: 'left', borderBottom: '2px solid #D1D5DB', fontWeight: 600 }}>Категория</th>
-                              <th style={{ padding: '8px 6px', textAlign: 'right', borderBottom: '2px solid #D1D5DB', fontWeight: 600 }}>Кол-во рекламаций</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {sorted.map((row, idx) => (
-                              <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                                <td style={{ padding: '6px 8px', borderBottom: '1px solid #E5E7EB' }}>{row.category}</td>
-                                <td style={{ padding: '6px 8px', textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontWeight: 600 }}>
-                                  {row.total_claims}
-                                </td>
+                          <span style={{
+                            background: '#2563EB',
+                            color: 'white',
+                            borderRadius: 8,
+                            padding: '2px 12px',
+                            fontSize: 14
+                          }}>
+                            {modelFilter === 'ALL' ? 'Все модели' : modelFilter}
+                          </span>
+                        </h3>
+                        
+                        {sorted.length > 0 ? (
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                            <thead>
+                              <tr style={{ backgroundColor: '#F3F4F6' }}>
+                                <th style={{ padding: '8px 6px', textAlign: 'left', borderBottom: '2px solid #D1D5DB', fontWeight: 600 }}>Категория</th>
+                                <th style={{ padding: '8px 6px', textAlign: 'right', borderBottom: '2px solid #D1D5DB', fontWeight: 600 }}>Кол-во рекламаций</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      ) : (
-                        <p style={{ color: '#9CA3AF', textAlign: 'center', padding: '12px 0', margin: 0 }}>Нет данных</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p style={{ color: '#6B7280', textAlign: 'center', padding: 40 }}>Нет загруженных данных</p>
-            )}
-          </div>
+                            </thead>
+                            <tbody>
+                              {sorted.map((row, idx) => (
+                                <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                                  <td style={{ padding: '6px 8px', borderBottom: '1px solid #E5E7EB' }}>{row.category}</td>
+                                  <td style={{ padding: '6px 8px', textAlign: 'right', borderBottom: '1px solid #E5E7EB', fontWeight: 600 }}>
+                                    {row.total_claims}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <p style={{ color: '#9CA3AF', textAlign: 'center', padding: '12px 0', margin: 0 }}>Нет данных</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p style={{ color: '#6B7280', textAlign: 'center', padding: 40 }}>Нет загруженных данных</p>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
