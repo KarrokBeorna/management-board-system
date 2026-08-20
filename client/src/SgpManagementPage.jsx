@@ -133,15 +133,17 @@ const totalRowStyle = {
 };
 
 const filterDropdownStyle = {
-  position: 'fixed',
-  zIndex: 1000,
+  position: 'absolute',
+  top: '100%',
+  left: 0,
+  zIndex: 100,
   backgroundColor: '#FFFFFF',
   border: '1px solid #E5E7EB',
   borderRadius: 8,
-  boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
-  maxHeight: 300,
+  boxShadow: '0 10px 20px rgba(0,0,0,0.1)',
+  maxHeight: 250,
   overflowY: 'auto',
-  minWidth: 220,
+  minWidth: 200,
   padding: 8,
 };
 
@@ -163,31 +165,28 @@ const statsContainerStyle = {
   flexWrap: 'wrap',
 };
 
-const statCardStyle = (color) => ({
+const statCardStyle = {
   padding: '12px 20px',
   borderRadius: 12,
   backgroundColor: '#F9FAFB',
-  border: `2px solid ${color}`,
+  border: '1px solid #E5E7EB',
   fontSize: 14,
   fontWeight: 600,
   color: '#374151',
   display: 'flex',
   alignItems: 'center',
   gap: 8,
-});
+};
 
 export default function SgpManagementPage() {
-  const [rawData, setRawData] = useState([]);
+  const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeModel, setActiveModel] = useState('ALL');
-  const [activeFilterColumn, setActiveFilterColumn] = useState(null);
-  const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
-  
-  // Множественные фильтры: { columnName: [selectedValues] }
   const [filters, setFilters] = useState({
-    storage_status: ['In stock'],
+    storage_status: 'In stock',
   });
+  const [activeFilterColumn, setActiveFilterColumn] = useState(null);
 
   const fetchData = async () => {
     try {
@@ -195,7 +194,32 @@ export default function SgpManagementPage() {
       const res = await fetch(`${API_BASE}/api/sgp-management`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
-      setRawData(json);
+      
+      // Группируем по VIN
+      const groupedMap = {};
+      
+      json.forEach(row => {
+        const vin = row.vin;
+        
+        if (!groupedMap[vin]) {
+          groupedMap[vin] = {
+            vin: row.vin,
+            model: row.model,
+            block_status: row.block_status,
+            details: [],
+          };
+        }
+        
+        groupedMap[vin].details.push({
+          reason: row.reason || '',
+          resolution_status: row.resolution_status || '—',
+          storage_status: row.storage_status || 'Unknown',
+          location: row.location || '—',
+        });
+      });
+      
+      const groupedData = Object.values(groupedMap);
+      setData(groupedData);
       setError(null);
     } catch (err) {
       console.error('Ошибка SGP Management:', err);
@@ -210,14 +234,14 @@ export default function SgpManagementPage() {
   }, []);
 
   const allModels = useMemo(() => {
-    const models = [...new Set(rawData.map(d => d.model))].filter(Boolean).sort();
+    const models = [...new Set(data.map(d => d.model))].filter(Boolean).sort();
     return models;
-  }, [rawData]);
+  }, [data]);
 
   const filteredByModel = useMemo(() => {
-    if (activeModel === 'ALL') return rawData;
-    return rawData.filter(d => d.model === activeModel);
-  }, [rawData, activeModel]);
+    if (activeModel === 'ALL') return data;
+    return data.filter(d => d.model === activeModel);
+  }, [data, activeModel]);
 
   const getUniqueValues = (field) => {
     let values = [];
@@ -226,13 +250,13 @@ export default function SgpManagementPage() {
       values = filteredByModel.map(d => d.block_status);
     } else if (field === 'storage_status') {
       filteredByModel.forEach(d => {
-        d.details?.forEach(detail => {
+        d.details.forEach(detail => {
           values.push(detail.storage_status);
         });
       });
     } else if (field === 'resolution_status') {
       filteredByModel.forEach(d => {
-        d.details?.forEach(detail => {
+        d.details.forEach(detail => {
           values.push(detail.resolution_status);
         });
       });
@@ -243,22 +267,25 @@ export default function SgpManagementPage() {
     return [...new Set(values.filter(v => v !== null && v !== undefined && v !== ''))].sort();
   };
 
-  // Фильтрация с множественным выбором
   const filteredData = useMemo(() => {
     let result = filteredByModel;
     
     Object.keys(filters).forEach(field => {
-      const selectedValues = filters[field];
-      if (selectedValues && selectedValues.length > 0 && !selectedValues.includes('ALL')) {
+      const filterValue = filters[field];
+      if (filterValue && filterValue !== 'ALL') {
         result = result.filter(d => {
           if (field === 'block_status') {
-            return selectedValues.includes(d.block_status);
+            return d.block_status === filterValue;
           } else if (field === 'storage_status') {
-            return d.details?.some(detail => selectedValues.includes(detail.storage_status));
+            return d.details.some(detail => detail.storage_status === filterValue);
           } else if (field === 'resolution_status') {
-            return d.details?.some(detail => selectedValues.includes(detail.resolution_status));
+            return d.details.some(detail => detail.resolution_status === filterValue);
           } else {
-            return selectedValues.includes(d[field]);
+            const val = d[field];
+            if (typeof val === 'string') {
+              return val.toLowerCase().includes(filterValue.toLowerCase());
+            }
+            return val === filterValue;
           }
         });
       }
@@ -268,54 +295,36 @@ export default function SgpManagementPage() {
   }, [filteredByModel, filters]);
 
   useEffect(() => {
-    setFilters({ storage_status: ['In stock'] });
+    setFilters({ storage_status: 'In stock' });
     setActiveFilterColumn(null);
   }, [activeModel]);
 
-  // Статистика
   const stats = useMemo(() => {
     const totalInStock = filteredByModel.filter(d => 
-      d.details?.some(detail => detail.storage_status === 'In stock')
-    ).length;
-    
-    const totalOutbound = filteredByModel.filter(d => 
-      d.details?.some(detail => detail.storage_status === 'Outbound')
+      d.details.some(detail => detail.storage_status === 'In stock')
     ).length;
     
     const totalBlock = filteredByModel.filter(d => d.block_status === 'Блок').length;
     const totalNotBlock = filteredByModel.filter(d => d.block_status === 'Не блок').length;
     
-    return { totalInStock, totalOutbound, totalBlock, totalNotBlock };
+    return { totalInStock, totalBlock, totalNotBlock };
   }, [filteredByModel]);
 
   const handleExportCurrent = () => {
     const exportData = [];
     
     filteredData.forEach(d => {
-      const details = d.details || [];
-      if (details.length === 0) {
+      d.details.forEach((detail, i) => {
         exportData.push({
-          'VIN': d.vin,
-          'Модель': d.model,
-          'Статус блок': d.block_status,
-          'Причина': '',
-          'Статус устранения': '',
-          'Статус хранения': '',
-          'Расположение': '',
+          'VIN': i === 0 ? d.vin : '',
+          'Модель': i === 0 ? d.model : '',
+          'Статус блок': i === 0 ? d.block_status : '',
+          'Причина': detail.reason,
+          'Статус устранения': detail.resolution_status,
+          'Статус хранения': detail.storage_status,
+          'Расположение': detail.location,
         });
-      } else {
-        details.forEach((detail, i) => {
-          exportData.push({
-            'VIN': i === 0 ? d.vin : '',
-            'Модель': i === 0 ? d.model : '',
-            'Статус блок': i === 0 ? d.block_status : '',
-            'Причина': detail.reason || '',
-            'Статус устранения': detail.resolution_status || '',
-            'Статус хранения': detail.storage_status || '',
-            'Расположение': detail.location || '',
-          });
-        });
-      }
+      });
     });
     
     exportData.push({
@@ -345,31 +354,18 @@ export default function SgpManagementPage() {
   const handleExportAll = () => {
     const exportData = [];
     
-    rawData.forEach(d => {
-      const details = d.details || [];
-      if (details.length === 0) {
+    data.forEach(d => {
+      d.details.forEach((detail, i) => {
         exportData.push({
-          'VIN': d.vin,
-          'Модель': d.model,
-          'Статус блок': d.block_status,
-          'Причина': '',
-          'Статус устранения': '',
-          'Статус хранения': '',
-          'Расположение': '',
+          'VIN': i === 0 ? d.vin : '',
+          'Модель': i === 0 ? d.model : '',
+          'Статус блок': i === 0 ? d.block_status : '',
+          'Причина': detail.reason,
+          'Статус устранения': detail.resolution_status,
+          'Статус хранения': detail.storage_status,
+          'Расположение': detail.location,
         });
-      } else {
-        details.forEach((detail, i) => {
-          exportData.push({
-            'VIN': i === 0 ? d.vin : '',
-            'Модель': i === 0 ? d.model : '',
-            'Статус блок': i === 0 ? d.block_status : '',
-            'Причина': detail.reason || '',
-            'Статус устранения': detail.resolution_status || '',
-            'Статус хранения': detail.storage_status || '',
-            'Расположение': detail.location || '',
-          });
-        });
-      }
+      });
     });
     
     exportData.push({
@@ -379,7 +375,7 @@ export default function SgpManagementPage() {
       'Причина': '',
       'Статус устранения': '',
       'Статус хранения': '',
-      'Расположение': rawData.length,
+      'Расположение': data.length,
     });
     
     const ws = XLSX.utils.json_to_sheet(exportData);
@@ -395,13 +391,7 @@ export default function SgpManagementPage() {
     XLSX.writeFile(wb, `SGP_Management_All_${dateStr}.xlsx`);
   };
 
-  const handleHeaderClick = (column, event) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    setFilterDropdownPos({
-      top: rect.bottom + 4,
-      left: rect.left,
-    });
-    
+  const handleHeaderClick = (column) => {
     if (activeFilterColumn === column) {
       setActiveFilterColumn(null);
     } else {
@@ -409,31 +399,12 @@ export default function SgpManagementPage() {
     }
   };
 
-  const handleFilterToggle = (column, value) => {
-    setFilters(prev => {
-      const currentValues = prev[column] || [];
-      let newValues;
-      
-      if (value === 'ALL') {
-        // Если выбрали "Все" - очищаем фильтр для этой колонки
-        newValues = [];
-      } else if (currentValues.includes(value)) {
-        // Убираем значение
-        newValues = currentValues.filter(v => v !== value);
-      } else {
-        // Добавляем значение
-        newValues = [...currentValues, value];
-      }
-      
-      return { ...prev, [column]: newValues };
-    });
+  const handleFilterSelect = (column, value) => {
+    setFilters(prev => ({ ...prev, [column]: value }));
+    setActiveFilterColumn(null);
   };
 
-  const handleFilterSelectAll = (column) => {
-    setFilters(prev => ({ ...prev, [column]: [] }));
-  };
-
-  if (loading && rawData.length === 0) {
+  if (loading && data.length === 0) {
     return (
       <div style={containerStyle}>
         <div style={{ textAlign: 'center', color: '#6B7280', fontSize: 16, padding: 40 }}>
@@ -470,11 +441,11 @@ export default function SgpManagementPage() {
             fontSize: 11,
             fontWeight: 700,
           }}>
-            {rawData.length}
+            {data.length}
           </span>
         </div>
         {allModels.map(model => {
-          const count = rawData.filter(d => d.model === model).length;
+          const count = data.filter(d => d.model === model).length;
           return (
             <div 
               key={model} 
@@ -499,17 +470,14 @@ export default function SgpManagementPage() {
 
       {/* Статистика */}
       <div style={statsContainerStyle}>
-        <div style={statCardStyle('#10B981')}>
-          📦 Итого In stock: <span style={{ color: '#10B981', fontSize: 20, fontWeight: 800 }}>{stats.totalInStock}</span>
+        <div style={statCardStyle}>
+          📦 Итого In stock: <span style={{ color: '#10B981', fontSize: 18 }}>{stats.totalInStock}</span>
         </div>
-        <div style={statCardStyle('#3B82F6')}>
-          📤 Итого Outbound: <span style={{ color: '#3B82F6', fontSize: 20, fontWeight: 800 }}>{stats.totalOutbound}</span>
+        <div style={statCardStyle}>
+          🔴 Итого Блок: <span style={{ color: '#DC2626', fontSize: 18 }}>{stats.totalBlock}</span>
         </div>
-        <div style={statCardStyle('#DC2626')}>
-          🔴 Итого Блок: <span style={{ color: '#DC2626', fontSize: 20, fontWeight: 800 }}>{stats.totalBlock}</span>
-        </div>
-        <div style={statCardStyle('#10B981')}>
-          🟢 Итого Не блок: <span style={{ color: '#10B981', fontSize: 20, fontWeight: 800 }}>{stats.totalNotBlock}</span>
+        <div style={statCardStyle}>
+          🟢 Итого Не блок: <span style={{ color: '#10B981', fontSize: 18 }}>{stats.totalNotBlock}</span>
         </div>
       </div>
 
@@ -525,49 +493,73 @@ export default function SgpManagementPage() {
             <thead>
               <tr>
                 <th 
-                  style={{ ...thStyle, width: '17%', background: filters.vin?.length > 0 ? '#DBEAFE' : '#F9FAFB' }}
-                  onClick={(e) => handleHeaderClick('vin', e)}
+                  style={{ ...thStyle, width: '17%' }}
+                  onClick={() => handleHeaderClick('vin')}
                 >
-                  VIN {filters.vin?.length > 0 ? `(${filters.vin.length})` : ''} {activeFilterColumn === 'vin' ? '▼' : '▼'}
+                  VIN {activeFilterColumn === 'vin' && '▼'}
                 </th>
                 <th 
-                  style={{ ...thStyle, width: '11%', background: filters.model?.length > 0 ? '#DBEAFE' : '#F9FAFB' }}
-                  onClick={(e) => handleHeaderClick('model', e)}
+                  style={{ ...thStyle, width: '11%' }}
+                  onClick={() => handleHeaderClick('model')}
                 >
-                  Модель {filters.model?.length > 0 ? `(${filters.model.length})` : ''} ▼
+                  Модель {activeFilterColumn === 'model' && '▼'}
                 </th>
                 <th 
-                  style={{ ...thStyle, width: '9%', background: filters.block_status?.length > 0 ? '#DBEAFE' : '#F9FAFB' }}
-                  onClick={(e) => handleHeaderClick('block_status', e)}
+                  style={{ ...thStyle, width: '9%' }}
+                  onClick={() => handleHeaderClick('block_status')}
                 >
-                  Статус блок {filters.block_status?.length > 0 ? `(${filters.block_status.length})` : ''} ▼
+                  Статус блок {activeFilterColumn === 'block_status' && '▼'}
                 </th>
                 <th style={{ ...thStyle, width: '22%', cursor: 'default' }}>Причина</th>
                 <th 
-                  style={{ ...thStyle, width: '11%', background: filters.resolution_status?.length > 0 ? '#DBEAFE' : '#F9FAFB' }}
-                  onClick={(e) => handleHeaderClick('resolution_status', e)}
+                  style={{ ...thStyle, width: '11%' }}
+                  onClick={() => handleHeaderClick('resolution_status')}
                 >
-                  Статус устранения {filters.resolution_status?.length > 0 ? `(${filters.resolution_status.length})` : ''} ▼
+                  Статус устранения {activeFilterColumn === 'resolution_status' && '▼'}
                 </th>
                 <th 
-                  style={{ ...thStyle, width: '13%', background: filters.storage_status?.length > 0 ? '#DBEAFE' : '#F9FAFB' }}
-                  onClick={(e) => handleHeaderClick('storage_status', e)}
+                  style={{ ...thStyle, width: '13%' }}
+                  onClick={() => handleHeaderClick('storage_status')}
                 >
-                  Статус хранения {filters.storage_status?.length > 0 ? `(${filters.storage_status.length})` : ''} ▼
+                  Статус хранения {activeFilterColumn === 'storage_status' && '▼'}
                 </th>
                 <th style={{ ...thStyle, width: '17%', cursor: 'default' }}>Расположение</th>
               </tr>
             </thead>
             <tbody>
               {filteredData.map((row, rowIdx) => {
-                const details = row.details || [];
+                const detailsCount = row.details.length;
                 
-                if (details.length === 0) {
-                  return (
-                    <tr key={rowIdx} style={{ backgroundColor: rowIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                      <td style={{ ...tdStyle, fontWeight: 600, fontSize: 12 }}>{row.vin}</td>
-                      <td style={{ ...tdStyle, fontWeight: 700 }}>{row.model}</td>
-                      <td style={tdStyle}>
+                return row.details.map((detail, detailIdx) => (
+                  <tr key={`${rowIdx}-${detailIdx}`} style={{ 
+                    backgroundColor: rowIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
+                    borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                  }}>
+                    {/* VIN - только первая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontWeight: 600, 
+                      fontSize: 12,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      {detailIdx === 0 ? row.vin : ''}
+                    </td>
+                    
+                    {/* Модель - только первая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontWeight: 700,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      {detailIdx === 0 ? row.model : ''}
+                    </td>
+                    
+                    {/* Статус блок - только первая строка */}
+                    <td style={{ 
+                      ...tdStyle,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      {detailIdx === 0 ? (
                         <span style={{
                           padding: '4px 10px',
                           borderRadius: 999,
@@ -578,96 +570,56 @@ export default function SgpManagementPage() {
                         }}>
                           {row.block_status}
                         </span>
-                      </td>
-                      <td style={{ ...tdStyle, color: '#9CA3AF' }}>—</td>
-                      <td style={{ ...tdStyle, color: '#9CA3AF' }}>—</td>
-                      <td style={{ ...tdStyle, color: '#9CA3AF' }}>—</td>
-                      <td style={{ ...tdStyle, color: '#9CA3AF' }}>—</td>
-                    </tr>
-                  );
-                }
-                
-                return details.map((detail, detailIdx) => {
-                  const isLastDetail = detailIdx === details.length - 1;
-                  
-                  return (
-                    <tr key={`${rowIdx}-${detailIdx}`} style={{ 
-                      backgroundColor: rowIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
-                      borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
+                      ) : ''}
+                    </td>
+                    
+                    {/* Причина - каждая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontSize: 12, 
+                      lineHeight: '1.4',
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
                     }}>
-                      <td style={{ 
-                        ...tdStyle, 
-                        fontWeight: 600, 
-                        fontSize: 12,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        {detailIdx === 0 ? row.vin : ''}
-                      </td>
-                      <td style={{ 
-                        ...tdStyle, 
+                      {detail.reason || '—'}
+                    </td>
+                    
+                    {/* Статус устранения - каждая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontSize: 12,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      <span style={{
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        fontSize: 11,
                         fontWeight: 700,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
+                        backgroundColor: detail.resolution_status === 'Устранено' ? '#F0FDF4' : '#FEF3C7',
+                        color: detail.resolution_status === 'Устранено' ? '#065F46' : '#92400E',
                       }}>
-                        {detailIdx === 0 ? row.model : ''}
-                      </td>
-                      <td style={{ 
-                        ...tdStyle,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        {detailIdx === 0 ? (
-                          <span style={{
-                            padding: '4px 10px',
-                            borderRadius: 999,
-                            fontSize: 11,
-                            fontWeight: 700,
-                            backgroundColor: row.block_status === 'Блок' ? '#FEE2E2' : '#D1FAE5',
-                            color: row.block_status === 'Блок' ? '#991B1B' : '#065F46',
-                          }}>
-                            {row.block_status}
-                          </span>
-                        ) : ''}
-                      </td>
-                      <td style={{ 
-                        ...tdStyle, 
-                        fontSize: 12, 
-                        lineHeight: '1.4',
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        {detail.reason || '—'}
-                      </td>
-                      <td style={{ 
-                        ...tdStyle, 
-                        fontSize: 12,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        <span style={{
-                          padding: '3px 8px',
-                          borderRadius: 6,
-                          fontSize: 11,
-                          fontWeight: 700,
-                          backgroundColor: detail.resolution_status === 'Устранено' ? '#F0FDF4' : detail.resolution_status === 'Не устранено' ? '#FEF3C7' : '#F3F4F6',
-                          color: detail.resolution_status === 'Устранено' ? '#065F46' : detail.resolution_status === 'Не устранено' ? '#92400E' : '#9CA3AF',
-                        }}>
-                          {detail.resolution_status || '—'}
-                        </span>
-                      </td>
-                      <td style={{ 
-                        ...tdStyle, 
-                        fontSize: 12,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        {detail.storage_status || '—'}
-                      </td>
-                      <td style={{ 
-                        ...tdStyle, 
-                        fontSize: 12,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        {detail.location || '—'}
-                      </td>
-                    </tr>
-                  );
-                });
+                        {detail.resolution_status}
+                      </span>
+                    </td>
+                    
+                    {/* Статус хранения - каждая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontSize: 12,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      {detail.storage_status}
+                    </td>
+                    
+                    {/* Расположение - каждая строка */}
+                    <td style={{ 
+                      ...tdStyle, 
+                      fontSize: 12,
+                      borderBottom: detailIdx === detailsCount - 1 ? '2px solid #E5E7EB' : '1px solid #F3F4F6',
+                    }}>
+                      {detail.location}
+                    </td>
+                  </tr>
+                ));
               })}
             </tbody>
             <tfoot>
@@ -683,52 +635,41 @@ export default function SgpManagementPage() {
             </tfoot>
           </table>
         </div>
-      </div>
 
-      {/* Выпадающий фильтр с множественным выбором */}
-      {activeFilterColumn && (
-        <div style={{
-          ...filterDropdownStyle,
-          top: filterDropdownPos.top,
-          left: filterDropdownPos.left,
-        }}>
-          <div 
-            style={{ ...filterOptionStyle, fontWeight: 700, borderBottom: '1px solid #E5E7EB', marginBottom: 4 }}
-            onClick={() => handleFilterSelectAll(activeFilterColumn)}
-            onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-          >
-            <input 
-              type="checkbox" 
-              checked={!filters[activeFilterColumn] || filters[activeFilterColumn].length === 0}
-              readOnly
-            />
-            Все значения
-          </div>
-          {getUniqueValues(activeFilterColumn).map(val => {
-            const isChecked = filters[activeFilterColumn]?.includes(val);
-            return (
+        {/* Выпадающий фильтр */}
+        {activeFilterColumn && (
+          <div style={filterDropdownStyle}>
+            <div 
+              style={{ ...filterOptionStyle, fontWeight: 700 }}
+              onClick={() => handleFilterSelect(activeFilterColumn, 'ALL')}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              Все значения
+            </div>
+            {getUniqueValues(activeFilterColumn).map(val => (
               <div 
                 key={val}
                 style={{
                   ...filterOptionStyle,
-                  background: isChecked ? '#EFF6FF' : 'transparent',
+                  background: filters[activeFilterColumn] === val ? '#EFF6FF' : 'transparent',
                 }}
-                onClick={() => handleFilterToggle(activeFilterColumn, val)}
+                onClick={() => handleFilterSelect(activeFilterColumn, val)}
                 onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
-                onMouseLeave={(e) => e.currentTarget.style.background = isChecked ? '#EFF6FF' : 'transparent'}
+                onMouseLeave={(e) => e.currentTarget.style.background = filters[activeFilterColumn] === val ? '#EFF6FF' : 'transparent'}
               >
                 <input 
                   type="checkbox" 
-                  checked={isChecked}
+                  checked={filters[activeFilterColumn] === val}
                   readOnly
+                  style={{ pointerEvents: 'none' }}
                 />
                 {val}
               </div>
-            );
-          })}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
