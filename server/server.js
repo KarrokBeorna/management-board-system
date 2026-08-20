@@ -3660,6 +3660,386 @@ app.get('/api/sgp-management', async (req, res) => {
   }
 });
 
+
+
+
+// ================== TIME POINTS (ВРЕМЯ ПРОХОЖДЕНИЯ ТОЧЕК) ==================
+
+// Получение списка автомобилей с временами прохождения точек
+app.get('/api/time-points', async (req, res) => {
+  try {
+    const {
+      vin,
+      materialCode,
+      batchNum,
+      partNo,
+      seqFrom,
+      seqTo,
+      kdMaterialNo,
+      model,
+      materialDesc,
+      colour,
+      componentFilter,
+      scanStatus,
+      cp5From, cp5To,
+      cp6From, cp6To,
+      trimInFrom, trimInTo,
+      cp7From, cp7To,
+      cp72From, cp72To,
+      cpFinalFrom, cpFinalTo,
+      cp8From, cp8To,
+      inboundFrom, inboundTo,
+      outboundFrom, outboundTo,
+      currentLocations,
+      excludeLocations,
+      missingComponents,
+      scannedComponents,
+    } = req.query;
+
+    let where = '1=1';
+    const params = [];
+
+    if (vin) {
+      where += ' AND v.vin LIKE ?';
+      params.push(`%${vin}%`);
+    }
+    if (materialCode) {
+      where += ' AND v.material_no LIKE ?';
+      params.push(`%${materialCode}%`);
+    }
+    if (batchNum) {
+      where += ' AND o.batch_num LIKE ?';
+      params.push(`%${batchNum}%`);
+    }
+    if (partNo) {
+      where += ' AND v.material_no LIKE ?';
+      params.push(`%${partNo}%`);
+    }
+    if (seqFrom) {
+      where += ' AND v.sequence_number >= ?';
+      params.push(parseInt(seqFrom));
+    }
+    if (seqTo) {
+      where += ' AND v.sequence_number <= ?';
+      params.push(parseInt(seqTo));
+    }
+    if (kdMaterialNo) {
+      const kdList = kdMaterialNo.split(',').filter(Boolean);
+      if (kdList.length > 0) {
+        where += ` AND o.kd_material_no IN (${kdList.map(() => '?').join(',')})`;
+        params.push(...kdList);
+      }
+    }
+    if (model) {
+      const modelList = model.split(',').filter(Boolean);
+      if (modelList.length > 0) {
+        where += ` AND o.product IN (${modelList.map(() => '?').join(',')})`;
+        params.push(...modelList);
+      }
+    }
+    if (materialDesc) {
+      const descList = materialDesc.split(',').filter(Boolean);
+      if (descList.length > 0) {
+        where += ` AND m.material_desc IN (${descList.map(() => '?').join(',')})`;
+        params.push(...descList);
+      }
+    }
+    if (colour) {
+      where += ' AND SUBSTRING(v.material_no, 8, 2) = ?';
+      params.push(colour);
+    }
+
+    // Фильтры по временам прохождения точек
+    const timeFilters = [
+      { key: 'CP5', from: cp5From, to: cp5To, column: 't.CP5_time' },
+      { key: 'CP6', from: cp6From, to: cp6To, column: 't.CP6_time' },
+      { key: 'TRIMIN', from: trimInFrom, to: trimInTo, column: 't.TRIMIN_time' },
+      { key: 'CP7', from: cp7From, to: cp7To, column: 't.CP7_time' },
+      { key: 'CP72', from: cp72From, to: cp72To, column: 't.CP72_time' },
+      { key: 'CPFINAL', from: cpFinalFrom, to: cpFinalTo, column: 't.CPFINAL_time' },
+      { key: 'CP8', from: cp8From, to: cp8To, column: 't.CP8_time' },
+      { key: 'Inbound', from: inboundFrom, to: inboundTo, column: 't.in_storage_time' },
+      { key: 'Outbound', from: outboundFrom, to: outboundTo, column: 't.out_storage_time' },
+    ];
+
+    timeFilters.forEach(({ from, to, column }) => {
+      if (from) {
+        where += ` AND ${column} >= ?`;
+        params.push(from);
+      }
+      if (to) {
+        where += ` AND ${column} <= ?`;
+        params.push(to);
+      }
+    });
+
+    // Определение текущего расположения
+    const locationCase = `
+      CASE
+        WHEN t.out_storage_time IS NOT NULL THEN 'Продан'
+        WHEN t.in_storage_time IS NOT NULL AND t.out_storage_time IS NULL THEN 'На складе'
+        WHEN t.CP8_time IS NOT NULL THEN 'CP8'
+        WHEN t.CPFINAL_time IS NOT NULL THEN 'CPFINAL'
+        WHEN t.TLTT_time IS NOT NULL OR t.TLADAS_time IS NOT NULL OR t.TLRT_time IS NOT NULL OR t.TLWA_time IS NOT NULL THEN 'На тестах'
+        WHEN t.CP72_time IS NOT NULL THEN 'CP72'
+        WHEN t.CP7_time IS NOT NULL THEN 'CP7'
+        WHEN t.TRIMIN_time IS NOT NULL THEN 'TRIMIN'
+        WHEN t.CP6_time IS NOT NULL THEN 'CP6'
+        WHEN t.CP5_time IS NOT NULL THEN 'CP5'
+        ELSE 'Планирование'
+      END
+    `;
+
+    if (currentLocations) {
+      const locList = currentLocations.split(',').filter(Boolean);
+      if (locList.length > 0) {
+        where += ` AND ${locationCase} IN (${locList.map(() => '?').join(',')})`;
+        params.push(...locList);
+      }
+    }
+    if (excludeLocations) {
+      const exclList = excludeLocations.split(',').filter(Boolean);
+      if (exclList.length > 0) {
+        where += ` AND ${locationCase} NOT IN (${exclList.map(() => '?').join(',')})`;
+        params.push(...exclList);
+      }
+    }
+
+    const sql = `
+      SELECT
+        v.vin,
+        v.material_no AS material_code,
+        v.sequence_number,
+        o.batch_num,
+        o.kd_material_no,
+        o.product AS model,
+        m.material_desc,
+        SUBSTRING(v.material_no, 8, 2) AS colour,
+        ${locationCase} AS location,
+        t.CP5_time AS CP5,
+        t.CP6_time AS CP6,
+        t.TRIMIN_time AS TRIMIN,
+        t.CP7_time AS CP7,
+        t.CP72_time AS CP72,
+        t.TLWA_time AS TLWA,
+        t.TLRT_time AS TLRT,
+        t.TLADAS_time AS TLADAS,
+        t.TLTT_time AS TLTT,
+        t.CPFINAL_time AS CPFINAL,
+        t.CP8_time AS CP8,
+        t.in_storage_time,
+        t.out_storage_time,
+        COALESCE(c.scanned_count, 0) AS count_scanned_components,
+        COALESCE(c.total_count, 0) AS count_components,
+        COALESCE(c.replaced_count, 0) AS replaced_components
+      FROM tm_vhc_vehicle v
+      JOIN tm_ofm_order o ON o.vin = v.vin
+      LEFT JOIN tm_bas_material_relation m ON m.material_no = v.material_no AND m.is_deleted = 0
+      LEFT JOIN (
+        SELECT
+          vin,
+          MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP5' THEN scan_time END) AS CP5_time,
+          MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP6' THEN scan_time END) AS CP6_time,
+          MAX(CASE WHEN node_nature = 'Key_Uloc_Type_TRIMIN' THEN scan_time END) AS TRIMIN_time,
+          MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN scan_time END) AS CP7_time,
+          MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP72' THEN scan_time END) AS CP72_time,
+          MAX(CASE WHEN node_nature IN ('TLWA','TLRT','TLADAS','TLTT') AND node_nature = 'TLWA' THEN scan_time END) AS TLWA_time,
+          MAX(CASE WHEN node_nature IN ('TLWA','TLRT','TLADAS','TLTT') AND node_nature = 'TLRT' THEN scan_time END) AS TLRT_time,
+          MAX(CASE WHEN node_nature IN ('TLWA','TLRT','TLADAS','TLTT') AND node_nature = 'TLADAS' THEN scan_time END) AS TLADAS_time,
+          MAX(CASE WHEN node_nature IN ('TLWA','TLRT','TLADAS','TLTT') AND node_nature = 'TLTT' THEN scan_time END) AS TLTT_time,
+          MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CPFINAL' THEN scan_time END) AS CPFINAL_time,
+          MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP8' THEN scan_time END) AS CP8_time,
+          MAX(CASE WHEN node_nature LIKE 'Key_Car_In_Storage_Status%' AND node_nature = 'Key_Car_In_Storage_Status_1' THEN scan_time END) AS in_storage_time,
+          MAX(CASE WHEN node_nature LIKE 'Key_Car_In_Storage_Status%' AND node_nature = 'Key_Car_In_Storage_Status_3' THEN scan_time END) AS out_storage_time
+        FROM tm_vhc_vehicle_movement
+        GROUP BY vin
+      ) t ON t.vin = v.vin
+      LEFT JOIN (
+        SELECT
+          vin,
+          COUNT(*) AS total_count,
+          SUM(CASE WHEN is_scanned = 1 THEN 1 ELSE 0 END) AS scanned_count,
+          SUM(CASE WHEN is_replaced = 1 THEN 1 ELSE 0 END) AS replaced_count
+        FROM tm_vhc_component
+        GROUP BY vin
+      ) c ON c.vin = v.vin
+      WHERE ${where}
+      ORDER BY v.sequence_number DESC
+      LIMIT 5000
+    `;
+
+    const [rows] = await mesPool.query(sql, params);
+    
+    // Применяем фильтры по компонентам после основного запроса
+    let result = rows;
+    
+    if (componentFilter === 'scanned') {
+      result = result.filter(r => r.count_scanned_components === r.count_components && r.count_components > 0);
+    } else if (componentFilter === 'notScanned') {
+      result = result.filter(r => r.count_scanned_components < r.count_components);
+    }
+    
+    if (scanStatus === 'complete') {
+      result = result.filter(r => r.count_scanned_components === r.count_components && r.count_components > 0);
+    } else if (scanStatus === 'incomplete') {
+      result = result.filter(r => r.count_scanned_components < r.count_components);
+    } else if (scanStatus === 'hasReplaced') {
+      result = result.filter(r => r.replaced_components > 0);
+    } else if (scanStatus === 'noReplaced') {
+      result = result.filter(r => r.replaced_components === 0);
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка time-points:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Получение компонентов автомобиля
+app.get('/api/time-points/:vin/components', async (req, res) => {
+  try {
+    const { vin } = req.params;
+    const { materialCode } = req.query;
+    
+    if (!vin || !materialCode) {
+      return res.status(400).json({ error: 'vin и materialCode обязательны' });
+    }
+    
+    const sql = `
+      SELECT
+        c.material_code,
+        c.material_desc,
+        c.is_scanned AS scanned,
+        c.scan_time,
+        c.is_replaced AS replaced
+      FROM tm_vhc_component c
+      WHERE c.vin = ?
+        AND c.material_code LIKE ?
+      ORDER BY c.material_code
+    `;
+    
+    const [rows] = await mesPool.query(sql, [vin, materialCode]);
+    
+    res.json(rows.map(r => ({
+      material_code: r.material_code,
+      material_desc: r.material_desc,
+      scanned: r.scanned === 1,
+      scan_time: r.scan_time,
+      replaced: r.replaced === 1,
+    })));
+  } catch (err) {
+    console.error('Ошибка компонентов:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Эндпоинты для фильтров
+app.get('/api/filters/ulocs', async (req, res) => {
+  try {
+    const [rows] = await mesPool.query('SELECT DISTINCT uloc_no FROM tm_vhc_uloc ORDER BY uloc_no');
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка ulocs:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/filters/components', async (req, res) => {
+  try {
+    const [rows] = await mesPool.query(`
+      SELECT DISTINCT c.material_code AS material, c.material_desc
+      FROM tm_vhc_component c
+      WHERE c.material_desc IS NOT NULL AND c.material_desc != ''
+      ORDER BY c.material_desc
+      LIMIT 500
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка components:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/filters/kd-material-nos', async (req, res) => {
+  try {
+    const [rows] = await mesPool.query(`
+      SELECT DISTINCT kd_material_no
+      FROM tm_ofm_order
+      WHERE kd_material_no IS NOT NULL AND kd_material_no != ''
+      ORDER BY kd_material_no
+      LIMIT 500
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка kd-material-nos:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/filters/material-descs', async (req, res) => {
+  try {
+    const [rows] = await mesPool.query(`
+      SELECT DISTINCT material_desc
+      FROM tm_bas_material_relation
+      WHERE material_desc IS NOT NULL AND material_desc != ''
+        AND is_deleted = 0
+      ORDER BY material_desc
+      LIMIT 500
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка material-descs:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/filters/vehicle-types', async (req, res) => {
+  try {
+    const [rows] = await mesPool.query(`
+      SELECT DISTINCT product AS vehicle_type
+      FROM tm_ofm_order
+      WHERE product IS NOT NULL AND product != ''
+      ORDER BY product
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка vehicle-types:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/filters/colours', async (req, res) => {
+  try {
+    const [rows] = await mesPool.query(`
+      SELECT DISTINCT SUBSTRING(material_no, 8, 2) AS colour
+      FROM tm_vhc_vehicle
+      WHERE SUBSTRING(material_no, 8, 2) IS NOT NULL
+        AND SUBSTRING(material_no, 8, 2) != ''
+      ORDER BY colour
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка colours:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Экспорт time points в Excel
+app.get('/api/time-points/export', async (req, res) => {
+  try {
+    // Используем те же фильтры что и в /api/time-points
+    const result = await getTimePointsData(req.query);
+    res.json({ data: result });
+  } catch (err) {
+    console.error('Ошибка экспорта time-points:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок
