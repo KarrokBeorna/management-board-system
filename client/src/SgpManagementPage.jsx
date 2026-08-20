@@ -62,7 +62,6 @@ const exportButtonStyle = {
   transition: 'background 0.2s, transform 0.1s',
 };
 
-// Стиль для кнопок моделей - компактные чипсы
 const modelChipStyle = (active) => ({
   padding: '8px 16px',
   borderRadius: 20,
@@ -120,6 +119,7 @@ const tdStyle = {
   borderBottom: '1px solid #F3F4F6',
   color: '#1F2937',
   fontSize: 13,
+  verticalAlign: 'top',
 };
 
 const totalRowStyle = {
@@ -158,7 +158,6 @@ const filterOptionStyle = {
   transition: 'background 0.15s',
 };
 
-// Статистика сверху
 const statsContainerStyle = {
   display: 'flex',
   gap: 16,
@@ -195,7 +194,39 @@ export default function SgpManagementPage() {
       const res = await fetch(`${API_BASE}/api/sgp-management`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
-      setData(json);
+      
+      // Группируем по VIN
+      // Каждая запись в json - это отдельная строка из БД
+      // Для одного VIN может быть несколько записей (разные причины)
+      const groupedMap = {};
+      
+      json.forEach(row => {
+        const vin = row.vin;
+        
+        if (!groupedMap[vin]) {
+          // Первая запись для этого VIN - создаем новую группу
+          groupedMap[vin] = {
+            vin: row.vin,
+            model: row.model,
+            block_status: row.block_status,
+            // Массив для хранения всех причин и их статусов
+            details: [],
+          };
+        }
+        
+        // Добавляем причину и статус устранения в массив
+        // Также сохраняем статус хранения и расположение для каждой записи
+        groupedMap[vin].details.push({
+          reason: row.reason || '',
+          resolution_status: row.resolution_status || '—',
+          storage_status: row.storage_status || 'Unknown',
+          location: row.location || '—',
+        });
+      });
+      
+      // Преобразуем в массив
+      const groupedData = Object.values(groupedMap);
+      setData(groupedData);
       setError(null);
     } catch (err) {
       console.error('Ошибка SGP Management:', err);
@@ -219,11 +250,36 @@ export default function SgpManagementPage() {
     return data.filter(d => d.model === activeModel);
   }, [data, activeModel]);
 
+  // Получение уникальных значений для фильтров
+  // Для block_status - из основного объекта
+  // Для storage_status - из details массива
   const getUniqueValues = (field) => {
-    const values = [...new Set(filteredByModel.map(d => d[field]).filter(v => v !== null && v !== undefined && v !== ''))];
-    return values.sort();
+    let values = [];
+    
+    if (field === 'block_status') {
+      values = filteredByModel.map(d => d.block_status);
+    } else if (field === 'storage_status') {
+      // Собираем все storage_status из details
+      filteredByModel.forEach(d => {
+        d.details.forEach(detail => {
+          values.push(detail.storage_status);
+        });
+      });
+    } else if (field === 'resolution_status') {
+      // Собираем все resolution_status из details
+      filteredByModel.forEach(d => {
+        d.details.forEach(detail => {
+          values.push(detail.resolution_status);
+        });
+      });
+    } else {
+      values = filteredByModel.map(d => d[field]);
+    }
+    
+    return [...new Set(values.filter(v => v !== null && v !== undefined && v !== ''))].sort();
   };
 
+  // Фильтрация данных
   const filteredData = useMemo(() => {
     let result = filteredByModel;
     
@@ -231,11 +287,21 @@ export default function SgpManagementPage() {
       const filterValue = filters[field];
       if (filterValue && filterValue !== 'ALL') {
         result = result.filter(d => {
-          const val = d[field];
-          if (typeof val === 'string') {
-            return val.toLowerCase().includes(filterValue.toLowerCase());
+          if (field === 'block_status') {
+            return d.block_status === filterValue;
+          } else if (field === 'storage_status') {
+            // Проверяем, есть ли хотя бы одна запись с таким storage_status
+            return d.details.some(detail => detail.storage_status === filterValue);
+          } else if (field === 'resolution_status') {
+            // Проверяем, есть ли хотя бы одна запись с таким resolution_status
+            return d.details.some(detail => detail.resolution_status === filterValue);
+          } else {
+            const val = d[field];
+            if (typeof val === 'string') {
+              return val.toLowerCase().includes(filterValue.toLowerCase());
+            }
+            return val === filterValue;
           }
-          return val === filterValue;
         });
       }
     });
@@ -248,25 +314,42 @@ export default function SgpManagementPage() {
     setActiveFilterColumn(null);
   }, [activeModel]);
 
-  // Статистика
+  // Статистика по отфильтрованной модели
   const stats = useMemo(() => {
-    const totalInStock = filteredByModel.filter(d => d.storage_status === 'In stock').length;
+    // In stock - если хотя бы одна запись в details имеет storage_status = 'In stock'
+    const totalInStock = filteredByModel.filter(d => 
+      d.details.some(detail => detail.storage_status === 'In stock')
+    ).length;
+    
     const totalBlock = filteredByModel.filter(d => d.block_status === 'Блок').length;
     const totalNotBlock = filteredByModel.filter(d => d.block_status === 'Не блок').length;
+    
     return { totalInStock, totalBlock, totalNotBlock };
   }, [filteredByModel]);
 
+  // Экспорт текущей таблицы
   const handleExportCurrent = () => {
-    const exportData = filteredData.map(d => ({
-      'VIN': d.vin,
-      'Модель': d.model,
-      'Статус блок': d.block_status,
-      'Причина': d.reason,
-      'Статус устранения': d.resolution_status,
-      'Статус хранения': d.storage_status,
-      'Расположение': d.location,
-    }));
+    const exportData = [];
     
+    filteredData.forEach(d => {
+      // Для каждого VIN создаем строку с объединенными данными
+      const reasons = d.details.map(detail => detail.reason).filter(r => r).join(' | ');
+      const resolutionStatuses = d.details.map(detail => detail.resolution_status).join(' | ');
+      const storageStatuses = d.details.map(detail => detail.storage_status).join(' | ');
+      const locations = d.details.map(detail => detail.location).join(' | ');
+      
+      exportData.push({
+        'VIN': d.vin,
+        'Модель': d.model,
+        'Статус блок': d.block_status,
+        'Причина': reasons,
+        'Статус устранения': resolutionStatuses,
+        'Статус хранения': storageStatuses,
+        'Расположение': locations,
+      });
+    });
+    
+    // Добавляем строку ИТОГО
     exportData.push({
       'VIN': 'ИТОГО',
       'Модель': '',
@@ -291,16 +374,26 @@ export default function SgpManagementPage() {
     XLSX.writeFile(wb, `SGP_Management_${activeModel === 'ALL' ? 'All' : activeModel}_${dateStr}.xlsx`);
   };
 
+  // Экспорт всех моделей
   const handleExportAll = () => {
-    const exportData = data.map(d => ({
-      'VIN': d.vin,
-      'Модель': d.model,
-      'Статус блок': d.block_status,
-      'Причина': d.reason,
-      'Статус устранения': d.resolution_status,
-      'Статус хранения': d.storage_status,
-      'Расположение': d.location,
-    }));
+    const exportData = [];
+    
+    data.forEach(d => {
+      const reasons = d.details.map(detail => detail.reason).filter(r => r).join(' | ');
+      const resolutionStatuses = d.details.map(detail => detail.resolution_status).join(' | ');
+      const storageStatuses = d.details.map(detail => detail.storage_status).join(' | ');
+      const locations = d.details.map(detail => detail.location).join(' | ');
+      
+      exportData.push({
+        'VIN': d.vin,
+        'Модель': d.model,
+        'Статус блок': d.block_status,
+        'Причина': reasons,
+        'Статус устранения': resolutionStatuses,
+        'Статус хранения': storageStatuses,
+        'Расположение': locations,
+      });
+    });
     
     exportData.push({
       'VIN': 'ИТОГО',
@@ -336,14 +429,6 @@ export default function SgpManagementPage() {
   const handleFilterSelect = (column, value) => {
     setFilters(prev => ({ ...prev, [column]: value }));
     setActiveFilterColumn(null);
-  };
-
-  const columnNames = {
-    vin: 'VIN',
-    model: 'Модель',
-    block_status: 'Статус блок',
-    resolution_status: 'Статус устранения',
-    storage_status: 'Статус хранения',
   };
 
   if (loading && data.length === 0) {
@@ -435,44 +520,49 @@ export default function SgpManagementPage() {
             <thead>
               <tr>
                 <th 
-                  style={{ ...thStyle, width: '18%' }}
+                  style={{ ...thStyle, width: '17%' }}
                   onClick={() => handleHeaderClick('vin')}
                 >
                   VIN {activeFilterColumn === 'vin' && '▼'}
                 </th>
                 <th 
-                  style={{ ...thStyle, width: '12%' }}
+                  style={{ ...thStyle, width: '11%' }}
                   onClick={() => handleHeaderClick('model')}
                 >
                   Модель {activeFilterColumn === 'model' && '▼'}
                 </th>
                 <th 
-                  style={{ ...thStyle, width: '10%' }}
+                  style={{ ...thStyle, width: '9%' }}
                   onClick={() => handleHeaderClick('block_status')}
                 >
                   Статус блок {activeFilterColumn === 'block_status' && '▼'}
                 </th>
-                <th style={{ ...thStyle, width: '30%', cursor: 'default' }}>Причина</th>
+                <th style={{ ...thStyle, width: '22%', cursor: 'default' }}>Причина</th>
                 <th 
-                  style={{ ...thStyle, width: '12%' }}
+                  style={{ ...thStyle, width: '11%' }}
                   onClick={() => handleHeaderClick('resolution_status')}
                 >
                   Статус устранения {activeFilterColumn === 'resolution_status' && '▼'}
                 </th>
                 <th 
-                  style={{ ...thStyle, width: '12%' }}
+                  style={{ ...thStyle, width: '13%' }}
                   onClick={() => handleHeaderClick('storage_status')}
                 >
                   Статус хранения {activeFilterColumn === 'storage_status' && '▼'}
                 </th>
-                <th style={{ ...thStyle, width: '16%', cursor: 'default' }}>Расположение</th>
+                <th style={{ ...thStyle, width: '17%', cursor: 'default' }}>Расположение</th>
               </tr>
             </thead>
             <tbody>
               {filteredData.map((row, idx) => (
                 <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                  {/* VIN - объединенная ячейка */}
                   <td style={{ ...tdStyle, fontWeight: 600, fontSize: 12 }}>{row.vin}</td>
+                  
+                  {/* Модель - объединенная ячейка */}
                   <td style={{ ...tdStyle, fontWeight: 700 }}>{row.model}</td>
+                  
+                  {/* Статус блок - объединенная ячейка */}
                   <td style={tdStyle}>
                     <span style={{
                       padding: '4px 10px',
@@ -485,21 +575,82 @@ export default function SgpManagementPage() {
                       {row.block_status}
                     </span>
                   </td>
-                  <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4' }}>{row.reason || ''}</td>
-                  <td style={tdStyle}>
-                    <span style={{
-                      padding: '4px 10px',
-                      borderRadius: 999,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      backgroundColor: row.resolution_status === 'Устранено' ? '#D1FAE5' : row.resolution_status ? '#FEF3C7' : '#F3F4F6',
-                      color: row.resolution_status === 'Устранено' ? '#065F46' : row.resolution_status ? '#92400E' : '#9CA3AF',
-                    }}>
-                      {row.resolution_status || '—'}
-                    </span>
+                  
+                  {/* Причина - отдельные строки внутри ячейки */}
+                  <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4' }}>
+                    {row.details.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {row.details.map((detail, i) => (
+                          <div key={i} style={{
+                            padding: '4px 8px',
+                            borderRadius: 4,
+                            backgroundColor: i % 2 === 0 ? '#F8FAFC' : '#F1F5F9',
+                            border: '1px solid #E2E8F0',
+                          }}>
+                            {detail.reason || '—'}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ color: '#9CA3AF' }}>—</span>
+                    )}
                   </td>
-                  <td style={tdStyle}>{row.storage_status}</td>
-                  <td style={{ ...tdStyle, fontSize: 12 }}>{row.location}</td>
+                  
+                  {/* Статус устранения - отдельные строки */}
+                  <td style={{ ...tdStyle, fontSize: 12 }}>
+                    {row.details.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {row.details.map((detail, i) => (
+                          <div key={i} style={{
+                            padding: '4px 8px',
+                            borderRadius: 4,
+                            backgroundColor: detail.resolution_status === 'Устранено' ? '#F0FDF4' : '#FEF3C7',
+                            border: '1px solid ' + (detail.resolution_status === 'Устранено' ? '#86EFAC' : '#FCD34D'),
+                            fontWeight: 700,
+                            color: detail.resolution_status === 'Устранено' ? '#065F46' : '#92400E',
+                          }}>
+                            {detail.resolution_status}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ color: '#9CA3AF' }}>—</span>
+                    )}
+                  </td>
+                  
+                  {/* Статус хранения - отдельные строки */}
+                  <td style={{ ...tdStyle, fontSize: 12 }}>
+                    {row.details.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {row.details.map((detail, i) => (
+                          <div key={i} style={{
+                            padding: '4px 8px',
+                          }}>
+                            {detail.storage_status}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ color: '#9CA3AF' }}>—</span>
+                    )}
+                  </td>
+                  
+                  {/* Расположение - отдельные строки */}
+                  <td style={{ ...tdStyle, fontSize: 12 }}>
+                    {row.details.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {row.details.map((detail, i) => (
+                          <div key={i} style={{
+                            padding: '4px 8px',
+                          }}>
+                            {detail.location}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ color: '#9CA3AF' }}>—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
