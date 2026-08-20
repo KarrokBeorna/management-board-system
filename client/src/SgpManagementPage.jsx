@@ -79,7 +79,6 @@ const modelChipStyle = (active) => ({
   gap: 6,
 });
 
-// Стиль для кнопок-фильтров
 const filterButtonStyle = (active) => ({
   padding: '6px 14px',
   borderRadius: 8,
@@ -193,7 +192,8 @@ export default function SgpManagementPage() {
   // Фильтры (множественный выбор)
   const [blockStatusFilter, setBlockStatusFilter] = useState([]);
   const [resolutionStatusFilter, setResolutionStatusFilter] = useState([]);
-  const [storageStatusFilter, setStorageStatusFilter] = useState([]);
+  // По умолчанию включен фильтр In stock
+  const [storageStatusFilter, setStorageStatusFilter] = useState(['In stock']);
 
   const fetchData = async () => {
     try {
@@ -202,31 +202,14 @@ export default function SgpManagementPage() {
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
       
-      // Группируем по VIN
-      const groupedMap = {};
+      // НЕ группируем по VIN - отображаем как есть из БД
+      // Просто нормализуем storage_status: In stock (blocked) -> In stock
+      const normalizedData = json.map(row => ({
+        ...row,
+        storage_status: row.storage_status === 'In stock (blocked)' ? 'In stock' : row.storage_status,
+      }));
       
-      json.forEach(row => {
-        const vin = row.vin;
-        
-        if (!groupedMap[vin]) {
-          groupedMap[vin] = {
-            vin: row.vin,
-            model: row.model,
-            block_status: row.block_status,
-            details: [],
-          };
-        }
-        
-        groupedMap[vin].details.push({
-          reason: row.reason || '',
-          resolution_status: row.resolution_status || '—',
-          storage_status: row.storage_status || 'Unknown',
-          location: row.location || '—',
-        });
-      });
-      
-      const groupedData = Object.values(groupedMap);
-      setRawData(groupedData);
+      setRawData(normalizedData);
       setError(null);
     } catch (err) {
       console.error('Ошибка SGP Management:', err);
@@ -254,23 +237,16 @@ export default function SgpManagementPage() {
   const filteredData = useMemo(() => {
     let result = filteredByModel;
     
-    // Фильтр по статусу блока
     if (blockStatusFilter.length > 0) {
       result = result.filter(d => blockStatusFilter.includes(d.block_status));
     }
     
-    // Фильтр по статусу устранения
     if (resolutionStatusFilter.length > 0) {
-      result = result.filter(d => 
-        d.details?.some(detail => resolutionStatusFilter.includes(detail.resolution_status))
-      );
+      result = result.filter(d => resolutionStatusFilter.includes(d.resolution_status));
     }
     
-    // Фильтр по статусу хранения
     if (storageStatusFilter.length > 0) {
-      result = result.filter(d => 
-        d.details?.some(detail => storageStatusFilter.includes(detail.storage_status))
-      );
+      result = result.filter(d => storageStatusFilter.includes(d.storage_status));
     }
     
     return result;
@@ -280,26 +256,19 @@ export default function SgpManagementPage() {
   useEffect(() => {
     setBlockStatusFilter([]);
     setResolutionStatusFilter([]);
-    setStorageStatusFilter([]);
+    setStorageStatusFilter(['In stock']);
   }, [activeModel]);
 
-  // Статистика по выбранной модели (без учета фильтров)
+  // Статистика по выбранной модели (In stock - только со статусом In stock)
   const stats = useMemo(() => {
-    const totalInStock = filteredByModel.filter(d => 
-      d.details?.some(detail => detail.storage_status === 'In stock')
-    ).length;
-    
-    const totalOutbound = filteredByModel.filter(d => 
-      d.details?.some(detail => detail.storage_status === 'Outbound')
-    ).length;
-    
+    const totalInStock = filteredByModel.filter(d => d.storage_status === 'In stock').length;
+    const totalOutbound = filteredByModel.filter(d => d.storage_status === 'Outbound').length;
     const totalBlock = filteredByModel.filter(d => d.block_status === 'Блок').length;
     const totalNotBlock = filteredByModel.filter(d => d.block_status === 'Не блок').length;
     
     return { totalInStock, totalOutbound, totalBlock, totalNotBlock };
   }, [filteredByModel]);
 
-  // Переключение фильтра
   const toggleFilter = (filterType, value) => {
     if (filterType === 'block') {
       setBlockStatusFilter(prev => 
@@ -317,34 +286,15 @@ export default function SgpManagementPage() {
   };
 
   const handleExportCurrent = () => {
-    const exportData = [];
-    
-    filteredData.forEach(d => {
-      const details = d.details || [];
-      if (details.length === 0) {
-        exportData.push({
-          'VIN': d.vin,
-          'Модель': d.model,
-          'Статус блок': d.block_status,
-          'Причина': '',
-          'Статус устранения': '',
-          'Статус хранения': '',
-          'Расположение': '',
-        });
-      } else {
-        details.forEach((detail, i) => {
-          exportData.push({
-            'VIN': i === 0 ? d.vin : '',
-            'Модель': i === 0 ? d.model : '',
-            'Статус блок': i === 0 ? d.block_status : '',
-            'Причина': detail.reason || '',
-            'Статус устранения': detail.resolution_status || '',
-            'Статус хранения': detail.storage_status || '',
-            'Расположение': detail.location || '',
-          });
-        });
-      }
-    });
+    const exportData = filteredData.map(d => ({
+      'VIN': d.vin,
+      'Модель': d.model,
+      'Статус блок': d.block_status,
+      'Причина': d.reason || '',
+      'Статус устранения': d.resolution_status || '',
+      'Статус хранения': d.storage_status || '',
+      'Расположение': d.location || '',
+    }));
     
     exportData.push({
       'VIN': 'ИТОГО',
@@ -371,34 +321,15 @@ export default function SgpManagementPage() {
   };
 
   const handleExportAll = () => {
-    const exportData = [];
-    
-    rawData.forEach(d => {
-      const details = d.details || [];
-      if (details.length === 0) {
-        exportData.push({
-          'VIN': d.vin,
-          'Модель': d.model,
-          'Статус блок': d.block_status,
-          'Причина': '',
-          'Статус устранения': '',
-          'Статус хранения': '',
-          'Расположение': '',
-        });
-      } else {
-        details.forEach((detail, i) => {
-          exportData.push({
-            'VIN': i === 0 ? d.vin : '',
-            'Модель': i === 0 ? d.model : '',
-            'Статус блок': i === 0 ? d.block_status : '',
-            'Причина': detail.reason || '',
-            'Статус устранения': detail.resolution_status || '',
-            'Статус хранения': detail.storage_status || '',
-            'Расположение': detail.location || '',
-          });
-        });
-      }
-    });
+    const exportData = rawData.map(d => ({
+      'VIN': d.vin,
+      'Модель': d.model,
+      'Статус блок': d.block_status,
+      'Причина': d.reason || '',
+      'Статус устранения': d.resolution_status || '',
+      'Статус хранения': d.storage_status || '',
+      'Расположение': d.location || '',
+    }));
     
     exportData.push({
       'VIN': 'ИТОГО',
@@ -552,12 +483,6 @@ export default function SgpManagementPage() {
             Outbound
           </button>
           <button 
-            style={filterButtonStyle(storageStatusFilter.includes('In stock (blocked)'))}
-            onClick={() => toggleFilter('storage', 'In stock (blocked)')}
-          >
-            In stock (blocked)
-          </button>
-          <button 
             style={filterButtonStyle(storageStatusFilter.includes('Unknown'))}
             onClick={() => toggleFilter('storage', 'Unknown')}
           >
@@ -587,115 +512,39 @@ export default function SgpManagementPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredData.map((row, rowIdx) => {
-                const details = row.details || [];
-                
-                if (details.length === 0) {
-                  return (
-                    <tr key={rowIdx} style={{ backgroundColor: rowIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                      <td style={{ ...tdStyle, fontWeight: 600, fontSize: 12 }}>{row.vin}</td>
-                      <td style={{ ...tdStyle, fontWeight: 700 }}>{row.model}</td>
-                      <td style={tdStyle}>
-                        <span style={{
-                          padding: '4px 10px',
-                          borderRadius: 999,
-                          fontSize: 11,
-                          fontWeight: 700,
-                          backgroundColor: row.block_status === 'Блок' ? '#FEE2E2' : '#D1FAE5',
-                          color: row.block_status === 'Блок' ? '#991B1B' : '#065F46',
-                        }}>
-                          {row.block_status}
-                        </span>
-                      </td>
-                      <td style={{ ...tdStyle, color: '#9CA3AF' }}>—</td>
-                      <td style={{ ...tdStyle, color: '#9CA3AF' }}>—</td>
-                      <td style={{ ...tdStyle, color: '#9CA3AF' }}>—</td>
-                      <td style={{ ...tdStyle, color: '#9CA3AF' }}>—</td>
-                    </tr>
-                  );
-                }
-                
-                return details.map((detail, detailIdx) => {
-                  const isLastDetail = detailIdx === details.length - 1;
-                  
-                  return (
-                    <tr key={`${rowIdx}-${detailIdx}`} style={{ 
-                      backgroundColor: rowIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
+              {filteredData.map((row, idx) => (
+                <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                  <td style={{ ...tdStyle, fontWeight: 600, fontSize: 12 }}>{row.vin}</td>
+                  <td style={{ ...tdStyle, fontWeight: 700 }}>{row.model}</td>
+                  <td style={tdStyle}>
+                    <span style={{
+                      padding: '4px 10px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      backgroundColor: row.block_status === 'Блок' ? '#FEE2E2' : '#D1FAE5',
+                      color: row.block_status === 'Блок' ? '#991B1B' : '#065F46',
                     }}>
-                      <td style={{ 
-                        ...tdStyle, 
-                        fontWeight: 600, 
-                        fontSize: 12,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        {detailIdx === 0 ? row.vin : ''}
-                      </td>
-                      <td style={{ 
-                        ...tdStyle, 
-                        fontWeight: 700,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        {detailIdx === 0 ? row.model : ''}
-                      </td>
-                      <td style={{ 
-                        ...tdStyle,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        {detailIdx === 0 ? (
-                          <span style={{
-                            padding: '4px 10px',
-                            borderRadius: 999,
-                            fontSize: 11,
-                            fontWeight: 700,
-                            backgroundColor: row.block_status === 'Блок' ? '#FEE2E2' : '#D1FAE5',
-                            color: row.block_status === 'Блок' ? '#991B1B' : '#065F46',
-                          }}>
-                            {row.block_status}
-                          </span>
-                        ) : ''}
-                      </td>
-                      <td style={{ 
-                        ...tdStyle, 
-                        fontSize: 12, 
-                        lineHeight: '1.4',
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        {detail.reason || '—'}
-                      </td>
-                      <td style={{ 
-                        ...tdStyle, 
-                        fontSize: 12,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        <span style={{
-                          padding: '3px 8px',
-                          borderRadius: 6,
-                          fontSize: 11,
-                          fontWeight: 700,
-                          backgroundColor: detail.resolution_status === 'Устранено' ? '#F0FDF4' : '#FEF3C7',
-                          color: detail.resolution_status === 'Устранено' ? '#065F46' : '#92400E',
-                        }}>
-                          {detail.resolution_status || '—'}
-                        </span>
-                      </td>
-                      <td style={{ 
-                        ...tdStyle, 
-                        fontSize: 12,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        {detail.storage_status || '—'}
-                      </td>
-                      <td style={{ 
-                        ...tdStyle, 
-                        fontSize: 12,
-                        borderBottom: isLastDetail ? '2px solid #D1D5DB' : '1px solid #F3F4F6',
-                      }}>
-                        {detail.location || '—'}
-                      </td>
-                    </tr>
-                  );
-                });
-              })}
+                      {row.block_status}
+                    </span>
+                  </td>
+                  <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4' }}>{row.reason || '—'}</td>
+                  <td style={tdStyle}>
+                    <span style={{
+                      padding: '3px 8px',
+                      borderRadius: 6,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      backgroundColor: row.resolution_status === 'Устранено' ? '#F0FDF4' : '#FEF3C7',
+                      color: row.resolution_status === 'Устранено' ? '#065F46' : '#92400E',
+                    }}>
+                      {row.resolution_status || '—'}
+                    </span>
+                  </td>
+                  <td style={{ ...tdStyle, fontSize: 12 }}>{row.storage_status || '—'}</td>
+                  <td style={{ ...tdStyle, fontSize: 12 }}>{row.location || '—'}</td>
+                </tr>
+              ))}
             </tbody>
             <tfoot>
               <tr style={totalRowStyle}>
