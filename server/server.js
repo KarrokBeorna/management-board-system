@@ -2948,7 +2948,7 @@ app.post('/api/warranty/upload', express.json({ limit: '100mb' }), async (req, r
 app.get('/api/warranty/upload-times', async (req, res) => {
   try {
     const [rows] = await notesPool.query(`
-      SELECT DISTINCT uploaded_at
+      SELECT DISTINCT DATE_FORMAT(uploaded_at, '%Y-%m-%d %H:%i:%s') AS uploaded_at
       FROM warranty_claims
       WHERE uploaded_at IS NOT NULL
       ORDER BY uploaded_at DESC
@@ -2986,18 +2986,20 @@ app.get('/api/warranty/analytics', async (req, res) => {
     let sql = `
       SELECT 
         DATE_FORMAT(production_date, '%Y-%m') AS month,
+        model,
         SUM(qty_sell) AS qty_sell,
         SUM(mis_0_count) AS mis_0,
         SUM(mis_3_count) AS mis_3
       FROM warranty_claims
       WHERE production_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
+        AND production_date IS NOT NULL
     `;
     const params = [];
-    if (uploadedAt) {
-      sql += ' AND uploaded_at = ?';
+    if (uploadedAt && uploadedAt !== '') {
+      sql += ' AND DATE_FORMAT(uploaded_at, "%Y-%m-%d %H:%i:%s") = ?';
       params.push(uploadedAt);
     }
-    sql += ' GROUP BY month ORDER BY month';
+    sql += ' GROUP BY month, model ORDER BY month, model';
     const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
@@ -3018,10 +3020,11 @@ app.get('/api/warranty/analytics-by-model', async (req, res) => {
         SUM(mis_3_count) AS mis_3_count
       FROM warranty_claims
       WHERE production_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
+        AND production_date IS NOT NULL
     `;
     const params = [];
-    if (uploadedAt) {
-      sql += ' AND uploaded_at = ?';
+    if (uploadedAt && uploadedAt !== '') {
+      sql += ' AND DATE_FORMAT(uploaded_at, "%Y-%m-%d %H:%i:%s") = ?';
       params.push(uploadedAt);
     }
     sql += ' GROUP BY month, model ORDER BY month, model';
@@ -3040,6 +3043,7 @@ app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
     let sql = `
       SELECT 
         DATE_FORMAT(warranty_start_date, '%Y-%m') AS month,
+        model,
         SUM(qty_sell) AS qty_sell,
         SUM(mis_0_count) AS mis_0_count,
         SUM(mis_3_count) AS mis_3_count
@@ -3047,11 +3051,11 @@ app.get('/api/warranty/analytics-by-sales-date', async (req, res) => {
       WHERE warranty_start_date IS NOT NULL
     `;
     const params = [];
-    if (uploadedAt) {
-      sql += ' AND uploaded_at = ?';
+    if (uploadedAt && uploadedAt !== '') {
+      sql += ' AND DATE_FORMAT(uploaded_at, "%Y-%m-%d %H:%i:%s") = ?';
       params.push(uploadedAt);
     }
-    sql += ' GROUP BY month ORDER BY month';
+    sql += ' GROUP BY month, model ORDER BY month, model';
     const [rows] = await notesPool.query(sql, params);
     res.json(rows);
   } catch (err) {
@@ -3074,8 +3078,8 @@ app.get('/api/warranty/categories-summary', async (req, res) => {
       sql += ' AND model = ?';
       params.push(model);
     }
-    if (uploadedAt) {
-      sql += ' AND uploaded_at = ?';
+    if (uploadedAt && uploadedAt !== '') {
+      sql += ' AND DATE_FORMAT(uploaded_at, "%Y-%m-%d %H:%i:%s") = ?';
       params.push(uploadedAt);
     }
     sql += ' GROUP BY model, category ORDER BY model, total_claims DESC';
