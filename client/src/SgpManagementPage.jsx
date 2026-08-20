@@ -389,7 +389,7 @@ export default function SgpManagementPage() {
     <div style={containerStyle}>
       {/* Заголовок */}
       <div style={headerStyle}>
-        <h1 style={titleStyle}>🚗 СГП Management</h1>
+        <h1 style={titleStyle}>🚗 СГП Hold Management</h1>
         <div style={{ display: 'flex', gap: 12 }}>
           <button style={exportButtonStyle} onClick={handleExportAll}>
             📥 Экспорт всех
@@ -524,7 +524,7 @@ export default function SgpManagementPage() {
             <thead>
               <tr>
                 <th style={{ ...thStyle, width: equalColumnWidth }}>VIN</th>
-                <th style={{ ...thStyle, width: equalColumnWidth }}>Модель</th>
+                <th style={{ ...thStyle, width: equalColumnWidth, textAlign: 'center' }}>Модель</th>
                 <th style={{ ...thStyle, width: equalColumnWidth }}>Статус блок</th>
                 <th style={{ ...thStyle, width: reasonColumnWidth }}>Причина</th>
                 <th style={{ ...thStyle, width: equalColumnWidth }}>Статус устранения</th>
@@ -537,7 +537,7 @@ export default function SgpManagementPage() {
               {filteredData.map((row, idx) => (
                 <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
                   <td style={{ ...tdStyle, fontWeight: 600, fontSize: 11 }}>{row.vin}</td>
-                  <td style={{ ...tdStyle, fontWeight: 700, fontSize: 11 }}>{row.model}</td>
+                  <td style={{ ...tdStyle, fontWeight: 700, fontSize: 11, textAlign: 'center' }}>{row.model}</td>
                   <td style={tdStyle}>
                     <span style={{
                       padding: '4px 8px',
