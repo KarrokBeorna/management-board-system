@@ -536,8 +536,8 @@ export default function SgpManagementPage() {
             <tbody>
               {filteredData.map((row, idx) => (
                 <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                  <td style={{ ...tdStyle, fontWeight: 600, fontSize: 9 }}>{row.vin}</td>
-                  <td style={{ ...tdStyle, fontWeight: 700 }}>{row.model}</td>
+                  <td style={{ ...tdStyle, fontWeight: 600, fontSize: 11 }}>{row.vin}</td>
+                  <td style={{ ...tdStyle, fontWeight: 700, fontSize: 11 }}>{row.model}</td>
                   <td style={tdStyle}>
                     <span style={{
                       padding: '4px 8px',
