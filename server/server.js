@@ -3614,6 +3614,7 @@ app.get('/api/shop-top-defects', async (req, res) => {
 });
 
 // SGP Management - данные по всем моделям
+// SGP Management - данные по всем моделям
 app.get('/api/sgp-management', async (req, res) => {
   try {
     const sql = `
@@ -3625,12 +3626,12 @@ app.get('/api/sgp-management', async (req, res) => {
         CASE 
             WHEN q.status = 1 THEN 'Устранено'
             WHEN q.status = 0 THEN 'Не устранено'
-            ELSE CONCAT('Статус ', q.status)
+            ELSE '—'
         END AS resolution_status,
         CASE
             WHEN s.in_storage_status = 'Key_Car_In_Storage_Status_3' THEN 'Outbound'
             WHEN s.in_storage_status = 'Key_Car_In_Storage_Status_1' THEN 'In stock'
-            WHEN s.in_storage_status = 'Key_Car_In_Storage_Status_2' THEN 'In stock (blocked)'
+            WHEN s.in_storage_status = 'Key_Car_In_Storage_Status_2' THEN 'In stock'
             ELSE 'Unknown'
         END AS storage_status,
         CONCAT_WS('-', COALESCE(s.ck_no, ''), COALESCE(s.kq_no, ''), COALESCE(s.kw_no, '')) AS location
@@ -3641,36 +3642,16 @@ app.get('/api/sgp-management', async (req, res) => {
     
     const [rows] = await lesPool.query(sql);
     
-    // Группируем по VIN - объединяем причины для одинаковых VIN
-    const groupedMap = {};
-    rows.forEach(row => {
-      const vin = row.vin;
-      if (!groupedMap[vin]) {
-        groupedMap[vin] = {
-          vin: row.vin,
-          model: row.model,
-          block_status: row.block_status,
-          reasons: [],
-          resolution_statuses: [],
-          storage_status: row.storage_status,
-          location: row.location,
-        };
-      }
-      
-      if (row.reason && !groupedMap[vin].reasons.includes(row.reason)) {
-        groupedMap[vin].reasons.push(row.reason);
-      }
-      
-      if (row.resolution_status && !groupedMap[vin].resolution_statuses.includes(row.resolution_status)) {
-        groupedMap[vin].resolution_statuses.push(row.resolution_status);
-      }
-    });
-    
-    // Преобразуем в массив
-    const result = Object.values(groupedMap).map(item => ({
-      ...item,
-      reason: item.reasons.join(' | '),
-      resolution_status: item.resolution_statuses.join(' | '),
+    // НЕ группируем - возвращаем как есть, каждая строка отдельно
+    // Просто нормализуем storage_status
+    const result = rows.map(row => ({
+      vin: row.vin,
+      model: row.model,
+      block_status: row.block_status,
+      reason: row.reason || '',
+      resolution_status: row.resolution_status || '—',
+      storage_status: row.storage_status === 'In stock (blocked)' ? 'In stock' : row.storage_status,
+      location: row.location || '—',
     }));
     
     res.json(result);
