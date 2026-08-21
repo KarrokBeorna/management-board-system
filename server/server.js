@@ -1417,15 +1417,40 @@ app.get('/api/sgp-audit-vins', async (req, res) => {
     }
 
     const allNodes = [
+      'Key_Uloc_Type_TRIMIN',
       'Key_Uloc_Type_CP7',
       'Key_Uloc_Type_CP72',
       'Key_Uloc_Type_CPFINAL',
       'Key_Uloc_Type_CP8'
     ];
+    
     if (!allNodes.includes(checkpoint)) {
       return res.status(400).json({ error: 'Неверный checkpoint' });
     }
 
+    // Для TRIMIN используем ti_mes_movement (AGMAS01001)
+    if (checkpoint === 'Key_Uloc_Type_TRIMIN') {
+      let sql = `
+        SELECT DISTINCT m.vin
+        FROM ti_mes_movement m
+        JOIN tm_ofm_order o ON o.vin = m.vin
+        WHERE m.uloc_no = 'AGMAS01001'
+          AND m.is_deleted = 0
+          AND m.scan_time BETWEEN ? AND ?
+      `;
+      const params = [dateFrom, dateTo];
+      
+      if (model && model !== 'ALL') {
+        sql += ' AND o.product = ?';
+        params.push(model);
+      }
+      
+      const [rows] = await mesPool.query(sql, params);
+      const vins = rows.map(r => r.vin);
+      return res.json(vins);
+    }
+
+    // Для CP7, CP72, CPFINAL, CP8 - обычный запрос
     let sql = `
       SELECT DISTINCT v.vin
       FROM tm_vhc_vehicle_movement m
@@ -1435,6 +1460,7 @@ app.get('/api/sgp-audit-vins', async (req, res) => {
         AND m.scan_time BETWEEN ? AND ?
     `;
     const params = [checkpoint, dateFrom, dateTo];
+    
     if (model && model !== 'ALL') {
       sql += ' AND o.product = ?';
       params.push(model);
@@ -1501,6 +1527,23 @@ app.get('/api/sgp-audit-vins-detail', async (req, res) => {
             WHERE v.vin = ?
               AND m.node_nature IN ('Key_Uloc_Type_CP7', 'Key_Uloc_Type_CP72', 'Key_Uloc_Type_CPFINAL', 'Key_Uloc_Type_CP8')
         ),
+        trimin_movement AS (
+            SELECT 
+                m.vin,
+                o.product AS model,
+                'Key_Uloc_Type_TRIMIN' AS node_nature,
+                m.scan_time
+            FROM ti_mes_movement m
+            LEFT JOIN tm_ofm_order o ON o.vin = m.vin
+            WHERE m.vin = ?
+              AND m.uloc_no = 'AGMAS01001'
+              AND m.is_deleted = 0
+        ),
+        all_movement AS (
+            SELECT * FROM movement
+            UNION ALL
+            SELECT * FROM trimin_movement
+        ),
         aggregated AS (
             SELECT
                 vin,
@@ -1508,12 +1551,14 @@ app.get('/api/sgp-audit-vins-detail', async (req, res) => {
                 node_nature,
                 MIN(scan_time) AS in_time,
                 MAX(scan_time) AS out_time
-            FROM movement
+            FROM all_movement
             GROUP BY vin, node_nature
         )
         SELECT
             vin AS VIN,
             MAX(model) AS Модель,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_TRIMIN' THEN in_time END) AS TRIMIN_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_TRIMIN' THEN out_time END) AS TRIMIN_out,
             MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN in_time END) AS CP7_in,
             MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN out_time END) AS CP7_out,
             MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP72' THEN in_time END) AS CP72_in,
@@ -1526,82 +1571,126 @@ app.get('/api/sgp-audit-vins-detail', async (req, res) => {
         GROUP BY vin
         ORDER BY vin
       `;
-      const [rows] = await mesPool.query(sqlDetail, [vin.trim()]);
+      const [rows] = await mesPool.query(sqlDetail, [vin.trim(), vin.trim()]);
       return res.json(rows);
     }
 
-    // --- Обычный режим (без изменений) ---
+    // --- Обычный режим ---
     if (!checkpoint || !dateFrom || !dateTo) {
       return res.status(400).json({ error: 'checkpoint, dateFrom, dateTo обязательны' });
     }
 
+    // Добавляем TRIMIN в список
     const allNodes = [
+      'Key_Uloc_Type_TRIMIN',
       'Key_Uloc_Type_CP7',
       'Key_Uloc_Type_CP72',
       'Key_Uloc_Type_CPFINAL',
       'Key_Uloc_Type_CP8'
     ];
+    
     if (!allNodes.includes(checkpoint)) {
       return res.status(400).json({ error: 'Неверный checkpoint' });
     }
 
-    // Определяем следующие чекпоинты после выбранного
     const idx = allNodes.indexOf(checkpoint);
     const nodesAfter = allNodes.slice(idx + 1);
 
-    // 1. Получаем VIN, прошедшие выбранный чекпоинт, с последним временем выхода
-    let sqlVins = `
-      SELECT v.vin, MAX(m.scan_time) AS last_cp_time
-      FROM tm_vhc_vehicle_movement m
-      JOIN tm_vhc_vehicle v ON v.id = m.tm_vhc_vehicle_id
-      LEFT JOIN tm_ofm_order o ON o.vin = v.vin
-      WHERE m.node_nature = ?
-        AND m.scan_time BETWEEN ? AND ?
-    `;
-    const paramsVins = [checkpoint, dateFrom, dateTo];
-    if (model && model !== 'ALL') {
-      sqlVins += ' AND o.product = ?';
-      paramsVins.push(model);
+    // Для TRIMIN - получаем VIN из ti_mes_movement
+    let sqlVins;
+    let paramsVins;
+    
+    if (checkpoint === 'Key_Uloc_Type_TRIMIN') {
+      sqlVins = `
+        SELECT m.vin, MAX(m.scan_time) AS last_cp_time
+        FROM ti_mes_movement m
+        LEFT JOIN tm_ofm_order o ON o.vin = m.vin
+        WHERE m.uloc_no = 'AGMAS01001'
+          AND m.is_deleted = 0
+          AND m.scan_time BETWEEN ? AND ?
+      `;
+      paramsVins = [dateFrom, dateTo];
+      if (model && model !== 'ALL') {
+        sqlVins += ' AND o.product = ?';
+        paramsVins.push(model);
+      }
+      sqlVins += ' GROUP BY m.vin';
+    } else {
+      sqlVins = `
+        SELECT v.vin, MAX(m.scan_time) AS last_cp_time
+        FROM tm_vhc_vehicle_movement m
+        JOIN tm_vhc_vehicle v ON v.id = m.tm_vhc_vehicle_id
+        LEFT JOIN tm_ofm_order o ON o.vin = v.vin
+        WHERE m.node_nature = ?
+          AND m.scan_time BETWEEN ? AND ?
+      `;
+      paramsVins = [checkpoint, dateFrom, dateTo];
+      if (model && model !== 'ALL') {
+        sqlVins += ' AND o.product = ?';
+        paramsVins.push(model);
+      }
+      sqlVins += ' GROUP BY v.vin';
     }
-    sqlVins += ' GROUP BY v.vin';
     
     const [vinsRows] = await mesPool.query(sqlVins, paramsVins);
     if (vinsRows.length === 0) {
       return res.json([]);
     }
 
-    // 2. Исключаем VIN, которые после выбранного чекпоинта появились на следующих
     const vinsWithTimes = vinsRows.map(r => ({ vin: r.vin, lastCpTime: r.last_cp_time }));
     const vinList = vinsWithTimes.map(v => v.vin);
 
     if (nodesAfter.length > 0) {
       const placeholders = vinList.map(() => '?').join(',');
-      const sqlNext = `
-        SELECT DISTINCT v.vin
-        FROM tm_vhc_vehicle_movement m
-        JOIN tm_vhc_vehicle v ON v.id = m.tm_vhc_vehicle_id
-        WHERE v.vin IN (${placeholders})
-          AND m.node_nature IN (${nodesAfter.map(() => '?').join(',')})
-          AND m.scan_time > (
-            SELECT MAX(m2.scan_time)
-            FROM tm_vhc_vehicle_movement m2
-            JOIN tm_vhc_vehicle v2 ON v2.id = m2.tm_vhc_vehicle_id
-            WHERE v2.vin = v.vin AND m2.node_nature = ?
-              AND m2.scan_time BETWEEN ? AND ?
-          )
-      `;
-      const paramsNext = [...vinList, ...nodesAfter, checkpoint, dateFrom, dateTo];
+      
+      // Исключаем VIN которые прошли следующие чекпоинты
+      let sqlNext;
+      let paramsNext;
+      
+      if (checkpoint === 'Key_Uloc_Type_TRIMIN') {
+        // Для TRIMIN - следующие CP7, CP72, CPFINAL, CP8 в tm_vhc_vehicle_movement
+        sqlNext = `
+          SELECT DISTINCT v.vin
+          FROM tm_vhc_vehicle_movement m
+          JOIN tm_vhc_vehicle v ON v.id = m.tm_vhc_vehicle_id
+          WHERE v.vin IN (${placeholders})
+            AND m.node_nature IN (${nodesAfter.map(() => '?').join(',')})
+            AND m.scan_time > (
+              SELECT MAX(m2.scan_time)
+              FROM ti_mes_movement m2
+              WHERE m2.vin = v.vin AND m2.uloc_no = 'AGMAS01001'
+                AND m2.is_deleted = 0
+                AND m2.scan_time BETWEEN ? AND ?
+            )
+        `;
+        paramsNext = [...vinList, ...nodesAfter, dateFrom, dateTo];
+      } else {
+        sqlNext = `
+          SELECT DISTINCT v.vin
+          FROM tm_vhc_vehicle_movement m
+          JOIN tm_vhc_vehicle v ON v.id = m.tm_vhc_vehicle_id
+          WHERE v.vin IN (${placeholders})
+            AND m.node_nature IN (${nodesAfter.map(() => '?').join(',')})
+            AND m.scan_time > (
+              SELECT MAX(m2.scan_time)
+              FROM tm_vhc_vehicle_movement m2
+              JOIN tm_vhc_vehicle v2 ON v2.id = m2.tm_vhc_vehicle_id
+              WHERE v2.vin = v.vin AND m2.node_nature = ?
+                AND m2.scan_time BETWEEN ? AND ?
+            )
+        `;
+        paramsNext = [...vinList, ...nodesAfter, checkpoint, dateFrom, dateTo];
+      }
+      
       const [nextRows] = await mesPool.query(sqlNext, paramsNext);
       const nextVins = new Set(nextRows.map(r => r.vin));
       
-      // Оставляем только те VIN, которых нет в nextVins
       const filteredVins = vinList.filter(vin => !nextVins.has(vin));
       
       if (filteredVins.length === 0) {
         return res.json([]);
       }
 
-      // 3. Для оставшихся VIN собираем полную агрегацию по всем чекпоинтам
       const filteredPlaceholders = filteredVins.map(() => '?').join(',');
       const sqlDetail = `
         WITH movement AS (
@@ -1616,6 +1705,23 @@ app.get('/api/sgp-audit-vins-detail', async (req, res) => {
             WHERE v.vin IN (${filteredPlaceholders})
               AND m.node_nature IN ('Key_Uloc_Type_CP7', 'Key_Uloc_Type_CP72', 'Key_Uloc_Type_CPFINAL', 'Key_Uloc_Type_CP8')
         ),
+        trimin_movement AS (
+            SELECT 
+                m.vin,
+                o.product AS model,
+                'Key_Uloc_Type_TRIMIN' AS node_nature,
+                m.scan_time
+            FROM ti_mes_movement m
+            LEFT JOIN tm_ofm_order o ON o.vin = m.vin
+            WHERE m.vin IN (${filteredPlaceholders})
+              AND m.uloc_no = 'AGMAS01001'
+              AND m.is_deleted = 0
+        ),
+        all_movement AS (
+            SELECT * FROM movement
+            UNION ALL
+            SELECT * FROM trimin_movement
+        ),
         aggregated AS (
             SELECT
                 vin,
@@ -1623,12 +1729,14 @@ app.get('/api/sgp-audit-vins-detail', async (req, res) => {
                 node_nature,
                 MIN(scan_time) AS in_time,
                 MAX(scan_time) AS out_time
-            FROM movement
+            FROM all_movement
             GROUP BY vin, node_nature
         )
         SELECT
             vin AS VIN,
             MAX(model) AS Модель,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_TRIMIN' THEN in_time END) AS TRIMIN_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_TRIMIN' THEN out_time END) AS TRIMIN_out,
             MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN in_time END) AS CP7_in,
             MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN out_time END) AS CP7_out,
             MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP72' THEN in_time END) AS CP72_in,
@@ -1642,10 +1750,10 @@ app.get('/api/sgp-audit-vins-detail', async (req, res) => {
         ORDER BY vin
       `;
 
-      const [detailRows] = await mesPool.query(sqlDetail, filteredVins);
+      const [detailRows] = await mesPool.query(sqlDetail, [...filteredVins, ...filteredVins]);
       return res.json(detailRows);
     } else {
-      // Если выбран CP8 (последний), то исключать не нужно, сразу отдаём детализацию
+      // Если выбран последний чекпоинт (CP8)
       const vinListOnly = vinsWithTimes.map(v => v.vin);
       const placeholders = vinListOnly.map(() => '?').join(',');
       const sqlDetail = `
@@ -1661,6 +1769,23 @@ app.get('/api/sgp-audit-vins-detail', async (req, res) => {
             WHERE v.vin IN (${placeholders})
               AND m.node_nature IN ('Key_Uloc_Type_CP7', 'Key_Uloc_Type_CP72', 'Key_Uloc_Type_CPFINAL', 'Key_Uloc_Type_CP8')
         ),
+        trimin_movement AS (
+            SELECT 
+                m.vin,
+                o.product AS model,
+                'Key_Uloc_Type_TRIMIN' AS node_nature,
+                m.scan_time
+            FROM ti_mes_movement m
+            LEFT JOIN tm_ofm_order o ON o.vin = m.vin
+            WHERE m.vin IN (${placeholders})
+              AND m.uloc_no = 'AGMAS01001'
+              AND m.is_deleted = 0
+        ),
+        all_movement AS (
+            SELECT * FROM movement
+            UNION ALL
+            SELECT * FROM trimin_movement
+        ),
         aggregated AS (
             SELECT
                 vin,
@@ -1668,12 +1793,14 @@ app.get('/api/sgp-audit-vins-detail', async (req, res) => {
                 node_nature,
                 MIN(scan_time) AS in_time,
                 MAX(scan_time) AS out_time
-            FROM movement
+            FROM all_movement
             GROUP BY vin, node_nature
         )
         SELECT
             vin AS VIN,
             MAX(model) AS Модель,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_TRIMIN' THEN in_time END) AS TRIMIN_in,
+            MAX(CASE WHEN node_nature = 'Key_Uloc_Type_TRIMIN' THEN out_time END) AS TRIMIN_out,
             MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN in_time END) AS CP7_in,
             MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP7' THEN out_time END) AS CP7_out,
             MAX(CASE WHEN node_nature = 'Key_Uloc_Type_CP72' THEN in_time END) AS CP72_in,
@@ -1686,7 +1813,7 @@ app.get('/api/sgp-audit-vins-detail', async (req, res) => {
         GROUP BY vin
         ORDER BY vin
       `;
-      const [detailRows] = await mesPool.query(sqlDetail, vinListOnly);
+      const [detailRows] = await mesPool.query(sqlDetail, [...vinListOnly, ...vinListOnly]);
       return res.json(detailRows);
     }
   } catch (err) {
