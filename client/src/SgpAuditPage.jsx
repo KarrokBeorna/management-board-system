@@ -363,6 +363,7 @@ export default function SgpAuditPage() {
           type="datetime-local"
           value={tpFilters[fromKey] || ''}
           onChange={(e) => setTpFilters(prev => ({ ...prev, [fromKey]: e.target.value }))}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleTpSearch(); }}
           style={{ ...inputStyle, fontSize: 10, padding: '4px 6px', width: '100%' }}
         />
       </div>
@@ -372,6 +373,7 @@ export default function SgpAuditPage() {
           type="datetime-local"
           value={tpFilters[toKey] || ''}
           onChange={(e) => setTpFilters(prev => ({ ...prev, [toKey]: e.target.value }))}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleTpSearch(); }}
           style={{ ...inputStyle, fontSize: 10, padding: '4px 6px', width: '100%' }}
         />
       </div>
@@ -598,10 +600,37 @@ export default function SgpAuditPage() {
 
       {/* Подкарточки */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 30 }}>
-        <button onClick={() => setActiveTab('checkpoints')} style={tabStyle(activeTab === 'checkpoints')}>
+        <button 
+          onClick={() => setActiveTab('checkpoints')} 
+          style={{
+            padding: '10px 28px',
+            borderRadius: 10,
+            border: 'none',
+            fontWeight: 600,
+            fontSize: 15,
+            background: '#2563EB',
+            color: '#FFFFFF',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(37,99,235,0.25)',
+            transition: 'all 0.2s',
+          }}
+        >
           До СР8
         </button>
-        <button onClick={() => navigate('/sgp-management')} style={tabStyle(false)}>
+        <button 
+          onClick={() => navigate('/sgp-management')} 
+          style={{
+            padding: '10px 28px',
+            borderRadius: 10,
+            border: 'none',
+            fontWeight: 600,
+            fontSize: 15,
+            background: '#F3F4F6',
+            color: '#6B7280',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+        >
           После СР8
         </button>
       </div>
