@@ -77,6 +77,7 @@ const tabStyle = (active) => ({
 });
 
 const cpNames = [
+  { value: 'Key_Uloc_Type_TRIMIN', label: 'TRIMIN' },
   { value: 'Key_Uloc_Type_CP7', label: 'CP7' },
   { value: 'Key_Uloc_Type_CP72', label: 'CP72' },
   { value: 'Key_Uloc_Type_CPFINAL', label: 'CPFINAL' },
