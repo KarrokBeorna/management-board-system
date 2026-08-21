@@ -147,7 +147,7 @@ export default function SgpAuditPage() {
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
 
   // Checkpoints
-  const [selectedCp, setSelectedCp] = useState('Key_Uloc_Type_CP7');
+  const [selectedCp, setSelectedCp] = useState('Key_Uloc_Type_TRIMIN');
   const [startDate, setStartDate] = useState('');
   const [startTime, setStartTime] = useState('00:00');
   const [endDate, setEndDate] = useState('');
@@ -174,6 +174,20 @@ export default function SgpAuditPage() {
   const [auditDailyData, setAuditDailyData] = useState([]);
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
+
+  // Закрытие выпадающего фильтра при клике вне
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (activeFilterColumn && !event.target.closest('.filter-dropdown') && !event.target.closest('th')) {
+        setActiveFilterColumn(null);
+      }
+    };
+    
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [activeFilterColumn]);
 
   const formatDateTime = (dt) => {
     if (!dt) return '-';
@@ -291,7 +305,6 @@ export default function SgpAuditPage() {
     setTimePointsPage(0);
   };
 
-  // Экспорт на холды (только VIN и Model)
   const handleExportToHolds = () => {
     const exportData = timePointsData.map(v => ({
       'VIN': v.vin,
@@ -552,14 +565,14 @@ export default function SgpAuditPage() {
               disabled={isFilterDisabled}
               style={{
                 flex: '1 1 0',
-                maxWidth: 180,
+                maxWidth: 140,
                 padding: '12px 0',
                 borderRadius: 12,
                 border: isActive ? '2px solid #2563EB' : '1px solid #E5E7EB',
                 background: isActive ? '#2563EB' : '#FFFFFF',
                 color: isActive ? '#FFFFFF' : '#374151',
                 fontWeight: 600,
-                fontSize: 16,
+                fontSize: 14,
                 cursor: isFilterDisabled ? 'not-allowed' : 'pointer',
                 transition: 'all 0.2s',
                 boxShadow: isActive ? '0 4px 10px rgba(37,99,235,0.3)' : '0 1px 3px rgba(0,0,0,0.04)',
@@ -569,7 +582,7 @@ export default function SgpAuditPage() {
               {cp.label}
             </button>
             {idx < cpNames.length - 1 && (
-              <div style={{ height: 2, width: 28, backgroundColor: '#CBD5E1', margin: '0 6px', borderRadius: 1 }} />
+              <div style={{ height: 2, width: 20, backgroundColor: '#CBD5E1', margin: '0 4px', borderRadius: 1 }} />
             )}
           </React.Fragment>
         );
@@ -670,6 +683,29 @@ export default function SgpAuditPage() {
                 ✕ Очистить
               </button>
             </div>
+          </div>
+
+          {/* VIN поиск */}
+          <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+              🔍 VIN:
+              <input
+                type="text"
+                value={tpFilters.vin || ''}
+                onChange={(e) => setTpFilters(prev => {
+                  const newPrev = { ...prev };
+                  if (e.target.value) {
+                    newPrev.vin = e.target.value;
+                  } else {
+                    delete newPrev.vin;
+                  }
+                  return newPrev;
+                })}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleTpSearch(); }}
+                placeholder="Введите VIN..."
+                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14, background: '#F9FAFB', width: 200 }}
+              />
+            </label>
           </div>
 
           {/* Фильтры в 2 столбца */}
@@ -778,11 +814,14 @@ export default function SgpAuditPage() {
 
           {/* Выпадающий фильтр */}
           {activeFilterColumn && timePointsData.length > 0 && (
-            <div style={{
-              ...filterDropdownStyle,
-              top: filterDropdownPos.top,
-              left: filterDropdownPos.left,
-            }}>
+            <div 
+              className="filter-dropdown"
+              style={{
+                ...filterDropdownStyle,
+                top: filterDropdownPos.top,
+                left: filterDropdownPos.left,
+              }}
+            >
               <div 
                 style={{ ...filterOptionStyle, fontWeight: 700, borderBottom: '1px solid #E5E7EB', marginBottom: 4 }}
                 onClick={() => handleFilterClear(activeFilterColumn)}
@@ -859,7 +898,7 @@ export default function SgpAuditPage() {
           <div style={cardStyle}>
             <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>📦</span>
-              Аудит чекпоинтов (хранение)
+              Аудит авто Цеха Сборки
             </h2>
             {renderCpSelector(selectedCp, setSelectedCp)}
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14, marginBottom: 8 }}>
