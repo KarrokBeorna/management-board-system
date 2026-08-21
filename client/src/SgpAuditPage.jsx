@@ -107,7 +107,6 @@ const filterOptionStyle = {
   transition: 'background 0.15s',
 };
 
-// Стиль для блока фильтра времени
 const timeFilterBlockStyle = {
   display: 'flex',
   alignItems: 'center',
@@ -232,8 +231,9 @@ export default function SgpAuditPage() {
     }
   };
 
+  // Загружаем данные при первом входе на вкладку
   useEffect(() => {
-    if (activeTab === 'timepoints') {
+    if (activeTab === 'timepoints' && timePointsData.length === 0) {
       loadTimePoints(tpFilters);
     }
   }, [activeTab]);
@@ -316,7 +316,6 @@ export default function SgpAuditPage() {
     XLSX.writeFile(wb, `Холды_${dateStr}.xlsx`);
   };
 
-  // Колонки таблицы
   const timePointColumns = [
     { key: 'vin', label: 'VIN', filterable: true },
     { key: 'material_code', label: 'Material Code', filterable: true },
@@ -342,7 +341,6 @@ export default function SgpAuditPage() {
     { key: 'out_storage_time', label: 'Outbound', isTime: true },
   ];
 
-  // Левый столбец фильтров
   const leftTimeFilters = [
     { label: 'CP5', fromKey: 'cp5From', toKey: 'cp5To' },
     { label: 'CP6', fromKey: 'cp6From', toKey: 'cp6To' },
@@ -353,7 +351,6 @@ export default function SgpAuditPage() {
     { label: 'TLRT', fromKey: 'tlrtFrom', toKey: 'tlrtTo' },
   ];
 
-  // Правый столбец фильтров
   const rightTimeFilters = [
     { label: 'TLADAS', fromKey: 'tladasFrom', toKey: 'tladasTo' },
     { label: 'TLTT', fromKey: 'tlttFrom', toKey: 'tlttTo' },
@@ -363,7 +360,6 @@ export default function SgpAuditPage() {
     { label: 'Outbound', fromKey: 'outboundFrom', toKey: 'outboundTo' },
   ];
 
-  // Компонент для отображения фильтра времени
   const renderTimeFilter = ({ label, fromKey, toKey }) => (
     <div style={timeFilterBlockStyle}>
       <span style={timeFilterLabelStyle}>{label}</span>
@@ -663,11 +659,9 @@ export default function SgpAuditPage() {
             borderRadius: 12,
             border: '1px solid #E5E7EB',
           }}>
-            {/* Левый столбец */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {leftTimeFilters.map(filter => renderTimeFilter(filter))}
             </div>
-            {/* Правый столбец */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {rightTimeFilters.map(filter => renderTimeFilter(filter))}
             </div>
@@ -754,7 +748,7 @@ export default function SgpAuditPage() {
             </>
           ) : (
             <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
-              Нажмите "Поиск" для загрузки данных.
+              Выберите фильтр точки
             </div>
           )}
 
