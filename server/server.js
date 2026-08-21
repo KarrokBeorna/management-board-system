@@ -3684,7 +3684,7 @@ app.get('/api/time-points', async (req, res) => {
     const hasLesFilters = inboundFrom || inboundTo || outboundFrom || outboundTo;
     const hasIotFilters = batchNum;
 
-    // --- MES запрос (основные данные + все точки) ---
+    // --- MES запрос (CP5, CP6, TRIMIN, CP7, CP72, CPFINAL, CP8) ---
     let mesQuery = `
       WITH times AS (
         SELECT
@@ -3695,14 +3695,9 @@ app.get('/api/time-points', async (req, res) => {
           MAX(IF(uloc_no = 'AGMAS01003', scan_time, NULL)) AS CP7,
           MAX(IF(uloc_no = 'CP72', scan_time, NULL)) AS CP72,
           MAX(IF(uloc_no = 'CPFINAL', scan_time, NULL)) AS CPFINAL,
-          MAX(IF(uloc_no = 'AGMAS01004', scan_time, NULL)) AS CP8,
-          MAX(IF(uloc_no = 'TLWA', scan_time, NULL)) AS TLWA,
-          MAX(IF(uloc_no = 'TLRT', scan_time, NULL)) AS TLRT,
-          MAX(IF(uloc_no = 'TLADAS', scan_time, NULL)) AS TLADAS,
-          MAX(IF(uloc_no = 'TLTT', scan_time, NULL)) AS TLTT,
-          MAX(IF(uloc_no = 'CPA', scan_time, NULL)) AS CPA
+          MAX(IF(uloc_no = 'AGMAS01004', scan_time, NULL)) AS CP8
         FROM ti_mes_movement
-        WHERE uloc_no IN ('AGMBS01002','AGMPS01002','AGMAS01001','AGMAS01003','CP72','CPFINAL','AGMAS01004','TLWA','TLRT','TLADAS','TLTT','CPA')
+        WHERE uloc_no IN ('AGMBS01002','AGMPS01002','AGMAS01001','AGMAS01003','CP72','CPFINAL','AGMAS01004')
           AND is_deleted = 0
         GROUP BY vin
       )
@@ -3714,15 +3709,13 @@ app.get('/api/time-points', async (req, res) => {
         too.product AS model,
         tbmr.material_desc,
         tbmr.ps_material_desc AS colour,
-        t.CP5, t.CP6, t.TRIMIN, t.CP7, t.CP72, t.CPFINAL, t.CP8,
-        t.TLWA, t.TLRT, t.TLADAS, t.TLTT, t.CPA
+        t.CP5, t.CP6, t.TRIMIN, t.CP7, t.CP72, t.CPFINAL, t.CP8
       FROM tm_ofm_order too 
         LEFT JOIN tm_vhc_vehicle tvv ON too.vin = tvv.vin 
         LEFT JOIN (SELECT DISTINCT material_no, kd_material_no, material_desc, vehicle_type, ps_material_desc FROM tm_bas_material_relation WHERE is_deleted = 0) tbmr ON tbmr.material_no = too.material_no 
         LEFT JOIN (SELECT DISTINCT material_no, kd_material_no FROM udt_vsp_kd_material_mapping WHERE is_deleted = 0) uvkmm ON CONCAT(LEFT(tbmr.material_no, 7), '**', RIGHT(tbmr.material_no, 6)) = uvkmm.material_no AND uvkmm.kd_material_no = tbmr.kd_material_no
         LEFT JOIN times t ON t.vin = too.vin
-      WHERE 1=1
-        AND too.is_deleted = 0
+      WHERE too.is_deleted = 0
     `;
     const mesParams = [];
 
@@ -3784,14 +3777,6 @@ app.get('/api/time-points', async (req, res) => {
     if (cpFinalTo) { mesQuery += ' AND t.CPFINAL <= ?'; mesParams.push(cpFinalTo); }
     if (cp8From) { mesQuery += ' AND t.CP8 >= ?'; mesParams.push(cp8From); }
     if (cp8To) { mesQuery += ' AND t.CP8 <= ?'; mesParams.push(cp8To); }
-    if (tlwaFrom) { mesQuery += ' AND t.TLWA >= ?'; mesParams.push(tlwaFrom); }
-    if (tlwaTo) { mesQuery += ' AND t.TLWA <= ?'; mesParams.push(tlwaTo); }
-    if (tlrtFrom) { mesQuery += ' AND t.TLRT >= ?'; mesParams.push(tlrtFrom); }
-    if (tlrtTo) { mesQuery += ' AND t.TLRT <= ?'; mesParams.push(tlrtTo); }
-    if (tladasFrom) { mesQuery += ' AND t.TLADAS >= ?'; mesParams.push(tladasFrom); }
-    if (tladasTo) { mesQuery += ' AND t.TLADAS <= ?'; mesParams.push(tladasTo); }
-    if (tlttFrom) { mesQuery += ' AND t.TLTT >= ?'; mesParams.push(tlttFrom); }
-    if (tlttTo) { mesQuery += ' AND t.TLTT <= ?'; mesParams.push(tlttTo); }
 
     mesQuery += ' ORDER BY t.CP5 DESC LIMIT 5000';
 
@@ -3803,47 +3788,33 @@ app.get('/api/time-points', async (req, res) => {
 
     let vehicles = mesRows;
     const vins = vehicles.map(v => v.vin);
-    const placeholders = vins.map(() => '?').join(',');
 
-    // --- LES запрос (Inbound/Outbound) ---
-    const lesPromise = hasLesFilters
-      ? lesPool.query(
-          `SELECT DISTINCT tbs.vin FROM tv_biz_storage_car tbs WHERE 1=1` +
-          (inboundFrom ? ' AND tbs.in_storage_time >= ?' : '') +
-          (inboundTo ? ' AND tbs.in_storage_time <= ?' : '') +
-          (outboundFrom ? ' AND tbs.out_storage_time >= ?' : '') +
-          (outboundTo ? ' AND tbs.out_storage_time <= ?' : ''),
-          [
-            ...(inboundFrom ? [inboundFrom] : []),
-            ...(inboundTo ? [inboundTo] : []),
-            ...(outboundFrom ? [outboundFrom] : []),
-            ...(outboundTo ? [outboundTo] : [])
-          ]
-        ).then(([rows]) => rows.map(r => r.vin))
-      : Promise.resolve([]);
-
-    // --- IOT запрос (batch_num) ---
-    const iotPromise = hasIotFilters
-      ? pool.query(
-          `SELECT DISTINCT wo.vin FROM work_order wo WHERE 1=1` +
-          (batchNum ? ' AND wo.batch_num = ?' : ''),
-          batchNum ? [batchNum] : []
-        ).then(([rows]) => rows.map(r => r.vin))
-      : Promise.resolve([]);
-
-    const [lesFilterVins, iotFilterVins] = await Promise.all([lesPromise, iotPromise]);
-
-    if ((hasLesFilters && lesFilterVins.length === 0) || (hasIotFilters && iotFilterVins.length === 0)) {
-      return res.json([]);
+    // --- LES фильтр (Inbound/Outbound) ---
+    if (hasLesFilters) {
+      const lesFilterQuery = `SELECT DISTINCT tbs.vin FROM tv_biz_storage_car tbs WHERE 1=1` +
+        (inboundFrom ? ' AND tbs.in_storage_time >= ?' : '') +
+        (inboundTo ? ' AND tbs.in_storage_time <= ?' : '') +
+        (outboundFrom ? ' AND tbs.out_storage_time >= ?' : '') +
+        (outboundTo ? ' AND tbs.out_storage_time <= ?' : '');
+      const lesFilterParams = [
+        ...(inboundFrom ? [inboundFrom] : []),
+        ...(inboundTo ? [inboundTo] : []),
+        ...(outboundFrom ? [outboundFrom] : []),
+        ...(outboundTo ? [outboundTo] : [])
+      ];
+      const [lesFilterRows] = await lesPool.query(lesFilterQuery, lesFilterParams);
+      const lesVins = new Set(lesFilterRows.map(r => r.vin));
+      vehicles = vehicles.filter(v => lesVins.has(v.vin));
     }
 
-    if (lesFilterVins.length > 0) {
-      const lesSet = new Set(lesFilterVins);
-      vehicles = vehicles.filter(v => lesSet.has(v.vin));
-    }
-    if (iotFilterVins.length > 0) {
-      const iotSet = new Set(iotFilterVins);
-      vehicles = vehicles.filter(v => iotSet.has(v.vin));
+    // --- IOT фильтр (batch_num) ---
+    if (hasIotFilters) {
+      const iotFilterQuery = `SELECT DISTINCT wo.vin FROM work_order wo WHERE 1=1` +
+        (batchNum ? ' AND wo.batch_num = ?' : '');
+      const iotFilterParams = batchNum ? [batchNum] : [];
+      const [iotFilterRows] = await pool.query(iotFilterQuery, iotFilterParams);
+      const iotVins = new Set(iotFilterRows.map(r => r.vin));
+      vehicles = vehicles.filter(v => iotVins.has(v.vin));
     }
 
     if (vehicles.length === 0) {
@@ -3851,35 +3822,49 @@ app.get('/api/time-points', async (req, res) => {
     }
 
     const filteredVins = vehicles.map(v => v.vin);
-    const filteredPlaceholders = filteredVins.map(() => '?').join(',');
+    const placeholders = filteredVins.map(() => '?').join(',');
 
-    // Обогащение LES (in_storage_time, out_storage_time) и IOT (batch_num)
-    const [lesDataResult, iotDataResult] = await Promise.all([
-      lesPool.query(
-        `SELECT tbs.vin, tbs.in_storage_time, tbs.out_storage_time
-         FROM tv_biz_storage_car tbs
-         WHERE tbs.vin IN (${filteredPlaceholders})`,
-        [...filteredVins]
-      ),
-      pool.query(
-        `SELECT wo.vin, wo.batch_num
-         FROM work_order wo
-         WHERE wo.vin IN (${filteredPlaceholders})`,
-        [...filteredVins]
-      )
-    ]);
+    // --- Обогащение LES (in_storage_time, out_storage_time) ---
+    const lesDataPromise = lesPool.query(
+      `SELECT tbs.vin, tbs.in_storage_time, tbs.out_storage_time
+       FROM tv_biz_storage_car tbs
+       WHERE tbs.vin IN (${placeholders})`,
+      [...filteredVins]
+    );
 
-    const [lesRows] = lesDataResult;
-    const [iotRows] = iotDataResult;
+    // --- Обогащение IOT (batch_num, TLWA, TLRT, TLADAS, TLTT) ---
+    const iotDataPromise = pool.query(
+      `SELECT wo.vin, wo.batch_num,
+              MAX(IF(aow.wc_name = 'TLWA', aow.creation_time, NULL)) AS TLWA,
+              MAX(IF(aow.wc_name = 'TLRT', aow.creation_time, NULL)) AS TLRT,
+              MAX(IF(aow.wc_name = 'TLADAS', aow.creation_time, NULL)) AS TLADAS,
+              MAX(IF(aow.wc_name = 'TLTT', aow.creation_time, NULL)) AS TLTT
+       FROM work_order wo
+       LEFT JOIN at_om_wiptrackinghistory aow ON wo.vin = aow.vin
+       WHERE wo.vin IN (${placeholders})
+       GROUP BY wo.vin, wo.batch_num`,
+      [...filteredVins]
+    );
 
+    const [[lesRows], [iotRows]] = await Promise.all([lesDataPromise, iotDataPromise]);
+
+    // Слияние LES
     const lesMap = new Map(lesRows.map(r => [r.vin, r]));
-    const iotMap = new Map(iotRows.map(r => [r.vin, r]));
-
     vehicles = vehicles.map(v => ({
       ...v,
       in_storage_time: lesMap.get(v.vin)?.in_storage_time || null,
       out_storage_time: lesMap.get(v.vin)?.out_storage_time || null,
+    }));
+
+    // Слияние IoT
+    const iotMap = new Map(iotRows.map(r => [r.vin, r]));
+    vehicles = vehicles.map(v => ({
+      ...v,
       batch_num: iotMap.get(v.vin)?.batch_num || null,
+      TLWA: iotMap.get(v.vin)?.TLWA || null,
+      TLRT: iotMap.get(v.vin)?.TLRT || null,
+      TLADAS: iotMap.get(v.vin)?.TLADAS || null,
+      TLTT: iotMap.get(v.vin)?.TLTT || null,
     }));
 
     // Вычисление location
@@ -3889,7 +3874,7 @@ app.get('/api/time-points', async (req, res) => {
       else if (v.in_storage_time) location = 'На складе';
       else if (v.CP8) location = 'CP8';
       else if (v.CPFINAL) location = 'CPFINAL';
-      else if (v.TLWA || v.TLRT || v.TLADAS || v.TLTT || v.CPA) location = 'На тестах';
+      else if (v.TLWA || v.TLRT || v.TLADAS || v.TLTT) location = 'На тестах';
       else if (v.CP72) location = 'CP72';
       else if (v.CP7) location = 'CP7';
       else if (v.TRIMIN) location = 'TRIMIN';
@@ -3907,6 +3892,16 @@ app.get('/api/time-points', async (req, res) => {
       const excArr = excludeLocations.split(',').map(s => s.trim()).filter(Boolean);
       vehicles = vehicles.filter(v => !excArr.includes(v.location));
     }
+
+    // Фильтры TLWA/TLRT/TLADAS/TLTT
+    if (tlwaFrom) vehicles = vehicles.filter(v => v.TLWA && new Date(v.TLWA) >= new Date(tlwaFrom));
+    if (tlwaTo) vehicles = vehicles.filter(v => v.TLWA && new Date(v.TLWA) <= new Date(tlwaTo));
+    if (tlrtFrom) vehicles = vehicles.filter(v => v.TLRT && new Date(v.TLRT) >= new Date(tlrtFrom));
+    if (tlrtTo) vehicles = vehicles.filter(v => v.TLRT && new Date(v.TLRT) <= new Date(tlrtTo));
+    if (tladasFrom) vehicles = vehicles.filter(v => v.TLADAS && new Date(v.TLADAS) >= new Date(tladasFrom));
+    if (tladasTo) vehicles = vehicles.filter(v => v.TLADAS && new Date(v.TLADAS) <= new Date(tladasTo));
+    if (tlttFrom) vehicles = vehicles.filter(v => v.TLTT && new Date(v.TLTT) >= new Date(tlttFrom));
+    if (tlttTo) vehicles = vehicles.filter(v => v.TLTT && new Date(v.TLTT) <= new Date(tlttTo));
 
     res.json(vehicles);
   } catch (err) {

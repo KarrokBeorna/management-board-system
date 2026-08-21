@@ -9,7 +9,6 @@ import {
 
 const API_BASE = '';
 
-// ====== Вспомогательные функции ======
 const tableToHtml = (rows) => {
   if (!rows.length) return '<p>Нет данных</p>';
   const headers = Object.keys(rows[0]);
@@ -112,19 +111,18 @@ export default function SgpAuditPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('checkpoints');
 
-  // ====== Time Points ======
+  // Time Points
   const [timePointsData, setTimePointsData] = useState([]);
   const [timePointsLoading, setTimePointsLoading] = useState(false);
   const [timePointsError, setTimePointsError] = useState(null);
   const [timePointsPage, setTimePointsPage] = useState(0);
   const timePointsPageSize = 50;
   
-  // Фильтры Time Points
   const [tpFilters, setTpFilters] = useState({});
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
 
-  // ====== Состояние для "Аудит чекпоинтов (хранение)" ======
+  // Checkpoints
   const [selectedCp, setSelectedCp] = useState('Key_Uloc_Type_CP7');
   const [startDate, setStartDate] = useState('');
   const [startTime, setStartTime] = useState('00:00');
@@ -137,11 +135,11 @@ export default function SgpAuditPage() {
   const [cpPage, setCpPage] = useState(0);
   const rowsPerPage = 100;
 
-  // ====== VIN-поиск ======
+  // VIN search
   const [vinSearch, setVinSearch] = useState('');
   const [isVinMode, setIsVinMode] = useState(false);
 
-  // ====== Состояние для "Аналитика по аудиту" ======
+  // Analytics
   const [auditStartDate, setAuditStartDate] = useState('');
   const [auditEndDate, setAuditEndDate] = useState('');
   const [auditModel, setAuditModel] = useState('ALL');
@@ -153,7 +151,6 @@ export default function SgpAuditPage() {
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
-  // ====== Форматирование ======
   const formatDateTime = (dt) => {
     if (!dt) return '-';
     const d = new Date(dt);
@@ -178,7 +175,6 @@ export default function SgpAuditPage() {
     return `${dd}.${mm} ${hh}:${min}`;
   };
 
-  // ====== Загрузка Time Points ======
   const loadTimePoints = async (filters = {}) => {
     setTimePointsLoading(true);
     setTimePointsError(null);
@@ -212,13 +208,13 @@ export default function SgpAuditPage() {
     }
   };
 
+  // Загружаем данные при первом входе на вкладку
   useEffect(() => {
     if (activeTab === 'timepoints') {
       loadTimePoints(tpFilters);
     }
   }, [activeTab]);
 
-  // ====== Фильтры ======
   const getUniqueValues = (column) => {
     const values = [...new Set(timePointsData.map(d => d[column]).filter(v => v !== null && v !== undefined && v !== ''))];
     return values.sort();
@@ -251,7 +247,6 @@ export default function SgpAuditPage() {
       
       const newFilters = { ...prev, [column]: newValues };
       
-      // Если фильтр пустой - удаляем его
       if (newValues.length === 0) {
         delete newFilters[column];
       }
@@ -278,7 +273,7 @@ export default function SgpAuditPage() {
     loadTimePoints({});
   };
 
-  // ====== Колонки Time Points ======
+  // Колонки в хронологическом порядке
   const timePointColumns = [
     { key: 'vin', label: 'VIN', filterable: true },
     { key: 'material_code', label: 'Material Code', filterable: true },
@@ -304,7 +299,23 @@ export default function SgpAuditPage() {
     { key: 'out_storage_time', label: 'Outbound', isTime: true },
   ];
 
-  // ====== VIN-поиск для checkpoints ======
+  // Фильтры по времени в хронологическом порядке
+  const timeFilterFields = [
+    { label: 'CP5', fromKey: 'cp5From', toKey: 'cp5To' },
+    { label: 'CP6', fromKey: 'cp6From', toKey: 'cp6To' },
+    { label: 'TRIMIN', fromKey: 'trimInFrom', toKey: 'trimInTo' },
+    { label: 'CP7', fromKey: 'cp7From', toKey: 'cp7To' },
+    { label: 'CP72', fromKey: 'cp72From', toKey: 'cp72To' },
+    { label: 'TLWA', fromKey: 'tlwaFrom', toKey: 'tlwaTo' },
+    { label: 'TLRT', fromKey: 'tlrtFrom', toKey: 'tlrtTo' },
+    { label: 'TLADAS', fromKey: 'tladasFrom', toKey: 'tladasTo' },
+    { label: 'TLTT', fromKey: 'tlttFrom', toKey: 'tlttTo' },
+    { label: 'CPFINAL', fromKey: 'cpFinalFrom', toKey: 'cpFinalTo' },
+    { label: 'CP8', fromKey: 'cp8From', toKey: 'cp8To' },
+    { label: 'Inbound', fromKey: 'inboundFrom', toKey: 'inboundTo' },
+    { label: 'Outbound', fromKey: 'outboundFrom', toKey: 'outboundTo' },
+  ];
+
   const handleVinSearch = () => {
     if (!vinSearch.trim()) {
       setIsVinMode(false);
@@ -523,7 +534,7 @@ export default function SgpAuditPage() {
         Управление холдами
       </h1>
 
-      {/* Подкарточки До СР8 / После СР8 */}
+      {/* Подкарточки */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 30 }}>
         <button onClick={() => setActiveTab('checkpoints')} style={tabStyle(activeTab !== 'timepoints' && activeTab !== 'analytics')}>
           До СР8
@@ -538,17 +549,15 @@ export default function SgpAuditPage() {
         <button onClick={() => setActiveTab('checkpoints')} style={tabStyle(activeTab === 'checkpoints')}>
           Аудит чекпоинтов (хранение)
         </button>
-
         <button onClick={() => setActiveTab('timepoints')} style={tabStyle(activeTab === 'timepoints')}>
           Время прохождения точек
         </button>
-
         <button onClick={() => setActiveTab('analytics')} style={tabStyle(activeTab === 'analytics')}>
           Аналитика по аудиту
         </button>
       </div>
 
-      {/* ========== Вкладка "Время прохождения точек" ========== */}
+      {/* ========== Time Points ========== */}
       {activeTab === 'timepoints' && (
         <div style={cardStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -568,37 +577,32 @@ export default function SgpAuditPage() {
             </div>
           </div>
 
-          {/* Фильтры по времени */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16, alignItems: 'center' }}>
-            {[
-              { label: 'CP5', fromKey: 'cp5From', toKey: 'cp5To' },
-              { label: 'CP6', fromKey: 'cp6From', toKey: 'cp6To' },
-              { label: 'TRIMIN', fromKey: 'trimInFrom', toKey: 'trimInTo' },
-              { label: 'CP7', fromKey: 'cp7From', toKey: 'cp7To' },
-              { label: 'CP72', fromKey: 'cp72From', toKey: 'cp72To' },
-              { label: 'TLWA', fromKey: 'tlwaFrom', toKey: 'tlwaTo' },
-              { label: 'TLRT', fromKey: 'tlrtFrom', toKey: 'tlrtTo' },
-              { label: 'TLADAS', fromKey: 'tladasFrom', toKey: 'tladasTo' },
-              { label: 'TLTT', fromKey: 'tlttFrom', toKey: 'tlttTo' },
-              { label: 'CPFINAL', fromKey: 'cpFinalFrom', toKey: 'cpFinalTo' },
-              { label: 'CP8', fromKey: 'cp8From', toKey: 'cp8To' },
-              { label: 'Inbound', fromKey: 'inboundFrom', toKey: 'inboundTo' },
-              { label: 'Outbound', fromKey: 'outboundFrom', toKey: 'outboundTo' },
-            ].map(({ label, fromKey, toKey }) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
-                <span style={{ fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>{label}:</span>
+          {/* Фильтры по времени в хронологическом порядке */}
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', 
+            gap: 8, 
+            marginBottom: 16,
+            padding: 12,
+            backgroundColor: '#F9FAFB',
+            borderRadius: 8,
+            border: '1px solid #E5E7EB',
+          }}>
+            {timeFilterFields.map(({ label, fromKey, toKey }) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                <span style={{ fontWeight: 700, color: '#374151', whiteSpace: 'nowrap', minWidth: 50 }}>{label}:</span>
                 <input
                   type="datetime-local"
                   value={tpFilters[fromKey] || ''}
                   onChange={(e) => setTpFilters(prev => ({ ...prev, [fromKey]: e.target.value }))}
-                  style={{ ...inputStyle, fontSize: 11, padding: '4px 6px' }}
+                  style={{ ...inputStyle, fontSize: 10, padding: '3px 4px', width: '100%' }}
                 />
-                <span style={{ color: '#9CA3AF' }}>—</span>
+                <span style={{ color: '#9CA3AF', fontSize: 10 }}>—</span>
                 <input
                   type="datetime-local"
                   value={tpFilters[toKey] || ''}
                   onChange={(e) => setTpFilters(prev => ({ ...prev, [toKey]: e.target.value }))}
-                  style={{ ...inputStyle, fontSize: 11, padding: '4px 6px' }}
+                  style={{ ...inputStyle, fontSize: 10, padding: '3px 4px', width: '100%' }}
                 />
               </div>
             ))}
@@ -685,7 +689,7 @@ export default function SgpAuditPage() {
             </>
           ) : (
             <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
-              Нет данных. Нажмите "Поиск" для загрузки.
+              Нажмите "Поиск" для загрузки данных.
             </div>
           )}
 
@@ -731,7 +735,7 @@ export default function SgpAuditPage() {
         </div>
       )}
 
-      {/* ========== Вкладка "Аудит чекпоинтов (хранение)" ========== */}
+      {/* ========== Checkpoints ========== */}
       {activeTab === 'checkpoints' && (
         <>
           <div style={{ marginBottom: 24, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', border: '1px solid #F0F0F5' }}>
@@ -852,7 +856,7 @@ export default function SgpAuditPage() {
         </>
       )}
 
-      {/* ========== Вкладка "Аналитика по аудиту" ========== */}
+      {/* ========== Analytics ========== */}
       {activeTab === 'analytics' && (
         <div style={cardStyle}>
           <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
