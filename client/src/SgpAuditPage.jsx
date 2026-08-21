@@ -639,7 +639,7 @@ export default function SgpAuditPage() {
       {/* Вкладки */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 30, flexWrap: 'wrap' }}>
         <button onClick={() => setActiveTab('checkpoints')} style={tabStyle(activeTab === 'checkpoints')}>
-          Аудит чекпоинтов (хранение)
+          Аудит авто Цеха Сборки
         </button>
         <button onClick={() => setActiveTab('timepoints')} style={tabStyle(activeTab === 'timepoints')}>
           Время прохождения точек
