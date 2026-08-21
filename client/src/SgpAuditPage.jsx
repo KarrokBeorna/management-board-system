@@ -135,9 +135,9 @@ export default function SgpAuditPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('checkpoints');
 
-  // Time Points Data
-  const [allTimePointsData, setAllTimePointsData] = useState([]); // полный список
-  const [timePointsData, setTimePointsData] = useState([]); // отфильтрованный список для таблицы
+  // Time Points
+  const [allTimePointsData, setAllTimePointsData] = useState([]);
+  const [timePointsData, setTimePointsData] = useState([]);
   const [timePointsLoading, setTimePointsLoading] = useState(false);
   const [timePointsError, setTimePointsError] = useState(null);
   const [timePointsPage, setTimePointsPage] = useState(0);
@@ -174,7 +174,7 @@ export default function SgpAuditPage() {
   const [auditAnalytics, setAuditAnalytics] = useState(null);
   const [auditDailyData, setAuditDailyData] = useState([]);
 
-  // Export to holds modal
+  // Export modal
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportReasons, setExportReasons] = useState([]);
   const [exportSearch, setExportSearch] = useState('');
@@ -184,7 +184,7 @@ export default function SgpAuditPage() {
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
-  // Закрытие фильтра при клике вне
+  // Закрытие выпадающего фильтра по клику вне
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (activeFilterColumn && !event.target.closest('.filter-dropdown') && !event.target.closest('th')) {
@@ -240,7 +240,7 @@ export default function SgpAuditPage() {
     return `${dd}.${mm} ${hh}:${min}`;
   };
 
-  // Загрузка всех данных при входе на вкладку
+  // Загрузка всех данных при первом входе на вкладку
   const loadTimePoints = async () => {
     setTimePointsLoading(true);
     setTimePointsError(null);
@@ -253,7 +253,7 @@ export default function SgpAuditPage() {
       }
       const json = await res.json();
       setAllTimePointsData(json);
-      setTimePointsData(json); // изначально показываем все
+      setTimePointsData(json);
       setTimePointsPage(0);
     } catch (err) {
       console.error('Ошибка Time Points:', err);
@@ -271,13 +271,19 @@ export default function SgpAuditPage() {
     }
   }, [activeTab]);
 
-  // Получение уникальных значений из полного набора данных
+  // Проверка наличия фильтров
+  const hasAnyFilter = useMemo(() => {
+    return !!tpFilters.vin ||
+      ['material_code', 'sequence_number', 'batch_num', 'kd_material_no', 'model', 'material_desc', 'colour', 'location'].some(f => tpFilters[f] && tpFilters[f].length > 0) ||
+      Object.keys(tpFilters).some(key => key.match(/^(cp5|cp6|trimIn|cp7|cp72|tlwa|tlrt|tladas|tltt|cpFinal|cp8|inbound|outbound)(From|To)$/));
+  }, [tpFilters]);
+
+  // Уникальные значения из полного набора
   const getUniqueValues = (column) => {
     const values = [...new Set(allTimePointsData.map(d => d[column]).filter(v => v !== null && v !== undefined && v !== ''))];
     return values.sort();
   };
 
-  // Обработчики фильтров
   const handleFilterHeaderClick = (column, event) => {
     const rect = event.currentTarget.getBoundingClientRect();
     setFilterDropdownPos({ top: rect.bottom + 4, left: rect.left });
@@ -310,17 +316,15 @@ export default function SgpAuditPage() {
     setActiveFilterColumn(null);
   };
 
-  // Локальная фильтрация на основе tpFilters
+  // Локальная фильтрация
   const filteredTimePointsData = useMemo(() => {
     let result = allTimePointsData;
 
-    // VIN поиск (текстовое поле)
     if (tpFilters.vin) {
       const vinFilter = tpFilters.vin.toLowerCase();
       result = result.filter(d => d.vin && d.vin.toLowerCase().includes(vinFilter));
     }
 
-    // Множественные фильтры по колонкам
     ['material_code', 'sequence_number', 'batch_num', 'kd_material_no', 'model', 'material_desc', 'colour', 'location'].forEach(field => {
       const selected = tpFilters[field];
       if (selected && selected.length > 0) {
@@ -328,7 +332,6 @@ export default function SgpAuditPage() {
       }
     });
 
-    // Временные фильтры
     const timeFields = [
       { key: 'CP5', from: 'cp5From', to: 'cp5To' },
       { key: 'CP6', from: 'cp6From', to: 'cp6To' },
@@ -359,13 +362,11 @@ export default function SgpAuditPage() {
     return result;
   }, [allTimePointsData, tpFilters]);
 
-  // Обновляем timePointsData при изменении фильтров
   useEffect(() => {
     setTimePointsData(filteredTimePointsData);
     setTimePointsPage(0);
   }, [filteredTimePointsData]);
 
-  // Сброс фильтров
   const handleTpClear = () => {
     setTpFilters({});
     setTimePointsData(allTimePointsData);
@@ -838,7 +839,11 @@ export default function SgpAuditPage() {
             <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка данных...</div>
           ) : timePointsError ? (
             <div style={{ textAlign: 'center', padding: 40, color: '#DC2626' }}>❌ {timePointsError}</div>
-          ) : timePointsData.length > 0 ? (
+          ) : !hasAnyFilter ? (
+            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+              Выберите фильтр точки
+            </div>
+          ) : (
             <>
               <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 550px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, minWidth: 2800 }}>
@@ -871,52 +876,58 @@ export default function SgpAuditPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {timePointsData.slice(timePointsPage * timePointsPageSize, (timePointsPage + 1) * timePointsPageSize).map((vehicle, idx) => (
-                      <tr 
-                        key={vehicle.vin}
-                        style={{ 
-                          backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
-                        onMouseLeave={e => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'}
-                      >
-                        {timePointColumns.map(col => (
-                          <td key={col.key} style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: 10, whiteSpace: 'nowrap' }}>
-                            {col.isTime ? formatShortDateTime(vehicle[col.key]) : (vehicle[col.key] || '-')}
-                          </td>
-                        ))}
+                    {timePointsData.length > 0 ? (
+                      timePointsData.slice(timePointsPage * timePointsPageSize, (timePointsPage + 1) * timePointsPageSize).map((vehicle, idx) => (
+                        <tr 
+                          key={vehicle.vin}
+                          style={{ 
+                            backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
+                          onMouseLeave={e => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'}
+                        >
+                          {timePointColumns.map(col => (
+                            <td key={col.key} style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: 10, whiteSpace: 'nowrap' }}>
+                              {col.isTime ? formatShortDateTime(vehicle[col.key]) : (vehicle[col.key] || '-')}
+                            </td>
+                          ))}
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={timePointColumns.length} style={{ textAlign: 'center', padding: 30, color: '#6B7280', fontSize: 14 }}>
+                          Нет данных по выбранным фильтрам
+                        </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
-                <span style={{ fontSize: 14, color: '#6B7280' }}>Всего записей: {timePointsData.length}</span>
-                {Math.ceil(timePointsData.length / timePointsPageSize) > 1 && (
-                  <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                    <button 
-                      onClick={() => setTimePointsPage(p => Math.max(0, p - 1))} 
-                      disabled={timePointsPage === 0} 
-                      style={{ ...buttonStyle, background: '#9CA3AF' }}
-                    >
-                      ← Назад
-                    </button>
-                    <span style={{ fontWeight: 500 }}>{timePointsPage + 1} / {Math.ceil(timePointsData.length / timePointsPageSize)}</span>
-                    <button 
-                      onClick={() => setTimePointsPage(p => Math.min(Math.ceil(timePointsData.length / timePointsPageSize) - 1, p + 1))} 
-                      disabled={timePointsPage === Math.ceil(timePointsData.length / timePointsPageSize) - 1} 
-                      style={{ ...buttonStyle, background: '#9CA3AF' }}
-                    >
-                      Вперёд →
-                    </button>
-                  </div>
-                )}
-              </div>
+              {timePointsData.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
+                  <span style={{ fontSize: 14, color: '#6B7280' }}>Всего записей: {timePointsData.length}</span>
+                  {Math.ceil(timePointsData.length / timePointsPageSize) > 1 && (
+                    <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                      <button 
+                        onClick={() => setTimePointsPage(p => Math.max(0, p - 1))} 
+                        disabled={timePointsPage === 0} 
+                        style={{ ...buttonStyle, background: '#9CA3AF' }}
+                      >
+                        ← Назад
+                      </button>
+                      <span style={{ fontWeight: 500 }}>{timePointsPage + 1} / {Math.ceil(timePointsData.length / timePointsPageSize)}</span>
+                      <button 
+                        onClick={() => setTimePointsPage(p => Math.min(Math.ceil(timePointsData.length / timePointsPageSize) - 1, p + 1))} 
+                        disabled={timePointsPage === Math.ceil(timePointsData.length / timePointsPageSize) - 1} 
+                        style={{ ...buttonStyle, background: '#9CA3AF' }}
+                      >
+                        Вперёд →
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
-          ) : (
-            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
-              Выберите фильтр точки
-            </div>
           )}
 
           {/* Выпадающий фильтр */}
