@@ -3749,7 +3749,7 @@ app.get('/api/sgp-management', async (req, res) => {
         s.vehicle_type AS model,
         IF(s.block_msg IS NOT NULL AND s.block_msg <> '', 'Блок', 'Не блок') AS block_status,
         q.issue_desc AS reason,
-        q.gmt_create AS hold_time,
+        q.gmt_create AS hold_date,
         CASE 
             WHEN q.status = 1 THEN 'Устранено'
             WHEN q.status = 0 THEN 'Не устранено'
@@ -3764,6 +3764,7 @@ app.get('/api/sgp-management', async (req, res) => {
         CONCAT_WS('-', COALESCE(s.ck_no, ''), COALESCE(s.kq_no, ''), COALESCE(s.kw_no, '')) AS location
       FROM tv_biz_storage_car s
       LEFT JOIN tv_quality_issue_detail q ON q.vin = s.vin
+        AND q.is_deleted = 0
       ORDER BY s.vehicle_type, s.vin, q.gmt_create DESC
     `;
     
@@ -3774,7 +3775,7 @@ app.get('/api/sgp-management', async (req, res) => {
       model: row.model,
       block_status: row.block_status,
       reason: row.reason || '',
-      hold_time: row.hold_time || null,
+      hold_date: row.hold_date || null,
       resolution_status: row.resolution_status || '—',
       storage_status: row.storage_status,
       location: row.location || '—',

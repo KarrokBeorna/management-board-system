@@ -103,7 +103,7 @@ const cardStyle = {
 };
 
 const tableWrapperStyle = {
-  maxHeight: 'calc(100vh - 400px)',
+  maxHeight: 'calc(100vh - 450px)',
   overflowY: 'auto',
   borderRadius: 8,
   position: 'relative',
@@ -142,7 +142,6 @@ const totalRowStyle = {
   boxShadow: '0 -4px 6px -2px rgba(0,0,0,0.05)',
 };
 
-// Иерархическая статистика
 const statsContainerStyle = {
   display: 'flex',
   flexDirection: 'column',
@@ -201,10 +200,8 @@ export default function SgpManagementPage() {
   const [resolutionStatusFilter, setResolutionStatusFilter] = useState([]);
   const [storageStatusFilter, setStorageStatusFilter] = useState(['In stock']);
   
-  // Подсветка VIN
   const [highlightedVin, setHighlightedVin] = useState(null);
 
-  // Закрытие подсветки при клике вне
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (highlightedVin && !event.target.closest('td[data-vin]')) {
@@ -217,6 +214,18 @@ export default function SgpManagementPage() {
       document.removeEventListener('click', handleClickOutside);
     };
   }, [highlightedVin]);
+
+  const formatDateTime = (dt) => {
+    if (!dt) return '—';
+    const d = new Date(dt);
+    if (isNaN(d.getTime())) return dt;
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
+  };
 
   const fetchData = async () => {
     try {
@@ -286,16 +295,13 @@ export default function SgpManagementPage() {
     setHighlightedVin(null);
   }, [activeModel]);
 
-  // Иерархическая статистика
   const stats = useMemo(() => {
-    // Верхний уровень: In stock / Outbound
     const inStockData = filteredByModel.filter(d => d.storage_status === 'In stock');
     const outboundData = filteredByModel.filter(d => d.storage_status === 'Outbound');
     
     const totalInStock = inStockData.length;
     const totalOutbound = outboundData.length;
     
-    // Нижний уровень: из In stock - Блок / Не блок
     const inStockBlock = inStockData.filter(d => d.block_status === 'Блок').length;
     const inStockNotBlock = inStockData.filter(d => d.block_status === 'Не блок').length;
     
@@ -328,6 +334,7 @@ export default function SgpManagementPage() {
       'Модель': d.model,
       'Статус блок': d.block_status,
       'Причина': d.reason || '',
+      'Дата постановки': d.hold_date ? formatDateTime(d.hold_date) : '—',
       'Статус устранения': d.resolution_status || '',
       'Статус хранения': d.storage_status || '',
       'Расположение': d.location || '',
@@ -338,6 +345,7 @@ export default function SgpManagementPage() {
       'Модель': '',
       'Статус блок': '',
       'Причина': '',
+      'Дата постановки': '',
       'Статус устранения': '',
       'Статус хранения': '',
       'Расположение': filteredData.length,
@@ -348,8 +356,8 @@ export default function SgpManagementPage() {
     const sheetName = activeModel === 'ALL' ? 'Все модели' : activeModel;
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
     ws['!cols'] = [
-      { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 50 },
-      { wch: 14 }, { wch: 14 }, { wch: 15 },
+      { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 45 },
+      { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 15 },
     ];
     
     const now = new Date();
@@ -357,7 +365,6 @@ export default function SgpManagementPage() {
     XLSX.writeFile(wb, `SGP_Management_${activeModel === 'ALL' ? 'All' : activeModel}_${dateStr}.xlsx`);
   };
 
-  // Экспорт на холды (только VIN и Model)
   const handleExportToHolds = () => {
     const exportData = filteredData.map(d => ({
       'VIN': d.vin,
@@ -383,6 +390,7 @@ export default function SgpManagementPage() {
       'Модель': d.model,
       'Статус блок': d.block_status,
       'Причина': d.reason || '',
+      'Дата постановки': d.hold_date ? formatDateTime(d.hold_date) : '—',
       'Статус устранения': d.resolution_status || '',
       'Статус хранения': d.storage_status || '',
       'Расположение': d.location || '',
@@ -393,6 +401,7 @@ export default function SgpManagementPage() {
       'Модель': '',
       'Статус блок': '',
       'Причина': '',
+      'Дата постановки': '',
       'Статус устранения': '',
       'Статус хранения': '',
       'Расположение': rawData.length,
@@ -402,8 +411,8 @@ export default function SgpManagementPage() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Все модели');
     ws['!cols'] = [
-      { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 50 },
-      { wch: 14 }, { wch: 14 }, { wch: 15 },
+      { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 45 },
+      { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 15 },
     ];
     
     const now = new Date();
@@ -423,7 +432,6 @@ export default function SgpManagementPage() {
 
   return (
     <div style={containerStyle}>
-      {/* Заголовок */}
       <div style={headerStyle}>
         <h1 style={titleStyle}>🚗 СГП Management</h1>
         <div style={{ display: 'flex', gap: 12 }}>
@@ -436,7 +444,7 @@ export default function SgpManagementPage() {
         </div>
       </div>
 
-      {/* Переключатель моделей - чипсы с количеством In stock */}
+      {/* Переключатель моделей */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 24, flexWrap: 'wrap' }}>
         <div style={modelChipStyle(activeModel === 'ALL')} onClick={() => setActiveModel('ALL')}>
           <span style={{ fontWeight: 800 }}>Все модели</span>
@@ -477,7 +485,6 @@ export default function SgpManagementPage() {
 
       {/* Иерархическая статистика */}
       <div style={statsContainerStyle}>
-        {/* Верхний уровень */}
         <div style={statsRowStyle}>
           <div style={statCardStyle('#10B981', '#F0FDF4')}>
             📦 In stock: <span style={{ color: '#10B981', fontSize: 20, fontWeight: 800 }}>{stats.totalInStock}</span>
@@ -486,7 +493,6 @@ export default function SgpManagementPage() {
             📤 Outbound: <span style={{ color: '#3B82F6', fontSize: 20, fontWeight: 800 }}>{stats.totalOutbound}</span>
           </div>
         </div>
-        {/* Нижний уровень - из In stock */}
         <div style={{ ...statsRowStyle, paddingLeft: 20, borderLeft: '3px solid #10B981' }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: '#10B981' }}>Из In stock:</span>
           <div style={statCardStyle('#DC2626', '#FEF2F2')}>
@@ -569,13 +575,14 @@ export default function SgpManagementPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
             <thead>
               <tr>
-                <th style={{ ...thStyle, width: '17%' }}>VIN</th>
-                <th style={{ ...thStyle, width: '11%' }}>Модель</th>
-                <th style={{ ...thStyle, width: '9%' }}>Статус блок</th>
-                <th style={{ ...thStyle, width: '22%' }}>Причина</th>
+                <th style={{ ...thStyle, width: '15%' }}>VIN</th>
+                <th style={{ ...thStyle, width: '10%' }}>Модель</th>
+                <th style={{ ...thStyle, width: '8%' }}>Статус блок</th>
+                <th style={{ ...thStyle, width: '20%' }}>Причина</th>
+                <th style={{ ...thStyle, width: '14%' }}>Дата постановки</th>
                 <th style={{ ...thStyle, width: '11%' }}>Статус устранения</th>
-                <th style={{ ...thStyle, width: '13%' }}>Статус хранения</th>
-                <th style={{ ...thStyle, width: '17%' }}>Расположение</th>
+                <th style={{ ...thStyle, width: '11%' }}>Статус хранения</th>
+                <th style={{ ...thStyle, width: '11%' }}>Расположение</th>
               </tr>
             </thead>
             <tbody>
@@ -618,6 +625,9 @@ export default function SgpManagementPage() {
                       </span>
                     </td>
                     <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4' }}>{row.reason || '—'}</td>
+                    <td style={{ ...tdStyle, fontSize: 11, whiteSpace: 'nowrap' }}>
+                      {row.hold_date ? formatDateTime(row.hold_date) : '—'}
+                    </td>
                     <td style={tdStyle}>
                       <span style={{
                         padding: '3px 8px',
@@ -640,6 +650,7 @@ export default function SgpManagementPage() {
             <tfoot>
               <tr style={totalRowStyle}>
                 <td style={{ ...tdStyle, fontWeight: 800 }}>ИТОГО</td>
+                <td style={tdStyle}></td>
                 <td style={tdStyle}></td>
                 <td style={tdStyle}></td>
                 <td style={tdStyle}></td>
