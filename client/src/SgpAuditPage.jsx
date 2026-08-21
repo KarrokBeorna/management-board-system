@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -84,29 +84,14 @@ const cpNames = [
   { value: 'Key_Uloc_Type_CP8', label: 'CP8' },
 ];
 
-const filterButtonStyle = (active) => ({
-  padding: '6px 12px',
-  borderRadius: 6,
-  border: active ? '2px solid #3B82F6' : '1px solid #D1D5DB',
-  fontWeight: 600,
-  fontSize: 12,
-  background: active ? '#EFF6FF' : '#FFFFFF',
-  color: active ? '#1D4ED8' : '#6B7280',
-  cursor: 'pointer',
-  transition: 'all 0.2s',
-  whiteSpace: 'nowrap',
-});
-
 const filterDropdownStyle = {
-  position: 'absolute',
-  top: '100%',
-  left: 0,
+  position: 'fixed',
   zIndex: 1000,
   backgroundColor: '#FFFFFF',
   border: '1px solid #E5E7EB',
   borderRadius: 8,
   boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
-  maxHeight: 250,
+  maxHeight: 300,
   overflowY: 'auto',
   minWidth: 200,
   padding: 8,
@@ -126,7 +111,6 @@ const filterOptionStyle = {
 export default function SgpAuditPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('checkpoints');
-  const [activeSubTab, setActiveSubTab] = useState('before');
 
   // ====== Time Points ======
   const [timePointsData, setTimePointsData] = useState([]);
@@ -136,14 +120,9 @@ export default function SgpAuditPage() {
   const timePointsPageSize = 50;
   
   // Фильтры Time Points
-  const [tpVinSearch, setTpVinSearch] = useState('');
   const [tpFilters, setTpFilters] = useState({});
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
-
-  // ====== Общие состояния VIN-поиска ======
-  const [vinSearch, setVinSearch] = useState('');
-  const [isVinMode, setIsVinMode] = useState(false);
 
   // ====== Состояние для "Аудит чекпоинтов (хранение)" ======
   const [selectedCp, setSelectedCp] = useState('Key_Uloc_Type_CP7');
@@ -158,6 +137,10 @@ export default function SgpAuditPage() {
   const [cpPage, setCpPage] = useState(0);
   const rowsPerPage = 100;
 
+  // ====== VIN-поиск ======
+  const [vinSearch, setVinSearch] = useState('');
+  const [isVinMode, setIsVinMode] = useState(false);
+
   // ====== Состояние для "Аналитика по аудиту" ======
   const [auditStartDate, setAuditStartDate] = useState('');
   const [auditEndDate, setAuditEndDate] = useState('');
@@ -170,7 +153,7 @@ export default function SgpAuditPage() {
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
-  // ====== Форматирование даты ======
+  // ====== Форматирование ======
   const formatDateTime = (dt) => {
     if (!dt) return '-';
     const d = new Date(dt);
@@ -182,6 +165,17 @@ export default function SgpAuditPage() {
     const min = String(d.getMinutes()).padStart(2, '0');
     const ss = String(d.getSeconds()).padStart(2, '0');
     return `${dd}.${mm}.${yyyy} ${hh}:${min}:${ss}`;
+  };
+
+  const formatShortDateTime = (dt) => {
+    if (!dt) return '-';
+    const d = new Date(dt);
+    if (isNaN(d.getTime())) return dt;
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${dd}.${mm} ${hh}:${min}`;
   };
 
   // ====== Загрузка Time Points ======
@@ -224,13 +218,12 @@ export default function SgpAuditPage() {
     }
   }, [activeTab]);
 
-  // ====== Получение уникальных значений для фильтров ======
+  // ====== Фильтры ======
   const getUniqueValues = (column) => {
     const values = [...new Set(timePointsData.map(d => d[column]).filter(v => v !== null && v !== undefined && v !== ''))];
     return values.sort();
   };
 
-  // ====== Обработка фильтров ======
   const handleFilterHeaderClick = (column, event) => {
     const rect = event.currentTarget.getBoundingClientRect();
     setFilterDropdownPos({
@@ -256,7 +249,14 @@ export default function SgpAuditPage() {
         newValues = [...currentValues, value];
       }
       
-      return { ...prev, [column]: newValues };
+      const newFilters = { ...prev, [column]: newValues };
+      
+      // Если фильтр пустой - удаляем его
+      if (newValues.length === 0) {
+        delete newFilters[column];
+      }
+      
+      return newFilters;
     });
   };
 
@@ -269,22 +269,16 @@ export default function SgpAuditPage() {
     setActiveFilterColumn(null);
   };
 
-  // ====== Применение фильтров и поиск ======
   const handleTpSearch = () => {
-    const filters = { ...tpFilters };
-    if (tpVinSearch.trim()) {
-      filters.vin = tpVinSearch.trim();
-    }
-    loadTimePoints(filters);
+    loadTimePoints(tpFilters);
   };
 
   const handleTpClear = () => {
     setTpFilters({});
-    setTpVinSearch('');
     loadTimePoints({});
   };
 
-  // ====== Колонки таблицы ======
+  // ====== Колонки Time Points ======
   const timePointColumns = [
     { key: 'vin', label: 'VIN', filterable: true },
     { key: 'material_code', label: 'Material Code', filterable: true },
@@ -295,19 +289,19 @@ export default function SgpAuditPage() {
     { key: 'material_desc', label: 'Комплектация', filterable: true },
     { key: 'colour', label: 'Цвет', filterable: true },
     { key: 'location', label: 'Расположение', filterable: true },
-    { key: 'CP5', label: 'CP5', isTime: true, filterableTime: true },
-    { key: 'CP6', label: 'CP6', isTime: true, filterableTime: true },
-    { key: 'TRIMIN', label: 'TRIMIN', isTime: true, filterableTime: true },
-    { key: 'CP7', label: 'CP7', isTime: true, filterableTime: true },
-    { key: 'CP72', label: 'CP72', isTime: true, filterableTime: true },
-    { key: 'TLWA', label: 'TLWA', isTime: true, filterableTime: true },
-    { key: 'TLRT', label: 'TLRT', isTime: true, filterableTime: true },
-    { key: 'TLADAS', label: 'TLADAS', isTime: true, filterableTime: true },
-    { key: 'TLTT', label: 'TLTT', isTime: true, filterableTime: true },
-    { key: 'CPFINAL', label: 'CPFINAL', isTime: true, filterableTime: true },
-    { key: 'CP8', label: 'CP8', isTime: true, filterableTime: true },
-    { key: 'in_storage_time', label: 'Inbound', isTime: true, filterableTime: true },
-    { key: 'out_storage_time', label: 'Outbound', isTime: true, filterableTime: true },
+    { key: 'CP5', label: 'CP5', isTime: true },
+    { key: 'CP6', label: 'CP6', isTime: true },
+    { key: 'TRIMIN', label: 'TRIMIN', isTime: true },
+    { key: 'CP7', label: 'CP7', isTime: true },
+    { key: 'CP72', label: 'CP72', isTime: true },
+    { key: 'TLWA', label: 'TLWA', isTime: true },
+    { key: 'TLRT', label: 'TLRT', isTime: true },
+    { key: 'TLADAS', label: 'TLADAS', isTime: true },
+    { key: 'TLTT', label: 'TLTT', isTime: true },
+    { key: 'CPFINAL', label: 'CPFINAL', isTime: true },
+    { key: 'CP8', label: 'CP8', isTime: true },
+    { key: 'in_storage_time', label: 'Inbound', isTime: true },
+    { key: 'out_storage_time', label: 'Outbound', isTime: true },
   ];
 
   // ====== VIN-поиск для checkpoints ======
@@ -319,9 +313,7 @@ export default function SgpAuditPage() {
     setIsVinMode(true);
     setStartDate(''); setEndDate('');
     setCpModel('ALL');
-    if (activeTab === 'checkpoints') {
-      loadStorageByVin();
-    }
+    loadStorageByVin();
   };
 
   const handleVinReset = () => {
@@ -533,7 +525,7 @@ export default function SgpAuditPage() {
 
       {/* Подкарточки До СР8 / После СР8 */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 30 }}>
-        <button onClick={() => setActiveSubTab('before')} style={tabStyle(activeSubTab === 'before')}>
+        <button onClick={() => setActiveTab('checkpoints')} style={tabStyle(activeTab !== 'timepoints' && activeTab !== 'analytics')}>
           До СР8
         </button>
         <button onClick={() => navigate('/sgp-management')} style={tabStyle(false)}>
@@ -576,27 +568,49 @@ export default function SgpAuditPage() {
             </div>
           </div>
 
-          {/* Фильтры */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 20, alignItems: 'center' }}>
-            {/* VIN поиск */}
-            <input
-              type="text"
-              value={tpVinSearch}
-              onChange={(e) => setTpVinSearch(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleTpSearch(); }}
-              placeholder="VIN..."
-              style={{ ...inputStyle, width: 180 }}
-            />
+          {/* Фильтры по времени */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 16, alignItems: 'center' }}>
+            {[
+              { label: 'CP5', fromKey: 'cp5From', toKey: 'cp5To' },
+              { label: 'CP6', fromKey: 'cp6From', toKey: 'cp6To' },
+              { label: 'TRIMIN', fromKey: 'trimInFrom', toKey: 'trimInTo' },
+              { label: 'CP7', fromKey: 'cp7From', toKey: 'cp7To' },
+              { label: 'CP72', fromKey: 'cp72From', toKey: 'cp72To' },
+              { label: 'TLWA', fromKey: 'tlwaFrom', toKey: 'tlwaTo' },
+              { label: 'TLRT', fromKey: 'tlrtFrom', toKey: 'tlrtTo' },
+              { label: 'TLADAS', fromKey: 'tladasFrom', toKey: 'tladasTo' },
+              { label: 'TLTT', fromKey: 'tlttFrom', toKey: 'tlttTo' },
+              { label: 'CPFINAL', fromKey: 'cpFinalFrom', toKey: 'cpFinalTo' },
+              { label: 'CP8', fromKey: 'cp8From', toKey: 'cp8To' },
+              { label: 'Inbound', fromKey: 'inboundFrom', toKey: 'inboundTo' },
+              { label: 'Outbound', fromKey: 'outboundFrom', toKey: 'outboundTo' },
+            ].map(({ label, fromKey, toKey }) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                <span style={{ fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>{label}:</span>
+                <input
+                  type="datetime-local"
+                  value={tpFilters[fromKey] || ''}
+                  onChange={(e) => setTpFilters(prev => ({ ...prev, [fromKey]: e.target.value }))}
+                  style={{ ...inputStyle, fontSize: 11, padding: '4px 6px' }}
+                />
+                <span style={{ color: '#9CA3AF' }}>—</span>
+                <input
+                  type="datetime-local"
+                  value={tpFilters[toKey] || ''}
+                  onChange={(e) => setTpFilters(prev => ({ ...prev, [toKey]: e.target.value }))}
+                  style={{ ...inputStyle, fontSize: 11, padding: '4px 6px' }}
+                />
+              </div>
+            ))}
           </div>
 
-          {/* Таблица */}
           {timePointsLoading ? (
             <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка данных...</div>
           ) : timePointsError ? (
             <div style={{ textAlign: 'center', padding: 40, color: '#DC2626' }}>❌ {timePointsError}</div>
           ) : timePointsData.length > 0 ? (
             <>
-              <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 400px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
+              <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 500px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, minWidth: 2800 }}>
                   <thead>
                     <tr style={{ backgroundColor: '#F9FAFB' }}>
@@ -638,7 +652,7 @@ export default function SgpAuditPage() {
                       >
                         {timePointColumns.map(col => (
                           <td key={col.key} style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: 10, whiteSpace: 'nowrap' }}>
-                            {col.isTime ? formatDateTime(vehicle[col.key]) : (vehicle[col.key] || '-')}
+                            {col.isTime ? formatShortDateTime(vehicle[col.key]) : (vehicle[col.key] || '-')}
                           </td>
                         ))}
                       </tr>
@@ -717,126 +731,125 @@ export default function SgpAuditPage() {
         </div>
       )}
 
-      {/* Блок VIN-поиска для checkpoints */}
-      {activeTab === 'checkpoints' && (
-        <div style={{ marginBottom: 24, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', border: '1px solid #F0F0F5' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
-              🔍 VIN:
-              <input
-                type="text"
-                value={vinSearch}
-                onChange={(e) => setVinSearch(e.target.value)}
-                placeholder="Введите VIN..."
-                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14, background: '#F9FAFB', width: 200 }}
-                disabled={isVinMode && !vinSearch}
-              />
-            </label>
-            <button
-              onClick={handleVinSearch}
-              disabled={!vinSearch.trim()}
-              style={{
-                ...buttonStyle,
-                opacity: vinSearch.trim() ? 1 : 0.6,
-                pointerEvents: vinSearch.trim() ? 'auto' : 'none',
-              }}
-            >
-              Найти
-            </button>
-            {isVinMode && (
-              <button
-                onClick={handleVinReset}
-                style={{ ...buttonStyle, background: '#9CA3AF' }}
-              >
-                ✕ Сбросить
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ========== Вкладка "Аудит чекпоинтов (хранение)" ========== */}
       {activeTab === 'checkpoints' && (
-        <div style={cardStyle}>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>📦</span>
-            Аудит чекпоинтов (хранение)
-          </h2>
-          {renderCpSelector(selectedCp, setSelectedCp)}
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14, marginBottom: 8 }}>
-            <label style={labelStyle}>
-              <span style={{ whiteSpace: 'nowrap' }}>Начало периода</span>
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} disabled={isFilterDisabled} />
-              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} style={{ ...inputStyle, width: '90px' }} disabled={isFilterDisabled} />
-            </label>
-            <label style={labelStyle}>
-              <span style={{ whiteSpace: 'nowrap' }}>Конец периода</span>
-              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={inputStyle} disabled={isFilterDisabled} />
-              <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} style={{ ...inputStyle, width: '90px' }} disabled={isFilterDisabled} />
-            </label>
-            <label style={labelStyle}>
-              Модель
-              <select value={cpModel} onChange={e => setCpModel(e.target.value)} style={inputStyle} disabled={isFilterDisabled}>
-                {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
-              </select>
-            </label>
-            <button
-              onClick={runAudit}
-              disabled={isFilterDisabled || !startDate || !endDate || cpLoading}
-              style={{
-                ...buttonStyle,
-                opacity: !isFilterDisabled && startDate && endDate && !cpLoading ? 1 : 0.6,
-                pointerEvents: !isFilterDisabled && startDate && endDate && !cpLoading ? 'auto' : 'none',
-                background: !isFilterDisabled && startDate && endDate && !cpLoading ? '#2563EB' : '#9CA3AF',
-              }}
-            >
-              {cpLoading ? '⏳ Загрузка...' : '▶ Загрузить аудит'}
-            </button>
-          </div>
-          {endDate && new Date(endDate) < new Date(startDate) && (
-            <p style={{ color: '#DC2626', fontSize: 13, marginTop: 8 }}>Конечная дата не может быть раньше начальной</p>
-          )}
-          {cpError && <p style={{ color: '#DC2626', marginTop: 18 }}>❌ Ошибка: {cpError}</p>}
-          {cpData.length > 0 && (
-            <div style={{ marginTop: 32 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                <span style={{ fontWeight: 600, color: '#1F2937' }}>Найдено записей: {cpData.length}</span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => exportExcel(cpData, 'аудит_хранение')} style={{ ...buttonStyle, background: '#059669' }}>📊 Excel</button>
-                  <button onClick={() => exportWord(cpData, 'аудит_хранение')} style={{ ...buttonStyle, background: '#7C3AED' }}>📄 Word</button>
-                </div>
-              </div>
-              <div style={{ borderRadius: 10, overflowX: 'auto', border: '1px solid #E5E7EB' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ backgroundColor: '#F9FAFB' }}>
-                      {Object.keys(cpData[0]).map(h => <th key={h} style={thStyle}>{h}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cpData.slice(cpPage * rowsPerPage, (cpPage + 1) * rowsPerPage).map((row, i) => (
-                      <tr key={i} style={{ backgroundColor: i % 2 ? '#F9FAFB' : '#FFFFFF' }}
-                        onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
-                        onMouseLeave={e => e.currentTarget.style.backgroundColor = i % 2 ? '#F9FAFB' : '#FFFFFF'}>
-                        {Object.keys(cpData[0]).map(key => <td key={key} style={tdStyle}>{row[key] ?? ''}</td>)}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {Math.ceil(cpData.length / rowsPerPage) > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 18 }}>
-                  <button onClick={() => setCpPage(p => Math.max(0, p - 1))} disabled={cpPage === 0} style={{ ...buttonStyle, background: '#9CA3AF' }}>← Назад</button>
-                  <span style={{ alignSelf: 'center', fontWeight: 500 }}>{cpPage + 1} / {Math.ceil(cpData.length / rowsPerPage)}</span>
-                  <button onClick={() => setCpPage(p => Math.min(Math.ceil(cpData.length / rowsPerPage) - 1, p + 1))} disabled={cpPage === Math.ceil(cpData.length / rowsPerPage) - 1} style={{ ...buttonStyle, background: '#9CA3AF' }}>Вперёд →</button>
-                </div>
+        <>
+          <div style={{ marginBottom: 24, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', border: '1px solid #F0F0F5' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+                🔍 VIN:
+                <input
+                  type="text"
+                  value={vinSearch}
+                  onChange={(e) => setVinSearch(e.target.value)}
+                  placeholder="Введите VIN..."
+                  style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14, background: '#F9FAFB', width: 200 }}
+                  disabled={isVinMode && !vinSearch}
+                />
+              </label>
+              <button
+                onClick={handleVinSearch}
+                disabled={!vinSearch.trim()}
+                style={{
+                  ...buttonStyle,
+                  opacity: vinSearch.trim() ? 1 : 0.6,
+                  pointerEvents: vinSearch.trim() ? 'auto' : 'none',
+                }}
+              >
+                Найти
+              </button>
+              {isVinMode && (
+                <button
+                  onClick={handleVinReset}
+                  style={{ ...buttonStyle, background: '#9CA3AF' }}
+                >
+                  ✕ Сбросить
+                </button>
               )}
             </div>
-          )}
-          {!cpLoading && cpData.length === 0 && startDate && endDate && (
-            <p style={{ color: '#6B7280', textAlign: 'center', marginTop: 30 }}>Нет данных за выбранный период</p>
-          )}
-        </div>
+          </div>
+
+          <div style={cardStyle}>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>📦</span>
+              Аудит чекпоинтов (хранение)
+            </h2>
+            {renderCpSelector(selectedCp, setSelectedCp)}
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 14, marginBottom: 8 }}>
+              <label style={labelStyle}>
+                <span style={{ whiteSpace: 'nowrap' }}>Начало периода</span>
+                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} disabled={isFilterDisabled} />
+                <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} style={{ ...inputStyle, width: '90px' }} disabled={isFilterDisabled} />
+              </label>
+              <label style={labelStyle}>
+                <span style={{ whiteSpace: 'nowrap' }}>Конец периода</span>
+                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={inputStyle} disabled={isFilterDisabled} />
+                <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} style={{ ...inputStyle, width: '90px' }} disabled={isFilterDisabled} />
+              </label>
+              <label style={labelStyle}>
+                Модель
+                <select value={cpModel} onChange={e => setCpModel(e.target.value)} style={inputStyle} disabled={isFilterDisabled}>
+                  {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
+                </select>
+              </label>
+              <button
+                onClick={runAudit}
+                disabled={isFilterDisabled || !startDate || !endDate || cpLoading}
+                style={{
+                  ...buttonStyle,
+                  opacity: !isFilterDisabled && startDate && endDate && !cpLoading ? 1 : 0.6,
+                  pointerEvents: !isFilterDisabled && startDate && endDate && !cpLoading ? 'auto' : 'none',
+                  background: !isFilterDisabled && startDate && endDate && !cpLoading ? '#2563EB' : '#9CA3AF',
+                }}
+              >
+                {cpLoading ? '⏳ Загрузка...' : '▶ Загрузить аудит'}
+              </button>
+            </div>
+            {endDate && new Date(endDate) < new Date(startDate) && (
+              <p style={{ color: '#DC2626', fontSize: 13, marginTop: 8 }}>Конечная дата не может быть раньше начальной</p>
+            )}
+            {cpError && <p style={{ color: '#DC2626', marginTop: 18 }}>❌ Ошибка: {cpError}</p>}
+            {cpData.length > 0 && (
+              <div style={{ marginTop: 32 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                  <span style={{ fontWeight: 600, color: '#1F2937' }}>Найдено записей: {cpData.length}</span>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => exportExcel(cpData, 'аудит_хранение')} style={{ ...buttonStyle, background: '#059669' }}>📊 Excel</button>
+                    <button onClick={() => exportWord(cpData, 'аудит_хранение')} style={{ ...buttonStyle, background: '#7C3AED' }}>📄 Word</button>
+                  </div>
+                </div>
+                <div style={{ borderRadius: 10, overflowX: 'auto', border: '1px solid #E5E7EB' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#F9FAFB' }}>
+                        {Object.keys(cpData[0]).map(h => <th key={h} style={thStyle}>{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cpData.slice(cpPage * rowsPerPage, (cpPage + 1) * rowsPerPage).map((row, i) => (
+                        <tr key={i} style={{ backgroundColor: i % 2 ? '#F9FAFB' : '#FFFFFF' }}
+                          onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
+                          onMouseLeave={e => e.currentTarget.style.backgroundColor = i % 2 ? '#F9FAFB' : '#FFFFFF'}>
+                          {Object.keys(cpData[0]).map(key => <td key={key} style={tdStyle}>{row[key] ?? ''}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {Math.ceil(cpData.length / rowsPerPage) > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 18 }}>
+                    <button onClick={() => setCpPage(p => Math.max(0, p - 1))} disabled={cpPage === 0} style={{ ...buttonStyle, background: '#9CA3AF' }}>← Назад</button>
+                    <span style={{ alignSelf: 'center', fontWeight: 500 }}>{cpPage + 1} / {Math.ceil(cpData.length / rowsPerPage)}</span>
+                    <button onClick={() => setCpPage(p => Math.min(Math.ceil(cpData.length / rowsPerPage) - 1, p + 1))} disabled={cpPage === Math.ceil(cpData.length / rowsPerPage) - 1} style={{ ...buttonStyle, background: '#9CA3AF' }}>Вперёд →</button>
+                  </div>
+                )}
+              </div>
+            )}
+            {!cpLoading && cpData.length === 0 && startDate && endDate && (
+              <p style={{ color: '#6B7280', textAlign: 'center', marginTop: 30 }}>Нет данных за выбранный период</p>
+            )}
+          </div>
+        </>
       )}
 
       {/* ========== Вкладка "Аналитика по аудиту" ========== */}
