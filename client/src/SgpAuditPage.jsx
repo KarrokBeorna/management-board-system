@@ -231,13 +231,6 @@ export default function SgpAuditPage() {
     }
   };
 
-  // Загружаем данные при первом входе на вкладку
-  useEffect(() => {
-    if (activeTab === 'timepoints' && timePointsData.length === 0) {
-      loadTimePoints(tpFilters);
-    }
-  }, [activeTab]);
-
   const getUniqueValues = (column) => {
     const values = [...new Set(timePointsData.map(d => d[column]).filter(v => v !== null && v !== undefined && v !== ''))];
     return values.sort();
@@ -293,7 +286,8 @@ export default function SgpAuditPage() {
 
   const handleTpClear = () => {
     setTpFilters({});
-    loadTimePoints({});
+    setTimePointsData([]);
+    setTimePointsPage(0);
   };
 
   // Экспорт на холды (только VIN и Model)
@@ -604,7 +598,7 @@ export default function SgpAuditPage() {
 
       {/* Подкарточки */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 30 }}>
-        <button onClick={() => setActiveTab('checkpoints')} style={tabStyle(activeTab !== 'timepoints' && activeTab !== 'analytics')}>
+        <button onClick={() => setActiveTab('checkpoints')} style={tabStyle(activeTab === 'checkpoints')}>
           До СР8
         </button>
         <button onClick={() => navigate('/sgp-management')} style={tabStyle(false)}>
