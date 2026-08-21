@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -159,7 +159,7 @@ export default function SgpAuditPage() {
   const [cpPage, setCpPage] = useState(0);
   const rowsPerPage = 100;
 
-  // VIN search
+  // VIN search (checkpoints)
   const [vinSearch, setVinSearch] = useState('');
   const [isVinMode, setIsVinMode] = useState(false);
 
@@ -173,21 +173,49 @@ export default function SgpAuditPage() {
   const [auditAnalytics, setAuditAnalytics] = useState(null);
   const [auditDailyData, setAuditDailyData] = useState([]);
 
+  // Export to holds modal state
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportReasons, setExportReasons] = useState([]);
+  const [exportSearch, setExportSearch] = useState('');
+  const [selectedReason, setSelectedReason] = useState('');
+  const [customReason, setCustomReason] = useState('');
+  const [exportReasonLoading, setExportReasonLoading] = useState(false);
+
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
-  // Закрытие выпадающего фильтра при клике вне
+  // Close filter dropdown on scroll
+  useEffect(() => {
+    const handleScroll = () => {
+      setActiveFilterColumn(null);
+    };
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, []);
+
+  // Close filter dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (activeFilterColumn && !event.target.closest('.filter-dropdown') && !event.target.closest('th')) {
         setActiveFilterColumn(null);
       }
     };
-    
     document.addEventListener('click', handleClickOutside);
-    return () => {
-      document.removeEventListener('click', handleClickOutside);
-    };
+    return () => document.removeEventListener('click', handleClickOutside);
   }, [activeFilterColumn]);
+
+  // Escape key to close export modal
+  useEffect(() => {
+    const handleEsc = (event) => {
+      if (event.key === 'Escape') {
+        setShowExportModal(false);
+        setSelectedReason('');
+        setCustomReason('');
+        setExportSearch('');
+      }
+    };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, []);
 
   const formatDateTime = (dt) => {
     if (!dt) return '-';
@@ -282,6 +310,8 @@ export default function SgpAuditPage() {
         delete newFilters[column];
       }
       
+      // Auto reload after filter toggle
+      loadTimePoints(newFilters);
       return newFilters;
     });
   };
@@ -290,6 +320,7 @@ export default function SgpAuditPage() {
     setTpFilters(prev => {
       const newPrev = { ...prev };
       delete newPrev[column];
+      loadTimePoints(newPrev);
       return newPrev;
     });
     setActiveFilterColumn(null);
@@ -305,10 +336,61 @@ export default function SgpAuditPage() {
     setTimePointsPage(0);
   };
 
-  const handleExportToHolds = () => {
+  // Export to holds: open modal
+  const openExportModal = async () => {
+    setShowExportModal(true);
+    setExportReasonLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/sgp-management-reasons`);
+      if (res.ok) {
+        const reasons = await res.json();
+        setExportReasons(reasons);
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки причин:', err);
+    } finally {
+      setExportReasonLoading(false);
+    }
+  };
+
+  // Close modal
+  const closeExportModal = () => {
+    setShowExportModal(false);
+    setSelectedReason('');
+    setCustomReason('');
+    setExportSearch('');
+  };
+
+  // When selecting a reason from list
+  const handleSelectReason = (reason) => {
+    setSelectedReason(reason);
+    setCustomReason('');
+  };
+
+  // When typing custom reason
+  const handleCustomReasonChange = (e) => {
+    const val = e.target.value;
+    setCustomReason(val);
+    if (val) {
+      setSelectedReason('');
+    }
+  };
+
+  // Filter reasons by search
+  const filteredReasons = useMemo(() => {
+    if (!exportSearch.trim()) return exportReasons;
+    return exportReasons.filter(r => r.toLowerCase().includes(exportSearch.toLowerCase()));
+  }, [exportReasons, exportSearch]);
+
+  // Actual export with reason
+  const handleExportToHoldsWithReason = () => {
+    const finalReason = selectedReason || customReason;
+    if (!finalReason) return;
+    
     const exportData = timePointsData.map(v => ({
       'VIN': v.vin,
-      'Модель': v.model || '',
+      'Причина': finalReason,
+      'FE130': '', // placeholder for FE130 column
     }));
     
     const ws = XLSX.utils.json_to_sheet(exportData);
@@ -316,12 +398,14 @@ export default function SgpAuditPage() {
     XLSX.utils.book_append_sheet(wb, ws, 'Холды');
     ws['!cols'] = [
       { wch: 20 },
+      { wch: 60 },
       { wch: 15 },
     ];
     
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     XLSX.writeFile(wb, `Холды_${dateStr}.xlsx`);
+    closeExportModal();
   };
 
   const timePointColumns = [
@@ -673,7 +757,7 @@ export default function SgpAuditPage() {
               <button style={{ ...buttonStyle, background: '#059669' }} onClick={() => exportExcel(timePointsData, 'time_points')}>
                 📊 Excel
               </button>
-              <button style={{ ...buttonStyle, background: '#F59E0B' }} onClick={handleExportToHolds}>
+              <button style={{ ...buttonStyle, background: '#F59E0B' }} onClick={openExportModal}>
                 📥 Экспорт на холды
               </button>
               <button style={buttonStyle} onClick={handleTpSearch}>
@@ -1067,6 +1151,127 @@ export default function SgpAuditPage() {
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* ========== Модальное окно экспорта на холды ========== */}
+      {showExportModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000,
+        }}>
+          <div style={{
+            backgroundColor: '#FFFFFF',
+            borderRadius: 16,
+            padding: 24,
+            width: '90%',
+            maxWidth: 600,
+            maxHeight: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#1F2937' }}>
+                Экспорт на холды
+              </h3>
+              <button 
+                onClick={closeExportModal}
+                style={{
+                  border: 'none',
+                  background: 'none',
+                  fontSize: 24,
+                  cursor: 'pointer',
+                  color: '#DC2626',
+                  padding: '0 4px',
+                  fontWeight: '700',
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <p style={{ fontSize: 14, color: '#4B5563', marginBottom: 16 }}>
+              Выберите причину или введите свою
+            </p>
+
+            {/* Блок поиска и списка причин */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ ...labelStyle, marginBottom: 8 }}>
+                Поиск причины:
+                <input
+                  type="text"
+                  value={exportSearch}
+                  onChange={(e) => setExportSearch(e.target.value)}
+                  placeholder="Начните вводить..."
+                  style={{ ...inputStyle, flex: 1 }}
+                  disabled={!!customReason}
+                />
+              </label>
+              <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8 }}>
+                {exportReasonLoading ? (
+                  <div style={{ padding: 20, textAlign: 'center', color: '#6B7280' }}>Загрузка...</div>
+                ) : filteredReasons.length > 0 ? (
+                  filteredReasons.map(reason => (
+                    <div 
+                      key={reason}
+                      onClick={() => handleSelectReason(reason)}
+                      style={{
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        backgroundColor: selectedReason === reason ? '#EFF6FF' : 'transparent',
+                        borderBottom: '1px solid #F0F0F5',
+                        fontSize: 14,
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = '#F3F4F6'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = selectedReason === reason ? '#EFF6FF' : 'transparent'}
+                    >
+                      {reason}
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ padding: 20, textAlign: 'center', color: '#9CA3AF' }}>Нет причин</div>
+                )}
+              </div>
+            </div>
+
+            {/* Блок своей причины */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ ...labelStyle, marginBottom: 8 }}>
+                Своя причина:
+                <input
+                  type="text"
+                  value={customReason}
+                  onChange={handleCustomReasonChange}
+                  placeholder="Введите причину..."
+                  style={{ ...inputStyle, flex: 1 }}
+                  disabled={!!selectedReason}
+                />
+              </label>
+            </div>
+
+            {/* Кнопка экспорта */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <button style={{ ...buttonStyle, background: '#9CA3AF' }} onClick={closeExportModal}>
+                Отмена
+              </button>
+              <button 
+                style={{ ...buttonStyle, background: '#F59E0B', opacity: (selectedReason || customReason) ? 1 : 0.6, pointerEvents: (selectedReason || customReason) ? 'auto' : 'none' }}
+                onClick={handleExportToHoldsWithReason}
+                disabled={!selectedReason && !customReason}
+              >
+                📥 Экспорт
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -3789,7 +3789,23 @@ app.get('/api/sgp-management', async (req, res) => {
 });
 
 
-
+app.get('/api/sgp-management-reasons', async (req, res) => {
+  try {
+    const sql = `
+      SELECT DISTINCT 
+        SUBSTRING_INDEX(issue_desc, ' - ', 1) AS reason
+      FROM tv_quality_issue_detail
+      WHERE issue_desc IS NOT NULL AND issue_desc != ''
+        AND is_deleted = 0
+      ORDER BY reason
+    `;
+    const [rows] = await lesPool.query(sql);
+    res.json(rows.map(r => r.reason).filter(Boolean));
+  } catch (err) {
+    console.error('Ошибка получения причин:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ================== TIME POINTS (ВРЕМЯ ПРОХОЖДЕНИЯ ТОЧЕК) ==================
 
