@@ -107,6 +107,30 @@ const filterOptionStyle = {
   transition: 'background 0.15s',
 };
 
+// Стиль для блока фильтра времени
+const timeFilterBlockStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  padding: '10px 14px',
+  backgroundColor: '#FFFFFF',
+  borderRadius: 10,
+  border: '1px solid #E5E7EB',
+  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+};
+
+const timeFilterLabelStyle = {
+  fontWeight: 700,
+  fontSize: 12,
+  color: '#2563EB',
+  whiteSpace: 'nowrap',
+  minWidth: 40,
+  textAlign: 'center',
+  background: '#EFF6FF',
+  padding: '4px 8px',
+  borderRadius: 6,
+};
+
 export default function SgpAuditPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('checkpoints');
@@ -208,7 +232,6 @@ export default function SgpAuditPage() {
     }
   };
 
-  // Загружаем данные при первом входе на вкладку
   useEffect(() => {
     if (activeTab === 'timepoints') {
       loadTimePoints(tpFilters);
@@ -273,7 +296,27 @@ export default function SgpAuditPage() {
     loadTimePoints({});
   };
 
-  // Колонки в хронологическом порядке
+  // Экспорт на холды (только VIN и Model)
+  const handleExportToHolds = () => {
+    const exportData = timePointsData.map(v => ({
+      'VIN': v.vin,
+      'Модель': v.model || '',
+    }));
+    
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Холды');
+    ws['!cols'] = [
+      { wch: 20 },
+      { wch: 15 },
+    ];
+    
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    XLSX.writeFile(wb, `Холды_${dateStr}.xlsx`);
+  };
+
+  // Колонки таблицы
   const timePointColumns = [
     { key: 'vin', label: 'VIN', filterable: true },
     { key: 'material_code', label: 'Material Code', filterable: true },
@@ -299,8 +342,8 @@ export default function SgpAuditPage() {
     { key: 'out_storage_time', label: 'Outbound', isTime: true },
   ];
 
-  // Фильтры по времени в хронологическом порядке
-  const timeFilterFields = [
+  // Левый столбец фильтров
+  const leftTimeFilters = [
     { label: 'CP5', fromKey: 'cp5From', toKey: 'cp5To' },
     { label: 'CP6', fromKey: 'cp6From', toKey: 'cp6To' },
     { label: 'TRIMIN', fromKey: 'trimInFrom', toKey: 'trimInTo' },
@@ -308,6 +351,10 @@ export default function SgpAuditPage() {
     { label: 'CP72', fromKey: 'cp72From', toKey: 'cp72To' },
     { label: 'TLWA', fromKey: 'tlwaFrom', toKey: 'tlwaTo' },
     { label: 'TLRT', fromKey: 'tlrtFrom', toKey: 'tlrtTo' },
+  ];
+
+  // Правый столбец фильтров
+  const rightTimeFilters = [
     { label: 'TLADAS', fromKey: 'tladasFrom', toKey: 'tladasTo' },
     { label: 'TLTT', fromKey: 'tlttFrom', toKey: 'tlttTo' },
     { label: 'CPFINAL', fromKey: 'cpFinalFrom', toKey: 'cpFinalTo' },
@@ -315,6 +362,31 @@ export default function SgpAuditPage() {
     { label: 'Inbound', fromKey: 'inboundFrom', toKey: 'inboundTo' },
     { label: 'Outbound', fromKey: 'outboundFrom', toKey: 'outboundTo' },
   ];
+
+  // Компонент для отображения фильтра времени
+  const renderTimeFilter = ({ label, fromKey, toKey }) => (
+    <div style={timeFilterBlockStyle}>
+      <span style={timeFilterLabelStyle}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+        <span style={{ fontSize: 10, color: '#9CA3AF', fontWeight: 600 }}>От</span>
+        <input
+          type="datetime-local"
+          value={tpFilters[fromKey] || ''}
+          onChange={(e) => setTpFilters(prev => ({ ...prev, [fromKey]: e.target.value }))}
+          style={{ ...inputStyle, fontSize: 10, padding: '4px 6px', width: '100%' }}
+        />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+        <span style={{ fontSize: 10, color: '#9CA3AF', fontWeight: 600 }}>По</span>
+        <input
+          type="datetime-local"
+          value={tpFilters[toKey] || ''}
+          onChange={(e) => setTpFilters(prev => ({ ...prev, [toKey]: e.target.value }))}
+          style={{ ...inputStyle, fontSize: 10, padding: '4px 6px', width: '100%' }}
+        />
+      </div>
+    </div>
+  );
 
   const handleVinSearch = () => {
     if (!vinSearch.trim()) {
@@ -560,13 +632,16 @@ export default function SgpAuditPage() {
       {/* ========== Time Points ========== */}
       {activeTab === 'timepoints' && (
         <div style={cardStyle}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
             <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', margin: 0 }}>
               ⏱️ Время прохождения точек
             </h2>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button style={{ ...buttonStyle, background: '#059669' }} onClick={() => exportExcel(timePointsData, 'time_points')}>
                 📊 Excel
+              </button>
+              <button style={{ ...buttonStyle, background: '#F59E0B' }} onClick={handleExportToHolds}>
+                📥 Экспорт на холды
               </button>
               <button style={buttonStyle} onClick={handleTpSearch}>
                 🔍 Поиск
@@ -577,35 +652,25 @@ export default function SgpAuditPage() {
             </div>
           </div>
 
-          {/* Фильтры по времени в хронологическом порядке */}
+          {/* Фильтры в 2 столбца */}
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', 
-            gap: 8, 
-            marginBottom: 16,
-            padding: 12,
+            gridTemplateColumns: '1fr 1fr', 
+            gap: 10, 
+            marginBottom: 20,
+            padding: 16,
             backgroundColor: '#F9FAFB',
-            borderRadius: 8,
+            borderRadius: 12,
             border: '1px solid #E5E7EB',
           }}>
-            {timeFilterFields.map(({ label, fromKey, toKey }) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
-                <span style={{ fontWeight: 700, color: '#374151', whiteSpace: 'nowrap', minWidth: 50 }}>{label}:</span>
-                <input
-                  type="datetime-local"
-                  value={tpFilters[fromKey] || ''}
-                  onChange={(e) => setTpFilters(prev => ({ ...prev, [fromKey]: e.target.value }))}
-                  style={{ ...inputStyle, fontSize: 10, padding: '3px 4px', width: '100%' }}
-                />
-                <span style={{ color: '#9CA3AF', fontSize: 10 }}>—</span>
-                <input
-                  type="datetime-local"
-                  value={tpFilters[toKey] || ''}
-                  onChange={(e) => setTpFilters(prev => ({ ...prev, [toKey]: e.target.value }))}
-                  style={{ ...inputStyle, fontSize: 10, padding: '3px 4px', width: '100%' }}
-                />
-              </div>
-            ))}
+            {/* Левый столбец */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {leftTimeFilters.map(filter => renderTimeFilter(filter))}
+            </div>
+            {/* Правый столбец */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {rightTimeFilters.map(filter => renderTimeFilter(filter))}
+            </div>
           </div>
 
           {timePointsLoading ? (
@@ -614,7 +679,7 @@ export default function SgpAuditPage() {
             <div style={{ textAlign: 'center', padding: 40, color: '#DC2626' }}>❌ {timePointsError}</div>
           ) : timePointsData.length > 0 ? (
             <>
-              <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 500px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
+              <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 550px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, minWidth: 2800 }}>
                   <thead>
                     <tr style={{ backgroundColor: '#F9FAFB' }}>
