@@ -142,17 +142,25 @@ const totalRowStyle = {
   boxShadow: '0 -4px 6px -2px rgba(0,0,0,0.05)',
 };
 
+// Иерархическая статистика
 const statsContainerStyle = {
   display: 'flex',
-  gap: 16,
-  marginBottom: 16,
-  flexWrap: 'wrap',
+  flexDirection: 'column',
+  gap: 12,
+  marginBottom: 20,
 };
 
-const statCardStyle = (borderColor) => ({
+const statsRowStyle = {
+  display: 'flex',
+  gap: 12,
+  flexWrap: 'wrap',
+  alignItems: 'center',
+};
+
+const statCardStyle = (borderColor, bgColor) => ({
   padding: '12px 20px',
   borderRadius: 12,
-  backgroundColor: '#F9FAFB',
+  backgroundColor: bgColor || '#F9FAFB',
   border: `2px solid ${borderColor}`,
   fontSize: 14,
   fontWeight: 600,
@@ -183,19 +191,6 @@ const filterLabelStyle = {
   marginRight: 4,
 };
 
-// Форматирование даты
-const formatDateTime = (dateStr) => {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return dateStr;
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const yyyy = d.getFullYear();
-  const hh = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
-  return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
-};
-
 export default function SgpManagementPage() {
   const [rawData, setRawData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -205,6 +200,23 @@ export default function SgpManagementPage() {
   const [blockStatusFilter, setBlockStatusFilter] = useState([]);
   const [resolutionStatusFilter, setResolutionStatusFilter] = useState([]);
   const [storageStatusFilter, setStorageStatusFilter] = useState(['In stock']);
+  
+  // Подсветка VIN
+  const [highlightedVin, setHighlightedVin] = useState(null);
+
+  // Закрытие подсветки при клике вне
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (highlightedVin && !event.target.closest('td[data-vin]')) {
+        setHighlightedVin(null);
+      }
+    };
+    
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [highlightedVin]);
 
   const fetchData = async () => {
     try {
@@ -271,15 +283,23 @@ export default function SgpManagementPage() {
     setBlockStatusFilter([]);
     setResolutionStatusFilter([]);
     setStorageStatusFilter(['In stock']);
+    setHighlightedVin(null);
   }, [activeModel]);
 
+  // Иерархическая статистика
   const stats = useMemo(() => {
-    const totalInStock = filteredByModel.filter(d => d.storage_status === 'In stock').length;
-    const totalOutbound = filteredByModel.filter(d => d.storage_status === 'Outbound').length;
-    const totalBlock = filteredByModel.filter(d => d.block_status === 'Блок').length;
-    const totalNotBlock = filteredByModel.filter(d => d.block_status === 'Не блок').length;
+    // Верхний уровень: In stock / Outbound
+    const inStockData = filteredByModel.filter(d => d.storage_status === 'In stock');
+    const outboundData = filteredByModel.filter(d => d.storage_status === 'Outbound');
     
-    return { totalInStock, totalOutbound, totalBlock, totalNotBlock };
+    const totalInStock = inStockData.length;
+    const totalOutbound = outboundData.length;
+    
+    // Нижний уровень: из In stock - Блок / Не блок
+    const inStockBlock = inStockData.filter(d => d.block_status === 'Блок').length;
+    const inStockNotBlock = inStockData.filter(d => d.block_status === 'Не блок').length;
+    
+    return { totalInStock, totalOutbound, inStockBlock, inStockNotBlock };
   }, [filteredByModel]);
 
   const toggleFilter = (filterType, value) => {
@@ -298,6 +318,10 @@ export default function SgpManagementPage() {
     }
   };
 
+  const handleVinClick = (vin) => {
+    setHighlightedVin(prev => prev === vin ? null : vin);
+  };
+
   const handleExportCurrent = () => {
     const exportData = filteredData.map(d => ({
       'VIN': d.vin,
@@ -307,7 +331,6 @@ export default function SgpManagementPage() {
       'Статус устранения': d.resolution_status || '',
       'Статус хранения': d.storage_status || '',
       'Расположение': d.location || '',
-      'Время постановки': d.hold_time ? formatDateTime(d.hold_time) : '—',
     }));
     
     exportData.push({
@@ -318,7 +341,6 @@ export default function SgpManagementPage() {
       'Статус устранения': '',
       'Статус хранения': '',
       'Расположение': filteredData.length,
-      'Время постановки': '',
     });
     
     const ws = XLSX.utils.json_to_sheet(exportData);
@@ -327,12 +349,32 @@ export default function SgpManagementPage() {
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
     ws['!cols'] = [
       { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 50 },
-      { wch: 14 }, { wch: 14 }, { wch: 15 }, { wch: 18 },
+      { wch: 14 }, { wch: 14 }, { wch: 15 },
     ];
     
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     XLSX.writeFile(wb, `SGP_Management_${activeModel === 'ALL' ? 'All' : activeModel}_${dateStr}.xlsx`);
+  };
+
+  // Экспорт на холды (только VIN и Model)
+  const handleExportToHolds = () => {
+    const exportData = filteredData.map(d => ({
+      'VIN': d.vin,
+      'Модель': d.model || '',
+    }));
+    
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Холды');
+    ws['!cols'] = [
+      { wch: 20 },
+      { wch: 15 },
+    ];
+    
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    XLSX.writeFile(wb, `Холды_${dateStr}.xlsx`);
   };
 
   const handleExportAll = () => {
@@ -344,7 +386,6 @@ export default function SgpManagementPage() {
       'Статус устранения': d.resolution_status || '',
       'Статус хранения': d.storage_status || '',
       'Расположение': d.location || '',
-      'Время постановки': d.hold_time ? formatDateTime(d.hold_time) : '—',
     }));
     
     exportData.push({
@@ -355,7 +396,6 @@ export default function SgpManagementPage() {
       'Статус устранения': '',
       'Статус хранения': '',
       'Расположение': rawData.length,
-      'Время постановки': '',
     });
     
     const ws = XLSX.utils.json_to_sheet(exportData);
@@ -363,7 +403,7 @@ export default function SgpManagementPage() {
     XLSX.utils.book_append_sheet(wb, ws, 'Все модели');
     ws['!cols'] = [
       { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 50 },
-      { wch: 14 }, { wch: 14 }, { wch: 15 }, { wch: 18 },
+      { wch: 14 }, { wch: 14 }, { wch: 15 },
     ];
     
     const now = new Date();
@@ -381,15 +421,11 @@ export default function SgpManagementPage() {
     );
   }
 
-  // Все столбцы кроме "Причина" имеют одинаковую ширину
-  const equalColumnWidth = '11%';
-  const reasonColumnWidth = '34%';
-
   return (
     <div style={containerStyle}>
       {/* Заголовок */}
       <div style={headerStyle}>
-        <h1 style={titleStyle}>🚗 СГП Hold Management</h1>
+        <h1 style={titleStyle}>🚗 СГП Management</h1>
         <div style={{ display: 'flex', gap: 12 }}>
           <button style={exportButtonStyle} onClick={handleExportAll}>
             📥 Экспорт всех
@@ -439,19 +475,26 @@ export default function SgpManagementPage() {
         })}
       </div>
 
-      {/* Статистика по выбранной модели */}
+      {/* Иерархическая статистика */}
       <div style={statsContainerStyle}>
-        <div style={statCardStyle('#10B981')}>
-          📦 Итого In stock: <span style={{ color: '#10B981', fontSize: 20, fontWeight: 800 }}>{stats.totalInStock}</span>
+        {/* Верхний уровень */}
+        <div style={statsRowStyle}>
+          <div style={statCardStyle('#10B981', '#F0FDF4')}>
+            📦 In stock: <span style={{ color: '#10B981', fontSize: 20, fontWeight: 800 }}>{stats.totalInStock}</span>
+          </div>
+          <div style={statCardStyle('#3B82F6', '#EFF6FF')}>
+            📤 Outbound: <span style={{ color: '#3B82F6', fontSize: 20, fontWeight: 800 }}>{stats.totalOutbound}</span>
+          </div>
         </div>
-        <div style={statCardStyle('#3B82F6')}>
-          📤 Итого Outbound: <span style={{ color: '#3B82F6', fontSize: 20, fontWeight: 800 }}>{stats.totalOutbound}</span>
-        </div>
-        <div style={statCardStyle('#DC2626')}>
-          🔴 Итого Блок: <span style={{ color: '#DC2626', fontSize: 20, fontWeight: 800 }}>{stats.totalBlock}</span>
-        </div>
-        <div style={statCardStyle('#059669')}>
-          🟢 Итого Не блок: <span style={{ color: '#059669', fontSize: 20, fontWeight: 800 }}>{stats.totalNotBlock}</span>
+        {/* Нижний уровень - из In stock */}
+        <div style={{ ...statsRowStyle, paddingLeft: 20, borderLeft: '3px solid #10B981' }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#10B981' }}>Из In stock:</span>
+          <div style={statCardStyle('#DC2626', '#FEF2F2')}>
+            🔴 Блок: <span style={{ color: '#DC2626', fontSize: 18, fontWeight: 800 }}>{stats.inStockBlock}</span>
+          </div>
+          <div style={statCardStyle('#059669', '#ECFDF5')}>
+            🟢 Не блок: <span style={{ color: '#059669', fontSize: 18, fontWeight: 800 }}>{stats.inStockNotBlock}</span>
+          </div>
         </div>
       </div>
 
@@ -513,9 +556,12 @@ export default function SgpManagementPage() {
       </div>
 
       <div style={cardStyle}>
-        <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <button style={exportButtonStyle} onClick={handleExportCurrent}>
             📥 Экспорт текущей таблицы ({filteredData.length})
+          </button>
+          <button style={{ ...buttonStyle, background: '#F59E0B' }} onClick={handleExportToHolds}>
+            📥 Экспорт на холды
           </button>
         </div>
 
@@ -523,55 +569,73 @@ export default function SgpManagementPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
             <thead>
               <tr>
-                <th style={{ ...thStyle, width: equalColumnWidth }}>VIN</th>
-                <th style={{ ...thStyle, width: equalColumnWidth, textAlign: 'center' }}>Модель</th>
-                <th style={{ ...thStyle, width: equalColumnWidth }}>Статус блок</th>
-                <th style={{ ...thStyle, width: reasonColumnWidth }}>Причина</th>
-                <th style={{ ...thStyle, width: equalColumnWidth }}>Статус устранения</th>
-                <th style={{ ...thStyle, width: equalColumnWidth }}>Статус хранения</th>
-                <th style={{ ...thStyle, width: equalColumnWidth }}>Расположение</th>
-                <th style={{ ...thStyle, width: equalColumnWidth }}>Время постановки</th>
+                <th style={{ ...thStyle, width: '17%' }}>VIN</th>
+                <th style={{ ...thStyle, width: '11%' }}>Модель</th>
+                <th style={{ ...thStyle, width: '9%' }}>Статус блок</th>
+                <th style={{ ...thStyle, width: '22%' }}>Причина</th>
+                <th style={{ ...thStyle, width: '11%' }}>Статус устранения</th>
+                <th style={{ ...thStyle, width: '13%' }}>Статус хранения</th>
+                <th style={{ ...thStyle, width: '17%' }}>Расположение</th>
               </tr>
             </thead>
             <tbody>
-              {filteredData.map((row, idx) => (
-                <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                  <td style={{ ...tdStyle, fontWeight: 600, fontSize: 11 }}>{row.vin}</td>
-                  <td style={{ ...tdStyle, fontWeight: 700, fontSize: 11, textAlign: 'center' }}>{row.model}</td>
-                  <td style={tdStyle}>
-                    <span style={{
-                      padding: '4px 8px',
-                      borderRadius: 999,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      backgroundColor: row.block_status === 'Блок' ? '#FEE2E2' : '#D1FAE5',
-                      color: row.block_status === 'Блок' ? '#991B1B' : '#065F46',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {row.block_status}
-                    </span>
-                  </td>
-                  <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4' }}>{row.reason || '—'}</td>
-                  <td style={tdStyle}>
-                    <span style={{
-                      padding: '3px 8px',
-                      borderRadius: 6,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      backgroundColor: row.resolution_status === 'Устранено' ? '#F0FDF4' : '#FEF3C7',
-                      color: row.resolution_status === 'Устранено' ? '#065F46' : '#92400E',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {row.resolution_status || '—'}
-                    </span>
-                  </td>
-                  <td style={{ ...tdStyle, fontSize: 12 }}>{row.storage_status || '—'}</td>
-                  <td style={{ ...tdStyle, fontSize: 12 }}>{row.location || '—'}</td>
-                  <td style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }}>
-                    {row.hold_time ? formatDateTime(row.hold_time) : '—'}
-                  </td>
-                </tr>
-              ))}
+              {filteredData.map((row, idx) => {
+                const isHighlighted = highlightedVin === row.vin;
+                return (
+                  <tr 
+                    key={idx} 
+                    style={{ 
+                      backgroundColor: isHighlighted ? '#DCFCE7' : (idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'),
+                      cursor: 'pointer',
+                      transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={e => {
+                      if (!isHighlighted) e.currentTarget.style.backgroundColor = '#EEF2FF';
+                    }}
+                    onMouseLeave={e => {
+                      if (!isHighlighted) e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB';
+                    }}
+                  >
+                    <td 
+                      data-vin={row.vin}
+                      style={{ ...tdStyle, fontWeight: 600, fontSize: 12 }}
+                      onClick={() => handleVinClick(row.vin)}
+                    >
+                      {row.vin}
+                    </td>
+                    <td style={{ ...tdStyle, fontWeight: 700, fontSize: 12 }}>{row.model}</td>
+                    <td style={tdStyle}>
+                      <span style={{
+                        padding: '4px 8px',
+                        borderRadius: 999,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        backgroundColor: row.block_status === 'Блок' ? '#FEE2E2' : '#D1FAE5',
+                        color: row.block_status === 'Блок' ? '#991B1B' : '#065F46',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {row.block_status}
+                      </span>
+                    </td>
+                    <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4' }}>{row.reason || '—'}</td>
+                    <td style={tdStyle}>
+                      <span style={{
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        backgroundColor: row.resolution_status === 'Устранено' ? '#F0FDF4' : '#FEF3C7',
+                        color: row.resolution_status === 'Устранено' ? '#065F46' : '#92400E',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {row.resolution_status || '—'}
+                      </span>
+                    </td>
+                    <td style={{ ...tdStyle, fontSize: 12 }}>{row.storage_status || '—'}</td>
+                    <td style={{ ...tdStyle, fontSize: 12 }}>{row.location || '—'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
             <tfoot>
               <tr style={totalRowStyle}>
@@ -582,7 +646,6 @@ export default function SgpManagementPage() {
                 <td style={tdStyle}></td>
                 <td style={tdStyle}></td>
                 <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 800 }}>{filteredData.length}</td>
-                <td style={tdStyle}></td>
               </tr>
             </tfoot>
           </table>
