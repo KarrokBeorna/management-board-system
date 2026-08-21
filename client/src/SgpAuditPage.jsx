@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -135,13 +135,14 @@ export default function SgpAuditPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('checkpoints');
 
-  // Time Points
-  const [timePointsData, setTimePointsData] = useState([]);
+  // Time Points Data
+  const [allTimePointsData, setAllTimePointsData] = useState([]); // полный список
+  const [timePointsData, setTimePointsData] = useState([]); // отфильтрованный список для таблицы
   const [timePointsLoading, setTimePointsLoading] = useState(false);
   const [timePointsError, setTimePointsError] = useState(null);
   const [timePointsPage, setTimePointsPage] = useState(0);
   const timePointsPageSize = 50;
-  
+
   const [tpFilters, setTpFilters] = useState({});
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
@@ -173,7 +174,7 @@ export default function SgpAuditPage() {
   const [auditAnalytics, setAuditAnalytics] = useState(null);
   const [auditDailyData, setAuditDailyData] = useState([]);
 
-  // Export to holds modal state
+  // Export to holds modal
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportReasons, setExportReasons] = useState([]);
   const [exportSearch, setExportSearch] = useState('');
@@ -183,16 +184,7 @@ export default function SgpAuditPage() {
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
-  // Close filter dropdown on scroll
-  useEffect(() => {
-    const handleScroll = () => {
-      setActiveFilterColumn(null);
-    };
-    window.addEventListener('scroll', handleScroll, true);
-    return () => window.removeEventListener('scroll', handleScroll, true);
-  }, []);
-
-  // Close filter dropdown on outside click
+  // Закрытие фильтра при клике вне
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (activeFilterColumn && !event.target.closest('.filter-dropdown') && !event.target.closest('th')) {
@@ -203,7 +195,14 @@ export default function SgpAuditPage() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [activeFilterColumn]);
 
-  // Escape key to close export modal
+  // Закрытие фильтра при скролле
+  useEffect(() => {
+    const handleScroll = () => setActiveFilterColumn(null);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, []);
+
+  // Escape для модалки
   useEffect(() => {
     const handleEsc = (event) => {
       if (event.key === 'Escape') {
@@ -241,77 +240,63 @@ export default function SgpAuditPage() {
     return `${dd}.${mm} ${hh}:${min}`;
   };
 
-  const loadTimePoints = async (filters = {}) => {
+  // Загрузка всех данных при входе на вкладку
+  const loadTimePoints = async () => {
     setTimePointsLoading(true);
     setTimePointsError(null);
     try {
-      const params = new URLSearchParams();
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value !== undefined && value !== '' && !(Array.isArray(value) && value.length === 0)) {
-          if (Array.isArray(value)) {
-            params.append(key, value.join(','));
-          } else {
-            params.append(key, String(value));
-          }
-        }
-      });
-      
-      const res = await fetch(`${API_BASE}/api/time-points?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/api/time-points`);
       if (!res.ok) {
         const errorText = await res.text();
         console.error('Server error:', errorText);
         throw new Error(`Ошибка загрузки данных (${res.status})`);
       }
       const json = await res.json();
-      setTimePointsData(Array.isArray(json) ? json : []);
+      setAllTimePointsData(json);
+      setTimePointsData(json); // изначально показываем все
       setTimePointsPage(0);
     } catch (err) {
       console.error('Ошибка Time Points:', err);
       setTimePointsError(err.message);
+      setAllTimePointsData([]);
       setTimePointsData([]);
     } finally {
       setTimePointsLoading(false);
     }
   };
 
+  useEffect(() => {
+    if (activeTab === 'timepoints') {
+      loadTimePoints();
+    }
+  }, [activeTab]);
+
+  // Получение уникальных значений из полного набора данных
   const getUniqueValues = (column) => {
-    const values = [...new Set(timePointsData.map(d => d[column]).filter(v => v !== null && v !== undefined && v !== ''))];
+    const values = [...new Set(allTimePointsData.map(d => d[column]).filter(v => v !== null && v !== undefined && v !== ''))];
     return values.sort();
   };
 
+  // Обработчики фильтров
   const handleFilterHeaderClick = (column, event) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    setFilterDropdownPos({
-      top: rect.bottom + 4,
-      left: rect.left,
-    });
-    
-    if (activeFilterColumn === column) {
-      setActiveFilterColumn(null);
-    } else {
-      setActiveFilterColumn(column);
-    }
+    setFilterDropdownPos({ top: rect.bottom + 4, left: rect.left });
+    setActiveFilterColumn(activeFilterColumn === column ? null : column);
   };
 
   const handleFilterToggle = (column, value) => {
     setTpFilters(prev => {
       const currentValues = prev[column] || [];
-      let newValues;
-      
-      if (currentValues.includes(value)) {
-        newValues = currentValues.filter(v => v !== value);
+      const newValues = currentValues.includes(value)
+        ? currentValues.filter(v => v !== value)
+        : [...currentValues, value];
+
+      const newFilters = { ...prev };
+      if (newValues.length > 0) {
+        newFilters[column] = newValues;
       } else {
-        newValues = [...currentValues, value];
-      }
-      
-      const newFilters = { ...prev, [column]: newValues };
-      
-      if (newValues.length === 0) {
         delete newFilters[column];
       }
-      
-      // Auto reload after filter toggle
-      loadTimePoints(newFilters);
       return newFilters;
     });
   };
@@ -320,23 +305,74 @@ export default function SgpAuditPage() {
     setTpFilters(prev => {
       const newPrev = { ...prev };
       delete newPrev[column];
-      loadTimePoints(newPrev);
       return newPrev;
     });
     setActiveFilterColumn(null);
   };
 
-  const handleTpSearch = () => {
-    loadTimePoints(tpFilters);
-  };
+  // Локальная фильтрация на основе tpFilters
+  const filteredTimePointsData = useMemo(() => {
+    let result = allTimePointsData;
 
+    // VIN поиск (текстовое поле)
+    if (tpFilters.vin) {
+      const vinFilter = tpFilters.vin.toLowerCase();
+      result = result.filter(d => d.vin && d.vin.toLowerCase().includes(vinFilter));
+    }
+
+    // Множественные фильтры по колонкам
+    ['material_code', 'sequence_number', 'batch_num', 'kd_material_no', 'model', 'material_desc', 'colour', 'location'].forEach(field => {
+      const selected = tpFilters[field];
+      if (selected && selected.length > 0) {
+        result = result.filter(d => selected.includes(d[field]));
+      }
+    });
+
+    // Временные фильтры
+    const timeFields = [
+      { key: 'CP5', from: 'cp5From', to: 'cp5To' },
+      { key: 'CP6', from: 'cp6From', to: 'cp6To' },
+      { key: 'TRIMIN', from: 'trimInFrom', to: 'trimInTo' },
+      { key: 'CP7', from: 'cp7From', to: 'cp7To' },
+      { key: 'CP72', from: 'cp72From', to: 'cp72To' },
+      { key: 'TLWA', from: 'tlwaFrom', to: 'tlwaTo' },
+      { key: 'TLRT', from: 'tlrtFrom', to: 'tlrtTo' },
+      { key: 'TLADAS', from: 'tladasFrom', to: 'tladasTo' },
+      { key: 'TLTT', from: 'tlttFrom', to: 'tlttTo' },
+      { key: 'CPFINAL', from: 'cpFinalFrom', to: 'cpFinalTo' },
+      { key: 'CP8', from: 'cp8From', to: 'cp8To' },
+      { key: 'in_storage_time', from: 'inboundFrom', to: 'inboundTo' },
+      { key: 'out_storage_time', from: 'outboundFrom', to: 'outboundTo' },
+    ];
+
+    timeFields.forEach(({ key, from, to }) => {
+      const fromVal = tpFilters[from];
+      const toVal = tpFilters[to];
+      if (fromVal) {
+        result = result.filter(d => d[key] && new Date(d[key]) >= new Date(fromVal));
+      }
+      if (toVal) {
+        result = result.filter(d => d[key] && new Date(d[key]) <= new Date(toVal));
+      }
+    });
+
+    return result;
+  }, [allTimePointsData, tpFilters]);
+
+  // Обновляем timePointsData при изменении фильтров
+  useEffect(() => {
+    setTimePointsData(filteredTimePointsData);
+    setTimePointsPage(0);
+  }, [filteredTimePointsData]);
+
+  // Сброс фильтров
   const handleTpClear = () => {
     setTpFilters({});
-    setTimePointsData([]);
+    setTimePointsData(allTimePointsData);
     setTimePointsPage(0);
   };
 
-  // Export to holds: open modal
+  // Экспорт на холды
   const openExportModal = async () => {
     setShowExportModal(true);
     setExportReasonLoading(true);
@@ -353,7 +389,6 @@ export default function SgpAuditPage() {
     }
   };
 
-  // Close modal
   const closeExportModal = () => {
     setShowExportModal(false);
     setSelectedReason('');
@@ -361,38 +396,32 @@ export default function SgpAuditPage() {
     setExportSearch('');
   };
 
-  // When selecting a reason from list
   const handleSelectReason = (reason) => {
     setSelectedReason(reason);
     setCustomReason('');
   };
 
-  // When typing custom reason
   const handleCustomReasonChange = (e) => {
     const val = e.target.value;
     setCustomReason(val);
-    if (val) {
-      setSelectedReason('');
-    }
+    if (val) setSelectedReason('');
   };
 
-  // Filter reasons by search
   const filteredReasons = useMemo(() => {
     if (!exportSearch.trim()) return exportReasons;
     return exportReasons.filter(r => r.toLowerCase().includes(exportSearch.toLowerCase()));
   }, [exportReasons, exportSearch]);
 
-  // Actual export with reason
   const handleExportToHoldsWithReason = () => {
     const finalReason = selectedReason || customReason;
     if (!finalReason) return;
-    
+
     const exportData = timePointsData.map(v => ({
       'VIN': v.vin,
       'Причина': finalReason,
-      'FE130': '', // placeholder for FE130 column
+      'FE130': 'FE130',
     }));
-    
+
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Холды');
@@ -401,7 +430,7 @@ export default function SgpAuditPage() {
       { wch: 60 },
       { wch: 15 },
     ];
-    
+
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     XLSX.writeFile(wb, `Холды_${dateStr}.xlsx`);
@@ -461,7 +490,6 @@ export default function SgpAuditPage() {
           type="datetime-local"
           value={tpFilters[fromKey] || ''}
           onChange={(e) => setTpFilters(prev => ({ ...prev, [fromKey]: e.target.value }))}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleTpSearch(); }}
           style={{ ...inputStyle, fontSize: 10, padding: '4px 6px', width: '100%' }}
         />
       </div>
@@ -471,7 +499,6 @@ export default function SgpAuditPage() {
           type="datetime-local"
           value={tpFilters[toKey] || ''}
           onChange={(e) => setTpFilters(prev => ({ ...prev, [toKey]: e.target.value }))}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleTpSearch(); }}
           style={{ ...inputStyle, fontSize: 10, padding: '4px 6px', width: '100%' }}
         />
       </div>
@@ -760,11 +787,8 @@ export default function SgpAuditPage() {
               <button style={{ ...buttonStyle, background: '#F59E0B' }} onClick={openExportModal}>
                 📥 Экспорт на холды
               </button>
-              <button style={buttonStyle} onClick={handleTpSearch}>
-                🔍 Поиск
-              </button>
               <button style={{ ...buttonStyle, background: '#9CA3AF' }} onClick={handleTpClear}>
-                ✕ Очистить
+                ✕ Очистить фильтры
               </button>
             </div>
           </div>
@@ -785,7 +809,6 @@ export default function SgpAuditPage() {
                   }
                   return newPrev;
                 })}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleTpSearch(); }}
                 placeholder="Введите VIN..."
                 style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14, background: '#F9FAFB', width: 200 }}
               />
