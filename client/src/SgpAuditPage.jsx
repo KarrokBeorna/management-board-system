@@ -163,7 +163,7 @@ export default function SgpAuditPage() {
   const [cpLoading, setCpLoading] = useState(false);
   const [cpError, setCpError] = useState(null);
   const [cpData, setCpData] = useState([]);
-  const [cpLocations, setCpLocations] = useState({}); // vin -> {isInStorage, storageString, checkpoint, isSold}
+  const [cpLocations, setCpLocations] = useState({});
   const [cpPage, setCpPage] = useState(0);
   const rowsPerPage = 100;
 
@@ -180,7 +180,7 @@ export default function SgpAuditPage() {
   const [neighborError, setNeighborError] = useState(null);
   const [neighborData, setNeighborData] = useState([]);
   const [neighborTargetTime, setNeighborTargetTime] = useState(null);
-  const [neighborLocations, setNeighborLocations] = useState({}); // vin -> {isInStorage, storageString, checkpoint, isSold}
+  const [neighborLocations, setNeighborLocations] = useState({});
 
   // Analytics (скрыта)
   const [auditStartDate, setAuditStartDate] = useState('');
@@ -391,7 +391,6 @@ export default function SgpAuditPage() {
       const uniqueVins = [...new Set(vinList.filter(v => v && v !== 'N/A'))];
       if (uniqueVins.length === 0) return {};
 
-      // Разбиваем на батчи по 200 VIN, чтобы избежать 431
       const batchSize = 200;
       const batches = [];
       for (let i = 0; i < uniqueVins.length; i += batchSize) {
@@ -444,6 +443,7 @@ export default function SgpAuditPage() {
         storageRows.forEach(row => {
           if (row.VIN) {
             map[row.VIN] = {
+              Модель: row['Модель'] || '-',
               Склад: row['Склад'] || '-',
               Локация: row['Локация'] || '-',
               Ячейка: row['Ячейка'] || '-',
@@ -454,7 +454,7 @@ export default function SgpAuditPage() {
 
       // Для отсутствующих VIN ставим '-'
       uniqueVins.forEach(vin => {
-        if (!map[vin]) map[vin] = { Склад: '-', Локация: '-', Ячейка: '-' };
+        if (!map[vin]) map[vin] = { Модель: '-', Склад: '-', Локация: '-', Ячейка: '-' };
       });
 
       return map;
@@ -487,7 +487,6 @@ export default function SgpAuditPage() {
 
       if (json.data && json.data.length > 0) {
         const vins = json.data.map(item => item.vin);
-        // Получаем текущее расположение (чекпоинт или склад)
         const locInfo = await fetchCurrentLocations(vins);
         setNeighborLocations(locInfo);
       }
@@ -518,6 +517,41 @@ export default function SgpAuditPage() {
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     XLSX.writeFile(wb, `Соседи_${neighborCheckpoint}_${dateStr}.xlsx`);
+  };
+
+  // НОВАЯ ФУНКЦИЯ: Экспорт на холд (два файла)
+  const exportNeighborsToHolds = () => {
+    if (!neighborData.length) return;
+
+    const afterCP8 = [];
+    const beforeCP8 = [];
+
+    neighborData.forEach(item => {
+      const loc = neighborLocations[item.vin];
+      const isAfter = loc && (loc.checkpoint === 'CP8' || loc.isInStorage || loc.isSold);
+      if (isAfter) {
+        afterCP8.push({ 'VIN': item.vin });
+      } else {
+        beforeCP8.push({ 'VIN': item.vin });
+      }
+    });
+
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    if (afterCP8.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(afterCP8);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'После CP8');
+      XLSX.writeFile(wb, `Холды_После_CP8_${dateStr}.xlsx`);
+    }
+
+    if (beforeCP8.length > 0) {
+      const ws = XLSX.utils.json_to_sheet(beforeCP8);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'До CP8');
+      XLSX.writeFile(wb, `Холды_До_CP8_${dateStr}.xlsx`);
+    }
   };
 
   const openExportModal = async () => {
@@ -723,13 +757,13 @@ export default function SgpAuditPage() {
       const storageMap = await fetchStorageLocations(vins);
 
       const tableData = vins.map(vin => {
-        const s = storageMap[vin];
+        const s = storageMap[vin] || { Модель: '-', Склад: '-', Локация: '-', Ячейка: '-' };
         return {
           VIN: vin,
-          Модель: s ? s.Модель || (cpModel !== 'ALL' ? cpModel : '-') : '-',
-          Склад: s ? s.Склад : '-',
-          Локация: s ? s.Локация : '-',
-          Ячейка: s ? s.Ячейка : '-',
+          Модель: s.Модель || '-',
+          Склад: s.Склад || '-',
+          Локация: s.Локация || '-',
+          Ячейка: s.Ячейка || '-',
           'Результат проверки': '',
         };
       });
@@ -1166,11 +1200,17 @@ export default function SgpAuditPage() {
             <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', margin: 0 }}>
               🚗 Соседи по точке
             </h2>
-            {neighborData.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button 
+                style={{ ...buttonStyle, background: '#F59E0B' }} 
+                onClick={exportNeighborsToHolds}
+              >
+                📥 Экспорт на холд
+              </button>
               <button style={{ ...buttonStyle, background: '#059669' }} onClick={exportNeighborsToExcel}>
                 📊 Экспорт Excel
               </button>
-            )}
+            </div>
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 20, alignItems: 'center' }}>
