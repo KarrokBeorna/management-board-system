@@ -4162,8 +4162,116 @@ app.get('/api/filters/colours', async (req, res) => {
   }
 });
 
+app.get('/api/time-point-neighbors', async (req, res) => {
+  try {
+    const { checkpoint, vin, limitBefore = 100, limitAfter = 100 } = req.query;
+    if (!vin || !checkpoint) return res.status(400).json({ error: 'vin и checkpoint обязательны' });
 
+    const beforeLimit = parseInt(limitBefore, 10) || 100;
+    const afterLimit = parseInt(limitAfter, 10) || 100;
+    const targetVin = vin.trim();
 
+    // ===== 1. Точки из MES (ti_mes_movement) =====
+    const mesPoints = {
+      CP5:      'AGMBS01002',
+      CP6:      'AGMPS01002',
+      TRIMIN:   'AGMAS01001',
+      CP7:      'AGMAS01003',
+      CP72:     'CP72',
+      CPFINAL:  'CPFINAL',
+      CP8:      'AGMAS01004',
+    };
+
+    // ===== 2. Точки из IOT/основной БД (at_om_wiptrackinghistory) =====
+    const iotPoints = ['TLWA', 'TLRT', 'TLADAS', 'TLTT'];
+
+    // ===== 3. Точки из LES (tv_biz_storage_car) =====
+    const lesPoints = ['Inbound', 'Outbound'];
+
+    let rows;
+    let targetTime = null;
+
+    if (mesPoints[checkpoint]) {
+      // --- MES ---
+      const uloc = mesPoints[checkpoint];
+      const [targetRows] = await mesPool.query(
+        `SELECT MAX(scan_time) AS point_time FROM ti_mes_movement WHERE vin = ? AND uloc_no = ? AND is_deleted = 0`,
+        [targetVin, uloc]
+      );
+      targetTime = targetRows[0]?.point_time;
+      if (!targetTime) return res.json({ data: [], targetTime: null });
+
+      const sql = `
+        WITH all_points AS (
+          SELECT vin, MAX(scan_time) AS point_time
+          FROM ti_mes_movement
+          WHERE uloc_no = ? AND is_deleted = 0
+          GROUP BY vin
+        )
+        SELECT vin, point_time FROM (
+          (SELECT vin, point_time FROM all_points WHERE point_time <= ? ORDER BY point_time DESC LIMIT ?)
+          UNION ALL
+          (SELECT vin, point_time FROM all_points WHERE point_time > ? ORDER BY point_time ASC LIMIT ?)
+        ) AS neighbors
+        ORDER BY point_time ASC
+      `;
+      const [resultRows] = await mesPool.query(sql, [uloc, targetTime, beforeLimit, targetTime, afterLimit]);
+      rows = resultRows;
+    } else if (iotPoints.includes(checkpoint)) {
+      // --- IOT (основная БД pool) ---
+      const [targetRows] = await pool.query(
+        `SELECT MAX(creation_time) AS point_time FROM at_om_wiptrackinghistory WHERE vin = ? AND wc_name = ?`,
+        [targetVin, checkpoint]
+      );
+      targetTime = targetRows[0]?.point_time;
+      if (!targetTime) return res.json({ data: [], targetTime: null });
+
+      const sql = `
+        WITH all_points AS (
+          SELECT vin, MAX(creation_time) AS point_time
+          FROM at_om_wiptrackinghistory
+          WHERE wc_name = ?
+          GROUP BY vin
+        )
+        SELECT vin, point_time FROM (
+          (SELECT vin, point_time FROM all_points WHERE point_time <= ? ORDER BY point_time DESC LIMIT ?)
+          UNION ALL
+          (SELECT vin, point_time FROM all_points WHERE point_time > ? ORDER BY point_time ASC LIMIT ?)
+        ) AS neighbors
+        ORDER BY point_time ASC
+      `;
+      const [resultRows] = await pool.query(sql, [checkpoint, targetTime, beforeLimit, targetTime, afterLimit]);
+      rows = resultRows;
+    } else if (lesPoints.includes(checkpoint)) {
+      // --- LES ---
+      const column = checkpoint === 'Inbound' ? 'in_storage_time' : 'out_storage_time';
+      const [targetRows] = await lesPool.query(
+        `SELECT ${column} AS point_time FROM tv_biz_storage_car WHERE vin = ? LIMIT 1`,
+        [targetVin]
+      );
+      targetTime = targetRows[0]?.point_time;
+      if (!targetTime) return res.json({ data: [], targetTime: null });
+
+      const sql = `
+        SELECT vin, ${column} AS point_time FROM (
+          (SELECT vin, ${column} FROM tv_biz_storage_car WHERE ${column} <= ? ORDER BY ${column} DESC LIMIT ?)
+          UNION ALL
+          (SELECT vin, ${column} FROM tv_biz_storage_car WHERE ${column} > ? ORDER BY ${column} ASC LIMIT ?)
+        ) AS neighbors
+        ORDER BY point_time ASC
+      `;
+      const [resultRows] = await lesPool.query(sql, [targetTime, beforeLimit, targetTime, afterLimit]);
+      rows = resultRows;
+    } else {
+      return res.status(400).json({ error: 'Неверный checkpoint' });
+    }
+
+    res.json({ data: rows, targetTime });
+  } catch (err) {
+    console.error('Ошибка time-point-neighbors:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ================== ЗАМЕТКИ ==================
 

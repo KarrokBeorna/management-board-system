@@ -131,6 +131,13 @@ const timeFilterLabelStyle = {
   borderRadius: 6,
 };
 
+// Список точек для вкладки "Соседи по точке"
+const neighborPointOptions = [
+  'CP5', 'CP6', 'TRIMIN', 'CP7', 'CP72',
+  'TLWA', 'TLRT', 'TLADAS', 'TLTT',
+  'CPFINAL', 'CP8', 'Inbound', 'Outbound'
+];
+
 export default function SgpAuditPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('checkpoints');
@@ -164,7 +171,17 @@ export default function SgpAuditPage() {
   const [vinSearch, setVinSearch] = useState('');
   const [isVinMode, setIsVinMode] = useState(false);
 
-  // Analytics
+  // ====== НОВАЯ ВКЛАДКА "СОСЕДИ ПО ТОЧКЕ" ======
+  const [neighborVin, setNeighborVin] = useState('');
+  const [neighborCheckpoint, setNeighborCheckpoint] = useState('TRIMIN');
+  const [neighborLimitBefore, setNeighborLimitBefore] = useState(100);
+  const [neighborLimitAfter, setNeighborLimitAfter] = useState(100);
+  const [neighborLoading, setNeighborLoading] = useState(false);
+  const [neighborError, setNeighborError] = useState(null);
+  const [neighborData, setNeighborData] = useState([]);
+  const [neighborTargetTime, setNeighborTargetTime] = useState(null);
+
+  // Analytics (временно скрыта)
   const [auditStartDate, setAuditStartDate] = useState('');
   const [auditEndDate, setAuditEndDate] = useState('');
   const [auditModel, setAuditModel] = useState('ALL');
@@ -371,6 +388,49 @@ export default function SgpAuditPage() {
     setTpFilters({});
     setTimePointsData(allTimePointsData);
     setTimePointsPage(0);
+  };
+
+  // ====== Загрузка соседей по точке ======
+  const loadNeighbors = async () => {
+    if (!neighborVin.trim()) return;
+    setNeighborLoading(true);
+    setNeighborError(null);
+    setNeighborData([]);
+    setNeighborTargetTime(null);
+    try {
+      const params = new URLSearchParams({
+        checkpoint: neighborCheckpoint,
+        vin: neighborVin.trim(),
+        limitBefore: neighborLimitBefore,
+        limitAfter: neighborLimitAfter,
+      });
+      const res = await fetch(`${API_BASE}/api/time-point-neighbors?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки соседей');
+      const json = await res.json();
+      setNeighborData(json.data || []);
+      setNeighborTargetTime(json.targetTime || null);
+    } catch (err) {
+      console.error('Ошибка neighbors:', err);
+      setNeighborError(err.message);
+      setNeighborData([]);
+    } finally {
+      setNeighborLoading(false);
+    }
+  };
+
+  const exportNeighborsToExcel = () => {
+    if (!neighborData.length) return;
+    const exportData = neighborData.map(item => ({
+      'VIN': item.vin,
+      [`Время ${neighborCheckpoint}`]: formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time),
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Соседи');
+    ws['!cols'] = [{ wch: 20 }, { wch: 25 }];
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    XLSX.writeFile(wb, `Соседи_${neighborCheckpoint}_${dateStr}.xlsx`);
   };
 
   // Экспорт на холды
@@ -649,6 +709,7 @@ export default function SgpAuditPage() {
     } catch (err) { setAuditError(err.message); } finally { setAuditLoading(false); }
   };
 
+  // eslint-disable-next-line no-unused-vars
   useEffect(() => {
     if (activeTab === 'analytics' && auditStartDate && auditEndDate) { loadAnalytics(); }
   }, [auditStartDate, auditEndDate, auditModel, auditResultFilter, activeTab]);
@@ -769,9 +830,13 @@ export default function SgpAuditPage() {
         <button onClick={() => setActiveTab('timepoints')} style={tabStyle(activeTab === 'timepoints')}>
           Время прохождения точек
         </button>
-        <button onClick={() => setActiveTab('analytics')} style={tabStyle(activeTab === 'analytics')}>
-          Аналитика по аудиту
+        <button onClick={() => setActiveTab('neighbors')} style={tabStyle(activeTab === 'neighbors')}>
+          Соседи по точке
         </button>
+        {/* Аналитика по аудиту — закомментирована */}
+        {/* <button onClick={() => setActiveTab('analytics')} style={tabStyle(activeTab === 'analytics')}>
+          Аналитика по аудиту
+        </button> */}
       </div>
 
       {/* ========== Time Points ========== */}
@@ -975,6 +1040,108 @@ export default function SgpAuditPage() {
         </div>
       )}
 
+      {/* ========== НОВАЯ ВКЛАДКА: СОСЕДИ ПО ТОЧКЕ ========== */}
+      {activeTab === 'neighbors' && (
+        <div style={cardStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', margin: 0 }}>
+              🚗 Соседи по точке
+            </h2>
+            {neighborData.length > 0 && (
+              <button style={{ ...buttonStyle, background: '#059669' }} onClick={exportNeighborsToExcel}>
+                📊 Экспорт Excel
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 20, alignItems: 'center' }}>
+            <label style={labelStyle}>
+              Точка:
+              <select
+                value={neighborCheckpoint}
+                onChange={(e) => setNeighborCheckpoint(e.target.value)}
+                style={{ ...inputStyle, minWidth: 120 }}
+              >
+                {neighborPointOptions.map(point => (
+                  <option key={point} value={point}>{point}</option>
+                ))}
+              </select>
+            </label>
+            <label style={{ ...labelStyle, minWidth: 200 }}>
+              VIN:
+              <input
+                type="text"
+                value={neighborVin}
+                onChange={(e) => setNeighborVin(e.target.value)}
+                placeholder="Введите VIN..."
+                style={{ ...inputStyle, flex: 1 }}
+              />
+            </label>
+            <label style={labelStyle}>
+              До (кол-во):
+              <input
+                type="number"
+                min="0"
+                value={neighborLimitBefore}
+                onChange={(e) => setNeighborLimitBefore(parseInt(e.target.value, 10) || 0)}
+                style={{ ...inputStyle, width: 80 }}
+              />
+            </label>
+            <label style={labelStyle}>
+              После (кол-во):
+              <input
+                type="number"
+                min="0"
+                value={neighborLimitAfter}
+                onChange={(e) => setNeighborLimitAfter(parseInt(e.target.value, 10) || 0)}
+                style={{ ...inputStyle, width: 80 }}
+              />
+            </label>
+            <button style={buttonStyle} onClick={loadNeighbors} disabled={!neighborVin.trim() || neighborLoading}>
+              {neighborLoading ? '⏳ Загрузка...' : '🔍 Найти соседей'}
+            </button>
+          </div>
+
+          {neighborError && <p style={{ color: '#DC2626', marginBottom: 16 }}>❌ {neighborError}</p>}
+          {neighborTargetTime && (
+            <p style={{ fontSize: 14, color: '#4B5563', marginBottom: 16 }}>
+              Время {neighborCheckpoint} для заданного VIN: <strong>{formatDateTime(neighborTargetTime)}</strong>
+            </p>
+          )}
+
+          {neighborLoading ? (
+            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка данных...</div>
+          ) : neighborData.length > 0 ? (
+            <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid #E5E7EB', maxHeight: '500px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#F9FAFB' }}>
+                    <th style={{ ...thStyle, position: 'sticky', top: 0 }}>VIN</th>
+                    <th style={{ ...thStyle, position: 'sticky', top: 0 }}>Время {neighborCheckpoint}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {neighborData.map((item, idx) => (
+                    <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                      <td style={tdStyle}>{item.vin}</td>
+                      <td style={tdStyle}>
+                        {formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            !neighborLoading && !neighborError && (
+              <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+                Введите VIN, выберите точку и нажмите «Найти соседей»
+              </div>
+            )
+          )}
+        </div>
+      )}
+
       {/* ========== Checkpoints ========== */}
       {activeTab === 'checkpoints' && (
         <>
@@ -1096,97 +1263,12 @@ export default function SgpAuditPage() {
         </>
       )}
 
-      {/* ========== Analytics ========== */}
-      {activeTab === 'analytics' && (
+      {/* Аналитика по аудиту — закомментирована */}
+      {/* {activeTab === 'analytics' && (
         <div style={cardStyle}>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>📈</span>
-            Аналитика по аудиту
-          </h2>
-
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', marginBottom: 12 }}>
-              <label style={labelStyle}>
-                Загрузить Excel:
-                <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} style={{ fontSize: 14 }} />
-              </label>
-            </div>
-
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center' }}>
-              <label style={labelStyle}>
-                Начало периода (CP8):
-                <input type="date" value={auditStartDate} onChange={e => setAuditStartDate(e.target.value)} style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                Конец периода (CP8):
-                <input type="date" value={auditEndDate} onChange={e => setAuditEndDate(e.target.value)} style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                Модель:
-                <select value={auditModel} onChange={e => setAuditModel(e.target.value)} style={inputStyle}>
-                  {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
-                </select>
-              </label>
-              <label style={labelStyle}>
-                Результат аудита:
-                <select value={auditResultFilter} onChange={e => setAuditResultFilter(e.target.value)} style={inputStyle}>
-                  <option value="ALL">Все</option>
-                  <option value="OK">OK</option>
-                  <option value="NG">NG</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          {auditError && <p style={{ color: '#DC2626' }}>❌ {auditError}</p>}
-          {auditLoading && <p>Загрузка аналитики...</p>}
-
-          {auditAnalytics && (
-            <>
-              <h3 style={{ marginTop: 30, marginBottom: 16 }}>Общая сводка</h3>
-              <div style={{ width: '100%', height: 300 }}>
-                <ResponsiveContainer>
-                  <BarChart data={[
-                    { name: 'Всего CP8', count: auditAnalytics.totalCp8 },
-                    { name: 'На складе', count: auditAnalytics.onStorage },
-                    { name: 'Не пройдено аудита', count: auditAnalytics.notAudited },
-                    { name: 'Прошли аудит', count: auditAnalytics.audited },
-                    { name: 'OK', count: auditAnalytics.ok },
-                    { name: 'NG', count: auditAnalytics.ng },
-                  ]} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
-                    <YAxis allowDecimals={false} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="count" fill="#2563EB" barSize={40} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              {auditDailyData.length > 0 && (
-                <>
-                  <h3 style={{ marginTop: 40, marginBottom: 16 }}>Динамика по дням аудита</h3>
-                  <div style={{ width: '100%', height: 300 }}>
-                    <ResponsiveContainer>
-                      <LineChart data={auditDailyData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis allowDecimals={false} />
-                        <Tooltip />
-                        <Legend />
-                        <Line type="monotone" dataKey="total" stroke="#2563EB" name="Всего" strokeWidth={2} />
-                        <Line type="monotone" dataKey="ok" stroke="#059669" name="ОК" strokeWidth={2} />
-                        <Line type="monotone" dataKey="ng" stroke="#DC2626" name="NG" strokeWidth={2} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </>
-              )}
-            </>
-          )}
+          ...
         </div>
-      )}
+      )} */}
 
       {/* ========== Модальное окно экспорта на холды ========== */}
       {showExportModal && (
@@ -1237,7 +1319,6 @@ export default function SgpAuditPage() {
               Выберите причину или введите свою
             </p>
 
-            {/* Блок поиска и списка причин */}
             <div style={{ marginBottom: 16 }}>
               <label style={{ ...labelStyle, marginBottom: 8 }}>
                 Поиск причины:
@@ -1277,7 +1358,6 @@ export default function SgpAuditPage() {
               </div>
             </div>
 
-            {/* Блок своей причины */}
             <div style={{ marginBottom: 16 }}>
               <label style={{ ...labelStyle, marginBottom: 8 }}>
                 Своя причина:
@@ -1292,7 +1372,6 @@ export default function SgpAuditPage() {
               </label>
             </div>
 
-            {/* Кнопка экспорта */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
               <button style={{ ...buttonStyle, background: '#9CA3AF' }} onClick={closeExportModal}>
                 Отмена
