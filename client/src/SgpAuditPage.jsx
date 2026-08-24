@@ -131,7 +131,6 @@ const timeFilterLabelStyle = {
   borderRadius: 6,
 };
 
-// Список точек для вкладки "Соседи по точке"
 const neighborPointOptions = [
   'CP5', 'CP6', 'TRIMIN', 'CP7', 'CP72',
   'TLWA', 'TLRT', 'TLADAS', 'TLTT',
@@ -164,7 +163,7 @@ export default function SgpAuditPage() {
   const [cpLoading, setCpLoading] = useState(false);
   const [cpError, setCpError] = useState(null);
   const [cpData, setCpData] = useState([]);
-  const [cpLocations, setCpLocations] = useState({}); // vin -> location
+  const [cpLocations, setCpLocations] = useState({});
   const [cpPage, setCpPage] = useState(0);
   const rowsPerPage = 100;
 
@@ -172,7 +171,7 @@ export default function SgpAuditPage() {
   const [vinSearch, setVinSearch] = useState('');
   const [isVinMode, setIsVinMode] = useState(false);
 
-  // ====== НОВАЯ ВКЛАДКА "СОСЕДИ ПО ТОЧКЕ" ======
+  // Соседи по точке
   const [neighborVin, setNeighborVin] = useState('');
   const [neighborCheckpoint, setNeighborCheckpoint] = useState('TRIMIN');
   const [neighborLimitBefore, setNeighborLimitBefore] = useState(100);
@@ -181,9 +180,9 @@ export default function SgpAuditPage() {
   const [neighborError, setNeighborError] = useState(null);
   const [neighborData, setNeighborData] = useState([]);
   const [neighborTargetTime, setNeighborTargetTime] = useState(null);
-  const [neighborLocations, setNeighborLocations] = useState({}); // vin -> location
+  const [neighborLocations, setNeighborLocations] = useState({});
 
-  // Analytics (закомментирована)
+  // Analytics (скрыта)
   const [auditStartDate, setAuditStartDate] = useState('');
   const [auditEndDate, setAuditEndDate] = useState('');
   const [auditModel, setAuditModel] = useState('ALL');
@@ -203,7 +202,6 @@ export default function SgpAuditPage() {
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
-  // Закрытие выпадающего фильтра по клику вне
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (activeFilterColumn && !event.target.closest('.filter-dropdown') && !event.target.closest('th')) {
@@ -214,14 +212,12 @@ export default function SgpAuditPage() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [activeFilterColumn]);
 
-  // Закрытие фильтра при скролле
   useEffect(() => {
     const handleScroll = () => setActiveFilterColumn(null);
     window.addEventListener('scroll', handleScroll, true);
     return () => window.removeEventListener('scroll', handleScroll, true);
   }, []);
 
-  // Escape для модалки
   useEffect(() => {
     const handleEsc = (event) => {
       if (event.key === 'Escape') {
@@ -259,7 +255,6 @@ export default function SgpAuditPage() {
     return `${dd}.${mm} ${hh}:${min}`;
   };
 
-  // Загрузка всех данных при первом входе на вкладку
   const loadTimePoints = async () => {
     setTimePointsLoading(true);
     setTimePointsError(null);
@@ -290,14 +285,12 @@ export default function SgpAuditPage() {
     }
   }, [activeTab]);
 
-  // Проверка наличия фильтров
   const hasAnyFilter = useMemo(() => {
     return !!tpFilters.vin ||
       ['material_code', 'sequence_number', 'batch_num', 'kd_material_no', 'model', 'material_desc', 'colour', 'location'].some(f => tpFilters[f] && tpFilters[f].length > 0) ||
       Object.keys(tpFilters).some(key => key.match(/^(cp5|cp6|trimIn|cp7|cp72|tlwa|tlrt|tladas|tltt|cpFinal|cp8|inbound|outbound)(From|To)$/));
   }, [tpFilters]);
 
-  // Уникальные значения из полного набора
   const getUniqueValues = (column) => {
     const values = [...new Set(allTimePointsData.map(d => d[column]).filter(v => v !== null && v !== undefined && v !== ''))];
     return values.sort();
@@ -335,7 +328,6 @@ export default function SgpAuditPage() {
     setActiveFilterColumn(null);
   };
 
-  // Локальная фильтрация
   const filteredTimePointsData = useMemo(() => {
     let result = allTimePointsData;
 
@@ -392,21 +384,20 @@ export default function SgpAuditPage() {
     setTimePointsPage(0);
   };
 
-  // ====== Функция получения текущего расположения для списка VIN ======
-  const fetchLocations = async (vinList) => {
+  // ====== Функция получения текущего расположения ======
+  const fetchCurrentLocations = async (vinList) => {
     if (!vinList || vinList.length === 0) return {};
     try {
       const uniqueVins = [...new Set(vinList.filter(v => v && v !== 'N/A'))];
       if (uniqueVins.length === 0) return {};
-      const params = new URLSearchParams({ vins: uniqueVins.join(',') });
-      const res = await fetch(`${API_BASE}/api/vehicles-current-location?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/api/vehicles-current-location?vins=${uniqueVins.join(',')}`);
       if (!res.ok) throw new Error('Ошибка загрузки локаций');
       const locationsArray = await res.json();
       const map = {};
-      locationsArray.forEach(item => { map[item.vin] = item.location; });
+      locationsArray.forEach(item => { map[item.vin] = item; });
       return map;
     } catch (err) {
-      console.error('Ошибка получения locations:', err);
+      console.error('Ошибка получения current locations:', err);
       return {};
     }
   };
@@ -432,11 +423,10 @@ export default function SgpAuditPage() {
       setNeighborData(json.data || []);
       setNeighborTargetTime(json.targetTime || null);
 
-      // Получаем location для всех соседей
       if (json.data && json.data.length > 0) {
         const vins = json.data.map(item => item.vin);
-        const locs = await fetchLocations(vins);
-        setNeighborLocations(locs);
+        const locInfo = await fetchCurrentLocations(vins);
+        setNeighborLocations(locInfo);
       }
     } catch (err) {
       console.error('Ошибка neighbors:', err);
@@ -452,18 +442,21 @@ export default function SgpAuditPage() {
     const exportData = neighborData.map(item => ({
       'VIN': item.vin,
       [`Время ${neighborCheckpoint}`]: formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time),
-      'Текущее расположение': neighborLocations[item.vin] || '—',
+      'Текущее расположение': neighborLocations[item.vin]
+        ? (neighborLocations[item.vin].isInStorage
+            ? neighborLocations[item.vin].storageString
+            : neighborLocations[item.vin].checkpoint || '-')
+        : '-',
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Соседи');
-    ws['!cols'] = [{ wch: 20 }, { wch: 25 }, { wch: 20 }];
+    ws['!cols'] = [{ wch: 20 }, { wch: 25 }, { wch: 25 }];
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     XLSX.writeFile(wb, `Соседи_${neighborCheckpoint}_${dateStr}.xlsx`);
   };
 
-  // Экспорт на холды
   const openExportModal = async () => {
     setShowExportModal(true);
     setExportReasonLoading(true);
@@ -624,12 +617,18 @@ export default function SgpAuditPage() {
       if (!res.ok) throw new Error('Ошибка получения данных');
       const json = await res.json();
       const data = Array.isArray(json) ? json : [];
-      setCpData(data);
+      const cleanedData = data.map(row => {
+        const newRow = { ...row };
+        Object.keys(newRow).forEach(key => {
+          if (newRow[key] === 'N/A') newRow[key] = '-';
+        });
+        return newRow;
+      });
+      setCpData(cleanedData);
 
-      // Получаем locations для VIN
-      const vins = data.map(row => row.VIN).filter(v => v && v !== 'N/A');
-      const locs = await fetchLocations(vins);
-      setCpLocations(locs);
+      const vins = cleanedData.map(row => row.VIN).filter(v => v && v !== '-');
+      const locInfo = await fetchCurrentLocations(vins);
+      setCpLocations(locInfo);
     } catch (err) {
       setCpError(err.message);
     } finally {
@@ -663,24 +662,100 @@ export default function SgpAuditPage() {
       const tableData = vins.map(vin => storageMap.has(vin) ? storageMap.get(vin) : {
         VIN: vin, Модель: 'N/A', Склад: 'N/A', Локация: 'N/A', Ячейка: 'N/A', 'Результат проверки': ''
       });
-      setCpData(tableData);
+      const cleanedData = tableData.map(row => {
+        const newRow = { ...row };
+        Object.keys(newRow).forEach(key => {
+          if (newRow[key] === 'N/A') newRow[key] = '-';
+        });
+        return newRow;
+      });
+      setCpData(cleanedData);
 
-      // Получаем locations для VIN
       const validVins = vins.filter(v => v && v !== 'N/A');
-      const locs = await fetchLocations(validVins);
-      setCpLocations(locs);
+      const locInfo = await fetchCurrentLocations(validVins);
+      setCpLocations(locInfo);
     } catch (err) { setCpError(err.message); } finally { setCpLoading(false); }
   };
 
   const handleFileUpload = async (e) => {
-    // ... (остальной код аналитики)
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const data = new Uint8Array(event.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+      if (json.length < 2) { alert('Файл должен содержать заголовки VIN и Результат'); return; }
+      const rows = json.slice(1).filter(row => row.length >= 2);
+      const parsed = rows.map(row => ({
+        vin: String(row[0]).trim(),
+        result: String(row[1]).trim().toUpperCase() === 'OK' ? 'OK' : 'NG',
+        date_uploaded: new Date().toISOString().split('T')[0],
+      }));
+      try {
+        const res = await fetch(`${API_BASE}/api/audit-results/upload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: parsed }),
+        });
+        if (!res.ok) throw new Error('Ошибка загрузки');
+        alert('Данные загружены!');
+        loadAnalytics();
+      } catch (err) { alert('Ошибка загрузки: ' + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
   };
 
   const loadAnalytics = async () => {
-    // ... (аналитика, временно скрыта)
+    if (!auditStartDate || !auditEndDate) { alert('Укажите период прохождения CP8'); return; }
+    setAuditLoading(true);
+    setAuditError(null);
+    try {
+      const vinsParams = new URLSearchParams({
+        checkpoint: 'Key_Uloc_Type_CP8',
+        dateFrom: `${auditStartDate} 00:00:00`,
+        dateTo: `${auditEndDate} 23:59:59`,
+      });
+      if (auditModel !== 'ALL') vinsParams.append('model', auditModel);
+      const vinsRes = await fetch(`${API_BASE}/api/sgp-audit-vins?${vinsParams.toString()}`);
+      if (!vinsRes.ok) throw new Error('Ошибка получения VIN CP8');
+      const cp8Vins = await vinsRes.json();
+      if (!cp8Vins.length) { setAuditAnalytics(null); setAuditDailyData([]); return; }
+
+      const storageRes = await fetch(`${API_BASE}/api/sgp-audit-storage?vins=${cp8Vins.join(',')}`);
+      if (!storageRes.ok) throw new Error('Ошибка получения склада');
+      const storageData = await storageRes.json();
+      const storageVins = new Set(storageData.map(item => item.VIN));
+
+      const auditRes = await fetch(`${API_BASE}/api/audit-results?result=${auditResultFilter}`);
+      if (!auditRes.ok) throw new Error('Ошибка получения аудитов');
+      const auditRows = await auditRes.json();
+      const auditMap = new Map(auditRows.map(r => [r.vin, r.result]));
+
+      const auditedVins = cp8Vins.filter(vin => auditMap.has(vin));
+      const totalCp8 = cp8Vins.length;
+      const onStorage = cp8Vins.filter(vin => storageVins.has(vin)).length;
+      const audited = auditedVins.length;
+      const notAudited = totalCp8 - audited;
+      const okCount = auditedVins.filter(vin => auditMap.get(vin) === 'OK').length;
+      const ngCount = audited - okCount;
+
+      setAuditAnalytics({ totalCp8, onStorage, audited, notAudited, ok: okCount, ng: ngCount });
+
+      const dailyMap = {};
+      auditRows.forEach(row => {
+        const date = row.date_uploaded;
+        if (!dailyMap[date]) dailyMap[date] = { date, total: 0, ok: 0, ng: 0 };
+        dailyMap[date].total++;
+        if (row.result === 'OK') dailyMap[date].ok++;
+        else dailyMap[date].ng++;
+      });
+      setAuditDailyData(Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date)));
+    } catch (err) { setAuditError(err.message); } finally { setAuditLoading(false); }
   };
 
-  // eslint-disable-next-line no-unused-vars
   useEffect(() => {
     if (activeTab === 'analytics' && auditStartDate && auditEndDate) { loadAnalytics(); }
   }, [auditStartDate, auditEndDate, auditModel, auditResultFilter, activeTab]);
@@ -804,7 +879,6 @@ export default function SgpAuditPage() {
         <button onClick={() => setActiveTab('neighbors')} style={tabStyle(activeTab === 'neighbors')}>
           Соседи по точке
         </button>
-        {/* Аналитика по аудиту — закомментирована */}
         {/* <button onClick={() => setActiveTab('analytics')} style={tabStyle(activeTab === 'analytics')}>
           Аналитика по аудиту
         </button> */}
@@ -1011,7 +1085,7 @@ export default function SgpAuditPage() {
         </div>
       )}
 
-      {/* ========== НОВАЯ ВКЛАДКА: СОСЕДИ ПО ТОЧКЕ ========== */}
+      {/* ========== Соседи по точке ========== */}
       {activeTab === 'neighbors' && (
         <div style={cardStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
@@ -1106,7 +1180,13 @@ export default function SgpAuditPage() {
                         <td style={tdStyle}>
                           {formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time)}
                         </td>
-                        <td style={tdStyle}>{neighborLocations[item.vin] || '—'}</td>
+                        <td style={tdStyle}>
+                          {neighborLocations[item.vin]
+                            ? neighborLocations[item.vin].isInStorage
+                              ? neighborLocations[item.vin].storageString
+                              : neighborLocations[item.vin].checkpoint || '-'
+                            : '-'}
+                        </td>
                       </tr>
                     );
                   })}
@@ -1223,8 +1303,18 @@ export default function SgpAuditPage() {
                         <tr key={i} style={{ backgroundColor: i % 2 ? '#F9FAFB' : '#FFFFFF' }}
                           onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
                           onMouseLeave={e => e.currentTarget.style.backgroundColor = i % 2 ? '#F9FAFB' : '#FFFFFF'}>
-                          {Object.keys(cpData[0]).map(key => <td key={key} style={tdStyle}>{row[key] ?? ''}</td>)}
-                          <td style={tdStyle}>{cpLocations[row.VIN] || '—'}</td>
+                          {Object.keys(cpData[0]).map(key => (
+                            <td key={key} style={tdStyle}>
+                              {row[key] === 'N/A' ? '-' : (row[key] ?? '')}
+                            </td>
+                          ))}
+                          <td style={tdStyle}>
+                            {cpLocations[row.VIN]
+                              ? cpLocations[row.VIN].isInStorage
+                                ? 'На складе'
+                                : cpLocations[row.VIN].checkpoint || '-'
+                              : '-'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1245,13 +1335,6 @@ export default function SgpAuditPage() {
           </div>
         </>
       )}
-
-      {/* Аналитика по аудиту — закомментирована */}
-      {/* {activeTab === 'analytics' && (
-        <div style={cardStyle}>
-          ...
-        </div>
-      )} */}
 
       {/* ========== Модальное окно экспорта на холды ========== */}
       {showExportModal && (

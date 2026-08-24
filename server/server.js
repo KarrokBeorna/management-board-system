@@ -4282,19 +4282,7 @@ app.get('/api/vehicles-current-location', async (req, res) => {
 
     const placeholders = vinList.map(() => '?').join(',');
 
-    // Получаем времена из MES
-    const mesPoints = {
-      CP5: 'AGMBS01002',
-      CP6: 'AGMPS01002',
-      TRIMIN: 'AGMAS01001',
-      CP7: 'AGMAS01003',
-      CP72: 'CP72',
-      CPFINAL: 'CPFINAL',
-      CP8: 'AGMAS01004',
-      // TLWA/TLRT/TLADAS/TLTT из IOT, но не из MES, так что отдельно
-    };
-
-    // MES
+    // 1. Получаем времена прохождения точек из MES
     const [mesRows] = await mesPool.query(
       `SELECT vin,
               MAX(IF(uloc_no = 'AGMBS01002', scan_time, NULL)) AS CP5,
@@ -4310,7 +4298,7 @@ app.get('/api/vehicles-current-location', async (req, res) => {
       vinList
     );
 
-    // IOT (TLWA, TLRT, TLADAS, TLTT)
+    // 2. Получаем TL-точки из IOT (основная БД)
     const [iotRows] = await pool.query(
       `SELECT wo.vin,
               MAX(IF(aow.wc_name = 'TLWA', aow.creation_time, NULL)) AS TLWA,
@@ -4324,35 +4312,64 @@ app.get('/api/vehicles-current-location', async (req, res) => {
       vinList
     );
 
-    // LES (Inbound, Outbound)
-    const [lesRows] = await lesPool.query(
-      `SELECT vin, in_storage_time, out_storage_time
+    // 3. Получаем складские данные
+    const [storageRows] = await lesPool.query(
+      `SELECT vin, ck_no, kq_no, kw_no
        FROM tv_biz_storage_car
        WHERE vin IN (${placeholders})`,
       vinList
     );
 
-    // Собираем карты
     const mesMap = new Map(mesRows.map(r => [r.vin, r]));
     const iotMap = new Map(iotRows.map(r => [r.vin, r]));
-    const lesMap = new Map(lesRows.map(r => [r.vin, r]));
+    const storageMap = new Map(storageRows.map(r => [r.vin, r]));
+
+    const checkpoints = ['CP5','CP6','TRIMIN','CP7','CP72','TLWA','TLRT','TLADAS','TLTT','CPFINAL','CP8'];
 
     const result = vinList.map(vin => {
       const m = mesMap.get(vin) || {};
       const i = iotMap.get(vin) || {};
-      const l = lesMap.get(vin) || {};
-      let location = 'Планирование';
-      if (l.out_storage_time) location = 'Продан';
-      else if (l.in_storage_time) location = 'На складе';
-      else if (m.CP8) location = 'CP8';
-      else if (m.CPFINAL) location = 'CPFINAL';
-      else if (i.TLWA || i.TLRT || i.TLADAS || i.TLTT) location = 'На тестах';
-      else if (m.CP72) location = 'CP72';
-      else if (m.CP7) location = 'CP7';
-      else if (m.TRIMIN) location = 'TRIMIN';
-      else if (m.CP6) location = 'CP6';
-      else if (m.CP5) location = 'CP5';
-      return { vin, location };
+      const s = storageMap.get(vin);
+
+      const times = {
+        CP5: m.CP5,
+        CP6: m.CP6,
+        TRIMIN: m.TRIMIN,
+        CP7: m.CP7,
+        CP72: m.CP72,
+        TLWA: i.TLWA,
+        TLRT: i.TLRT,
+        TLADAS: i.TLADAS,
+        TLTT: i.TLTT,
+        CPFINAL: m.CPFINAL,
+        CP8: m.CP8,
+      };
+
+      // Определяем последний пройденный чекпоинт
+      let latestCheckpoint = null;
+      let latestTime = null;
+      for (const cp of checkpoints) {
+        if (times[cp]) {
+          const t = new Date(times[cp]);
+          if (!latestTime || t > latestTime) {
+            latestTime = t;
+            latestCheckpoint = cp;
+          }
+        }
+      }
+
+      // Проверяем склад
+      const hasStorageData = s && s.ck_no && s.kq_no && s.kw_no &&
+                             s.ck_no !== 'N/A' && s.kq_no !== 'N/A' && s.kw_no !== 'N/A';
+      const isInStorage = !!hasStorageData;
+      const storageString = hasStorageData ? `${s.ck_no}-${s.kq_no}-${s.kw_no}` : null;
+
+      return {
+        vin,
+        isInStorage,
+        storageString,
+        checkpoint: latestCheckpoint,
+      };
     });
 
     res.json(result);
