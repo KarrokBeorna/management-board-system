@@ -931,7 +931,7 @@ export default function SgpAuditPage() {
           )}
 
           {/* Выпадающий фильтр */}
-          {activeFilterColumn && timePointsData.length > 0 && (
+          {activeFilterColumn && allTimePointsData.length > 0 && (
             <div 
               className="filter-dropdown"
               style={{
