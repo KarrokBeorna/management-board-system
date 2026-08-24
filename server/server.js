@@ -4282,7 +4282,7 @@ app.get('/api/vehicles-current-location', async (req, res) => {
 
     const placeholders = vinList.map(() => '?').join(',');
 
-    // 1. Получаем времена прохождения точек из MES
+    // 1. MES: времена прохождения точек
     const [mesRows] = await mesPool.query(
       `SELECT vin,
               MAX(IF(uloc_no = 'AGMBS01002', scan_time, NULL)) AS CP5,
@@ -4298,7 +4298,7 @@ app.get('/api/vehicles-current-location', async (req, res) => {
       vinList
     );
 
-    // 2. Получаем TL-точки из IOT (основная БД)
+    // 2. IOT: TL-точки
     const [iotRows] = await pool.query(
       `SELECT wo.vin,
               MAX(IF(aow.wc_name = 'TLWA', aow.creation_time, NULL)) AS TLWA,
@@ -4312,9 +4312,9 @@ app.get('/api/vehicles-current-location', async (req, res) => {
       vinList
     );
 
-    // 3. Получаем складские данные
+    // 3. LES: складские данные + out_storage_time
     const [storageRows] = await lesPool.query(
-      `SELECT vin, ck_no, kq_no, kw_no
+      `SELECT vin, ck_no, kq_no, kw_no, out_storage_time
        FROM tv_biz_storage_car
        WHERE vin IN (${placeholders})`,
       vinList
@@ -4345,7 +4345,7 @@ app.get('/api/vehicles-current-location', async (req, res) => {
         CP8: m.CP8,
       };
 
-      // Определяем последний пройденный чекпоинт
+      // Последний пройденный чекпоинт
       let latestCheckpoint = null;
       let latestTime = null;
       for (const cp of checkpoints) {
@@ -4358,17 +4358,22 @@ app.get('/api/vehicles-current-location', async (req, res) => {
         }
       }
 
-      // Проверяем склад
+      // Статус: продан?
+      const isSold = s && s.out_storage_time !== null && s.out_storage_time !== undefined;
+
+      // На складе?
       const hasStorageData = s && s.ck_no && s.kq_no && s.kw_no &&
                              s.ck_no !== 'N/A' && s.kq_no !== 'N/A' && s.kw_no !== 'N/A';
-      const isInStorage = !!hasStorageData;
+      const isInStorage = !isSold && hasStorageData;
+
       const storageString = hasStorageData ? `${s.ck_no}-${s.kq_no}-${s.kw_no}` : null;
 
       return {
         vin,
         isInStorage,
+        isSold,
         storageString,
-        checkpoint: latestCheckpoint,
+        checkpoint: isSold ? 'Продан' : (isInStorage ? null : latestCheckpoint),
       };
     });
 

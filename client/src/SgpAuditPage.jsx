@@ -163,7 +163,7 @@ export default function SgpAuditPage() {
   const [cpLoading, setCpLoading] = useState(false);
   const [cpError, setCpError] = useState(null);
   const [cpData, setCpData] = useState([]);
-  const [cpLocations, setCpLocations] = useState({});
+  const [cpLocations, setCpLocations] = useState({}); // vin -> {isInStorage, storageString, checkpoint, isSold}
   const [cpPage, setCpPage] = useState(0);
   const rowsPerPage = 100;
 
@@ -180,7 +180,7 @@ export default function SgpAuditPage() {
   const [neighborError, setNeighborError] = useState(null);
   const [neighborData, setNeighborData] = useState([]);
   const [neighborTargetTime, setNeighborTargetTime] = useState(null);
-  const [neighborLocations, setNeighborLocations] = useState({});
+  const [neighborLocations, setNeighborLocations] = useState({}); // vin -> {isInStorage, storageString, checkpoint, isSold}
 
   // Analytics (скрыта)
   const [auditStartDate, setAuditStartDate] = useState('');
@@ -390,14 +390,76 @@ export default function SgpAuditPage() {
     try {
       const uniqueVins = [...new Set(vinList.filter(v => v && v !== 'N/A'))];
       if (uniqueVins.length === 0) return {};
-      const res = await fetch(`${API_BASE}/api/vehicles-current-location?vins=${uniqueVins.join(',')}`);
-      if (!res.ok) throw new Error('Ошибка загрузки локаций');
-      const locationsArray = await res.json();
+
+      // Разбиваем на батчи по 200 VIN, чтобы избежать 431
+      const batchSize = 200;
+      const batches = [];
+      for (let i = 0; i < uniqueVins.length; i += batchSize) {
+        batches.push(uniqueVins.slice(i, i + batchSize));
+      }
+
+      const allResponses = await Promise.all(
+        batches.map(async (batch) => {
+          const res = await fetch(`${API_BASE}/api/vehicles-current-location?vins=${batch.join(',')}`);
+          if (!res.ok) throw new Error('Ошибка загрузки локаций');
+          return res.json();
+        })
+      );
+
       const map = {};
-      locationsArray.forEach(item => { map[item.vin] = item; });
+      allResponses.forEach((locationsArray) => {
+        locationsArray.forEach(item => { map[item.vin] = item; });
+      });
+
       return map;
     } catch (err) {
       console.error('Ошибка получения current locations:', err);
+      return {};
+    }
+  };
+
+  // ====== Функция получения данных склада (батчевая) ======
+  const fetchStorageLocations = async (vinList) => {
+    if (!vinList || vinList.length === 0) return {};
+    try {
+      const uniqueVins = [...new Set(vinList.filter(v => v && v !== 'N/A'))];
+      if (uniqueVins.length === 0) return {};
+
+      const batchSize = 200;
+      const batches = [];
+      for (let i = 0; i < uniqueVins.length; i += batchSize) {
+        batches.push(uniqueVins.slice(i, i + batchSize));
+      }
+
+      const allResponses = await Promise.all(
+        batches.map(async (batch) => {
+          const res = await fetch(`${API_BASE}/api/sgp-audit-storage?vins=${batch.join(',')}`);
+          if (!res.ok) throw new Error('Ошибка загрузки storage');
+          return res.json();
+        })
+      );
+
+      const map = {};
+      allResponses.forEach((storageRows) => {
+        storageRows.forEach(row => {
+          if (row.VIN) {
+            map[row.VIN] = {
+              Склад: row['Склад'] || '-',
+              Локация: row['Локация'] || '-',
+              Ячейка: row['Ячейка'] || '-',
+            };
+          }
+        });
+      });
+
+      // Для отсутствующих VIN ставим '-'
+      uniqueVins.forEach(vin => {
+        if (!map[vin]) map[vin] = { Склад: '-', Локация: '-', Ячейка: '-' };
+      });
+
+      return map;
+    } catch (err) {
+      console.error('Ошибка получения storage locations:', err);
       return {};
     }
   };
@@ -425,6 +487,7 @@ export default function SgpAuditPage() {
 
       if (json.data && json.data.length > 0) {
         const vins = json.data.map(item => item.vin);
+        // Получаем текущее расположение (чекпоинт или склад)
         const locInfo = await fetchCurrentLocations(vins);
         setNeighborLocations(locInfo);
       }
@@ -443,9 +506,9 @@ export default function SgpAuditPage() {
       'VIN': item.vin,
       [`Время ${neighborCheckpoint}`]: formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time),
       'Текущее расположение': neighborLocations[item.vin]
-        ? (neighborLocations[item.vin].isInStorage
-            ? neighborLocations[item.vin].storageString
-            : neighborLocations[item.vin].checkpoint || '-')
+        ? neighborLocations[item.vin].isInStorage
+          ? neighborLocations[item.vin].storageString
+          : neighborLocations[item.vin].checkpoint || '-'
         : '-',
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
@@ -655,13 +718,22 @@ export default function SgpAuditPage() {
       if (!vinsRes.ok) throw new Error(`Ошибка получения VIN: ${vinsRes.status}`);
       const vins = await vinsRes.json();
       if (!vins.length) { setCpData([]); setCpLocations({}); return; }
-      const storageRes = await fetch(`${API_BASE}/api/sgp-audit-storage?vins=${vins.join(',')}`);
-      if (!storageRes.ok) throw new Error(`Ошибка получения storage: ${storageRes.status}`);
-      const storageRows = await storageRes.json();
-      const storageMap = new Map(storageRows.map(r => [r.VIN, r]));
-      const tableData = vins.map(vin => storageMap.has(vin) ? storageMap.get(vin) : {
-        VIN: vin, Модель: 'N/A', Склад: 'N/A', Локация: 'N/A', Ячейка: 'N/A', 'Результат проверки': ''
+
+      // Загружаем данные склада батчами
+      const storageMap = await fetchStorageLocations(vins);
+
+      const tableData = vins.map(vin => {
+        const s = storageMap[vin];
+        return {
+          VIN: vin,
+          Модель: s ? s.Модель || (cpModel !== 'ALL' ? cpModel : '-') : '-',
+          Склад: s ? s.Склад : '-',
+          Локация: s ? s.Локация : '-',
+          Ячейка: s ? s.Ячейка : '-',
+          'Результат проверки': '',
+        };
       });
+
       const cleanedData = tableData.map(row => {
         const newRow = { ...row };
         Object.keys(newRow).forEach(key => {
@@ -669,8 +741,10 @@ export default function SgpAuditPage() {
         });
         return newRow;
       });
+
       setCpData(cleanedData);
 
+      // Получаем текущее расположение
       const validVins = vins.filter(v => v && v !== 'N/A');
       const locInfo = await fetchCurrentLocations(validVins);
       setCpLocations(locInfo);
@@ -1169,6 +1243,17 @@ export default function SgpAuditPage() {
                 <tbody>
                   {neighborData.map((item, idx) => {
                     const isTarget = item.vin === neighborVin;
+                    const loc = neighborLocations[item.vin];
+                    let displayLocation = '-';
+                    if (loc) {
+                      if (loc.isInStorage) {
+                        displayLocation = loc.storageString;
+                      } else if (loc.isSold) {
+                        displayLocation = 'Продан';
+                      } else {
+                        displayLocation = loc.checkpoint || '-';
+                      }
+                    }
                     return (
                       <tr 
                         key={idx} 
@@ -1180,13 +1265,7 @@ export default function SgpAuditPage() {
                         <td style={tdStyle}>
                           {formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time)}
                         </td>
-                        <td style={tdStyle}>
-                          {neighborLocations[item.vin]
-                            ? neighborLocations[item.vin].isInStorage
-                              ? neighborLocations[item.vin].storageString
-                              : neighborLocations[item.vin].checkpoint || '-'
-                            : '-'}
-                        </td>
+                        <td style={tdStyle}>{displayLocation}</td>
                       </tr>
                     );
                   })}
@@ -1299,24 +1378,27 @@ export default function SgpAuditPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {cpData.slice(cpPage * rowsPerPage, (cpPage + 1) * rowsPerPage).map((row, i) => (
-                        <tr key={i} style={{ backgroundColor: i % 2 ? '#F9FAFB' : '#FFFFFF' }}
-                          onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
-                          onMouseLeave={e => e.currentTarget.style.backgroundColor = i % 2 ? '#F9FAFB' : '#FFFFFF'}>
-                          {Object.keys(cpData[0]).map(key => (
-                            <td key={key} style={tdStyle}>
-                              {row[key] === 'N/A' ? '-' : (row[key] ?? '')}
-                            </td>
-                          ))}
-                          <td style={tdStyle}>
-                            {cpLocations[row.VIN]
-                              ? cpLocations[row.VIN].isInStorage
-                                ? 'На складе'
-                                : cpLocations[row.VIN].checkpoint || '-'
-                              : '-'}
-                          </td>
-                        </tr>
-                      ))}
+                      {cpData.slice(cpPage * rowsPerPage, (cpPage + 1) * rowsPerPage).map((row, i) => {
+                        const loc = cpLocations[row.VIN];
+                        let displayLocation = '-';
+                        if (loc) {
+                          if (loc.isInStorage) displayLocation = 'На складе';
+                          else if (loc.isSold) displayLocation = 'Продан';
+                          else displayLocation = loc.checkpoint || '-';
+                        }
+                        return (
+                          <tr key={i} style={{ backgroundColor: i % 2 ? '#F9FAFB' : '#FFFFFF' }}
+                            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
+                            onMouseLeave={e => e.currentTarget.style.backgroundColor = i % 2 ? '#F9FAFB' : '#FFFFFF'}>
+                            {Object.keys(cpData[0]).map(key => (
+                              <td key={key} style={tdStyle}>
+                                {row[key] === 'N/A' ? '-' : (row[key] ?? '')}
+                              </td>
+                            ))}
+                            <td style={tdStyle}>{displayLocation}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
