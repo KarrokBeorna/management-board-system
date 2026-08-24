@@ -190,6 +190,15 @@ const filterLabelStyle = {
   marginRight: 4,
 };
 
+// Стиль для полей ввода
+const inputStyle = {
+  padding: '8px 12px',
+  borderRadius: 8,
+  border: '1px solid #D1D5DB',
+  fontSize: 14,
+  background: '#F9FAFB',
+};
+
 // Стиль для меток в модальном окне
 const labelStyle = {
   display: 'flex',
