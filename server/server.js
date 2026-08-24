@@ -4273,6 +4273,95 @@ app.get('/api/time-point-neighbors', async (req, res) => {
   }
 });
 
+app.get('/api/vehicles-current-location', async (req, res) => {
+  try {
+    const { vins } = req.query;
+    if (!vins) return res.status(400).json({ error: 'vins обязателен' });
+    const vinList = vins.split(',').map(v => v.trim()).filter(Boolean);
+    if (vinList.length === 0) return res.json([]);
+
+    const placeholders = vinList.map(() => '?').join(',');
+
+    // Получаем времена из MES
+    const mesPoints = {
+      CP5: 'AGMBS01002',
+      CP6: 'AGMPS01002',
+      TRIMIN: 'AGMAS01001',
+      CP7: 'AGMAS01003',
+      CP72: 'CP72',
+      CPFINAL: 'CPFINAL',
+      CP8: 'AGMAS01004',
+      // TLWA/TLRT/TLADAS/TLTT из IOT, но не из MES, так что отдельно
+    };
+
+    // MES
+    const [mesRows] = await mesPool.query(
+      `SELECT vin,
+              MAX(IF(uloc_no = 'AGMBS01002', scan_time, NULL)) AS CP5,
+              MAX(IF(uloc_no = 'AGMPS01002', scan_time, NULL)) AS CP6,
+              MAX(IF(uloc_no = 'AGMAS01001', scan_time, NULL)) AS TRIMIN,
+              MAX(IF(uloc_no = 'AGMAS01003', scan_time, NULL)) AS CP7,
+              MAX(IF(uloc_no = 'CP72', scan_time, NULL)) AS CP72,
+              MAX(IF(uloc_no = 'CPFINAL', scan_time, NULL)) AS CPFINAL,
+              MAX(IF(uloc_no = 'AGMAS01004', scan_time, NULL)) AS CP8
+       FROM ti_mes_movement
+       WHERE vin IN (${placeholders}) AND is_deleted = 0
+       GROUP BY vin`,
+      vinList
+    );
+
+    // IOT (TLWA, TLRT, TLADAS, TLTT)
+    const [iotRows] = await pool.query(
+      `SELECT wo.vin,
+              MAX(IF(aow.wc_name = 'TLWA', aow.creation_time, NULL)) AS TLWA,
+              MAX(IF(aow.wc_name = 'TLRT', aow.creation_time, NULL)) AS TLRT,
+              MAX(IF(aow.wc_name = 'TLADAS', aow.creation_time, NULL)) AS TLADAS,
+              MAX(IF(aow.wc_name = 'TLTT', aow.creation_time, NULL)) AS TLTT
+       FROM work_order wo
+       LEFT JOIN at_om_wiptrackinghistory aow ON wo.vin = aow.vin
+       WHERE wo.vin IN (${placeholders})
+       GROUP BY wo.vin`,
+      vinList
+    );
+
+    // LES (Inbound, Outbound)
+    const [lesRows] = await lesPool.query(
+      `SELECT vin, in_storage_time, out_storage_time
+       FROM tv_biz_storage_car
+       WHERE vin IN (${placeholders})`,
+      vinList
+    );
+
+    // Собираем карты
+    const mesMap = new Map(mesRows.map(r => [r.vin, r]));
+    const iotMap = new Map(iotRows.map(r => [r.vin, r]));
+    const lesMap = new Map(lesRows.map(r => [r.vin, r]));
+
+    const result = vinList.map(vin => {
+      const m = mesMap.get(vin) || {};
+      const i = iotMap.get(vin) || {};
+      const l = lesMap.get(vin) || {};
+      let location = 'Планирование';
+      if (l.out_storage_time) location = 'Продан';
+      else if (l.in_storage_time) location = 'На складе';
+      else if (m.CP8) location = 'CP8';
+      else if (m.CPFINAL) location = 'CPFINAL';
+      else if (i.TLWA || i.TLRT || i.TLADAS || i.TLTT) location = 'На тестах';
+      else if (m.CP72) location = 'CP72';
+      else if (m.CP7) location = 'CP7';
+      else if (m.TRIMIN) location = 'TRIMIN';
+      else if (m.CP6) location = 'CP6';
+      else if (m.CP5) location = 'CP5';
+      return { vin, location };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка vehicles-current-location:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок
