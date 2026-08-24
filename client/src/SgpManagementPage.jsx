@@ -190,6 +190,16 @@ const filterLabelStyle = {
   marginRight: 4,
 };
 
+// Стиль для меток в модальном окне
+const labelStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  fontSize: 14,
+  color: '#4B5563',
+  fontWeight: 500,
+};
+
 export default function SgpManagementPage() {
   const [rawData, setRawData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -276,11 +286,10 @@ export default function SgpManagementPage() {
     return models;
   }, [rawData]);
 
+  // Количество уникальных VIN в In stock для модели
   const getInStockCount = (model) => {
-    if (model === 'ALL') {
-      return rawData.filter(d => d.storage_status === 'In stock').length;
-    }
-    return rawData.filter(d => d.model === model && d.storage_status === 'In stock').length;
+    const data = model === 'ALL' ? rawData : rawData.filter(d => d.model === model);
+    return new Set(data.filter(d => d.storage_status === 'In stock').map(d => d.vin)).size;
   };
 
   const filteredByModel = useMemo(() => {
@@ -309,13 +318,19 @@ export default function SgpManagementPage() {
     setHighlightedVin(null);
   }, [activeModel]);
 
+  // Статистика по уникальным VIN
   const stats = useMemo(() => {
-    const inStockData = filteredByModel.filter(d => d.storage_status === 'In stock');
-    const outboundData = filteredByModel.filter(d => d.storage_status === 'Outbound');
-    const totalInStock = inStockData.length;
-    const totalOutbound = outboundData.length;
-    const inStockBlock = inStockData.filter(d => d.block_status === 'Блок').length;
-    const inStockNotBlock = inStockData.filter(d => d.block_status === 'Не блок').length;
+    const uniqueVins = (arr) => new Set(arr.map(d => d.vin)).size;
+    
+    const inStockRows = filteredByModel.filter(d => d.storage_status === 'In stock');
+    const outboundRows = filteredByModel.filter(d => d.storage_status === 'Outbound');
+    
+    const totalInStock = uniqueVins(inStockRows);
+    const totalOutbound = uniqueVins(outboundRows);
+    
+    const inStockBlock = uniqueVins(inStockRows.filter(d => d.block_status === 'Блок'));
+    const inStockNotBlock = uniqueVins(inStockRows.filter(d => d.block_status === 'Не блок'));
+    
     return { totalInStock, totalOutbound, inStockBlock, inStockNotBlock };
   }, [filteredByModel]);
 
@@ -527,7 +542,7 @@ export default function SgpManagementPage() {
         })}
       </div>
 
-      {/* Иерархическая статистика */}
+      {/* Иерархическая статистика по уникальным VIN */}
       <div style={statsContainerStyle}>
         <div style={statsRowStyle}>
           <div style={statCardStyle('#10B981', '#F0FDF4')}>
