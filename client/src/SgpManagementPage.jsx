@@ -443,7 +443,6 @@ export default function SgpManagementPage() {
     const exportData = uniqueVins.map(vin => ({
         'VIN': vin,
         'Причина': finalReason,
-        'FE130': 'FE130',
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -451,7 +450,6 @@ export default function SgpManagementPage() {
     ws['!cols'] = [
       { wch: 20 },
       { wch: 60 },
-      { wch: 15 },
     ];
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
