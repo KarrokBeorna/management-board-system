@@ -436,10 +436,14 @@ export default function SgpManagementPage() {
   const handleExportToHoldsWithReason = () => {
     const finalReason = selectedReason || customReason;
     if (!finalReason) return;
-    const exportData = filteredData.map(d => ({
-      'VIN': d.vin,
-      'Причина': finalReason,
-      'FE130': 'FE130',
+    
+    // Извлекаем уникальные VIN
+    const uniqueVins = [...new Set(filteredData.map(d => d.vin))];
+    
+    const exportData = uniqueVins.map(vin => ({
+        'VIN': vin,
+        'Причина': finalReason,
+        'FE130': 'FE130',
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
