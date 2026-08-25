@@ -203,24 +203,38 @@ const getTimeRange = (timeFilter) => {
 export default function DrrCp7DashboardPage() {
   const [filter, setFilter] = useState('all');
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
-  const [data, setData] = useState({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
+  const [drrData, setDrrData] = useState({ totalVins: 0, closedVins: 0, drrPercent: 0 });
+  const [topDefects, setTopDefects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const loadData = async () => {
     setLoading(true);
+    setError(null);
     try {
       const { start, end } = getTimeRange(timeFilter);
-      const params = new URLSearchParams({
+
+      // Запрос DRR данных
+      const drrParams = new URLSearchParams({
         filter,
         startTime: start,
         endTime: end
       });
-      const res = await fetch(`${API_BASE}/api/drr-cp7-dashboard?${params.toString()}`);
-      if (!res.ok) throw new Error('Ошибка загрузки данных');
-      const json = await res.json();
-      setData(json);
-      setError(null);
+      const drrRes = await fetch(`${API_BASE}/api/drr-cp7-dashboard?${drrParams.toString()}`);
+      if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
+      const drrJson = await drrRes.json();
+      setDrrData(drrJson);
+
+      // Запрос топ дефектов (MPP)
+      const defectsParams = new URLSearchParams({
+        filter,
+        startTime: start,
+        endTime: end
+      });
+      const defectsRes = await fetch(`${API_BASE}/api/drr-cp7-top-defects?${defectsParams.toString()}`);
+      if (!defectsRes.ok) throw new Error('Ошибка загрузки топа дефектов');
+      const defectsJson = await defectsRes.json();
+      setTopDefects(defectsJson);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -234,11 +248,11 @@ export default function DrrCp7DashboardPage() {
     return () => clearInterval(interval);
   }, [filter, timeFilter]);
 
-  const nokVins = data.totalVins - data.closedVins;
+  const nokVins = drrData.totalVins - drrData.closedVins;
 
   const pieData = [
-    { name: 'DRR', value: data.drrPercent },
-    { name: 'Не прямой сход', value: Math.max(0, 100 - data.drrPercent) },
+    { name: 'DRR', value: drrData.drrPercent },
+    { name: 'Не прямой сход', value: Math.max(0, 100 - drrData.drrPercent) },
   ];
 
   return (
@@ -305,7 +319,7 @@ export default function DrrCp7DashboardPage() {
               }}>
                 <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
                 <div style={{ fontSize: '7.5rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
-                  {data.drrPercent.toFixed(1)}%
+                  {drrData.drrPercent.toFixed(1)}%
                 </div>
               </div>
             </div>
@@ -325,7 +339,7 @@ export default function DrrCp7DashboardPage() {
               }}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Всего авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
-                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.totalVins}</div>
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalVins}</div>
               </div>
               <div style={{ 
                 flex: 1, 
@@ -341,7 +355,7 @@ export default function DrrCp7DashboardPage() {
               }}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
-                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.closedVins}</div>
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.closedVins}</div>
               </div>
               <div style={{ 
                 flex: 1, 
@@ -368,17 +382,17 @@ export default function DrrCp7DashboardPage() {
               <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP7</h2>
               
               <div style={tableScrollStyle}>
-                {data.topDefects.length > 0 ? (
+                {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr>
-                        <th style={thStyle}>Описание дефекта</th>
+                        <th style={thStyle}>Описание дефекта (MPP)</th>
                         <th style={thStyle}>Класс</th>
                         <th style={thStyle}>Кол-во авто</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {data.topDefects.map((defect, idx) => (
+                      {topDefects.map((defect, idx) => (
                         <tr 
                           key={idx} 
                           style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}
@@ -387,7 +401,7 @@ export default function DrrCp7DashboardPage() {
                             ...tdStyle, 
                             boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none'
                           }}>
-                            {defect.description}
+                            {defect.mpp}
                           </td>
                           <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
                           <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '2rem', color: idx < 3 ? '#DC2626' : '#1E293B' }}>

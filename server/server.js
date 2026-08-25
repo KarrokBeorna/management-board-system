@@ -4433,7 +4433,7 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    // 1. Все VIN, прошедшие CP72 в заданном временном окне
+    // 1. Все VIN, прошедшие CP72 в заданном окне
     const [cp72Rows] = await pool.query(`
       SELECT VIN
       FROM at_om_wiptrackinghistory
@@ -4445,15 +4445,13 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
     const totalVins = cp72Rows.length;
 
     if (totalVins === 0) {
-      return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
+      return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0 });
     }
 
     // 2. Дефекты по выбранным постам и времени
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN,
-        d.PROBLEM_DESCRIPTION,
-        d.PROBLEM_GRADE,
         d.STATUS
       FROM at_qm_defect_info d
       WHERE d.POST_NAME IN (${postListStr})
@@ -4491,43 +4489,133 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
 
     const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
 
-    // 3. Топ дефектов среди незакрытых VIN
-    const notClosedVins = new Set(
-      cp72Rows
-        .filter(row => {
-          const stat = vinDefectMap.get(row.VIN);
-          return stat && stat.total > stat.closed;
-        })
-        .map(row => row.VIN)
-    );
-
-    const defectCountMap = new Map();
-    defectRows.forEach(row => {
-      if (!notClosedVins.has(row.VIN)) return;
-      const desc = row.PROBLEM_DESCRIPTION || 'Без описания';
-      if (!defectCountMap.has(desc)) {
-        defectCountMap.set(desc, { description: desc, grade: row.PROBLEM_GRADE || '-', affectedVins: new Set() });
-      }
-      defectCountMap.get(desc).affectedVins.add(row.VIN);
-    });
-
-    const topDefects = Array.from(defectCountMap.values())
-      .map(d => ({
-        description: d.description,
-        grade: d.grade,
-        affectedVins: d.affectedVins.size,
-      }))
-      .sort((a, b) => b.affectedVins - a.affectedVins)
-      .slice(0, 20); // Увеличено с 10 до 20
-
     res.json({
       totalVins,
       closedVins,
       drrPercent: Math.round(drrPercent * 10) / 10,
-      topDefects,
     });
   } catch (err) {
     console.error('Ошибка DRR CP7 Dashboard:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/drr-cp7-top-defects', async (req, res) => {
+  try {
+    const { filter = 'all', startTime, endTime } = req.query;
+
+    let rangeStart, rangeEnd;
+    if (startTime && endTime) {
+      rangeStart = startTime;
+      rangeEnd = endTime;
+    } else {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      rangeStart = `${y}-${m}-${d} 00:00:00`;
+      rangeEnd = `${y}-${m}-${d} 23:59:59`;
+    }
+
+    const postLists = {
+      all: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ],
+      cp7: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'EXT1', 'PIP2', 'PIP4', 'PIP9'
+      ],
+      pip: [
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ]
+    };
+
+    const postList = postLists[filter] || postLists.all;
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    // 1. VIN, прошедшие CP72 в окне
+    const [cp72Rows] = await pool.query(`
+      SELECT VIN
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND CREATION_TIME >= ?
+        AND CREATION_TIME <= ?
+      GROUP BY VIN
+    `, [rangeStart, rangeEnd]);
+
+    if (cp72Rows.length === 0) {
+      return res.json([]);
+    }
+
+    // 2. Все дефекты (выбранные посты) для этих VIN в окне
+    const [defectRows] = await pool.query(`
+      SELECT
+        d.VIN,
+        wo.MODEL,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.PROBLEM_GRADE,
+        d.STATUS
+      FROM at_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.POST_NAME IN (${postListStr})
+        AND d.CREATION_TIME >= ?
+        AND d.CREATION_TIME <= ?
+        AND d.VIN IN (
+          SELECT VIN FROM at_om_wiptrackinghistory
+          WHERE WC_NAME = 'CP72'
+            AND CREATION_TIME >= ?
+            AND CREATION_TIME <= ?
+        )
+    `, [rangeStart, rangeEnd, rangeStart, rangeEnd]);
+
+    // 3. Определяем VIN с незакрытыми дефектами
+    const vinStatusMap = new Map();
+    defectRows.forEach(row => {
+      const vin = row.VIN;
+      if (!vinStatusMap.has(vin)) {
+        vinStatusMap.set(vin, { hasOpen: false });
+      }
+      if (row.STATUS && row.STATUS.toLowerCase() !== 'closed') {
+        vinStatusMap.get(vin).hasOpen = true;
+      }
+    });
+
+    const openVins = new Set();
+    vinStatusMap.forEach((val, vin) => {
+      if (val.hasOpen) openVins.add(vin);
+    });
+
+    // 4. Группируем только открытые дефекты (незакрытые) по MPP
+    const defectGroupMap = new Map();
+    defectRows.forEach(row => {
+      if (!openVins.has(row.VIN)) return;
+      const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
+      if (!defectGroupMap.has(mpp)) {
+        defectGroupMap.set(mpp, {
+          mpp,
+          grade: row.PROBLEM_GRADE || '-',
+          affectedVins: new Set(),
+        });
+      }
+      defectGroupMap.get(mpp).affectedVins.add(row.VIN);
+    });
+
+    const topDefects = Array.from(defectGroupMap.values())
+      .map(d => ({
+        mpp: d.mpp,
+        grade: d.grade,
+        affectedVins: d.affectedVins.size,
+      }))
+      .sort((a, b) => b.affectedVins - a.affectedVins)
+      .slice(0, 20);
+
+    res.json(topDefects);
+  } catch (err) {
+    console.error('Ошибка DRR CP7 Top Defects:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
