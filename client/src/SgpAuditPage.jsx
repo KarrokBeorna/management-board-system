@@ -287,7 +287,7 @@ export default function SgpAuditPage() {
   }, [activeTab]);
 
   const hasAnyFilter = useMemo(() => {
-    return !!tpVinSearch ||
+    return !!tpVinSearch.trim() ||
       (Array.isArray(tpFilters.vin) && tpFilters.vin.length > 0) ||
       ['material_code', 'sequence_number', 'batch_num', 'kd_material_no', 'model', 'material_desc', 'colour', 'location'].some(f => tpFilters[f] && tpFilters[f].length > 0) ||
       Object.keys(tpFilters).some(key => key.match(/^(cp5|cp6|trimIn|cp7|cp72|tlwa|tlrt|tladas|tltt|cpFinal|cp8|inbound|outbound)(From|To)$/));
@@ -339,7 +339,7 @@ export default function SgpAuditPage() {
       result = result.filter(d => d.vin && d.vin.toLowerCase().includes(vinFilter));
     }
 
-    // Множественный фильтр по VIN
+    // Множественный фильтр по VIN (если он выбран из заголовка)
     if (Array.isArray(tpFilters.vin) && tpFilters.vin.length > 0) {
       result = result.filter(d => tpFilters.vin.includes(d.vin));
     }
