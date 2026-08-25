@@ -4397,6 +4397,107 @@ app.get('/api/vehicles-models', async (req, res) => {
   }
 });
 
+app.get('/api/drr-cp7-dashboard', async (req, res) => {
+  try {
+    const { filter = 'all' } = req.query;
+
+    // Список постов для фильтров
+    const postLists = {
+      all: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ],
+      cp7: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'EXT1', 'PIP2', 'PIP4', 'PIP9'
+      ],
+      pip: [
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ]
+    };
+
+    const postList = postLists[filter] || postLists.all;
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    const sql = `
+      WITH cp72_vins AS (
+          SELECT 
+              VIN,
+              MIN(CREATION_TIME) AS CP72_TIME
+          FROM at_om_wiptrackinghistory
+          WHERE WC_NAME = 'CP72'
+            AND DATE(CREATION_TIME) = CURDATE()
+          GROUP BY VIN
+      ),
+      defect_summary AS (
+          SELECT 
+              VIN,
+              COUNT(*) AS total_defects,
+              SUM(CASE WHEN LOWER(STATUS) = 'closed' THEN 1 ELSE 0 END) AS closed_defects
+          FROM at_qm_defect_info
+          GROUP BY VIN
+      )
+      SELECT 
+          d.VIN,
+          d.PROBLEM_DESCRIPTION,
+          d.PROBLEM_GRADE,
+          d.STATUS,
+          d.CREATION_TIME,
+          d.LAST_MODIFIED_TIME AS STATUS_TIME,
+          cp.CP72_TIME,
+          CASE 
+              WHEN ds.total_defects = ds.closed_defects THEN 1 
+              ELSE 0 
+          END AS ALL_DEFECTS_CLOSED
+      FROM at_qm_defect_info d
+      JOIN cp72_vins cp ON d.VIN = cp.VIN
+      LEFT JOIN defect_summary ds ON d.VIN = ds.VIN
+      WHERE d.POST_NAME IN (${postListStr})
+      ORDER BY d.VIN, d.CREATION_TIME
+    `;
+
+    const [rows] = await pool.query(sql);
+
+    if (!rows.length) {
+      return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
+    }
+
+    // Уникальные VIN
+    const uniqueVins = [...new Set(rows.map(r => r.VIN))];
+    const closedVins = [...new Set(rows.filter(r => r.ALL_DEFECTS_CLOSED === 1).map(r => r.VIN))];
+    const totalVins = uniqueVins.length;
+    const closedCount = closedVins.length;
+    const drrPercent = totalVins > 0 ? (closedCount / totalVins) * 100 : 0;
+
+    // Топ дефектов среди VIN, у которых не все закрыты
+    const notClosedRows = rows.filter(r => r.ALL_DEFECTS_CLOSED === 0);
+    const defectMap = {};
+    notClosedRows.forEach(r => {
+      const key = r.PROBLEM_DESCRIPTION || 'Без описания';
+      if (!defectMap[key]) {
+        defectMap[key] = { description: key, affectedVins: new Set(), grade: r.PROBLEM_GRADE || '-' };
+      }
+      defectMap[key].affectedVins.add(r.VIN);
+    });
+
+    const topDefects = Object.values(defectMap)
+      .map(d => ({
+        description: d.description,
+        grade: d.grade,
+        affectedVins: d.affectedVins.size,
+      }))
+      .sort((a, b) => b.affectedVins - a.affectedVins)
+      .slice(0, 10);
+
+    res.json({ totalVins, closedVins: closedCount, drrPercent: Math.round(drrPercent * 10) / 10, topDefects });
+  } catch (err) {
+    console.error('Ошибка DRR CP7 Dashboard:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок

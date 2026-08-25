@@ -15,6 +15,7 @@ import WarrantyPage from './WarrantyPage';
 import TLMapPage from './TLMapPage';
 import HoldsSgpPage from './HoldsSgpPage';
 import SgpManagementPage from './SgpManagementPage';
+import DrrCp7DashboardPage from './DrrCp7DashboardPage';
 import favicon from './assets/weblog.png';
 
 export default function App() {
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/warranty" element={<WarrantyPage />} />
         <Route path="/tl-map" element={<TLMapPage />} />
         <Route path="/holds-sgp" element={<HoldsSgpPage />} />
+        <Route path="/drr-cp7-dashboard" element={<DrrCp7DashboardPage />} />
       </Route>
     </Routes>
   );

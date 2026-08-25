@@ -14,7 +14,9 @@ import externalDReportPreview from './assets/dim.png';
 import warrantyPreview from './assets/waran.png';
 import tlMapPreview from './assets/tlmap.png';
 import HoldsSgpPage from './assets/hold.png';
-import sgpManagementPreview from './assets/cp8.png'; // Добавьте вашу картинку
+import sgpManagementPreview from './assets/cp8.png';
+//import drrReportPreview from './assets/123.png'; 
+//<ReportCard to="/drr-cp7-dashboard" imgSrc={drrReportPreview} caption="DRR CP7 Dashboard" accentColor="#3B82F6" />
 
 // ====== СТИЛИ ======
 const sectionStyle = {
