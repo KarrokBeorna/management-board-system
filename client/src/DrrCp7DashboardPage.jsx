@@ -293,8 +293,8 @@ export default function DrrCp7DashboardPage() {
 
             {/* Подписи под графиком */}
             <div style={pieLegendStyle}>
-              <span style={{ color: '#10B981' }}>DRR, %: {data.drrPercent.toFixed(1)}%</span>
-              <span style={{ color: '#EF4444' }}>Не прямой сход, %: {(100 - data.drrPercent).toFixed(1)}%</span>
+              <span style={{ color: '#10B981' }}>DRR: {data.drrPercent.toFixed(1)}%</span>
+              <span style={{ color: '#EF4444' }}>Не прямой сход: {(100 - data.drrPercent).toFixed(1)}%</span>
             </div>
           </div>
 
