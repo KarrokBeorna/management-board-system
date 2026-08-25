@@ -150,6 +150,7 @@ export default function SgpAuditPage() {
   const timePointsPageSize = 50;
 
   const [tpFilters, setTpFilters] = useState({});
+  const [tpVinSearch, setTpVinSearch] = useState(''); // отдельное состояние для текстового поиска VIN
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
 
@@ -286,10 +287,11 @@ export default function SgpAuditPage() {
   }, [activeTab]);
 
   const hasAnyFilter = useMemo(() => {
-    return !!tpFilters.vin ||
+    return !!tpVinSearch ||
+      (Array.isArray(tpFilters.vin) && tpFilters.vin.length > 0) ||
       ['material_code', 'sequence_number', 'batch_num', 'kd_material_no', 'model', 'material_desc', 'colour', 'location'].some(f => tpFilters[f] && tpFilters[f].length > 0) ||
       Object.keys(tpFilters).some(key => key.match(/^(cp5|cp6|trimIn|cp7|cp72|tlwa|tlrt|tladas|tltt|cpFinal|cp8|inbound|outbound)(From|To)$/));
-  }, [tpFilters]);
+  }, [tpFilters, tpVinSearch]);
 
   const getUniqueValues = (column) => {
     const values = [...new Set(allTimePointsData.map(d => d[column]).filter(v => v !== null && v !== undefined && v !== ''))];
@@ -331,9 +333,15 @@ export default function SgpAuditPage() {
   const filteredTimePointsData = useMemo(() => {
     let result = allTimePointsData;
 
-    if (tpFilters.vin) {
-      const vinFilter = tpFilters.vin.toLowerCase();
+    // Текстовый поиск VIN
+    if (tpVinSearch.trim()) {
+      const vinFilter = tpVinSearch.trim().toLowerCase();
       result = result.filter(d => d.vin && d.vin.toLowerCase().includes(vinFilter));
+    }
+
+    // Множественный фильтр по VIN
+    if (Array.isArray(tpFilters.vin) && tpFilters.vin.length > 0) {
+      result = result.filter(d => tpFilters.vin.includes(d.vin));
     }
 
     ['material_code', 'sequence_number', 'batch_num', 'kd_material_no', 'model', 'material_desc', 'colour', 'location'].forEach(field => {
@@ -371,7 +379,7 @@ export default function SgpAuditPage() {
     });
 
     return result;
-  }, [allTimePointsData, tpFilters]);
+  }, [allTimePointsData, tpFilters, tpVinSearch]);
 
   useEffect(() => {
     setTimePointsData(filteredTimePointsData);
@@ -380,6 +388,7 @@ export default function SgpAuditPage() {
 
   const handleTpClear = () => {
     setTpFilters({});
+    setTpVinSearch('');
     setTimePointsData(allTimePointsData);
     setTimePointsPage(0);
   };
@@ -753,27 +762,36 @@ export default function SgpAuditPage() {
     setCpLoading(true);
     setCpError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/sgp-audit-storage?vin=${encodeURIComponent(vinSearch.trim())}`);
-      if (!res.ok) throw new Error('Ошибка получения данных');
-      const json = await res.json();
-      const data = Array.isArray(json) ? json : [];
-      const cleanedData = data.map(row => {
-        const newRow = { ...row };
-        Object.keys(newRow).forEach(key => {
-          if (newRow[key] === 'N/A') newRow[key] = '-';
-        });
-        return newRow;
-      });
-      const vins = cleanedData.map(row => row.VIN).filter(v => v && v !== '-');
-      const modelsMap = await fetchModels(vins);
-      const enrichedData = cleanedData.map(row => ({
-        ...row,
-        Модель: modelsMap[row.VIN] || (row.Модель && row.Модель !== '-' ? row.Модель : '-'),
-      }));
-      setCpData(enrichedData);
+      const vin = vinSearch.trim();
 
-      const locInfo = await fetchCurrentLocations(vins);
-      setCpLocations(locInfo);
+      // Получаем текущее расположение
+      const locRes = await fetch(`${API_BASE}/api/vehicles-current-location?vins=${encodeURIComponent(vin)}`);
+      const locArray = await locRes.json();
+      const loc = locArray.length > 0 ? locArray[0] : null;
+
+      // Получаем модель
+      const modelRes = await fetch(`${API_BASE}/api/vehicles-models?vins=${encodeURIComponent(vin)}`);
+      const modelMap = await modelRes.json();
+      const model = modelMap[vin] || '-';
+
+      // Получаем складские данные (если есть)
+      const storageRes = await fetch(`${API_BASE}/api/sgp-audit-storage?vin=${encodeURIComponent(vin)}`);
+      const storageData = await storageRes.json();
+      const storageRow = storageData && storageData.length > 0 ? storageData[0] : null;
+
+      const rowData = {
+        VIN: vin,
+        Модель: model,
+        Склад: storageRow?.Склад || '-',
+        Локация: storageRow?.Локация || '-',
+        Ячейка: storageRow?.Ячейка || '-',
+        'Результат проверки': '',
+      };
+
+      Object.keys(rowData).forEach(k => { if (rowData[k] === 'N/A') rowData[k] = '-'; });
+
+      setCpData([rowData]);
+      setCpLocations({ [vin]: loc });
     } catch (err) {
       setCpError(err.message);
     } finally {
@@ -835,11 +853,11 @@ export default function SgpAuditPage() {
   };
 
   const handleFileUpload = async (e) => {
-    // ... (как раньше)
+    // ... (аналитика скрыта)
   };
 
   const loadAnalytics = async () => {
-    // ... (как раньше)
+    // ... (аналитика скрыта)
   };
 
   useEffect(() => {
@@ -990,22 +1008,14 @@ export default function SgpAuditPage() {
             </div>
           </div>
 
-          {/* VIN поиск */}
+          {/* VIN поиск (текстовое поле) */}
           <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
               🔍 VIN:
               <input
                 type="text"
-                value={tpFilters.vin || ''}
-                onChange={(e) => setTpFilters(prev => {
-                  const newPrev = { ...prev };
-                  if (e.target.value) {
-                    newPrev.vin = e.target.value;
-                  } else {
-                    delete newPrev.vin;
-                  }
-                  return newPrev;
-                })}
+                value={tpVinSearch}
+                onChange={(e) => setTpVinSearch(e.target.value)}
                 placeholder="Введите VIN..."
                 style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14, background: '#F9FAFB', width: 200 }}
               />
