@@ -3,7 +3,6 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 
-// ====== ГЛАВНЫЙ КОНТЕЙНЕР ======
 const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
@@ -129,7 +128,6 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
-// Функция определения дефолтного временного фильтра
 const getDefaultTimeFilter = () => {
   const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
   const hours = nowMoscow.getUTCHours();
@@ -143,7 +141,6 @@ const getDefaultTimeFilter = () => {
   }
 };
 
-// Функция вычисления границ временного интервала
 const getTimeRange = (timeFilter) => {
   const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
   const year = nowMoscow.getUTCFullYear();
@@ -272,9 +269,7 @@ export default function DrrCp7DashboardPage() {
           
           {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart + цветные блоки */}
           <div style={chartColumnStyle}>
-            <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', margin: '0 0 20px 0' }}>Доли DRR CP7</h2>
-            
-            <div style={{ position: 'relative', width: '100%', height: '500px' }}>
+            <div style={{ position: 'relative', width: '100%', height: '600px' }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -283,8 +278,8 @@ export default function DrrCp7DashboardPage() {
                     nameKey="name"
                     cx="50%"
                     cy="50%"
-                    innerRadius="55%"
-                    outerRadius="90%"
+                    innerRadius="60%"
+                    outerRadius="88%"
                     paddingAngle={4}
                     stroke="#FFFFFF"
                     strokeWidth={4}
@@ -300,7 +295,6 @@ export default function DrrCp7DashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
               
-              {/* ЦИФРА В ЦЕНТРЕ: DRR% */}
               <div style={{
                 position: 'absolute',
                 top: '50%',
@@ -310,13 +304,12 @@ export default function DrrCp7DashboardPage() {
                 pointerEvents: 'none',
               }}>
                 <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
-                <div style={{ fontSize: '4.3rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
+                <div style={{ fontSize: '7.5rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {data.drrPercent.toFixed(1)}%
                 </div>
               </div>
             </div>
 
-            {/* ЦВЕТНЫЕ БЛОКИ ПОД ДИАГРАММОЙ */}
             <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
               <div style={{ 
                 flex: 1, 
@@ -330,7 +323,7 @@ export default function DrrCp7DashboardPage() {
                 flexDirection: 'column', 
                 justifyContent: 'center' 
               }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Всего авто</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Всего авто, прошедших CP72</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.totalVins}</div>
               </div>
