@@ -4171,28 +4171,22 @@ app.get('/api/time-point-neighbors', async (req, res) => {
     const afterLimit = parseInt(limitAfter, 10) || 100;
     const targetVin = vin.trim();
 
-    // ===== 1. Точки из MES (ti_mes_movement) =====
     const mesPoints = {
-      CP5:      'AGMBS01002',
-      CP6:      'AGMPS01002',
-      TRIMIN:   'AGMAS01001',
-      CP7:      'AGMAS01003',
-      CP72:     'CP72',
-      CPFINAL:  'CPFINAL',
-      CP8:      'AGMAS01004',
+      CP5: 'AGMBS01002',
+      CP6: 'AGMPS01002',
+      TRIMIN: 'AGMAS01001',
+      CP7: 'AGMAS01003',
+      CP72: 'CP72',
+      CPFINAL: 'CPFINAL',
+      CP8: 'AGMAS01004',
     };
-
-    // ===== 2. Точки из IOT/основной БД (at_om_wiptrackinghistory) =====
     const iotPoints = ['TLWA', 'TLRT', 'TLADAS', 'TLTT'];
-
-    // ===== 3. Точки из LES (tv_biz_storage_car) =====
     const lesPoints = ['Inbound', 'Outbound'];
 
     let rows;
     let targetTime = null;
 
     if (mesPoints[checkpoint]) {
-      // --- MES ---
       const uloc = mesPoints[checkpoint];
       const [targetRows] = await mesPool.query(
         `SELECT MAX(scan_time) AS point_time FROM ti_mes_movement WHERE vin = ? AND uloc_no = ? AND is_deleted = 0`,
@@ -4218,9 +4212,8 @@ app.get('/api/time-point-neighbors', async (req, res) => {
       const [resultRows] = await mesPool.query(sql, [uloc, targetTime, beforeLimit, targetTime, afterLimit]);
       rows = resultRows;
     } else if (iotPoints.includes(checkpoint)) {
-      // --- IOT (основная БД pool) ---
       const [targetRows] = await pool.query(
-        `SELECT MAX(creation_time) AS point_time FROM at_om_wiptrackinghistory WHERE vin = ? AND wc_name = ?`,
+        `SELECT MAX(CREATION_TIME) AS point_time FROM at_om_wiptrackinghistory WHERE vin = ? AND WC_NAME = ?`,
         [targetVin, checkpoint]
       );
       targetTime = targetRows[0]?.point_time;
@@ -4228,9 +4221,9 @@ app.get('/api/time-point-neighbors', async (req, res) => {
 
       const sql = `
         WITH all_points AS (
-          SELECT vin, MAX(creation_time) AS point_time
+          SELECT vin, MAX(CREATION_TIME) AS point_time
           FROM at_om_wiptrackinghistory
-          WHERE wc_name = ?
+          WHERE WC_NAME = ?
           GROUP BY vin
         )
         SELECT vin, point_time FROM (
@@ -4243,7 +4236,6 @@ app.get('/api/time-point-neighbors', async (req, res) => {
       const [resultRows] = await pool.query(sql, [checkpoint, targetTime, beforeLimit, targetTime, afterLimit]);
       rows = resultRows;
     } else if (lesPoints.includes(checkpoint)) {
-      // --- LES ---
       const column = checkpoint === 'Inbound' ? 'in_storage_time' : 'out_storage_time';
       const [targetRows] = await lesPool.query(
         `SELECT ${column} AS point_time FROM tv_biz_storage_car WHERE vin = ? LIMIT 1`,
@@ -4298,13 +4290,13 @@ app.get('/api/vehicles-current-location', async (req, res) => {
       vinList
     );
 
-    // 2. IOT: TL-точки
+    // 2. IOT: TL-точки (используем WC_NAME)
     const [iotRows] = await pool.query(
       `SELECT wo.vin,
-              MAX(IF(aow.wc_name = 'TLWA', aow.creation_time, NULL)) AS TLWA,
-              MAX(IF(aow.wc_name = 'TLRT', aow.creation_time, NULL)) AS TLRT,
-              MAX(IF(aow.wc_name = 'TLADAS', aow.creation_time, NULL)) AS TLADAS,
-              MAX(IF(aow.wc_name = 'TLTT', aow.creation_time, NULL)) AS TLTT
+              MAX(IF(aow.WC_NAME = 'TLWA', aow.CREATION_TIME, NULL)) AS TLWA,
+              MAX(IF(aow.WC_NAME = 'TLRT', aow.CREATION_TIME, NULL)) AS TLRT,
+              MAX(IF(aow.WC_NAME = 'TLADAS', aow.CREATION_TIME, NULL)) AS TLADAS,
+              MAX(IF(aow.WC_NAME = 'TLTT', aow.CREATION_TIME, NULL)) AS TLTT
        FROM work_order wo
        LEFT JOIN at_om_wiptrackinghistory aow ON wo.vin = aow.vin
        WHERE wo.vin IN (${placeholders})
@@ -4345,7 +4337,6 @@ app.get('/api/vehicles-current-location', async (req, res) => {
         CP8: m.CP8,
       };
 
-      // Последний пройденный чекпоинт
       let latestCheckpoint = null;
       let latestTime = null;
       for (const cp of checkpoints) {
@@ -4358,14 +4349,10 @@ app.get('/api/vehicles-current-location', async (req, res) => {
         }
       }
 
-      // Статус: продан?
       const isSold = s && s.out_storage_time !== null && s.out_storage_time !== undefined;
-
-      // На складе?
       const hasStorageData = s && s.ck_no && s.kq_no && s.kw_no &&
                              s.ck_no !== 'N/A' && s.kq_no !== 'N/A' && s.kw_no !== 'N/A';
       const isInStorage = !isSold && hasStorageData;
-
       const storageString = hasStorageData ? `${s.ck_no}-${s.kq_no}-${s.kw_no}` : null;
 
       return {
