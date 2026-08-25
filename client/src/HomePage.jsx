@@ -15,8 +15,7 @@ import warrantyPreview from './assets/waran.png';
 import tlMapPreview from './assets/tlmap.png';
 import HoldsSgpPage from './assets/hold.png';
 import sgpManagementPreview from './assets/cp8.png';
-//import drrReportPreview from './assets/123.png'; 
-//<ReportCard to="/drr-cp7-dashboard" imgSrc={drrReportPreview} caption="DRR CP7 Dashboard" accentColor="#3B82F6" />
+import drrReportPreview from './assets/cp7drr.png'; 
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -255,6 +254,7 @@ export default function HomePage() {
           <ReportCard to="/drr-report" imgSrc={drrReportPreview} caption="DRR Report" accentColor="#fa0000" />
           <ReportCard to="/daily-dashboard" imgSrc={dailyDashboardPreview} caption="Daily Dashboard" accentColor="#0cb428" />
           <ReportCard to="/tl-map" imgSrc={tlMapPreview} caption="TL Map" accentColor="#0ad5c8" />
+          <ReportCard to="/drr-cp7-dashboard" imgSrc={drrReportPreview} caption="DRR CP7 Dashboard" accentColor="#3a2ac5" />
         </div>
       </AnimatedSection>
 
