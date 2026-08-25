@@ -16,7 +16,6 @@ const containerStyle = {
   overflow: 'hidden',
 };
 
-// ====== ШАПКА ======
 const headerStyle = {
   display: 'flex',
   alignItems: 'center',
@@ -45,7 +44,6 @@ const filterButtonStyle = (active) => ({
   marginLeft: '10px',
 });
 
-// ====== ОСНОВНАЯ СЕТКА ======
 const dashboardGridStyle = {
   display: 'flex',
   gap: '20px',
@@ -60,7 +58,6 @@ const chartColumnStyle = {
   padding: '24px',
   display: 'flex',
   flexDirection: 'column',
-  justifyContent: 'center',
   boxShadow: '0 8px 30px rgba(0,0,0,0.05)',
   minHeight: 0,
 };
@@ -73,7 +70,7 @@ const rightColumnStyle = {
   minHeight: 0,
 };
 
-// ====== KPI БЛОКИ (Жесткая структура: подпись 2 строки, линия, цифра) ======
+// ====== KPI БЛОКИ ======
 const kpiRowStyle = {
   display: 'flex',
   gap: '20px',
@@ -88,22 +85,22 @@ const kpiCardStyle = (color) => ({
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  justifyContent: 'space-between', // Распределяем по высоте
+  justifyContent: 'space-between',
   boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
   color: '#FFFFFF',
   textAlign: 'center',
-  height: '180px', // Фиксируем высоту, чтобы ничего не прыгало
+  height: '180px',
 });
 
 const kpiLabelStyle = {
-  fontSize: '1.5rem', // Уменьшаем, чтобы влезали длинные подписи
+  fontSize: '1.5rem',
   fontWeight: 600,
   opacity: 0.95,
   lineHeight: 1.3,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  flex: 1, // Подпись занимает верхнюю часть
+  flex: 1,
   width: '100%',
 };
 
@@ -111,7 +108,7 @@ const separatorStyle = {
   width: '80%',
   height: '2px',
   backgroundColor: 'rgba(255, 255, 255, 0.3)',
-  margin: '8px 0', // Разделитель между подписью и цифрой
+  margin: '8px 0',
 };
 
 const kpiValueStyle = {
@@ -121,7 +118,7 @@ const kpiValueStyle = {
   paddingBottom: '10px',
 };
 
-// ====== ТАБЛИЦА (Полная, со скроллом) ======
+// ====== ТАБЛИЦА (Убрал красную линию из tr, теперь она в td) ======
 const tableCardStyle = {
   flex: 2,
   backgroundColor: '#FFFFFF',
@@ -170,6 +167,16 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
+// Стиль для блока подписей под графиком
+const pieLegendStyle = {
+  display: 'flex',
+  justifyContent: 'center',
+  gap: '30px',
+  marginTop: '10px',
+  fontSize: '1.6rem',
+  fontWeight: 'bold',
+};
+
 export default function DrrCp7DashboardPage() {
   const [filter, setFilter] = useState('all');
   const [data, setData] = useState({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
@@ -178,6 +185,9 @@ export default function DrrCp7DashboardPage() {
 
   const loadData = async () => {
     try {
+      // Искусственная задержка 2.5 секунды
+      await new Promise(resolve => setTimeout(resolve, 2500)); 
+      
       const res = await fetch(`${API_BASE}/api/drr-cp7-dashboard?filter=${filter}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
@@ -191,6 +201,7 @@ export default function DrrCp7DashboardPage() {
   };
 
   useEffect(() => {
+    setLoading(true); // Включаем загрузку перед запросом
     loadData();
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
@@ -200,28 +211,6 @@ export default function DrrCp7DashboardPage() {
     { name: 'DRR, %', value: data.drrPercent },
     { name: 'Не прямой сход, %', value: Math.max(0, 100 - data.drrPercent) },
   ];
-
-  // Кастомный рендер подписей Pie chart, чтобы они не обрезались
-  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
-    const RADIAN = Math.PI / 180;
-    const radius = outerRadius + 25; // Отодвигаем подпись дальше от кольца
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-    return (
-      <text
-        x={x}
-        y={y}
-        fill={name === 'DRR, %' ? '#10B981' : '#EF4444'}
-        textAnchor={x > cx ? 'start' : 'end'}
-        dominantBaseline="central"
-        fontSize="1.6rem"
-        fontWeight="bold"
-      >
-        {`${name}: ${(percent * 100).toFixed(1)}%`}
-      </text>
-    );
-  };
 
   return (
     <div style={containerStyle}>
@@ -245,26 +234,25 @@ export default function DrrCp7DashboardPage() {
       ) : (
         <div style={dashboardGridStyle}>
           
-          {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart */}
+          {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart (обычный, без кастомных обрезанных лейблов) */}
           <div style={chartColumnStyle}>
             <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', margin: '0 0 20px 0' }}>DRR распределение</h2>
             
-            <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: '350px' }}>
+            <div style={{ position: 'relative', width: '100%', height: '400px' }}>
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart margin={{ top: 50, right: 50, bottom: 50, left: 50 }}>
+                <PieChart>
                   <Pie
                     data={pieData}
                     dataKey="value"
                     nameKey="name"
                     cx="50%"
                     cy="50%"
-                    innerRadius="50%"
-                    outerRadius="60%" // Уменьшаем радиус, чтобы подписи влезали
+                    innerRadius="55%"
+                    outerRadius="80%"
                     paddingAngle={4}
                     stroke="#FFFFFF"
                     strokeWidth={4}
-                    label={renderCustomLabel}
-                    labelLine={false}
+                    // Убрали label и labelLine - подписи будут снизу!
                   >
                     {pieData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
@@ -277,7 +265,7 @@ export default function DrrCp7DashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
               
-              {/* Цифра в центре */}
+              {/* Цифра по центру (Без анимации, появляется с задержкой загрузки) */}
               <div style={{
                 position: 'absolute',
                 top: '50%',
@@ -285,14 +273,17 @@ export default function DrrCp7DashboardPage() {
                 transform: 'translate(-50%, -50%)',
                 textAlign: 'center',
                 pointerEvents: 'none',
-                animation: 'fadeIn 1s ease-out forwards',
-                opacity: 0,
               }}>
-                <style>{`@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }`}</style>
                 <div style={{ fontSize: '5rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {data.totalVins}
                 </div>
               </div>
+            </div>
+
+            {/* ПОДПИСИ ПОД ГРАФИКОМ (По центру снизу) */}
+            <div style={pieLegendStyle}>
+              <span style={{ color: '#10B981' }}>DRR, %: {data.drrPercent.toFixed(1)}%</span>
+              <span style={{ color: '#EF4444' }}>Не прямой сход, %: {(100 - data.drrPercent).toFixed(1)}%</span>
             </div>
           </div>
 
@@ -320,7 +311,7 @@ export default function DrrCp7DashboardPage() {
               </div>
             </div>
 
-            {/* Таблица дефектов (Полная, со скроллом) */}
+            {/* Таблица дефектов (Красная линия теперь в td, не двигается) */}
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR</h2>
               
@@ -338,12 +329,15 @@ export default function DrrCp7DashboardPage() {
                       {data.topDefects.map((defect, idx) => (
                         <tr 
                           key={idx} 
-                          style={{ 
-                            backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC',
-                            borderLeft: idx < 3 ? '10px solid #EF4444' : '10px solid transparent'
-                          }}
+                          style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}
                         >
-                          <td style={tdStyle}>{defect.description}</td>
+                          {/* Ставим красную границу именно в первую ячейку, чтобы она не вылезала при скролле */}
+                          <td style={{ 
+                            ...tdStyle, 
+                            borderLeft: idx < 3 ? '10px solid #EF4444' : '10px solid transparent' 
+                          }}>
+                            {defect.description}
+                          </td>
                           <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
                           <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '2rem', color: idx < 3 ? '#DC2626' : '#1E293B' }}>
                             {defect.affectedVins}
