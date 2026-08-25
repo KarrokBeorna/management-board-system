@@ -8,7 +8,7 @@ const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
   width: '100%',
-  height: '100vh', // Фиксируем высоту под один экран
+  height: '100vh',
   boxSizing: 'border-box',
   backgroundColor: '#F8FAFC',
   display: 'flex',
@@ -45,7 +45,7 @@ const filterButtonStyle = (active) => ({
   marginLeft: '10px',
 });
 
-// ====== ОСНОВНАЯ СЕТКА (Чарт слева 40%, Правая часть 60%) ======
+// ====== ОСНОВНАЯ СЕТКА ======
 const dashboardGridStyle = {
   display: 'flex',
   gap: '20px',
@@ -73,7 +73,7 @@ const rightColumnStyle = {
   minHeight: 0,
 };
 
-// ====== KPI БЛОКИ (Единый формат) ======
+// ====== KPI БЛОКИ (Жесткая структура: подпись 2 строки, линия, цифра) ======
 const kpiRowStyle = {
   display: 'flex',
   gap: '20px',
@@ -88,30 +88,42 @@ const kpiCardStyle = (color) => ({
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  justifyContent: 'center',
+  justifyContent: 'space-between', // Распределяем по высоте
   boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
   color: '#FFFFFF',
   textAlign: 'center',
+  height: '180px', // Фиксируем высоту, чтобы ничего не прыгало
 });
 
-// Единый размер подписи и цифры для всех блоков
 const kpiLabelStyle = {
-  fontSize: '1.6rem',
+  fontSize: '1.5rem', // Уменьшаем, чтобы влезали длинные подписи
   fontWeight: 600,
   opacity: 0.95,
-  marginBottom: '8px',
-  lineHeight: 1.4, // Перенос слов в подписи
+  lineHeight: 1.3,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flex: 1, // Подпись занимает верхнюю часть
+  width: '100%',
+};
+
+const separatorStyle = {
+  width: '80%',
+  height: '2px',
+  backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  margin: '8px 0', // Разделитель между подписью и цифрой
 };
 
 const kpiValueStyle = {
   fontSize: '4rem',
   fontWeight: 900,
   lineHeight: 1,
+  paddingBottom: '10px',
 };
 
-// ====== ТАБЛИЦА (Высота под 5 строк) ======
+// ====== ТАБЛИЦА (Полная, со скроллом) ======
 const tableCardStyle = {
-  flex: 2, // Увеличиваем высоту для таблицы
+  flex: 2,
   backgroundColor: '#FFFFFF',
   borderRadius: '24px',
   padding: '24px',
@@ -164,7 +176,6 @@ export default function DrrCp7DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Функция загрузки данных
   const loadData = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/drr-cp7-dashboard?filter=${filter}`);
@@ -179,14 +190,9 @@ export default function DrrCp7DashboardPage() {
     }
   };
 
-  // Первичная загрузка и обновление (ПУНКТ 1)
   useEffect(() => {
     loadData();
-
-    // Обновление каждые 30 секунд (30 000 мс)
     const interval = setInterval(loadData, 30000);
-
-    // Очистка интервала при уходе со страницы
     return () => clearInterval(interval);
   }, [filter]);
 
@@ -194,6 +200,28 @@ export default function DrrCp7DashboardPage() {
     { name: 'DRR, %', value: data.drrPercent },
     { name: 'Не прямой сход, %', value: Math.max(0, 100 - data.drrPercent) },
   ];
+
+  // Кастомный рендер подписей Pie chart, чтобы они не обрезались
+  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }) => {
+    const RADIAN = Math.PI / 180;
+    const radius = outerRadius + 25; // Отодвигаем подпись дальше от кольца
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text
+        x={x}
+        y={y}
+        fill={name === 'DRR, %' ? '#10B981' : '#EF4444'}
+        textAnchor={x > cx ? 'start' : 'end'}
+        dominantBaseline="central"
+        fontSize="1.6rem"
+        fontWeight="bold"
+      >
+        {`${name}: ${(percent * 100).toFixed(1)}%`}
+      </text>
+    );
+  };
 
   return (
     <div style={containerStyle}>
@@ -217,30 +245,26 @@ export default function DrrCp7DashboardPage() {
       ) : (
         <div style={dashboardGridStyle}>
           
-          {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart с анимацией */}
+          {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart */}
           <div style={chartColumnStyle}>
             <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', margin: '0 0 20px 0' }}>DRR распределение</h2>
             
-            <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: '300px' }}>
-              {/* Увеличиваем отступы и уменьшаем радиус, чтобы подписи НЕ ОБРЕЗАЛИСЬ (ПУНКТ 2) */}
+            <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: '350px' }}>
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart margin={{ top: 40, right: 40, bottom: 40, left: 40 }}>
+                <PieChart margin={{ top: 50, right: 50, bottom: 50, left: 50 }}>
                   <Pie
                     data={pieData}
                     dataKey="value"
                     nameKey="name"
                     cx="50%"
                     cy="50%"
-                    innerRadius="50%" 
-                    outerRadius="70%"
+                    innerRadius="50%"
+                    outerRadius="60%" // Уменьшаем радиус, чтобы подписи влезали
                     paddingAngle={4}
                     stroke="#FFFFFF"
                     strokeWidth={4}
-                    labelLine={{ stroke: '#CBD5E1', strokeWidth: 2 }}
-                    label={({ name, value }) => `${name}: ${value.toFixed(1)}%`}
-                    fontSize="1.6rem"
-                    fontWeight="bold"
-                    fill="#333"
+                    label={renderCustomLabel}
+                    labelLine={false}
                   >
                     {pieData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
@@ -253,7 +277,7 @@ export default function DrrCp7DashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
               
-              {/* ЦИФРА В ЦЕНТРЕ (Появляется с плавной анимацией одновременно с графиком, ПУНКТ 3) */}
+              {/* Цифра в центре */}
               <div style={{
                 position: 'absolute',
                 top: '50%',
@@ -261,7 +285,6 @@ export default function DrrCp7DashboardPage() {
                 transform: 'translate(-50%, -50%)',
                 textAlign: 'center',
                 pointerEvents: 'none',
-                // Плавное появление (Fade In)
                 animation: 'fadeIn 1s ease-out forwards',
                 opacity: 0,
               }}>
@@ -276,31 +299,33 @@ export default function DrrCp7DashboardPage() {
           {/* ПРАВАЯ КОЛОНКА (60%) - KPI + Таблица */}
           <div style={rightColumnStyle}>
             
-            {/* KPI Блоки (Единый формат цифр и подписей, ПУНКТ 4) */}
+            {/* KPI Блоки */}
             <div style={kpiRowStyle}>
               <div style={kpiCardStyle('#1E293B')}>
                 <div style={kpiLabelStyle}>Всего авто, прошедших CP72</div>
+                <div style={separatorStyle}></div>
                 <div style={kpiValueStyle}>{data.totalVins}</div>
               </div>
               
               <div style={kpiCardStyle('#059669')}>
                 <div style={kpiLabelStyle}>Авто со всеми закрытыми дефектами</div>
+                <div style={separatorStyle}></div>
                 <div style={kpiValueStyle}>{data.closedVins}</div>
               </div>
               
               <div style={kpiCardStyle('linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)')}>
                 <div style={kpiLabelStyle}>DRR, %</div>
+                <div style={separatorStyle}></div>
                 <div style={kpiValueStyle}>{data.drrPercent.toFixed(1)}%</div>
               </div>
             </div>
 
-            {/* Таблица дефектов (Вывод 5 строк, ПУНКТ 5) */}
+            {/* Таблица дефектов (Полная, со скроллом) */}
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR</h2>
               
               <div style={tableScrollStyle}>
-                {/* slice(0, 5) - жесткое ограничение на 5 строк */}
-                {data.topDefects.slice(0, 5).length > 0 ? (
+                {data.topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr>
@@ -310,7 +335,7 @@ export default function DrrCp7DashboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {data.topDefects.slice(0, 5).map((defect, idx) => (
+                      {data.topDefects.map((defect, idx) => (
                         <tr 
                           key={idx} 
                           style={{ 
