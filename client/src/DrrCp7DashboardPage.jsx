@@ -7,7 +7,7 @@ const API_BASE = '';
 const containerStyle = {
   padding: '2vw',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
-  maxWidth: '1920px',
+  maxWidth: '100%',
   margin: '0 auto',
   backgroundColor: '#F8FAFC',
   minHeight: '100vh',
