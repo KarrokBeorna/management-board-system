@@ -309,7 +309,8 @@ export default function DrrCp7DashboardPage() {
                 textAlign: 'center',
                 pointerEvents: 'none',
               }}>
-                <div style={{ fontSize: '7.5rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
+                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
+                <div style={{ fontSize: '6.5rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {data.drrPercent.toFixed(1)}%
                 </div>
               </div>
@@ -317,22 +318,58 @@ export default function DrrCp7DashboardPage() {
 
             {/* ЦВЕТНЫЕ БЛОКИ ПОД ДИАГРАММОЙ */}
             <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '12px', textAlign: 'center', color: '#FFFFFF' }}>
+              <div style={{ 
+                flex: 1, 
+                backgroundColor: '#1E293B', 
+                borderRadius: '12px', 
+                padding: '16px', 
+                textAlign: 'center', 
+                color: '#FFFFFF', 
+                minHeight: '140px', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Всего авто, прошедших CP72</div>
-                <div style={{ fontSize: '2rem', fontWeight: 900, marginTop: '4px' }}>{data.totalVins}</div>
+                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.totalVins}</div>
               </div>
-              <div style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '12px', textAlign: 'center', color: '#FFFFFF' }}>
+              <div style={{ 
+                flex: 1, 
+                backgroundColor: '#059669', 
+                borderRadius: '12px', 
+                padding: '16px', 
+                textAlign: 'center', 
+                color: '#FFFFFF', 
+                minHeight: '140px', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
-                <div style={{ fontSize: '2rem', fontWeight: 900, marginTop: '4px' }}>{data.closedVins}</div>
+                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.closedVins}</div>
               </div>
-              <div style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '12px', textAlign: 'center', color: '#FFFFFF' }}>
+              <div style={{ 
+                flex: 1, 
+                backgroundColor: '#DC2626', 
+                borderRadius: '12px', 
+                padding: '16px', 
+                textAlign: 'center', 
+                color: '#FFFFFF', 
+                minHeight: '140px', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                justifyContent: 'center' 
+              }}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK Авто</div>
-                <div style={{ fontSize: '2rem', fontWeight: 900, marginTop: '4px' }}>{nokVins}</div>
+                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{nokVins}</div>
               </div>
             </div>
           </div>
 
-          {/* ПРАВАЯ КОЛОНКА (60%) - Таблица (поднята вверх) */}
+          {/* ПРАВАЯ КОЛОНКА (60%) - Таблица */}
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP7</h2>
