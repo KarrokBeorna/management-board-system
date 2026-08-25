@@ -310,7 +310,7 @@ export default function DrrCp7DashboardPage() {
                 pointerEvents: 'none',
               }}>
                 <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
-                <div style={{ fontSize: '5.3rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
+                <div style={{ fontSize: '5.1rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {data.drrPercent.toFixed(1)}%
                 </div>
               </div>
@@ -330,7 +330,7 @@ export default function DrrCp7DashboardPage() {
                 flexDirection: 'column', 
                 justifyContent: 'center' 
               }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Авто, прошедшие CP72</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Всего авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.totalVins}</div>
               </div>
