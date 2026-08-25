@@ -182,12 +182,11 @@ export default function DrrCp7DashboardPage() {
   const [data, setData] = useState({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showNumber, setShowNumber] = useState(false); // Состояние для цифры в центре
 
+  // Загрузка данных (без задержек!)
   const loadData = async () => {
     try {
-      // Искусственная задержка 8 секунд
-      await new Promise(resolve => setTimeout(resolve, 8000)); 
-      
       const res = await fetch(`${API_BASE}/api/drr-cp7-dashboard?filter=${filter}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
@@ -202,10 +201,21 @@ export default function DrrCp7DashboardPage() {
 
   useEffect(() => {
     setLoading(true);
+    setShowNumber(false); // Сбрасываем цифру при смене фильтра
     loadData();
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [filter]);
+
+  // ОТДЕЛЬНЫЙ ТАЙМЕР ТОЛЬКО ДЛЯ ЦИФРЫ В ЦЕНТРЕ (8 секунд)
+  useEffect(() => {
+    if (!loading && !error) {
+      const timer = setTimeout(() => {
+        setShowNumber(true);
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, error, data]); // Зависимость от data, чтобы таймер перезапускался при обновлении
 
   const pieData = [
     { name: 'DRR, %', value: data.drrPercent },
@@ -234,11 +244,10 @@ export default function DrrCp7DashboardPage() {
       ) : (
         <div style={dashboardGridStyle}>
           
-          {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart (увеличен) */}
+          {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart */}
           <div style={chartColumnStyle}>
             <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', margin: '0 0 20px 0' }}>DRR распределение</h2>
             
-            {/* Высота увеличена до 500px, радиус увеличен */}
             <div style={{ position: 'relative', width: '100%', height: '500px' }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -249,7 +258,7 @@ export default function DrrCp7DashboardPage() {
                     cx="50%"
                     cy="50%"
                     innerRadius="55%"
-                    outerRadius="90%"  // Увеличен внешний радиус
+                    outerRadius="90%"
                     paddingAngle={4}
                     stroke="#FFFFFF"
                     strokeWidth={4}
@@ -265,19 +274,21 @@ export default function DrrCp7DashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
               
-              {/* Цифра по центру (появляется после загрузки) */}
-              <div style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                textAlign: 'center',
-                pointerEvents: 'none',
-              }}>
-                <div style={{ fontSize: '5rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
-                  {data.totalVins}
+              {/* ЦИФРА В ЦЕНТРЕ (появляется ТОЛЬКО через 8 секунд, отдельно от загрузки страницы) */}
+              {showNumber && (
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  textAlign: 'center',
+                  pointerEvents: 'none',
+                }}>
+                  <div style={{ fontSize: '5rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
+                    {data.totalVins}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Подписи под графиком */}
@@ -311,7 +322,7 @@ export default function DrrCp7DashboardPage() {
               </div>
             </div>
 
-            {/* Таблица дефектов (красная линия теперь через boxShadow) */}
+            {/* Таблица дефектов */}
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR</h2>
               
@@ -331,7 +342,7 @@ export default function DrrCp7DashboardPage() {
                           key={idx} 
                           style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}
                         >
-                          {/* Используем boxShadow inset вместо border-left, чтобы линия не вылезала */}
+                          {/* Красная линия через boxShadow, не вылезает при скролле */}
                           <td style={{ 
                             ...tdStyle, 
                             boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none'
