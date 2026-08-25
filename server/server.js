@@ -4399,7 +4399,22 @@ app.get('/api/vehicles-models', async (req, res) => {
 
 app.get('/api/drr-cp7-dashboard', async (req, res) => {
   try {
-    const { filter = 'all' } = req.query;
+    const { filter = 'all', startTime, endTime } = req.query;
+
+    // Если startTime и endTime не переданы, по умолчанию за сегодня (сутки)
+    let rangeStart, rangeEnd;
+    if (startTime && endTime) {
+      rangeStart = startTime;
+      rangeEnd = endTime;
+    } else {
+      // Fallback: текущие сутки
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      rangeStart = `${y}-${m}-${d} 00:00:00`;
+      rangeEnd = `${y}-${m}-${d} 23:59:59`;
+    }
 
     const postLists = {
       all: [
@@ -4420,21 +4435,22 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    // 1. Все VIN, прошедшие CP72 (без фильтра дефектов)
+    // 1. Все VIN, прошедшие CP72 в заданном временном окне
     const [cp72Rows] = await pool.query(`
       SELECT VIN
       FROM at_om_wiptrackinghistory
       WHERE WC_NAME = 'CP72'
-        AND DATE(CREATION_TIME) = CURDATE()
+        AND CREATION_TIME >= ?
+        AND CREATION_TIME <= ?
       GROUP BY VIN
-    `);
+    `, [rangeStart, rangeEnd]);
     const totalVins = cp72Rows.length;
 
     if (totalVins === 0) {
       return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
     }
 
-    // 2. Дефекты только по выбранным постам для VIN из CP72
+    // 2. Дефекты по выбранным постам и времени (только для VIN, прошедших CP72 в окне)
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN,
@@ -4443,15 +4459,17 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
         d.STATUS
       FROM at_qm_defect_info d
       WHERE d.POST_NAME IN (${postListStr})
+        AND d.CREATION_TIME >= ?
+        AND d.CREATION_TIME <= ?
         AND d.VIN IN (
-          SELECT VIN
-          FROM at_om_wiptrackinghistory
+          SELECT VIN FROM at_om_wiptrackinghistory
           WHERE WC_NAME = 'CP72'
-            AND DATE(CREATION_TIME) = CURDATE()
+            AND CREATION_TIME >= ?
+            AND CREATION_TIME <= ?
         )
-    `);
+    `, [rangeStart, rangeEnd, rangeStart, rangeEnd]);
 
-    // Группируем по VIN: считаем total и closed только в рамках выбранных постов
+    // Группируем по VIN: считаем total и closed только в рамках выбранного времени и постов
     const vinDefectMap = new Map();
     defectRows.forEach(row => {
       const vin = row.VIN;
@@ -4465,7 +4483,7 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
       }
     });
 
-    // Авто с закрытыми всеми дефектами (считаем, что если нет дефектов – тоже closed)
+    // Авто с закрытыми всеми дефектами (если дефектов нет – тоже считаем closed)
     let closedVins = 0;
     cp72Rows.forEach(row => {
       const vin = row.VIN;
@@ -4482,7 +4500,7 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
       cp72Rows
         .filter(row => {
           const stat = vinDefectMap.get(row.VIN);
-          return stat && stat.total > stat.closed; // только у кого есть незакрытые дефекты
+          return stat && stat.total > stat.closed;
         })
         .map(row => row.VIN)
     );

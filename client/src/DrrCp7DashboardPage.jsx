@@ -31,6 +31,12 @@ const titleStyle = {
   margin: 0,
 };
 
+const filterGroupStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px',
+};
+
 const filterButtonStyle = (active) => ({
   padding: '12px 24px',
   borderRadius: '12px',
@@ -41,7 +47,13 @@ const filterButtonStyle = (active) => ({
   color: active ? '#FFFFFF' : '#64748B',
   cursor: 'pointer',
   boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-  marginLeft: '10px',
+  transition: 'all 0.2s',
+});
+
+const timeFilterButtonStyle = (active) => ({
+  ...filterButtonStyle(active),
+  background: active ? '#F59E0B' : '#FFFFFF',
+  color: active ? '#FFFFFF' : '#64748B',
 });
 
 const dashboardGridStyle = {
@@ -70,7 +82,6 @@ const rightColumnStyle = {
   minHeight: 0,
 };
 
-// ====== KPI БЛОКИ ======
 const kpiRowStyle = {
   display: 'flex',
   gap: '20px',
@@ -118,7 +129,6 @@ const kpiValueStyle = {
   paddingBottom: '10px',
 };
 
-// ====== ТАБЛИЦА ======
 const tableCardStyle = {
   flex: 2,
   backgroundColor: '#FFFFFF',
@@ -167,7 +177,6 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
-// Подписи под графиком
 const pieLegendStyle = {
   display: 'flex',
   justifyContent: 'center',
@@ -177,17 +186,104 @@ const pieLegendStyle = {
   fontWeight: 'bold',
 };
 
+// Функция определения дефолтного временного фильтра
+const getDefaultTimeFilter = () => {
+  // Московское время = UTC+3 (без перехода на летнее время)
+  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const hours = nowMoscow.getUTCHours();
+  const minutes = nowMoscow.getUTCMinutes();
+  const totalMinutes = hours * 60 + minutes;
+
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 19 * 60 + 30) {
+    return 'day'; // 07:50 - 19:30
+  } else {
+    return 'evening'; // 19:31 - 07:49 следующего дня (или до 07:50 текущего)
+  }
+};
+
+// Функция вычисления границ временного интервала
+const getTimeRange = (timeFilter) => {
+  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const year = nowMoscow.getUTCFullYear();
+  const month = String(nowMoscow.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(nowMoscow.getUTCDate()).padStart(2, '0');
+  const hours = nowMoscow.getUTCHours();
+  const minutes = nowMoscow.getUTCMinutes();
+  const totalMinutes = hours * 60 + minutes;
+
+  if (timeFilter === 'all') {
+    return {
+      start: `${year}-${month}-${day} 00:00:00`,
+      end: `${year}-${month}-${day} 23:59:59`
+    };
+  }
+
+  if (timeFilter === 'day') {
+    return {
+      start: `${year}-${month}-${day} 07:50:00`,
+      end: `${year}-${month}-${day} 19:30:00`
+    };
+  }
+
+  if (timeFilter === 'evening') {
+    // Если сейчас уже вечер (>=19:31), начало сегодня 19:31, конец завтра 07:49
+    // Если сейчас ночь/раннее утро (<07:50), начало вчера 19:31, конец сегодня 07:49
+    const isAfterEveningStart = totalMinutes >= 19 * 60 + 31;
+    let startDate = new Date(nowMoscow);
+    let endDate = new Date(nowMoscow);
+
+    if (isAfterEveningStart) {
+      // Начало сегодня 19:31, конец завтра 07:49
+      startDate.setUTCHours(19, 31, 0, 0);
+      endDate.setUTCDate(endDate.getUTCDate() + 1);
+      endDate.setUTCHours(7, 49, 0, 0);
+    } else {
+      // Начало вчера 19:31, конец сегодня 07:49
+      startDate.setUTCDate(startDate.getUTCDate() - 1);
+      startDate.setUTCHours(19, 31, 0, 0);
+      endDate.setUTCHours(7, 49, 0, 0);
+    }
+
+    const fmt = (date) => {
+      const y = date.getUTCFullYear();
+      const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(date.getUTCDate()).padStart(2, '0');
+      const hh = String(date.getUTCHours()).padStart(2, '0');
+      const mm = String(date.getUTCMinutes()).padStart(2, '0');
+      return `${y}-${m}-${d} ${hh}:${mm}:00`;
+    };
+
+    return {
+      start: fmt(startDate),
+      end: fmt(endDate)
+    };
+  }
+
+  // fallback
+  return {
+    start: `${year}-${month}-${day} 00:00:00`,
+    end: `${year}-${month}-${day} 23:59:59`
+  };
+};
+
 export default function DrrCp7DashboardPage() {
   const [filter, setFilter] = useState('all');
+  const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
   const [data, setData] = useState({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showNumber, setShowNumber] = useState(false); // Состояние для цифры в центре
+  const [showNumber, setShowNumber] = useState(false);
 
-  // Загрузка данных (без задержек!)
   const loadData = async () => {
+    setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/drr-cp7-dashboard?filter=${filter}`);
+      const { start, end } = getTimeRange(timeFilter);
+      const params = new URLSearchParams({
+        filter,
+        startTime: start,
+        endTime: end
+      });
+      const res = await fetch(`${API_BASE}/api/drr-cp7-dashboard?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
       setData(json);
@@ -200,14 +296,12 @@ export default function DrrCp7DashboardPage() {
   };
 
   useEffect(() => {
-    setLoading(true);
-    setShowNumber(false); // Сбрасываем цифру при смене фильтра
+    setShowNumber(false);
     loadData();
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
-  }, [filter]);
+  }, [filter, timeFilter]);
 
-  // ОТДЕЛЬНЫЙ ТАЙМЕР ТОЛЬКО ДЛЯ ЦИФРЫ В ЦЕНТРЕ (8 секунд)
   useEffect(() => {
     if (!loading && !error) {
       const timer = setTimeout(() => {
@@ -215,7 +309,7 @@ export default function DrrCp7DashboardPage() {
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [loading, error, data]); // Зависимость от data, чтобы таймер перезапускался при обновлении
+  }, [loading, error, data]);
 
   const pieData = [
     { name: 'DRR', value: data.drrPercent },
@@ -226,10 +320,16 @@ export default function DrrCp7DashboardPage() {
     <div style={containerStyle}>
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR CP7 Dashboard</h1>
-        <div>
+        <div style={filterGroupStyle}>
+          {/* Чекпоинты */}
           <button style={filterButtonStyle(filter === 'all')} onClick={() => setFilter('all')}>Все</button>
           <button style={filterButtonStyle(filter === 'cp7')} onClick={() => setFilter('cp7')}>CP7</button>
           <button style={filterButtonStyle(filter === 'pip')} onClick={() => setFilter('pip')}>PIP</button>
+
+          {/* Временные фильтры */}
+          <button style={timeFilterButtonStyle(timeFilter === 'all')} onClick={() => setTimeFilter('all')}>Сутки</button>
+          <button style={timeFilterButtonStyle(timeFilter === 'day')} onClick={() => setTimeFilter('day')}>День</button>
+          <button style={timeFilterButtonStyle(timeFilter === 'evening')} onClick={() => setTimeFilter('evening')}>Вечер</button>
         </div>
       </div>
 
@@ -274,7 +374,6 @@ export default function DrrCp7DashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
               
-              {/* ЦИФРА В ЦЕНТРЕ (появляется ТОЛЬКО через 8 секунд, отдельно от загрузки страницы) */}
               {showNumber && (
                 <div style={{
                   position: 'absolute',
@@ -291,7 +390,6 @@ export default function DrrCp7DashboardPage() {
               )}
             </div>
 
-            {/* Подписи под графиком */}
             <div style={pieLegendStyle}>
               <span style={{ color: '#10B981' }}>DRR: {data.drrPercent.toFixed(1)}%</span>
               <span style={{ color: '#EF4444' }}>Не прямой сход: {(100 - data.drrPercent).toFixed(1)}%</span>
@@ -301,7 +399,6 @@ export default function DrrCp7DashboardPage() {
           {/* ПРАВАЯ КОЛОНКА (60%) - KPI + Таблица */}
           <div style={rightColumnStyle}>
             
-            {/* KPI Блоки */}
             <div style={kpiRowStyle}>
               <div style={kpiCardStyle('#1E293B')}>
                 <div style={kpiLabelStyle}>Всего авто, прошедших CP72</div>
@@ -322,7 +419,6 @@ export default function DrrCp7DashboardPage() {
               </div>
             </div>
 
-            {/* Таблица дефектов */}
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP7</h2>
               
@@ -342,7 +438,6 @@ export default function DrrCp7DashboardPage() {
                           key={idx} 
                           style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}
                         >
-                          {/* Красная линия через boxShadow, не вылезает при скролле */}
                           <td style={{ 
                             ...tdStyle, 
                             boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none'
