@@ -4401,7 +4401,6 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
   try {
     const { filter = 'all' } = req.query;
 
-    // Список постов для фильтров
     const postLists = {
       all: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
@@ -4421,68 +4420,84 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    const sql = `
-      WITH cp72_vins AS (
-          SELECT 
-              VIN,
-              MIN(CREATION_TIME) AS CP72_TIME
-          FROM at_om_wiptrackinghistory
-          WHERE WC_NAME = 'CP72'
-            AND DATE(CREATION_TIME) = CURDATE()
-          GROUP BY VIN
-      ),
-      defect_summary AS (
-          SELECT 
-              VIN,
-              COUNT(*) AS total_defects,
-              SUM(CASE WHEN LOWER(STATUS) = 'closed' THEN 1 ELSE 0 END) AS closed_defects
-          FROM at_qm_defect_info
-          GROUP BY VIN
-      )
-      SELECT 
-          d.VIN,
-          d.PROBLEM_DESCRIPTION,
-          d.PROBLEM_GRADE,
-          d.STATUS,
-          d.CREATION_TIME,
-          d.LAST_MODIFIED_TIME AS STATUS_TIME,
-          cp.CP72_TIME,
-          CASE 
-              WHEN ds.total_defects = ds.closed_defects THEN 1 
-              ELSE 0 
-          END AS ALL_DEFECTS_CLOSED
-      FROM at_qm_defect_info d
-      JOIN cp72_vins cp ON d.VIN = cp.VIN
-      LEFT JOIN defect_summary ds ON d.VIN = ds.VIN
-      WHERE d.POST_NAME IN (${postListStr})
-      ORDER BY d.VIN, d.CREATION_TIME
-    `;
+    // 1. Все VIN, прошедшие CP72 (без фильтра дефектов)
+    const [cp72Rows] = await pool.query(`
+      SELECT VIN
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND DATE(CREATION_TIME) = CURDATE()
+      GROUP BY VIN
+    `);
+    const totalVins = cp72Rows.length;
 
-    const [rows] = await pool.query(sql);
-
-    if (!rows.length) {
+    if (totalVins === 0) {
       return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
     }
 
-    // Уникальные VIN
-    const uniqueVins = [...new Set(rows.map(r => r.VIN))];
-    const closedVins = [...new Set(rows.filter(r => r.ALL_DEFECTS_CLOSED === 1).map(r => r.VIN))];
-    const totalVins = uniqueVins.length;
-    const closedCount = closedVins.length;
-    const drrPercent = totalVins > 0 ? (closedCount / totalVins) * 100 : 0;
+    // 2. Дефекты только по выбранным постам для VIN из CP72
+    const [defectRows] = await pool.query(`
+      SELECT
+        d.VIN,
+        d.PROBLEM_DESCRIPTION,
+        d.PROBLEM_GRADE,
+        d.STATUS
+      FROM at_qm_defect_info d
+      WHERE d.POST_NAME IN (${postListStr})
+        AND d.VIN IN (
+          SELECT VIN
+          FROM at_om_wiptrackinghistory
+          WHERE WC_NAME = 'CP72'
+            AND DATE(CREATION_TIME) = CURDATE()
+        )
+    `);
 
-    // Топ дефектов среди VIN, у которых не все закрыты
-    const notClosedRows = rows.filter(r => r.ALL_DEFECTS_CLOSED === 0);
-    const defectMap = {};
-    notClosedRows.forEach(r => {
-      const key = r.PROBLEM_DESCRIPTION || 'Без описания';
-      if (!defectMap[key]) {
-        defectMap[key] = { description: key, affectedVins: new Set(), grade: r.PROBLEM_GRADE || '-' };
+    // Группируем по VIN: считаем total и closed только в рамках выбранных постов
+    const vinDefectMap = new Map();
+    defectRows.forEach(row => {
+      const vin = row.VIN;
+      if (!vinDefectMap.has(vin)) {
+        vinDefectMap.set(vin, { total: 0, closed: 0 });
       }
-      defectMap[key].affectedVins.add(r.VIN);
+      const stat = vinDefectMap.get(vin);
+      stat.total += 1;
+      if (row.STATUS && row.STATUS.toLowerCase() === 'closed') {
+        stat.closed += 1;
+      }
     });
 
-    const topDefects = Object.values(defectMap)
+    // Авто с закрытыми всеми дефектами (считаем, что если нет дефектов – тоже closed)
+    let closedVins = 0;
+    cp72Rows.forEach(row => {
+      const vin = row.VIN;
+      const stat = vinDefectMap.get(vin);
+      if (!stat || stat.total === stat.closed) {
+        closedVins += 1;
+      }
+    });
+
+    const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
+
+    // 3. Топ дефектов среди незакрытых VIN
+    const notClosedVins = new Set(
+      cp72Rows
+        .filter(row => {
+          const stat = vinDefectMap.get(row.VIN);
+          return stat && stat.total > stat.closed; // только у кого есть незакрытые дефекты
+        })
+        .map(row => row.VIN)
+    );
+
+    const defectCountMap = new Map();
+    defectRows.forEach(row => {
+      if (!notClosedVins.has(row.VIN)) return;
+      const desc = row.PROBLEM_DESCRIPTION || 'Без описания';
+      if (!defectCountMap.has(desc)) {
+        defectCountMap.set(desc, { description: desc, grade: row.PROBLEM_GRADE || '-', affectedVins: new Set() });
+      }
+      defectCountMap.get(desc).affectedVins.add(row.VIN);
+    });
+
+    const topDefects = Array.from(defectCountMap.values())
       .map(d => ({
         description: d.description,
         grade: d.grade,
@@ -4491,7 +4506,12 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
       .sort((a, b) => b.affectedVins - a.affectedVins)
       .slice(0, 10);
 
-    res.json({ totalVins, closedVins: closedCount, drrPercent: Math.round(drrPercent * 10) / 10, topDefects });
+    res.json({
+      totalVins,
+      closedVins,
+      drrPercent: Math.round(drrPercent * 10) / 10,
+      topDefects,
+    });
   } catch (err) {
     console.error('Ошибка DRR CP7 Dashboard:', err.message);
     res.status(500).json({ error: err.message });
