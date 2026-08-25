@@ -78,59 +78,11 @@ const rightColumnStyle = {
   flex: 1,
   display: 'flex',
   flexDirection: 'column',
-  gap: '20px',
   minHeight: 0,
 };
 
-const kpiRowStyle = {
-  display: 'flex',
-  gap: '20px',
-  flexShrink: 0,
-};
-
-const kpiCardStyle = (color) => ({
-  flex: 1,
-  background: color,
-  borderRadius: '20px',
-  padding: '16px',
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
-  color: '#FFFFFF',
-  textAlign: 'center',
-  height: '180px',
-});
-
-const kpiLabelStyle = {
-  fontSize: '1.5rem',
-  fontWeight: 600,
-  opacity: 0.95,
-  lineHeight: 1.3,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  flex: 1,
-  width: '100%',
-};
-
-const separatorStyle = {
-  width: '80%',
-  height: '2px',
-  backgroundColor: 'rgba(255, 255, 255, 0.3)',
-  margin: '8px 0',
-};
-
-const kpiValueStyle = {
-  fontSize: '4rem',
-  fontWeight: 900,
-  lineHeight: 1,
-  paddingBottom: '10px',
-};
-
 const tableCardStyle = {
-  flex: 2,
+  flex: 1,
   backgroundColor: '#FFFFFF',
   borderRadius: '24px',
   padding: '24px',
@@ -177,27 +129,17 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
-const pieLegendStyle = {
-  display: 'flex',
-  justifyContent: 'center',
-  gap: '30px',
-  marginTop: '10px',
-  fontSize: '1.6rem',
-  fontWeight: 'bold',
-};
-
 // Функция определения дефолтного временного фильтра
 const getDefaultTimeFilter = () => {
-  // Московское время = UTC+3 (без перехода на летнее время)
   const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
   const hours = nowMoscow.getUTCHours();
   const minutes = nowMoscow.getUTCMinutes();
   const totalMinutes = hours * 60 + minutes;
 
   if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 19 * 60 + 30) {
-    return 'day'; // 07:50 - 19:30
+    return 'day';
   } else {
-    return 'evening'; // 19:31 - 07:49 следующего дня (или до 07:50 текущего)
+    return 'evening';
   }
 };
 
@@ -226,19 +168,15 @@ const getTimeRange = (timeFilter) => {
   }
 
   if (timeFilter === 'evening') {
-    // Если сейчас уже вечер (>=19:31), начало сегодня 19:31, конец завтра 07:49
-    // Если сейчас ночь/раннее утро (<07:50), начало вчера 19:31, конец сегодня 07:49
     const isAfterEveningStart = totalMinutes >= 19 * 60 + 31;
     let startDate = new Date(nowMoscow);
     let endDate = new Date(nowMoscow);
 
     if (isAfterEveningStart) {
-      // Начало сегодня 19:31, конец завтра 07:49
       startDate.setUTCHours(19, 31, 0, 0);
       endDate.setUTCDate(endDate.getUTCDate() + 1);
       endDate.setUTCHours(7, 49, 0, 0);
     } else {
-      // Начало вчера 19:31, конец сегодня 07:49
       startDate.setUTCDate(startDate.getUTCDate() - 1);
       startDate.setUTCHours(19, 31, 0, 0);
       endDate.setUTCHours(7, 49, 0, 0);
@@ -259,7 +197,6 @@ const getTimeRange = (timeFilter) => {
     };
   }
 
-  // fallback
   return {
     start: `${year}-${month}-${day} 00:00:00`,
     end: `${year}-${month}-${day} 23:59:59`
@@ -272,7 +209,6 @@ export default function DrrCp7DashboardPage() {
   const [data, setData] = useState({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showNumber, setShowNumber] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -296,20 +232,12 @@ export default function DrrCp7DashboardPage() {
   };
 
   useEffect(() => {
-    setShowNumber(false);
     loadData();
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [filter, timeFilter]);
 
-  useEffect(() => {
-    if (!loading && !error) {
-      const timer = setTimeout(() => {
-        setShowNumber(true);
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [loading, error, data]);
+  const nokVins = data.totalVins - data.closedVins;
 
   const pieData = [
     { name: 'DRR', value: data.drrPercent },
@@ -321,12 +249,10 @@ export default function DrrCp7DashboardPage() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR CP7 Dashboard</h1>
         <div style={filterGroupStyle}>
-          {/* Чекпоинты */}
           <button style={filterButtonStyle(filter === 'all')} onClick={() => setFilter('all')}>Все</button>
           <button style={filterButtonStyle(filter === 'cp7')} onClick={() => setFilter('cp7')}>CP7</button>
           <button style={filterButtonStyle(filter === 'pip')} onClick={() => setFilter('pip')}>PIP</button>
 
-          {/* Временные фильтры */}
           <button style={timeFilterButtonStyle(timeFilter === 'all')} onClick={() => setTimeFilter('all')}>Сутки</button>
           <button style={timeFilterButtonStyle(timeFilter === 'day')} onClick={() => setTimeFilter('day')}>День</button>
           <button style={timeFilterButtonStyle(timeFilter === 'evening')} onClick={() => setTimeFilter('evening')}>Вечер</button>
@@ -344,7 +270,7 @@ export default function DrrCp7DashboardPage() {
       ) : (
         <div style={dashboardGridStyle}>
           
-          {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart */}
+          {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart + цветные блоки */}
           <div style={chartColumnStyle}>
             <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', margin: '0 0 20px 0' }}>Доли DRR CP7</h2>
             
@@ -374,51 +300,40 @@ export default function DrrCp7DashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
               
-              {showNumber && (
-                <div style={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: '50%',
-                  transform: 'translate(-50%, -50%)',
-                  textAlign: 'center',
-                  pointerEvents: 'none',
-                }}>
-                  <div style={{ fontSize: '5rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
-                    {data.totalVins}
-                  </div>
+              {/* ЦИФРА В ЦЕНТРЕ: DRR% */}
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                textAlign: 'center',
+                pointerEvents: 'none',
+              }}>
+                <div style={{ fontSize: '7.5rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
+                  {data.drrPercent.toFixed(1)}%
                 </div>
-              )}
+              </div>
             </div>
 
-            <div style={pieLegendStyle}>
-              <span style={{ color: '#10B981' }}>DRR: {data.drrPercent.toFixed(1)}%</span>
-              <span style={{ color: '#EF4444' }}>Не прямой сход: {(100 - data.drrPercent).toFixed(1)}%</span>
+            {/* ЦВЕТНЫЕ БЛОКИ ПОД ДИАГРАММОЙ */}
+            <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '12px', textAlign: 'center', color: '#FFFFFF' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Всего авто, прошедших CP72</div>
+                <div style={{ fontSize: '2rem', fontWeight: 900, marginTop: '4px' }}>{data.totalVins}</div>
+              </div>
+              <div style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '12px', textAlign: 'center', color: '#FFFFFF' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
+                <div style={{ fontSize: '2rem', fontWeight: 900, marginTop: '4px' }}>{data.closedVins}</div>
+              </div>
+              <div style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '12px', textAlign: 'center', color: '#FFFFFF' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK Авто</div>
+                <div style={{ fontSize: '2rem', fontWeight: 900, marginTop: '4px' }}>{nokVins}</div>
+              </div>
             </div>
           </div>
 
-          {/* ПРАВАЯ КОЛОНКА (60%) - KPI + Таблица */}
+          {/* ПРАВАЯ КОЛОНКА (60%) - Таблица (поднята вверх) */}
           <div style={rightColumnStyle}>
-            
-            <div style={kpiRowStyle}>
-              <div style={kpiCardStyle('#1E293B')}>
-                <div style={kpiLabelStyle}>Всего авто, прошедших CP72</div>
-                <div style={separatorStyle}></div>
-                <div style={kpiValueStyle}>{data.totalVins}</div>
-              </div>
-              
-              <div style={kpiCardStyle('#059669')}>
-                <div style={kpiLabelStyle}>Авто с дефектами closed</div>
-                <div style={separatorStyle}></div>
-                <div style={kpiValueStyle}>{data.closedVins}</div>
-              </div>
-              
-              <div style={kpiCardStyle('linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)')}>
-                <div style={kpiLabelStyle}>DRR, %</div>
-                <div style={separatorStyle}></div>
-                <div style={kpiValueStyle}>{data.drrPercent.toFixed(1)}%</div>
-              </div>
-            </div>
-
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP7</h2>
               
@@ -457,8 +372,8 @@ export default function DrrCp7DashboardPage() {
                 )}
               </div>
             </div>
-
           </div>
+
         </div>
       )}
     </div>

@@ -4401,13 +4401,11 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
   try {
     const { filter = 'all', startTime, endTime } = req.query;
 
-    // Если startTime и endTime не переданы, по умолчанию за сегодня (сутки)
     let rangeStart, rangeEnd;
     if (startTime && endTime) {
       rangeStart = startTime;
       rangeEnd = endTime;
     } else {
-      // Fallback: текущие сутки
       const now = new Date();
       const y = now.getFullYear();
       const m = String(now.getMonth() + 1).padStart(2, '0');
@@ -4450,7 +4448,7 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
       return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
     }
 
-    // 2. Дефекты по выбранным постам и времени (только для VIN, прошедших CP72 в окне)
+    // 2. Дефекты по выбранным постам и времени
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN,
@@ -4469,7 +4467,6 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
         )
     `, [rangeStart, rangeEnd, rangeStart, rangeEnd]);
 
-    // Группируем по VIN: считаем total и closed только в рамках выбранного времени и постов
     const vinDefectMap = new Map();
     defectRows.forEach(row => {
       const vin = row.VIN;
@@ -4483,7 +4480,6 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
       }
     });
 
-    // Авто с закрытыми всеми дефектами (если дефектов нет – тоже считаем closed)
     let closedVins = 0;
     cp72Rows.forEach(row => {
       const vin = row.VIN;
@@ -4522,7 +4518,7 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
         affectedVins: d.affectedVins.size,
       }))
       .sort((a, b) => b.affectedVins - a.affectedVins)
-      .slice(0, 10);
+      .slice(0, 20); // Увеличено с 10 до 20
 
     res.json({
       totalVins,
