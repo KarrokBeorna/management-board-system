@@ -278,8 +278,8 @@ export default function DrrCp7DashboardPage() {
                     nameKey="name"
                     cx="50%"
                     cy="50%"
-                    innerRadius="60%"
-                    outerRadius="88%"
+                    innerRadius="70%"
+                    outerRadius="95%"
                     paddingAngle={4}
                     stroke="#FFFFFF"
                     strokeWidth={4}
