@@ -212,14 +212,14 @@ export default function DrrCp7DashboardPage() {
     if (!loading && !error) {
       const timer = setTimeout(() => {
         setShowNumber(true);
-      }, 8000);
+      }, 2000);
       return () => clearTimeout(timer);
     }
   }, [loading, error, data]); // Зависимость от data, чтобы таймер перезапускался при обновлении
 
   const pieData = [
-    { name: 'DRR, %', value: data.drrPercent },
-    { name: 'Не прямой сход, %', value: Math.max(0, 100 - data.drrPercent) },
+    { name: 'DRR', value: data.drrPercent },
+    { name: 'Не прямой сход', value: Math.max(0, 100 - data.drrPercent) },
   ];
 
   return (
@@ -246,7 +246,7 @@ export default function DrrCp7DashboardPage() {
           
           {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart */}
           <div style={chartColumnStyle}>
-            <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', margin: '0 0 20px 0' }}>DRR распределение</h2>
+            <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', margin: '0 0 20px 0' }}>Доли DRR CP7</h2>
             
             <div style={{ position: 'relative', width: '100%', height: '500px' }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -310,7 +310,7 @@ export default function DrrCp7DashboardPage() {
               </div>
               
               <div style={kpiCardStyle('#059669')}>
-                <div style={kpiLabelStyle}>Авто со всеми закрытыми дефектами</div>
+                <div style={kpiLabelStyle}>Авто с дефектами closed</div>
                 <div style={separatorStyle}></div>
                 <div style={kpiValueStyle}>{data.closedVins}</div>
               </div>
@@ -324,7 +324,7 @@ export default function DrrCp7DashboardPage() {
 
             {/* Таблица дефектов */}
             <div style={tableCardStyle}>
-              <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR</h2>
+              <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP7</h2>
               
               <div style={tableScrollStyle}>
                 {data.topDefects.length > 0 ? (
