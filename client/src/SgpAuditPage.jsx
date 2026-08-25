@@ -163,7 +163,7 @@ export default function SgpAuditPage() {
   const [cpLoading, setCpLoading] = useState(false);
   const [cpError, setCpError] = useState(null);
   const [cpData, setCpData] = useState([]);
-  const [cpLocations, setCpLocations] = useState({});
+  const [cpLocations, setCpLocations] = useState({}); // vin -> {isInStorage, storageString, checkpoint, isSold}
   const [cpPage, setCpPage] = useState(0);
   const rowsPerPage = 100;
 
@@ -180,7 +180,7 @@ export default function SgpAuditPage() {
   const [neighborError, setNeighborError] = useState(null);
   const [neighborData, setNeighborData] = useState([]);
   const [neighborTargetTime, setNeighborTargetTime] = useState(null);
-  const [neighborLocations, setNeighborLocations] = useState({});
+  const [neighborLocations, setNeighborLocations] = useState({}); // vin -> {isInStorage, storageString, checkpoint, isSold}
 
   // Analytics (скрыта)
   const [auditStartDate, setAuditStartDate] = useState('');
@@ -464,6 +464,39 @@ export default function SgpAuditPage() {
     }
   };
 
+  // ====== Функция получения моделей из MES ======
+  const fetchModels = async (vinList) => {
+    if (!vinList || vinList.length === 0) return {};
+    try {
+      const uniqueVins = [...new Set(vinList.filter(v => v && v !== 'N/A'))];
+      if (uniqueVins.length === 0) return {};
+
+      const batchSize = 200;
+      const batches = [];
+      for (let i = 0; i < uniqueVins.length; i += batchSize) {
+        batches.push(uniqueVins.slice(i, i + batchSize));
+      }
+
+      const allResponses = await Promise.all(
+        batches.map(async (batch) => {
+          const res = await fetch(`${API_BASE}/api/vehicles-models?vins=${batch.join(',')}`);
+          if (!res.ok) throw new Error('Ошибка загрузки моделей');
+          return res.json();
+        })
+      );
+
+      const map = {};
+      allResponses.forEach(modelsMap => {
+        Object.keys(modelsMap).forEach(vin => { map[vin] = modelsMap[vin]; });
+      });
+
+      return map;
+    } catch (err) {
+      console.error('Ошибка получения моделей:', err);
+      return {};
+    }
+  };
+
   // ====== Загрузка соседей по точке ======
   const loadNeighbors = async () => {
     if (!neighborVin.trim()) return;
@@ -519,7 +552,7 @@ export default function SgpAuditPage() {
     XLSX.writeFile(wb, `Соседи_${neighborCheckpoint}_${dateStr}.xlsx`);
   };
 
-  // НОВАЯ ФУНКЦИЯ: Экспорт на холд (два файла)
+  // НОВАЯ ФУНКЦИЯ: Экспорт на холд (два файла с колонкой Текущее расположение)
   const exportNeighborsToHolds = () => {
     if (!neighborData.length) return;
 
@@ -528,11 +561,23 @@ export default function SgpAuditPage() {
 
     neighborData.forEach(item => {
       const loc = neighborLocations[item.vin];
+      let locationStr = '-';
+      if (loc) {
+        if (loc.isInStorage) locationStr = loc.storageString;
+        else if (loc.isSold) locationStr = 'Продан';
+        else locationStr = loc.checkpoint || '-';
+      }
+
+      const rowData = {
+        'VIN': item.vin,
+        'Текущее расположение': locationStr,
+      };
+
       const isAfter = loc && (loc.checkpoint === 'CP8' || loc.isInStorage || loc.isSold);
       if (isAfter) {
-        afterCP8.push({ 'VIN': item.vin });
+        afterCP8.push(rowData);
       } else {
-        beforeCP8.push({ 'VIN': item.vin });
+        beforeCP8.push(rowData);
       }
     });
 
@@ -721,9 +766,14 @@ export default function SgpAuditPage() {
         });
         return newRow;
       });
-      setCpData(cleanedData);
-
       const vins = cleanedData.map(row => row.VIN).filter(v => v && v !== '-');
+      const modelsMap = await fetchModels(vins);
+      const enrichedData = cleanedData.map(row => ({
+        ...row,
+        Модель: modelsMap[row.VIN] || (row.Модель && row.Модель !== '-') ? row.Модель : '-',
+      }));
+      setCpData(enrichedData);
+
       const locInfo = await fetchCurrentLocations(vins);
       setCpLocations(locInfo);
     } catch (err) {
@@ -755,12 +805,14 @@ export default function SgpAuditPage() {
 
       // Загружаем данные склада батчами
       const storageMap = await fetchStorageLocations(vins);
+      // Загружаем модели
+      const modelsMap = await fetchModels(vins);
 
       const tableData = vins.map(vin => {
-        const s = storageMap[vin] || { Модель: '-', Склад: '-', Локация: '-', Ячейка: '-' };
+        const s = storageMap[vin] || {};
         return {
           VIN: vin,
-          Модель: s.Модель || '-',
+          Модель: modelsMap[vin] || (s.Модель && s.Модель !== '-') ? s.Модель : '-',
           Склад: s.Склад || '-',
           Локация: s.Локация || '-',
           Ячейка: s.Ячейка || '-',

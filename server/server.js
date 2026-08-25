@@ -4384,6 +4384,32 @@ app.get('/api/vehicles-current-location', async (req, res) => {
   }
 });
 
+app.get('/api/vehicles-models', async (req, res) => {
+  try {
+    const { vins } = req.query;
+    if (!vins) return res.status(400).json({ error: 'vins обязателен' });
+    const vinList = vins.split(',').map(v => v.trim()).filter(Boolean);
+    if (vinList.length === 0) return res.json({});
+
+    const placeholders = vinList.map(() => '?').join(',');
+
+    const [rows] = await mesPool.query(
+      `SELECT vin, product AS model
+       FROM tm_ofm_order
+       WHERE vin IN (${placeholders})`,
+      vinList
+    );
+
+    const map = {};
+    rows.forEach(r => { map[r.vin] = r.model; });
+
+    res.json(map);
+  } catch (err) {
+    console.error('Ошибка vehicles-models:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок
