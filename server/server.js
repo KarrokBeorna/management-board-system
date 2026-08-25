@@ -155,7 +155,7 @@ app.get('/api/defects-dashboard', async (req, res) => {
     // Единые списки постов для всех отчётов
     const cp7Posts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-      'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+      'REPAIR', 'REPAIR_Final',
       'EXT1', 'PIP2', 'PIP4', 'PIP9'
     ];
     const cp8Posts = [
@@ -163,7 +163,7 @@ app.get('/api/defects-dashboard', async (req, res) => {
       '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'
     ];
     const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT','CP8 Touch Up'];
 
     let postList = [];
     if (checkpoint === 'CP7') postList = cp7Posts;
@@ -250,12 +250,12 @@ app.get('/api/daily-top', async (req, res) => {
 
     const cp7Posts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-      'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+      'REPAIR', 'REPAIR_Final',
       'EXT1', 'PIP2', 'PIP4', 'PIP9'
     ];
     const cp8Posts = [
       'CP8', 'CP8 Gate', 'CP8-gate',
-      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT','CP8 Touch Up'
     ];
 
     let postList = [];
@@ -347,12 +347,12 @@ app.get('/api/daily-top-vins', async (req, res) => {
 
     const cp7Posts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-      'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+      'REPAIR', 'REPAIR_Final',
       'EXT1', 'PIP2', 'PIP4', 'PIP9'
     ];
     const cp8Posts = [
       'CP8', 'CP8 Gate', 'CP8-gate',
-      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
     ];
 
     let postList = [];
@@ -653,7 +653,7 @@ app.get('/api/model-status-dpu-cp7', async (req, res) => {
     // Посты CP7 + PIP (офлайн-дефекты и учёт авто)
     const cp7pipPosts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-      'CP8 Touch Up', 'PIP1', 'PIP2', 'PIP9',
+      'PIP1', 'PIP2', 'PIP9',
     ];
     const postListStr = cp7pipPosts.map(p => `'${p}'`).join(',');
 
@@ -735,7 +735,7 @@ app.get('/api/model-status-dpu-cp7-details', async (req, res) => {
     // Новый список постов CP7
     const cp7Posts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-      'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+      'REPAIR', 'REPAIR_Final',
       'EXT1', 'PIP2', 'PIP4', 'PIP9'
     ];
     const postListStr = cp7Posts.map(p => `'${p}'`).join(',');
@@ -947,8 +947,8 @@ app.get('/api/checkpoint-stats', async (req, res) => {
     const type = defectType || 'all';
 
     const pipPostsAll = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-    const cp7PostsAll = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'CP8 Touch Up', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
-    const tlPostsAll  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const cp7PostsAll = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const tlPostsAll  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT','CP8 Touch Up'];
     const cp8PostsAll = ['CP8', 'CP8 Gate', 'CP8-gate'];
 
     const checkpoints = [
@@ -1062,8 +1062,8 @@ app.get('/api/checkpoint-stats', async (req, res) => {
     // Списки постов
     const pipPostsPure = ['EXT1', 'PIP1', 'PIP5', 'PIP6', 'PIP8'];
     const pipPostsAll  = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-    const cp7PostsAll  = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'CP8 Touch Up', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
-    const tlPostsAll   = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const cp7PostsAll  = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const tlPostsAll   = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT','CP8 Touch Up'];
     const cp8PostsAll  = ['CP8', 'CP8 Gate', 'CP8-gate'];
 
     // Вспомогательная функция: подсчёт уникальных VIN с офлайн-дефектами на заданном списке постов
@@ -1222,8 +1222,8 @@ app.get('/api/checkpoint-defects', async (req, res) => {
     // Базовые списки
     const pipPostsAll   = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
     const pipPostsPure  = ['EXT1', 'PIP1', 'PIP5', 'PIP6', 'PIP8'];
-    const cp7PostsAll   = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'CP8 Touch Up', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
-    const tlPostsAll    = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const cp7PostsAll   = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const tlPostsAll    = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT','CP8 Touch Up'];
     const cp8PostsAll   = ['CP8', 'CP8 Gate', 'CP8-gate'];
 
     let postList;
@@ -1867,9 +1867,9 @@ app.get('/api/mpp-weekly-top', async (req, res) => {
     const type = defectType || 'offline';
 
     const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-    const cp7Posts = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'CP8 Touch Up', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const cp7Posts = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
     const cp8Posts = ['CP8', 'CP8 Gate', 'CP8-gate', '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
-    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT',, 'CP8 Touch Up'];
 
     let postList = [];
     if (!checkpoint || checkpoint === 'ALL') {
@@ -2100,9 +2100,9 @@ app.get('/api/mpp-remzone-duration', async (req, res) => {
 
     // Списки постов (аналогично mpp-weekly-top)
     const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-    const cp7Posts = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'CP8 Touch Up', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const cp7Posts = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
     const cp8Posts = ['CP8', 'CP8 Gate', 'CP8-gate', '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
-    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT',, 'CP8 Touch Up'];
 
     let postList = [];
     if (!checkpoint || checkpoint === 'ALL') {
@@ -2234,8 +2234,8 @@ app.get('/api/mpp-drr-analytics', async (req, res) => {
 
     // ========== 1. Список постов для дефектов (зависит от фильтра чекпоинтов) ==========
     const pipPosts = ['EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9'];
-    const cp7Posts = ['CP7','CP7 Audit','CP7 Gate','CP7-gate','CP8 Touch Up','REPAIR','REPAIR_Final','EXT1','PIP2','PIP4','PIP9'];
-    const cp8Posts = ['CP8','CP8 Gate','CP8-gate','360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT'];
+    const cp7Posts = ['CP7','CP7 Audit','CP7 Gate','CP7-gate','REPAIR','REPAIR_Final','EXT1','PIP2','PIP4','PIP9'];
+    const cp8Posts = ['CP8','CP8 Gate','CP8-gate','360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT','CP8 Touch Up'];
 
     let defectPostList = [];
     if (!checkpoint || checkpoint === 'ALL') defectPostList = [...new Set([...pipPosts, ...cp7Posts, ...cp8Posts])];
@@ -4417,12 +4417,12 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
     const postLists = {
       all: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'REPAIR', 'REPAIR_Final',
         'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
       ],
       cp7: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'REPAIR', 'REPAIR_Final',
         'EXT1', 'PIP2', 'PIP4', 'PIP9'
       ],
       pip: [
