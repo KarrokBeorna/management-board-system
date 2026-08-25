@@ -118,7 +118,7 @@ const kpiValueStyle = {
   paddingBottom: '10px',
 };
 
-// ====== ТАБЛИЦА (Убрал красную линию из tr, теперь она в td) ======
+// ====== ТАБЛИЦА ======
 const tableCardStyle = {
   flex: 2,
   backgroundColor: '#FFFFFF',
@@ -167,7 +167,7 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
-// Стиль для блока подписей под графиком
+// Подписи под графиком
 const pieLegendStyle = {
   display: 'flex',
   justifyContent: 'center',
@@ -185,8 +185,8 @@ export default function DrrCp7DashboardPage() {
 
   const loadData = async () => {
     try {
-      // Искусственная задержка 2.5 секунды
-      await new Promise(resolve => setTimeout(resolve, 2500)); 
+      // Искусственная задержка 8 секунд
+      await new Promise(resolve => setTimeout(resolve, 8000)); 
       
       const res = await fetch(`${API_BASE}/api/drr-cp7-dashboard?filter=${filter}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
@@ -201,7 +201,7 @@ export default function DrrCp7DashboardPage() {
   };
 
   useEffect(() => {
-    setLoading(true); // Включаем загрузку перед запросом
+    setLoading(true);
     loadData();
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
@@ -234,11 +234,12 @@ export default function DrrCp7DashboardPage() {
       ) : (
         <div style={dashboardGridStyle}>
           
-          {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart (обычный, без кастомных обрезанных лейблов) */}
+          {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart (увеличен) */}
           <div style={chartColumnStyle}>
             <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', margin: '0 0 20px 0' }}>DRR распределение</h2>
             
-            <div style={{ position: 'relative', width: '100%', height: '400px' }}>
+            {/* Высота увеличена до 500px, радиус увеличен */}
+            <div style={{ position: 'relative', width: '100%', height: '500px' }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -248,11 +249,10 @@ export default function DrrCp7DashboardPage() {
                     cx="50%"
                     cy="50%"
                     innerRadius="55%"
-                    outerRadius="80%"
+                    outerRadius="90%"  // Увеличен внешний радиус
                     paddingAngle={4}
                     stroke="#FFFFFF"
                     strokeWidth={4}
-                    // Убрали label и labelLine - подписи будут снизу!
                   >
                     {pieData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
@@ -265,7 +265,7 @@ export default function DrrCp7DashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
               
-              {/* Цифра по центру (Без анимации, появляется с задержкой загрузки) */}
+              {/* Цифра по центру (появляется после загрузки) */}
               <div style={{
                 position: 'absolute',
                 top: '50%',
@@ -280,7 +280,7 @@ export default function DrrCp7DashboardPage() {
               </div>
             </div>
 
-            {/* ПОДПИСИ ПОД ГРАФИКОМ (По центру снизу) */}
+            {/* Подписи под графиком */}
             <div style={pieLegendStyle}>
               <span style={{ color: '#10B981' }}>DRR, %: {data.drrPercent.toFixed(1)}%</span>
               <span style={{ color: '#EF4444' }}>Не прямой сход, %: {(100 - data.drrPercent).toFixed(1)}%</span>
@@ -311,7 +311,7 @@ export default function DrrCp7DashboardPage() {
               </div>
             </div>
 
-            {/* Таблица дефектов (Красная линия теперь в td, не двигается) */}
+            {/* Таблица дефектов (красная линия теперь через boxShadow) */}
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR</h2>
               
@@ -331,10 +331,10 @@ export default function DrrCp7DashboardPage() {
                           key={idx} 
                           style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}
                         >
-                          {/* Ставим красную границу именно в первую ячейку, чтобы она не вылезала при скролле */}
+                          {/* Используем boxShadow inset вместо border-left, чтобы линия не вылезала */}
                           <td style={{ 
                             ...tdStyle, 
-                            borderLeft: idx < 3 ? '10px solid #EF4444' : '10px solid transparent' 
+                            boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none'
                           }}>
                             {defect.description}
                           </td>
