@@ -1,48 +1,101 @@
 import React, { useState, useEffect } from 'react';
-import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 
-const cardStyle = {
-  backgroundColor: '#FFFFFF',
-  borderRadius: 16,
-  padding: 24,
-  marginBottom: 24,
-  boxShadow: '0 8px 30px rgba(0,0,0,0.06)',
-  border: '1px solid #F0F0F5',
+// ==== СТИЛИ ДЛЯ ТВ (ОГРОМНЫЕ ЦИФРЫ, ВЫСОКИЙ КОНТРАСТ) ====
+const containerStyle = {
+  padding: '40px',
+  fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
+  maxWidth: '1920px',
+  margin: '0 auto',
+  backgroundColor: '#F8FAFC',
+  minHeight: '100vh',
+  boxSizing: 'border-box',
 };
 
+const headerStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  marginBottom: '40px',
+};
+
+const titleStyle = {
+  fontSize: '48px',
+  fontWeight: 900,
+  color: '#1E293B',
+  margin: 0,
+  letterSpacing: '-1px',
+};
+
+// Кнопки фильтров (огромные, для управления с пульта/пальцем)
 const filterButtonStyle = (active) => ({
-  padding: '8px 20px',
-  borderRadius: 8,
+  padding: '16px 40px',
+  borderRadius: '16px',
   border: 'none',
-  fontWeight: 600,
-  fontSize: 14,
-  background: active ? '#2563EB' : '#F3F4F6',
-  color: active ? '#FFFFFF' : '#6B7280',
+  fontWeight: 800,
+  fontSize: '24px',
+  background: active ? '#2563EB' : '#FFFFFF',
+  color: active ? '#FFFFFF' : '#64748B',
   cursor: 'pointer',
-  boxShadow: active ? '0 4px 12px rgba(37,99,235,0.25)' : 'none',
+  boxShadow: active ? '0 8px 20px rgba(37,99,235,0.3)' : '0 4px 12px rgba(0,0,0,0.05)',
   transition: 'all 0.2s',
-  marginRight: 8,
+  marginRight: '16px',
 });
 
+const cardStyle = {
+  backgroundColor: '#FFFFFF',
+  borderRadius: '32px',
+  padding: '40px',
+  boxShadow: '0 10px 40px rgba(0,0,0,0.05)',
+  border: '1px solid #E2E8F0',
+};
+
+// ==== КОМПОНЕНТ KPI (Крупный блок с цифрой) ====
+const KpiCard = ({ label, value, color, suffix = '' }) => (
+  <div style={{
+    background: color,
+    borderRadius: '24px',
+    padding: '24px',
+    color: '#FFFFFF',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 8px 24px rgba(0,0,0,0.1)',
+    minWidth: '220px',
+    flex: 1,
+  }}>
+    <div style={{ fontSize: '20px', fontWeight: 600, opacity: 0.9, marginBottom: '8px' }}>{label}</div>
+    <div style={{ fontSize: '72px', fontWeight: 900, lineHeight: 1 }}>{value}{suffix}</div>
+  </div>
+);
+
+// ==== СТИЛИ ТАБЛИЦЫ ====
 const thStyle = {
-  padding: '12px 14px',
+  padding: '20px 24px',
   textAlign: 'left',
-  fontWeight: 600,
-  color: '#374151',
-  borderBottom: '2px solid #E5E7EB',
-  background: '#F9FAFB',
-  whiteSpace: 'nowrap',
+  fontWeight: 800,
+  color: '#475569',
+  borderBottom: '3px solid #E2E8F0',
+  background: '#F8FAFC',
+  fontSize: '22px',
+  textTransform: 'uppercase',
+  letterSpacing: '0.5px',
 };
 
 const tdStyle = {
-  padding: '10px 14px',
-  borderBottom: '1px solid #F0F0F5',
-  color: '#1F2937',
+  padding: '18px 24px',
+  borderBottom: '1px solid #F1F5F9',
+  color: '#1E293B',
+  fontSize: '22px',
 };
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
+const GRADIENT_GREEN = 'linear-gradient(135deg, #059669 0%, #10B981 100%)';
+const GRADIENT_BLUE = 'linear-gradient(135deg, #1D4ED8 0%, #3B82F6 100%)';
+const GRADIENT_DARK = 'linear-gradient(135deg, #1E293B 0%, #334155 100%)';
 
 export default function DrrCp7DashboardPage() {
   const [filter, setFilter] = useState('all');
@@ -75,74 +128,98 @@ export default function DrrCp7DashboardPage() {
   ];
 
   return (
-    <div style={{ padding: 30, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
-      <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 30 }}>
-        DRR CP7 Dashboard
-      </h1>
-
-      {/* Фильтры */}
-      <div style={{ marginBottom: 20 }}>
-        <button style={filterButtonStyle(filter === 'all')} onClick={() => setFilter('all')}>Все</button>
-        <button style={filterButtonStyle(filter === 'cp7')} onClick={() => setFilter('cp7')}>CP7</button>
-        <button style={filterButtonStyle(filter === 'pip')} onClick={() => setFilter('pip')}>PIP</button>
+    <div style={containerStyle}>
+      {/* Заголовок и фильтры */}
+      <div style={headerStyle}>
+        <h1 style={titleStyle}>DRR CP7 Dashboard</h1>
+        <div>
+          <button style={filterButtonStyle(filter === 'all')} onClick={() => setFilter('all')}>Все</button>
+          <button style={filterButtonStyle(filter === 'cp7')} onClick={() => setFilter('cp7')}>CP7</button>
+          <button style={filterButtonStyle(filter === 'pip')} onClick={() => setFilter('pip')}>PIP</button>
+        </div>
       </div>
 
       {loading ? (
-        <p style={{ textAlign: 'center', padding: 40 }}>Загрузка данных...</p>
+        <div style={{ fontSize: '36px', textAlign: 'center', padding: '60px', color: '#64748B' }}>Загрузка данных...</div>
       ) : error ? (
-        <p style={{ textAlign: 'center', color: '#DC2626' }}>❌ {error}</p>
+        <div style={{ fontSize: '36px', textAlign: 'center', color: '#DC2626' }}>❌ {error}</div>
       ) : (
         <>
-          {/* Карточка с диаграммой и цифрами */}
-          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 24 }}>
-            <div style={{ ...cardStyle, flex: '1 1 400px' }}>
-              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>DRR распределение</h2>
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={100}
-                    label={(entry) => `${entry.name}: ${entry.value.toFixed(1)}%`}
-                  >
-                    {pieData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => `${value.toFixed(1)}%`} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
+          {/* Верхний блок: Диаграмма + KPI */}
+          <div style={{ display: 'flex', gap: '32px', marginBottom: '40px' }}>
+            
+            {/* Левая часть: Диаграмма */}
+            <div style={{ ...cardStyle, flex: '1.5' }}>
+              <h2 style={{ fontSize: '32px', fontWeight: 800, color: '#1E293B', marginBottom: '24px' }}>DRR распределение</h2>
+              <div style={{ width: '100%', height: '450px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={80}
+                      outerRadius={160}
+                      paddingAngle={2}
+                      stroke="none"
+                      label={({ name, value }) => `${name}: ${value.toFixed(1)}%`}
+                      labelLine={{ stroke: '#CBD5E1', strokeWidth: 2 }}
+                      fontSize="24px"
+                      fontWeight="bold"
+                      fill="#333"
+                    >
+                      {pieData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      formatter={(value) => `${value.toFixed(1)}%`}
+                      contentStyle={{ fontSize: '24px', borderRadius: '16px' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
             </div>
 
-            <div style={{ ...cardStyle, flex: '1 1 300px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Ключевые показатели</h2>
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 14, color: '#6B7280' }}>Всего автомобилей (CP72)</div>
-                <div style={{ fontSize: 32, fontWeight: 800, color: '#1F2937' }}>{data.totalVins}</div>
+            {/* Правая часть: KPI (Огромные карточки) */}
+            <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <h2 style={{ fontSize: '32px', fontWeight: 800, color: '#1E293B', margin: '0 0 8px 0' }}>Ключевые показатели</h2>
+              
+              <div style={{ display: 'flex', gap: '24px' }}>
+                <KpiCard label="Всего авто (CP72)" value={data.totalVins} color="#1E293B" />
+                <KpiCard label="Закрытые дефекты" value={data.closedVins} color="#059669" />
               </div>
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 14, color: '#6B7280' }}>Авто с закрытыми дефектами</div>
-                <div style={{ fontSize: 32, fontWeight: 800, color: '#10B981' }}>{data.closedVins}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 14, color: '#6B7280' }}>DRR %</div>
-                <div style={{ fontSize: 48, fontWeight: 900, color: '#2563EB' }}>{data.drrPercent.toFixed(1)}%</div>
+              
+              <div style={{ 
+                background: GRADIENT_BLUE, 
+                borderRadius: '24px', 
+                padding: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 8px 24px rgba(37,99,235,0.3)',
+                flex: 1
+              }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '24px', fontWeight: 600, opacity: 0.9, marginBottom: '4px' }}>DRR %</div>
+                  <div style={{ fontSize: '96px', fontWeight: 900, lineHeight: 1, color: '#FFFFFF' }}>
+                    {data.drrPercent.toFixed(1)}%
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Топ дефектов */}
+          {/* Нижний блок: Таблица */}
           <div style={cardStyle}>
-            <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>
+            <h2 style={{ fontSize: '32px', fontWeight: 800, color: '#1E293B', marginBottom: '32px' }}>
               Топ дефектов, повлиявших на DRR
             </h2>
             {data.topDefects.length > 0 ? (
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
                       <th style={thStyle}>Описание дефекта</th>
@@ -152,17 +229,25 @@ export default function DrrCp7DashboardPage() {
                   </thead>
                   <tbody>
                     {data.topDefects.map((defect, idx) => (
-                      <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                      <tr 
+                        key={idx} 
+                        style={{ 
+                          backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC',
+                          borderLeft: idx < 3 ? '8px solid #EF4444' : '8px solid transparent'
+                        }}
+                      >
                         <td style={tdStyle}>{defect.description}</td>
-                        <td style={tdStyle}>{defect.grade}</td>
-                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700 }}>{defect.affectedVins}</td>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '32px', color: idx < 3 ? '#DC2626' : '#1E293B' }}>
+                          {defect.affectedVins}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             ) : (
-              <p style={{ textAlign: 'center', padding: 20, color: '#6B7280' }}>Нет данных</p>
+              <p style={{ textAlign: 'center', padding: '40px', color: '#64748B', fontSize: '24px' }}>Нет данных</p>
             )}
           </div>
         </>
