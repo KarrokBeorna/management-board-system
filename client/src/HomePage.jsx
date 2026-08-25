@@ -254,7 +254,7 @@ export default function HomePage() {
           <ReportCard to="/drr-report" imgSrc={drrReportPreview} caption="DRR Report" accentColor="#fa0000" />
           <ReportCard to="/daily-dashboard" imgSrc={dailyDashboardPreview} caption="Daily Dashboard" accentColor="#0cb428" />
           <ReportCard to="/tl-map" imgSrc={tlMapPreview} caption="TL Map" accentColor="#0ad5c8" />
-          <ReportCard to="/drr-cp7-dashboard" imgSrc={drrReportPreview} caption="DRR CP7 Dashboard" accentColor="#3a2ac5" />
+          <ReportCard to="/drr-cp7-dashboard" imgSrc={DrrCp7DashboardPage} caption="DRR CP7 Dashboard" accentColor="#3a2ac5" />
         </div>
       </AnimatedSection>
 
