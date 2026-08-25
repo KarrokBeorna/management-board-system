@@ -150,7 +150,7 @@ export default function SgpAuditPage() {
   const timePointsPageSize = 50;
 
   const [tpFilters, setTpFilters] = useState({});
-  const [tpVinSearch, setTpVinSearch] = useState(''); // отдельное состояние для текстового поиска VIN
+  const [tpVinSearch, setTpVinSearch] = useState('');
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
 
@@ -256,11 +256,15 @@ export default function SgpAuditPage() {
     return `${dd}.${mm} ${hh}:${min}`;
   };
 
-  const loadTimePoints = async () => {
+  const loadTimePoints = async (vin = '') => {
     setTimePointsLoading(true);
     setTimePointsError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/time-points`);
+      const params = new URLSearchParams();
+      if (vin && vin.trim()) {
+        params.append('vin', vin.trim());
+      }
+      const res = await fetch(`${API_BASE}/api/time-points?${params.toString()}`);
       if (!res.ok) {
         const errorText = await res.text();
         console.error('Server error:', errorText);
@@ -333,13 +337,11 @@ export default function SgpAuditPage() {
   const filteredTimePointsData = useMemo(() => {
     let result = allTimePointsData;
 
-    // Текстовый поиск VIN
     if (tpVinSearch.trim()) {
       const vinFilter = tpVinSearch.trim().toLowerCase();
       result = result.filter(d => d.vin && d.vin.toLowerCase().includes(vinFilter));
     }
 
-    // Множественный фильтр по VIN (если он выбран из заголовка)
     if (Array.isArray(tpFilters.vin) && tpFilters.vin.length > 0) {
       result = result.filter(d => tpFilters.vin.includes(d.vin));
     }
@@ -1008,7 +1010,7 @@ export default function SgpAuditPage() {
             </div>
           </div>
 
-          {/* VIN поиск (текстовое поле) */}
+          {/* VIN поиск с кнопкой */}
           <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
               🔍 VIN:
@@ -1016,10 +1018,14 @@ export default function SgpAuditPage() {
                 type="text"
                 value={tpVinSearch}
                 onChange={(e) => setTpVinSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') loadTimePoints(tpVinSearch); }}
                 placeholder="Введите VIN..."
                 style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14, background: '#F9FAFB', width: 200 }}
               />
             </label>
+            <button style={buttonStyle} onClick={() => loadTimePoints(tpVinSearch)}>
+              Найти
+            </button>
           </div>
 
           {/* Фильтры в 2 столбца */}
