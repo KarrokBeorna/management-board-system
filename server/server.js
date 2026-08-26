@@ -4423,7 +4423,7 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
       cp7: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
         'REPAIR', 'REPAIR_Final',
-        'EXT1', 'PIP2', 'PIP4', 'PIP9'
+        'EXT1','PIP9'
       ],
       pip: [
         'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
