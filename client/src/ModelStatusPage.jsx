@@ -139,16 +139,16 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     }
   };
 
-  // Генерация PDF с уменьшенным размером
+  // Генерация PDF с масштабом 200% и многостраничностью без обрезания
   const generatePdf = async () => {
     const canvas = await html2canvas(targetRef.current, {
-      scale: 1.25,
+      scale: 2, // 200% – высокое разрешение
       useCORS: true,
       logging: false,
       windowWidth: targetRef.current.scrollWidth,
       windowHeight: targetRef.current.scrollHeight,
     });
-    const imgData = canvas.toDataURL('image/jpeg', 0.8); // JPEG, качество 80%
+    const imgData = canvas.toDataURL('image/jpeg', 0.85); // JPEG, качество 85%
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
@@ -169,32 +169,27 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     return pdf;
   };
 
+  // Отправка: генерируем PDF, скачиваем и открываем почтовый клиент
   const handleSendNow = async () => {
     try {
-      await saveSettings(); // сохраняем настройки перед отправкой
+      await saveSettings(); // сохранить настройки
 
       // Генерируем PDF
       const pdf = await generatePdf();
       const pdfBlob = pdf.output('blob');
+      const pdfUrl = URL.createObjectURL(pdfBlob);
 
-      // Загружаем PDF на сервер
-      const formData = new FormData();
-      formData.append('pdf', pdfBlob, 'report.pdf');
-      const uploadRes = await fetch(`${API_BASE}/api/email/upload-pdf`, {
-        method: 'POST',
-        body: formData,
-      });
-      if (!uploadRes.ok) {
-        throw new Error('Не удалось загрузить PDF на сервер');
-      }
+      // Скачиваем PDF
+      const link = document.createElement('a');
+      link.href = pdfUrl;
+      link.download = `${pageTitle || 'report'}.pdf`;
+      link.click();
+      URL.revokeObjectURL(pdfUrl);
 
-      // Отправляем письмо через сервер
-      const sendRes = await fetch(`${API_BASE}/api/email/send-now`, { method: 'POST' });
-      if (!sendRes.ok) {
-        throw new Error('Не удалось отправить письмо');
-      }
+      // Открываем почтовый клиент
+      const mailtoLink = `mailto:${emailForm.to}?cc=${emailForm.cc}&subject=${encodeURIComponent(emailForm.subject)}&body=${encodeURIComponent(emailForm.body)}`;
+      window.location.href = mailtoLink;
 
-      alert('Письмо отправлено!');
       setSettingsModalOpen(false);
     } catch (err) {
       console.error('Ошибка отправки', err);
@@ -261,6 +256,7 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     fontFamily: BRAND.fontFamily,
     color: BRAND.text,
     boxSizing: 'border-box',
+    margin: '0 auto', // гарантирует равные отступы слева и справа
   };
 
   const modalWideStyle = {
@@ -312,17 +308,6 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     cursor: 'pointer',
     fontSize: '0.9rem',
     transition: 'background 0.2s',
-  };
-
-  const buttonAccent = {
-    padding: '10px 20px',
-    borderRadius: BRAND.radiusSmall,
-    border: 'none',
-    background: BRAND.accent,
-    color: '#FFFFFF',
-    fontWeight: 600,
-    cursor: 'pointer',
-    fontSize: '0.9rem',
   };
 
   return (
@@ -1360,13 +1345,13 @@ export default function ModelStatusPage() {
   const handleExportPdf = async () => {
     try {
       const canvas = await html2canvas(pageRef.current, {
-        scale: 1.25,
+        scale: 2, // 200% – высокое качество
         useCORS: true,
         logging: false,
         windowWidth: pageRef.current.scrollWidth,
         windowHeight: pageRef.current.scrollHeight,
       });
-      const imgData = canvas.toDataURL('image/jpeg', 0.8);
+      const imgData = canvas.toDataURL('image/jpeg', 0.85);
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
