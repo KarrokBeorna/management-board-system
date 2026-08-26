@@ -76,7 +76,6 @@ const tdStyle = {
   textOverflow: 'ellipsis',
 };
 
-// Цвета для типов периодов
 const typeColors = {
   year: '#065F46',
   month: '#10B981',
@@ -148,16 +147,14 @@ export default function DrrCp7HistoryPage() {
   }, [data]);
 
   const tableData = useMemo(() => {
-    const rows = allModelKeys.map(key => {
-      return {
-        model: modelShortNames[key],
-        fullModel: key,
-        cells: data.map(p => {
-          const modelData = p.models && p.models[key];
-          return modelData ? modelData.drr : '';
-        }),
-      };
-    });
+    const rows = allModelKeys.map(key => ({
+      model: modelShortNames[key],
+      fullModel: key,
+      cells: data.map(p => {
+        const modelData = p.models && p.models[key];
+        return modelData ? modelData.drr : '';
+      }),
+    }));
     const totalRow = {
       model: 'Total',
       fullModel: 'Total',
@@ -167,13 +164,12 @@ export default function DrrCp7HistoryPage() {
   }, [data]);
 
   const exportToExcel = () => {
-    const exportData = [];
-    tableData.forEach(row => {
+    const exportData = tableData.map(row => {
       const rowObj = { 'Модель': row.model };
       data.forEach((p, idx) => {
         rowObj[p.label] = row.cells[idx] !== '' ? `${row.cells[idx]}%` : '';
       });
-      exportData.push(rowObj);
+      return rowObj;
     });
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -219,71 +215,61 @@ export default function DrrCp7HistoryPage() {
         <button onClick={exportToExcel} style={{ ...buttonStyle, background: '#059669' }}>📥 Экспорт</button>
       </div>
 
-      {/* График */}
+      {/* Карточка с графиком и таблицей */}
       <div style={cardStyle}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 20 }}>
-          Динамика DRR CP7
-        </h2>
+        <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 20 }}>Динамика DRR CP7</h2>
 
         {loading ? (
           <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Загрузка данных...</p>
         ) : error ? (
           <p style={{ textAlign: 'center', color: '#DC2626', padding: 20 }}>❌ {error}</p>
         ) : (
-          <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={chartData} margin={{ top: 20, right: 60, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-35} textAnchor="end" height={60} />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
-              <ReferenceLine y={80} stroke="#EF4444" strokeDasharray="5 5">
-                <Label value="80%" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 700 }} />
-              </ReferenceLine>
-              <Bar dataKey="drr" barSize={25} radius={[6, 6, 0, 0]}>
-                {chartData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={typeColors[entry.type] || '#10B981'} />
-                ))}
-                <LabelList dataKey="drr" position="top" formatter={(v) => `${v}%`} style={{ fill: '#1F2937', fontSize: 11, fontWeight: 600 }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-
-      {/* Таблица */}
-      <div style={cardStyle}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 20 }}>
-          Данные по DRR
-        </h2>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr>
-                <th style={{ ...thStyle, textAlign: 'left', paddingLeft: 12, position: 'sticky', left: 0, zIndex: 2, backgroundColor: '#F9FAFB' }}>
-                  Модель
-                </th>
-                {data.map((p, idx) => (
-                  <th key={idx} style={{ ...thStyle, backgroundColor: typeBgColors[p.type] || '#F9FAFB' }}>
-                    {p.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tableData.map((row, rowIdx) => (
-                <tr key={rowIdx} style={{ backgroundColor: rowIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                  <td style={{ ...tdStyle, textAlign: 'left', paddingLeft: 12, fontWeight: 700, position: 'sticky', left: 0, backgroundColor: rowIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                    {row.model}
-                  </td>
-                  {data.map((p, colIdx) => (
-                    <td key={colIdx} style={{ ...tdStyle, backgroundColor: typeBgColors[p.type] || 'transparent' }}>
-                      {row.cells[colIdx] !== '' ? `${row.cells[colIdx]}%` : ''}
-                    </td>
+          <>
+            <ResponsiveContainer width="100%" height={350}>
+              <BarChart data={chartData} margin={{ top: 20, right: 60, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                <ReferenceLine y={80} stroke="#EF4444" strokeDasharray="5 5">
+                  <Label value="80%" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 700 }} />
+                </ReferenceLine>
+                <Bar dataKey="drr" barSize={25} radius={[6, 6, 0, 0]}>
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={typeColors[entry.type] || '#10B981'} />
                   ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  <LabelList dataKey="drr" position="top" formatter={(v) => `${v}%`} style={{ fill: '#1F2937', fontSize: 11, fontWeight: 600 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+
+            <div style={{ overflowX: 'auto', marginTop: 12, paddingRight: 60 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...thStyle, width: '8%', paddingLeft: 12 }}>Модель</th>
+                    {data.map((p, idx) => (
+                      <th key={idx} style={{ ...thStyle, backgroundColor: typeBgColors[p.type] || '#F9FAFB' }}>
+                        {p.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tableData.map((row, rowIdx) => (
+                    <tr key={rowIdx} style={{ backgroundColor: rowIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                      <td style={{ ...tdStyle, fontWeight: 700, paddingLeft: 12 }}>{row.model}</td>
+                      {data.map((p, colIdx) => (
+                        <td key={colIdx} style={{ ...tdStyle, backgroundColor: typeBgColors[p.type] || 'transparent' }}>
+                          {row.cells[colIdx] !== '' ? `${row.cells[colIdx]}%` : ''}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -4740,7 +4740,6 @@ app.get('/api/drr-cp7-history', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    // Расчёт для диапазона дат (исторический алгоритм)
     const calcModelsForRange = async (startDate, endDate) => {
       const sql = `
         WITH cp72_vins AS (
@@ -4805,15 +4804,9 @@ app.get('/api/drr-cp7-history', async (req, res) => {
         m.drr = Math.round(m.drr * 10) / 10;
       });
 
-      return {
-        totalVins,
-        closedVins,
-        drr: Math.round(drr * 10) / 10,
-        models
-      };
+      return { totalVins, closedVins, drr: Math.round(drr * 10) / 10, models };
     };
 
-    // Расчёт для сегодняшнего дня (по дашборду, с моделями)
     const calcModelsForToday = async () => {
       const now = new Date();
       const y = now.getFullYear();
@@ -4832,9 +4825,7 @@ app.get('/api/drr-cp7-history', async (req, res) => {
       `, [start, end]);
 
       const totalVins = cp72Rows.length;
-      if (totalVins === 0) {
-        return { totalVins: 0, closedVins: 0, drr: 0, models: {} };
-      }
+      if (totalVins === 0) return { totalVins: 0, closedVins: 0, drr: 0, models: {} };
 
       const [defectRows] = await pool.query(`
         SELECT d.VIN, d.STATUS
@@ -4879,15 +4870,16 @@ app.get('/api/drr-cp7-history', async (req, res) => {
 
     const now = new Date();
     let periods = [];
+
     const typeOrder = { year: 0, month: 1, week: 2, day: 3 };
 
     if (period === 'all') {
-      // Годы: от прошлого к текущему
+      // Годы
       for (let i = 1; i >= 0; i--) {
         const y = now.getFullYear() - i;
         periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
       }
-      // Месяцы: от старого к текущему
+      // Месяцы
       for (let i = 2; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const y = d.getFullYear();
@@ -4896,7 +4888,7 @@ app.get('/api/drr-cp7-history', async (req, res) => {
         const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
         periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${lastDay}`, type: 'month' });
       }
-      // Недели: от старой к текущей
+      // Недели (без года)
       const dayOfWeek = now.getDay();
       const monday = new Date(now);
       monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
@@ -4905,9 +4897,9 @@ app.get('/api/drr-cp7-history', async (req, res) => {
         start.setDate(monday.getDate() - i * 7);
         const end = new Date(start);
         end.setDate(start.getDate() + 6);
-        periods.push({ label: `W${getISOWeek(start)} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
+        periods.push({ label: `W${getISOWeek(start)}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
       }
-      // Дни: только 7 последних (от старого к сегодня)
+      // Дни (7 последних)
       for (let i = 6; i >= 0; i--) {
         const d = new Date(now);
         d.setDate(now.getDate() - i);
@@ -4939,7 +4931,7 @@ app.get('/api/drr-cp7-history', async (req, res) => {
           start.setDate(monday.getDate() - i * 7);
           const end = new Date(start);
           end.setDate(start.getDate() + 6);
-          periods.push({ label: `W${getISOWeek(start)} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
+          periods.push({ label: `W${getISOWeek(start)}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
         }
       } else if (period === 'day') {
         for (let i = limit - 1; i >= 0; i--) {
@@ -4950,17 +4942,7 @@ app.get('/api/drr-cp7-history', async (req, res) => {
       }
     }
 
-    // Сортировка: сначала по типу (year < month < week < day), затем по дате
     periods.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || a.startDate.localeCompare(b.startDate));
-
-    // Удаляем возможные дубликаты (если пересекаются даты)
-    const seen = new Set();
-    periods = periods.filter(p => {
-      const key = `${p.type}_${p.startDate}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
 
     const results = [];
     for (const p of periods) {
