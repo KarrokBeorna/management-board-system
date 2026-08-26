@@ -51,7 +51,7 @@ function formatPeriodLabel(period, periodType) {
 /* ============ УНИВЕРСАЛЬНЫЙ КОМПОНЕНТ АВТОРАССЫЛКИ ============ */
 const EmailSenderButton = ({ targetRef, pageTitle }) => {
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
-  const [composeModalOpen, setComposeModalOpen] = useState(false);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [emailForm, setEmailForm] = useState({
@@ -59,95 +59,180 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     cc: '',
     subject: pageTitle || 'Отчёт',
     body: '',
+    signatureText: '',
+    signatureImage: '', // base64 строка
+    senderName: 'MBS Quality System',
+  });
+  const [schedule, setSchedule] = useState({
+    days: [1, 2, 3, 4, 5], // 0=вс, 1=пн, ...
+    times: ['08:00', '12:00', '16:00'],
   });
   const [savedMessage, setSavedMessage] = useState('');
 
-  const correctPassword = 'report2024'; // пароль для доступа к настройке письма
+  const correctPassword = '1234561';
 
-  // Загрузка сохранённых адресатов при открытии окна настройки письма
-  const loadSavedRecipients = async () => {
+  // Загрузка сохранённых настроек
+  const loadSettings = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/email-recipients`);
-      if (response.ok) {
-        const data = await response.json();
-        if (data && typeof data === 'object') {
+      const res = await fetch(`${API_BASE}/api/email-settings`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data) {
           setEmailForm(prev => ({
             ...prev,
             to: data.to || '',
             cc: data.cc || '',
+            subject: data.subject || pageTitle || 'Отчёт',
+            body: data.body || '',
+            signatureText: data.signature_text || '',
+            signatureImage: data.signature_image || '',
+            senderName: data.sender_name || 'MBS Quality System',
           }));
+          if (data.schedule) {
+            setSchedule(prev => ({
+              ...prev,
+              days: data.schedule.days || prev.days,
+              times: data.schedule.times || prev.times,
+            }));
+          }
         }
       }
     } catch (err) {
-      console.error('Не удалось загрузить сохранённых адресатов', err);
+      console.error('Не удалось загрузить настройки авторассылки', err);
     }
   };
 
-  // Сохранение адресатов на сервер
-  const saveRecipients = async () => {
+  // Сохранение настроек на сервер
+  const saveSettings = async () => {
     try {
-      await fetch(`${API_BASE}/api/email-recipients`, {
+      await fetch(`${API_BASE}/api/email-settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: emailForm.to, cc: emailForm.cc }),
+        body: JSON.stringify({
+          to: emailForm.to,
+          cc: emailForm.cc,
+          subject: emailForm.subject,
+          body: emailForm.body,
+          signature_text: emailForm.signatureText,
+          signature_image: emailForm.signatureImage,
+          sender_name: emailForm.senderName,
+          schedule: schedule,
+        }),
       });
-      setSavedMessage('Адресаты сохранены');
+      setSavedMessage('Настройки сохранены');
       setTimeout(() => setSavedMessage(''), 3000);
     } catch (err) {
-      console.error('Не удалось сохранить адресатов', err);
+      console.error('Не удалось сохранить настройки', err);
+      alert('Ошибка сохранения');
     }
   };
 
   const handlePasswordSubmit = () => {
     if (password === correctPassword) {
       setPasswordModalOpen(false);
-      setComposeModalOpen(true);
+      setSettingsModalOpen(true);
       setPassword('');
       setError('');
-      loadSavedRecipients(); // подгружаем сохранённые адреса
+      loadSettings();
     } else {
       setError('Неверный пароль');
     }
   };
 
-  const handleSendEmail = async () => {
-    try {
-      // Сохраняем адресатов перед отправкой
-      await saveRecipients();
+  // Генерация PDF с уменьшенным размером
+  const generatePdf = async () => {
+    const canvas = await html2canvas(targetRef.current, {
+      scale: 1.25,
+      useCORS: true,
+      logging: false,
+      windowWidth: targetRef.current.scrollWidth,
+      windowHeight: targetRef.current.scrollHeight,
+    });
+    const imgData = canvas.toDataURL('image/jpeg', 0.8); // JPEG, качество 80%
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
 
-      // Генерируем PDF
-      const canvas = await html2canvas(targetRef.current, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        windowWidth: targetRef.current.scrollWidth,
-        windowHeight: targetRef.current.scrollHeight,
-      });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+    // Если изображение выше одной страницы A4 — разрезаем
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    let heightLeft = pdfHeight;
+    let position = 0;
+    let firstPage = true;
+
+    pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
+    heightLeft -= pageHeight;
+
+    while (heightLeft > 0) {
+      position -= pageHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
+      heightLeft -= pageHeight;
+      firstPage = false;
+    }
+    return pdf;
+  };
+
+  const handleSendNow = async () => {
+    try {
+      await saveSettings(); // сохраняем адресатов и настройки перед отправкой
+      const pdf = await generatePdf();
       const pdfBlob = pdf.output('blob');
       const pdfUrl = URL.createObjectURL(pdfBlob);
 
-      // Открываем почтовый клиент
+      // Открываем Outlook с заполненными полями
       const mailtoLink = `mailto:${emailForm.to}?cc=${emailForm.cc}&subject=${encodeURIComponent(emailForm.subject)}&body=${encodeURIComponent(emailForm.body)}`;
       window.location.href = mailtoLink;
 
-      // Скачиваем PDF, чтобы пользователь мог вручную прикрепить
+      // Скачиваем PDF для ручного прикрепления
       const link = document.createElement('a');
       link.href = pdfUrl;
       link.download = `${pageTitle || 'report'}.pdf`;
       link.click();
       URL.revokeObjectURL(pdfUrl);
 
-      setComposeModalOpen(false);
+      setSettingsModalOpen(false);
     } catch (err) {
-      console.error('Ошибка при генерации или отправке PDF:', err);
-      alert('Не удалось сгенерировать PDF');
+      console.error('Ошибка при отправке', err);
+      alert('Не удалось сгенерировать или отправить письмо');
     }
   };
+
+  // Обработчик загрузки изображения подписи
+  const handleSignatureUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setEmailForm(prev => ({ ...prev, signatureImage: ev.target.result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Вспомогательные функции для расписания
+  const toggleDay = (day) => {
+    setSchedule(prev => {
+      const days = prev.days.includes(day)
+        ? prev.days.filter(d => d !== day)
+        : [...prev.days, day];
+      return { ...prev, days };
+    });
+  };
+
+  const toggleTime = (time) => {
+    setSchedule(prev => {
+      const times = prev.times.includes(time)
+        ? prev.times.filter(t => t !== time)
+        : [...prev.times, time];
+      return { ...prev, times };
+    });
+  };
+
+  const dayNames = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+  const timeOptions = [
+    '00:00', '01:00', '02:00', '03:00', '04:00', '05:00', '06:00', '07:00', '08:00',
+    '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
+    '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
+  ];
 
   return (
     <>
@@ -167,7 +252,7 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
           fontFamily: BRAND.fontFamily,
         }}
       >
-        📧 Авторассылка
+        ⚙️ Настройка авторассылки
       </button>
 
       {/* Модальное окно пароля */}
@@ -184,7 +269,10 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
             padding: 30,
             borderRadius: BRAND.radius,
             boxShadow: BRAND.shadow,
-            width: '400px',
+            width: '90%',
+            maxWidth: '400px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
             fontFamily: BRAND.fontFamily,
           }}>
             <h3 style={{ marginTop: 0, color: BRAND.text }}>Введите пароль</h3>
@@ -231,15 +319,15 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
                   fontFamily: BRAND.fontFamily,
                 }}
               >
-                ОК
+                Войти
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Модальное окно настройки письма */}
-      {composeModalOpen && (
+      {/* Модальное окно настроек */}
+      {settingsModalOpen && (
         <div style={{
           position: 'fixed',
           top: 0, left: 0, width: '100%', height: '100%',
@@ -252,121 +340,175 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
             padding: 30,
             borderRadius: BRAND.radius,
             boxShadow: BRAND.shadow,
-            width: '500px',
+            width: '90%',
+            maxWidth: '700px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
             fontFamily: BRAND.fontFamily,
           }}>
-            <h3 style={{ marginTop: 0, color: BRAND.text }}>Настройка письма</h3>
+            <h3 style={{ marginTop: 0, color: BRAND.text }}>Настройка авторассылки</h3>
             {savedMessage && <p style={{ color: '#10B981' }}>{savedMessage}</p>}
-            <div style={{ marginBottom: 10 }}>
-              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600, color: BRAND.textSecondary }}>Кому:</label>
+
+            {/* Получатели */}
+            <div style={{ marginBottom: 15 }}>
+              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Кому:</label>
               <input
                 type="text"
                 value={emailForm.to}
                 onChange={(e) => setEmailForm({ ...emailForm, to: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  borderRadius: BRAND.radiusSmall,
-                  border: `1px solid ${BRAND.border}`,
-                  fontFamily: BRAND.fontFamily,
-                }}
+                style={inputStyle}
               />
             </div>
-            <div style={{ marginBottom: 10 }}>
-              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600, color: BRAND.textSecondary }}>Копия:</label>
+            <div style={{ marginBottom: 15 }}>
+              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Копия:</label>
               <input
                 type="text"
                 value={emailForm.cc}
                 onChange={(e) => setEmailForm({ ...emailForm, cc: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  borderRadius: BRAND.radiusSmall,
-                  border: `1px solid ${BRAND.border}`,
-                  fontFamily: BRAND.fontFamily,
-                }}
+                style={inputStyle}
               />
             </div>
-            <div style={{ marginBottom: 10 }}>
-              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600, color: BRAND.textSecondary }}>Тема:</label>
+            <div style={{ marginBottom: 15 }}>
+              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Отправитель (имя):</label>
+              <input
+                type="text"
+                value={emailForm.senderName}
+                onChange={(e) => setEmailForm({ ...emailForm, senderName: e.target.value })}
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ marginBottom: 15 }}>
+              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Тема:</label>
               <input
                 type="text"
                 value={emailForm.subject}
                 onChange={(e) => setEmailForm({ ...emailForm, subject: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  borderRadius: BRAND.radiusSmall,
-                  border: `1px solid ${BRAND.border}`,
-                  fontFamily: BRAND.fontFamily,
-                }}
+                style={inputStyle}
               />
             </div>
             <div style={{ marginBottom: 15 }}>
-              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600, color: BRAND.textSecondary }}>Сообщение:</label>
+              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Текст письма:</label>
               <textarea
                 rows={4}
                 value={emailForm.body}
                 onChange={(e) => setEmailForm({ ...emailForm, body: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  borderRadius: BRAND.radiusSmall,
-                  border: `1px solid ${BRAND.border}`,
-                  fontFamily: BRAND.fontFamily,
-                  resize: 'vertical',
-                }}
+                style={{ ...inputStyle, resize: 'vertical' }}
               />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 15 }}>
-              <button
-                onClick={saveRecipients}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: BRAND.radiusSmall,
-                  border: `1px solid ${BRAND.border}`,
-                  background: '#fff',
-                  cursor: 'pointer',
-                  fontFamily: BRAND.fontFamily,
-                }}
-              >
-                💾 Сохранить адресатов
-              </button>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button
-                  onClick={() => setComposeModalOpen(false)}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: BRAND.radiusSmall,
-                    border: `1px solid ${BRAND.border}`,
-                    background: '#fff',
-                    cursor: 'pointer',
-                    fontFamily: BRAND.fontFamily,
-                  }}
-                >
-                  Отмена
-                </button>
-                <button
-                  onClick={handleSendEmail}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: BRAND.radiusSmall,
-                    border: 'none',
-                    background: BRAND.primary,
-                    color: '#fff',
-                    cursor: 'pointer',
-                    fontFamily: BRAND.fontFamily,
-                  }}
-                >
-                  Отправить
-                </button>
+
+            {/* Подпись */}
+            <div style={{ marginBottom: 15 }}>
+              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Подпись (текст):</label>
+              <textarea
+                rows={3}
+                value={emailForm.signatureText}
+                onChange={(e) => setEmailForm({ ...emailForm, signatureText: e.target.value })}
+                style={{ ...inputStyle, resize: 'vertical' }}
+              />
+            </div>
+            <div style={{ marginBottom: 15 }}>
+              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>
+                Изображение подписи (логотип):
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleSignatureUpload}
+                style={{ marginBottom: 5 }}
+              />
+              {emailForm.signatureImage && (
+                <div>
+                  <img
+                    src={emailForm.signatureImage}
+                    alt="Подпись"
+                    style={{ maxWidth: '200px', maxHeight: '100px', display: 'block' }}
+                  />
+                  <button
+                    onClick={() => setEmailForm({ ...emailForm, signatureImage: '' })}
+                    style={{ marginTop: 5, padding: '2px 8px', cursor: 'pointer' }}
+                  >
+                    Удалить
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Расписание */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', marginBottom: 10, fontWeight: 600 }}>Дни недели:</label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {dayNames.map((name, idx) => (
+                  <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input
+                      type="checkbox"
+                      checked={schedule.days.includes(idx)}
+                      onChange={() => toggleDay(idx)}
+                    />
+                    {name}
+                  </label>
+                ))}
               </div>
+
+              <label style={{ display: 'block', marginTop: 15, marginBottom: 10, fontWeight: 600 }}>
+                Время отправки (можно несколько):
+              </label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: '150px', overflowY: 'auto', border: '1px solid #ccc', padding: 8, borderRadius: 8 }}>
+                {timeOptions.map(time => (
+                  <label key={time} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input
+                      type="checkbox"
+                      checked={schedule.times.includes(time)}
+                      onChange={() => toggleTime(time)}
+                    />
+                    {time}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Кнопки */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={saveSettings} style={secondaryBtnStyle}>💾 Сохранить настройки</button>
+                <button onClick={() => setSettingsModalOpen(false)} style={secondaryBtnStyle}>Закрыть</button>
+              </div>
+              <button onClick={handleSendNow} style={primaryBtnStyle}>📧 Отправить сейчас</button>
             </div>
           </div>
         </div>
       )}
     </>
   );
+};
+
+// Общие стили для полей и кнопок (можно вынести в styles)
+const inputStyle = {
+  width: '100%',
+  padding: '8px 12px',
+  borderRadius: BRAND.radiusSmall,
+  border: `1px solid ${BRAND.border}`,
+  fontSize: '0.9rem',
+  fontFamily: BRAND.fontFamily,
+};
+
+const primaryBtnStyle = {
+  padding: '10px 20px',
+  borderRadius: BRAND.radiusSmall,
+  border: 'none',
+  background: BRAND.primary,
+  color: '#fff',
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const secondaryBtnStyle = {
+  padding: '10px 20px',
+  borderRadius: BRAND.radiusSmall,
+  border: `1px solid ${BRAND.border}`,
+  background: '#fff',
+  color: BRAND.text,
+  fontWeight: 600,
+  cursor: 'pointer',
 };
 
 /* ============ ДРОПДАУН МОДЕЛЕЙ ============ */
