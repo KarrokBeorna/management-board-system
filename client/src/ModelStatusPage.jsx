@@ -18,9 +18,9 @@ const BRAND = {
   text: '#1E293B',
   textSecondary: '#64748B',
   border: '#E2E8F0',
-  shadow: '0 8px 30px rgba(0,0,0,0.05)',
-  radius: 24,
-  radiusSmall: 12,
+  shadow: '0 8px 30px rgba(0,0,0,0.08)',
+  radius: 16,
+  radiusSmall: 8,
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
 };
 
@@ -152,12 +152,10 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-
-    // Если изображение выше одной страницы A4 — разрезаем
     const pageHeight = pdf.internal.pageSize.getHeight();
+
     let heightLeft = pdfHeight;
     let position = 0;
-    let firstPage = true;
 
     pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
     heightLeft -= pageHeight;
@@ -167,33 +165,40 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
       pdf.addPage();
       pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
       heightLeft -= pageHeight;
-      firstPage = false;
     }
     return pdf;
   };
 
   const handleSendNow = async () => {
     try {
-      await saveSettings(); // сохраняем адресатов и настройки перед отправкой
+      await saveSettings(); // сохраняем настройки перед отправкой
+
+      // Генерируем PDF
       const pdf = await generatePdf();
       const pdfBlob = pdf.output('blob');
-      const pdfUrl = URL.createObjectURL(pdfBlob);
 
-      // Открываем Outlook с заполненными полями
-      const mailtoLink = `mailto:${emailForm.to}?cc=${emailForm.cc}&subject=${encodeURIComponent(emailForm.subject)}&body=${encodeURIComponent(emailForm.body)}`;
-      window.location.href = mailtoLink;
+      // Загружаем PDF на сервер
+      const formData = new FormData();
+      formData.append('pdf', pdfBlob, 'report.pdf');
+      const uploadRes = await fetch(`${API_BASE}/api/email/upload-pdf`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!uploadRes.ok) {
+        throw new Error('Не удалось загрузить PDF на сервер');
+      }
 
-      // Скачиваем PDF для ручного прикрепления
-      const link = document.createElement('a');
-      link.href = pdfUrl;
-      link.download = `${pageTitle || 'report'}.pdf`;
-      link.click();
-      URL.revokeObjectURL(pdfUrl);
+      // Отправляем письмо через сервер
+      const sendRes = await fetch(`${API_BASE}/api/email/send-now`, { method: 'POST' });
+      if (!sendRes.ok) {
+        throw new Error('Не удалось отправить письмо');
+      }
 
+      alert('Письмо отправлено!');
       setSettingsModalOpen(false);
     } catch (err) {
-      console.error('Ошибка при отправке', err);
-      alert('Не удалось сгенерировать или отправить письмо');
+      console.error('Ошибка отправки', err);
+      alert('Ошибка: ' + err.message);
     }
   };
 
@@ -208,7 +213,6 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     reader.readAsDataURL(file);
   };
 
-  // Вспомогательные функции для расписания
   const toggleDay = (day) => {
     setSchedule(prev => {
       const days = prev.days.includes(day)
@@ -234,6 +238,93 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
   ];
 
+  // Стили модальных окон
+  const overlayStyle = {
+    position: 'fixed',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2000,
+  };
+
+  const modalStyle = {
+    backgroundColor: '#FFFFFF',
+    borderRadius: BRAND.radius,
+    boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+    width: '90%',
+    maxWidth: '500px',
+    maxHeight: '90vh',
+    overflowY: 'auto',
+    padding: '30px',
+    fontFamily: BRAND.fontFamily,
+    color: BRAND.text,
+    boxSizing: 'border-box',
+  };
+
+  const modalWideStyle = {
+    ...modalStyle,
+    maxWidth: '700px',
+  };
+
+  const inputStyle = {
+    width: '100%',
+    padding: '10px 12px',
+    borderRadius: BRAND.radiusSmall,
+    border: `1px solid ${BRAND.border}`,
+    fontSize: '0.9rem',
+    fontFamily: BRAND.fontFamily,
+    color: BRAND.text,
+    backgroundColor: '#FFFFFF',
+    outline: 'none',
+    transition: 'border-color 0.2s',
+  };
+
+  const labelStyle = {
+    display: 'block',
+    marginBottom: '6px',
+    fontWeight: 600,
+    fontSize: '0.85rem',
+    color: BRAND.textSecondary,
+    letterSpacing: '0.02em',
+  };
+
+  const buttonPrimary = {
+    padding: '10px 20px',
+    borderRadius: BRAND.radiusSmall,
+    border: 'none',
+    background: BRAND.primary,
+    color: '#FFFFFF',
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontSize: '0.9rem',
+    transition: 'background 0.2s',
+  };
+
+  const buttonSecondary = {
+    padding: '10px 20px',
+    borderRadius: BRAND.radiusSmall,
+    border: `1px solid ${BRAND.border}`,
+    background: '#FFFFFF',
+    color: BRAND.text,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontSize: '0.9rem',
+    transition: 'background 0.2s',
+  };
+
+  const buttonAccent = {
+    padding: '10px 20px',
+    borderRadius: BRAND.radiusSmall,
+    border: 'none',
+    background: BRAND.accent,
+    color: '#FFFFFF',
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontSize: '0.9rem',
+  };
+
   return (
     <>
       <button
@@ -257,68 +348,24 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
 
       {/* Модальное окно пароля */}
       {passwordModalOpen && (
-        <div style={{
-          position: 'fixed',
-          top: 0, left: 0, width: '100%', height: '100%',
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 2000,
-        }}>
-          <div style={{
-            background: '#fff',
-            padding: 30,
-            borderRadius: BRAND.radius,
-            boxShadow: BRAND.shadow,
-            width: '90%',
-            maxWidth: '400px',
-            maxHeight: '90vh',
-            overflowY: 'auto',
-            fontFamily: BRAND.fontFamily,
-          }}>
-            <h3 style={{ marginTop: 0, color: BRAND.text }}>Введите пароль</h3>
-            {error && <p style={{ color: '#EF4444' }}>{error}</p>}
+        <div style={overlayStyle}>
+          <div style={modalStyle}>
+            <h3 style={{ marginTop: 0, marginBottom: 20, color: BRAND.text, fontWeight: 700 }}>Введите пароль</h3>
+            {error && <p style={{ color: '#EF4444', marginBottom: 10 }}>{error}</p>}
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handlePasswordSubmit()}
-              style={{
-                width: '100%',
-                padding: '10px 15px',
-                borderRadius: BRAND.radiusSmall,
-                border: `1px solid ${BRAND.border}`,
-                marginBottom: 15,
-                fontSize: '1rem',
-                fontFamily: BRAND.fontFamily,
-              }}
+              placeholder="Пароль"
+              style={{ ...inputStyle, marginBottom: 15 }}
               autoFocus
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button
-                onClick={() => setPasswordModalOpen(false)}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: BRAND.radiusSmall,
-                  border: `1px solid ${BRAND.border}`,
-                  background: '#fff',
-                  cursor: 'pointer',
-                  fontFamily: BRAND.fontFamily,
-                }}
-              >
+              <button onClick={() => setPasswordModalOpen(false)} style={buttonSecondary}>
                 Отмена
               </button>
-              <button
-                onClick={handlePasswordSubmit}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: BRAND.radiusSmall,
-                  border: 'none',
-                  background: BRAND.primary,
-                  color: '#fff',
-                  cursor: 'pointer',
-                  fontFamily: BRAND.fontFamily,
-                }}
-              >
+              <button onClick={handlePasswordSubmit} style={buttonPrimary}>
                 Войти
               </button>
             </div>
@@ -328,30 +375,15 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
 
       {/* Модальное окно настроек */}
       {settingsModalOpen && (
-        <div style={{
-          position: 'fixed',
-          top: 0, left: 0, width: '100%', height: '100%',
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 2001,
-        }}>
-          <div style={{
-            background: '#fff',
-            padding: 30,
-            borderRadius: BRAND.radius,
-            boxShadow: BRAND.shadow,
-            width: '90%',
-            maxWidth: '700px',
-            maxHeight: '90vh',
-            overflowY: 'auto',
-            fontFamily: BRAND.fontFamily,
-          }}>
-            <h3 style={{ marginTop: 0, color: BRAND.text }}>Настройка авторассылки</h3>
-            {savedMessage && <p style={{ color: '#10B981' }}>{savedMessage}</p>}
+        <div style={overlayStyle}>
+          <div style={modalWideStyle}>
+            <h3 style={{ marginTop: 0, marginBottom: 24, color: BRAND.text, fontWeight: 700, fontSize: '1.4rem' }}>
+              Настройка авторассылки
+            </h3>
+            {savedMessage && <p style={{ color: '#10B981', marginBottom: 12 }}>{savedMessage}</p>}
 
-            {/* Получатели */}
-            <div style={{ marginBottom: 15 }}>
-              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Кому:</label>
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Кому:</label>
               <input
                 type="text"
                 value={emailForm.to}
@@ -359,8 +391,9 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
                 style={inputStyle}
               />
             </div>
-            <div style={{ marginBottom: 15 }}>
-              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Копия:</label>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Копия:</label>
               <input
                 type="text"
                 value={emailForm.cc}
@@ -368,8 +401,9 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
                 style={inputStyle}
               />
             </div>
-            <div style={{ marginBottom: 15 }}>
-              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Отправитель (имя):</label>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Отправитель (имя):</label>
               <input
                 type="text"
                 value={emailForm.senderName}
@@ -377,8 +411,9 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
                 style={inputStyle}
               />
             </div>
-            <div style={{ marginBottom: 15 }}>
-              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Тема:</label>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Тема:</label>
               <input
                 type="text"
                 value={emailForm.subject}
@@ -386,8 +421,9 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
                 style={inputStyle}
               />
             </div>
-            <div style={{ marginBottom: 15 }}>
-              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Текст письма:</label>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Текст письма:</label>
               <textarea
                 rows={4}
                 value={emailForm.body}
@@ -396,9 +432,8 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
               />
             </div>
 
-            {/* Подпись */}
-            <div style={{ marginBottom: 15 }}>
-              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>Подпись (текст):</label>
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Подпись (текст):</label>
               <textarea
                 rows={3}
                 value={emailForm.signatureText}
@@ -406,26 +441,25 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
                 style={{ ...inputStyle, resize: 'vertical' }}
               />
             </div>
-            <div style={{ marginBottom: 15 }}>
-              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600 }}>
-                Изображение подписи (логотип):
-              </label>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Изображение подписи (логотип):</label>
               <input
                 type="file"
                 accept="image/*"
                 onChange={handleSignatureUpload}
-                style={{ marginBottom: 5 }}
+                style={{ marginBottom: 8 }}
               />
               {emailForm.signatureImage && (
-                <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <img
                     src={emailForm.signatureImage}
                     alt="Подпись"
-                    style={{ maxWidth: '200px', maxHeight: '100px', display: 'block' }}
+                    style={{ maxWidth: '180px', maxHeight: '80px', border: `1px solid ${BRAND.border}`, borderRadius: 4 }}
                   />
                   <button
                     onClick={() => setEmailForm({ ...emailForm, signatureImage: '' })}
-                    style={{ marginTop: 5, padding: '2px 8px', cursor: 'pointer' }}
+                    style={{ padding: '4px 8px', fontSize: '0.8rem', cursor: 'pointer', border: `1px solid ${BRAND.border}`, borderRadius: 4, background: '#FFFFFF' }}
                   >
                     Удалить
                   </button>
@@ -433,12 +467,11 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
               )}
             </div>
 
-            {/* Расписание */}
             <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', marginBottom: 10, fontWeight: 600 }}>Дни недели:</label>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <label style={labelStyle}>Дни недели:</label>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {dayNames.map((name, idx) => (
-                  <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: '0.9rem' }}>
                     <input
                       type="checkbox"
                       checked={schedule.days.includes(idx)}
@@ -449,12 +482,20 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
                 ))}
               </div>
 
-              <label style={{ display: 'block', marginTop: 15, marginBottom: 10, fontWeight: 600 }}>
-                Время отправки (можно несколько):
-              </label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: '150px', overflowY: 'auto', border: '1px solid #ccc', padding: 8, borderRadius: 8 }}>
+              <label style={{ ...labelStyle, marginTop: 15 }}>Время отправки (можно несколько):</label>
+              <div style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 8,
+                maxHeight: '140px',
+                overflowY: 'auto',
+                border: `1px solid ${BRAND.border}`,
+                padding: 10,
+                borderRadius: BRAND.radiusSmall,
+                background: '#FFFFFF',
+              }}>
                 {timeOptions.map(time => (
-                  <label key={time} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <label key={time} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: '0.85rem', background: schedule.times.includes(time) ? '#EFF6FF' : 'transparent', padding: '2px 6px', borderRadius: 4 }}>
                     <input
                       type="checkbox"
                       checked={schedule.times.includes(time)}
@@ -466,49 +507,24 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
               </div>
             </div>
 
-            {/* Кнопки */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginTop: 20 }}>
               <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={saveSettings} style={secondaryBtnStyle}>💾 Сохранить настройки</button>
-                <button onClick={() => setSettingsModalOpen(false)} style={secondaryBtnStyle}>Закрыть</button>
+                <button onClick={saveSettings} style={buttonSecondary}>
+                  💾 Сохранить настройки
+                </button>
+                <button onClick={() => setSettingsModalOpen(false)} style={buttonSecondary}>
+                  Закрыть
+                </button>
               </div>
-              <button onClick={handleSendNow} style={primaryBtnStyle}>📧 Отправить сейчас</button>
+              <button onClick={handleSendNow} style={buttonPrimary}>
+                📧 Отправить сейчас
+              </button>
             </div>
           </div>
         </div>
       )}
     </>
   );
-};
-
-// Общие стили для полей и кнопок (можно вынести в styles)
-const inputStyle = {
-  width: '100%',
-  padding: '8px 12px',
-  borderRadius: BRAND.radiusSmall,
-  border: `1px solid ${BRAND.border}`,
-  fontSize: '0.9rem',
-  fontFamily: BRAND.fontFamily,
-};
-
-const primaryBtnStyle = {
-  padding: '10px 20px',
-  borderRadius: BRAND.radiusSmall,
-  border: 'none',
-  background: BRAND.primary,
-  color: '#fff',
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-const secondaryBtnStyle = {
-  padding: '10px 20px',
-  borderRadius: BRAND.radiusSmall,
-  border: `1px solid ${BRAND.border}`,
-  background: '#fff',
-  color: BRAND.text,
-  fontWeight: 600,
-  cursor: 'pointer',
 };
 
 /* ============ ДРОПДАУН МОДЕЛЕЙ ============ */
@@ -1344,17 +1360,31 @@ export default function ModelStatusPage() {
   const handleExportPdf = async () => {
     try {
       const canvas = await html2canvas(pageRef.current, {
-        scale: 2,
+        scale: 1.25,
         useCORS: true,
         logging: false,
         windowWidth: pageRef.current.scrollWidth,
         windowHeight: pageRef.current.scrollHeight,
       });
-      const imgData = canvas.toDataURL('image/png');
+      const imgData = canvas.toDataURL('image/jpeg', 0.8);
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      let heightLeft = pdfHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position -= pageHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
+        heightLeft -= pageHeight;
+      }
+
       pdf.save('ModelStatus.pdf');
     } catch (err) {
       console.error('Ошибка при генерации PDF:', err);

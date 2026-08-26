@@ -68,6 +68,34 @@ const lesPool = mysql.createPool({
   dateStrings: true,
 });
 
+const nodemailer = require('nodemailer');
+const cron = require('node-cron');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Настройка хранилища для PDF
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
+}
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => cb(null, 'report.pdf'), // всегда один файл, перезаписываем
+});
+const upload = multer({ storage });
+
+// SMTP transporter (создаётся один раз)
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT) || 587,
+  secure: false, // true для 465, false для 587
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
 async function checkDatabaseConnection() {
   try {
     const connection = await pool.getConnection();
@@ -101,6 +129,54 @@ async function checkLesDatabaseConnection() {
   } catch (err) {
     console.error('БД LES ОШИБКА:', err.message);
     return false;
+  }
+}
+
+async function sendEmailWithPdf() {
+  try {
+    // Загружаем настройки из базы
+    const [rows] = await notesPool.query('SELECT * FROM email_settings ORDER BY id DESC LIMIT 1');
+    if (rows.length === 0) return;
+
+    const settings = rows[0];
+    const to = settings.to_email;
+    if (!to) return;
+
+    // Проверяем наличие PDF
+    const pdfPath = path.join(uploadDir, 'report.pdf');
+    if (!fs.existsSync(pdfPath)) {
+      console.error('PDF не найден. Загрузите его через /api/email/upload-pdf');
+      return;
+    }
+
+    // Формируем HTML-письмо с подписью
+    let html = `<p>${settings.body || ''}</p>`;
+    if (settings.signature_text) {
+      html += `<p>${settings.signature_text.replace(/\n/g, '<br>')}</p>`;
+    }
+    if (settings.signature_image) {
+      html += `<p><img src="${settings.signature_image}" style="max-width:200px;max-height:100px;"></p>`;
+    }
+    html += `<p>С уважением, ${settings.sender_name || 'MBS Quality System'}</p>`;
+
+    const mailOptions = {
+      from: `"${settings.sender_name || process.env.SMTP_FROM_NAME}" <${process.env.SMTP_FROM_EMAIL}>`,
+      to: settings.to_email,
+      cc: settings.cc_email || undefined,
+      subject: settings.subject,
+      html: html,
+      attachments: [
+        {
+          filename: 'report.pdf',
+          path: pdfPath,
+        },
+      ],
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log('Письмо отправлено:', new Date().toISOString());
+  } catch (err) {
+    console.error('Ошибка отправки письма:', err);
   }
 }
 
@@ -4707,6 +4783,48 @@ app.post('/api/email-settings', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+app.post('/api/email/upload-pdf', upload.single('pdf'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'Файл не загружен' });
+  }
+  res.json({ success: true });
+});
+
+app.post('/api/email/send-now', async (req, res) => {
+  try {
+    await sendEmailWithPdf();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+setInterval(async () => {
+  try {
+    const [rows] = await notesPool.query('SELECT * FROM email_settings ORDER BY id DESC LIMIT 1');
+    if (rows.length === 0) return;
+
+    const settings = rows[0];
+    const now = new Date();
+    const day = now.getDay(); // 0=вс, 1=пн...
+    const time = now.toTimeString().slice(0, 5); // "HH:MM"
+
+    const days = settings.schedule_days ? settings.schedule_days.split(',').map(Number) : [];
+    const times = settings.schedule_times ? settings.schedule_times.split(',') : [];
+
+    if (days.includes(day) && times.includes(time)) {
+      // Проверяем, не отправляли ли уже в эту минуту (чтобы не дублировать)
+      const lastSentKey = `${now.toISOString().slice(0, 16)}`; // минута
+      if (!global.lastEmailSent || global.lastEmailSent !== lastSentKey) {
+        global.lastEmailSent = lastSentKey;
+        await sendEmailWithPdf();
+      }
+    }
+  } catch (err) {
+    console.error('Ошибка в планировщике:', err);
+  }
+}, 30000); // каждые 30 секунд
 
 // ================== ЗАМЕТКИ ==================
 
