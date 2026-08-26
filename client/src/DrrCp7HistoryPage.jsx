@@ -76,9 +76,34 @@ const tdStyle = {
   textOverflow: 'ellipsis',
 };
 
+// Цвета для типов периодов
+const typeColors = {
+  year: '#065F46',
+  month: '#10B981',
+  week: '#6EE7B7',
+  day: '#84CC16',
+};
+
+const typeBgColors = {
+  year: 'rgba(6, 95, 70, 0.1)',
+  month: 'rgba(16, 185, 129, 0.1)',
+  week: 'rgba(110, 231, 183, 0.1)',
+  day: 'rgba(132, 204, 22, 0.1)',
+};
+
+const modelShortNames = {
+  'ESTEO MX': 'MX',
+  'JELAND J6': 'J6',
+  'JELAND J7': 'J7',
+  'TENET A8': 'A8',
+  'JELAND J8': 'J8',
+};
+
+const allModelKeys = Object.keys(modelShortNames);
+
 export default function DrrCp7HistoryPage() {
   const [filter, setFilter] = useState('all');
-  const [period, setPeriod] = useState('combo'); // combo, year, month, week, day
+  const [period, setPeriod] = useState('all');
   const [count, setCount] = useState(3);
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -86,9 +111,9 @@ export default function DrrCp7HistoryPage() {
 
   const handlePeriodChange = (newPeriod) => {
     setPeriod(newPeriod);
-    if (newPeriod !== 'combo') {
+    if (newPeriod !== 'all') {
       const defaults = { year: 2, month: 3, week: 4, day: 14 };
-      setCount(defaults[newPeriod]);
+      setCount(defaults[newPeriod] || 3);
     }
   };
 
@@ -97,7 +122,7 @@ export default function DrrCp7HistoryPage() {
     setError(null);
     try {
       const params = new URLSearchParams({ filter, period });
-      if (period !== 'combo' && count) params.append('count', count);
+      if (period !== 'all' && count) params.append('count', count);
       const res = await fetch(`${API_BASE}/api/drr-cp7-history?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
@@ -114,16 +139,42 @@ export default function DrrCp7HistoryPage() {
     loadHistory();
   }, [filter, period, count]);
 
-  const chartData = useMemo(() => data, [data]);
+  const chartData = useMemo(() => {
+    return data.map(d => ({
+      label: d.label,
+      type: d.type,
+      drr: d.drr,
+    }));
+  }, [data]);
+
+  const tableData = useMemo(() => {
+    const rows = allModelKeys.map(key => {
+      return {
+        model: modelShortNames[key],
+        fullModel: key,
+        cells: data.map(p => {
+          const modelData = p.models && p.models[key];
+          return modelData ? modelData.drr : '';
+        }),
+      };
+    });
+    const totalRow = {
+      model: 'Total',
+      fullModel: 'Total',
+      cells: data.map(p => p.drr),
+    };
+    return [...rows, totalRow];
+  }, [data]);
 
   const exportToExcel = () => {
-    const exportData = data.map(d => ({
-      'Период': d.label,
-      'Тип': d.type,
-      'DRR %': d.drr,
-      'Всего авто': d.totalVins,
-      'ОК авто': d.closedVins,
-    }));
+    const exportData = [];
+    tableData.forEach(row => {
+      const rowObj = { 'Модель': row.model };
+      data.forEach((p, idx) => {
+        rowObj[p.label] = row.cells[idx] !== '' ? `${row.cells[idx]}%` : '';
+      });
+      exportData.push(rowObj);
+    });
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'DRR CP7 History');
@@ -143,14 +194,14 @@ export default function DrrCp7HistoryPage() {
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
-          <button onClick={() => handlePeriodChange('combo')} style={tabStyle(period === 'combo')}>Комбо</button>
+          <button onClick={() => handlePeriodChange('all')} style={tabStyle(period === 'all')}>Все</button>
           <button onClick={() => handlePeriodChange('year')} style={tabStyle(period === 'year')}>Год</button>
           <button onClick={() => handlePeriodChange('month')} style={tabStyle(period === 'month')}>Месяц</button>
           <button onClick={() => handlePeriodChange('week')} style={tabStyle(period === 'week')}>Неделя</button>
           <button onClick={() => handlePeriodChange('day')} style={tabStyle(period === 'day')}>День</button>
         </div>
 
-        {period !== 'combo' && (
+        {period !== 'all' && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
             Кол-во периодов:
             <input
@@ -182,13 +233,16 @@ export default function DrrCp7HistoryPage() {
           <ResponsiveContainer width="100%" height={400}>
             <BarChart data={chartData} margin={{ top: 20, right: 60, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-35} textAnchor="end" height={60} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
               <ReferenceLine y={80} stroke="#EF4444" strokeDasharray="5 5">
                 <Label value="80%" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 700 }} />
               </ReferenceLine>
-              <Bar dataKey="drr" barSize={28} radius={[6, 6, 0, 0]} fill="#10B981">
-                <LabelList dataKey="drr" position="top" formatter={(v) => `${v}%`} style={{ fill: '#1F2937', fontSize: 12, fontWeight: 600 }} />
+              <Bar dataKey="drr" barSize={25} radius={[6, 6, 0, 0]}>
+                {chartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={typeColors[entry.type] || '#10B981'} />
+                ))}
+                <LabelList dataKey="drr" position="top" formatter={(v) => `${v}%`} style={{ fill: '#1F2937', fontSize: 11, fontWeight: 600 }} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -200,25 +254,31 @@ export default function DrrCp7HistoryPage() {
         <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 20 }}>
           Данные по DRR
         </h2>
-        <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
-          <table style={{ width: 'auto', minWidth: 400, maxWidth: 900, margin: '0 auto', borderCollapse: 'collapse', fontSize: 13 }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ backgroundColor: '#F9FAFB' }}>
-                <th style={thStyle}>Период</th>
-                <th style={thStyle}>Тип</th>
-                <th style={thStyle}>DRR %</th>
-                <th style={thStyle}>Всего авто</th>
-                <th style={thStyle}>ОК авто</th>
+              <tr>
+                <th style={{ ...thStyle, textAlign: 'left', paddingLeft: 12, position: 'sticky', left: 0, zIndex: 2, backgroundColor: '#F9FAFB' }}>
+                  Модель
+                </th>
+                {data.map((p, idx) => (
+                  <th key={idx} style={{ ...thStyle, backgroundColor: typeBgColors[p.type] || '#F9FAFB' }}>
+                    {p.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {chartData.map((row, idx) => (
-                <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                  <td style={tdStyle}>{row.label}</td>
-                  <td style={tdStyle}>{row.type}</td>
-                  <td style={{ ...tdStyle, fontWeight: 700, color: '#10B981' }}>{row.drr}%</td>
-                  <td style={tdStyle}>{row.totalVins}</td>
-                  <td style={tdStyle}>{row.closedVins}</td>
+              {tableData.map((row, rowIdx) => (
+                <tr key={rowIdx} style={{ backgroundColor: rowIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                  <td style={{ ...tdStyle, textAlign: 'left', paddingLeft: 12, fontWeight: 700, position: 'sticky', left: 0, backgroundColor: rowIdx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                    {row.model}
+                  </td>
+                  {data.map((p, colIdx) => (
+                    <td key={colIdx} style={{ ...tdStyle, backgroundColor: typeBgColors[p.type] || 'transparent' }}>
+                      {row.cells[colIdx] !== '' ? `${row.cells[colIdx]}%` : ''}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>

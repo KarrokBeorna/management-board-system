@@ -4711,7 +4711,6 @@ app.post('/api/email-settings', async (req, res) => {
   }
 });
 
-// Вспомогательные функции
 function formatDate(date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -4719,17 +4718,9 @@ function formatDate(date) {
   return `${y}-${m}-${d}`;
 }
 
-function getISOWeek(date) {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-}
-
 app.get('/api/drr-cp7-history', async (req, res) => {
   try {
-    const { filter = 'all', period = 'combo', count } = req.query;
+    const { filter = 'all', period = 'all', count } = req.query;
 
     const postLists = {
       all: [
@@ -4749,15 +4740,16 @@ app.get('/api/drr-cp7-history', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    // Функция расчёта DRR за конкретный диапазон дат с новым правилом
-    const calcDrrForRange = async (startDate, endDate) => {
+    // Расчёт для диапазона дат (исторический алгоритм)
+    const calcModelsForRange = async (startDate, endDate) => {
       const sql = `
         WITH cp72_vins AS (
-            SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
-            FROM at_om_wiptrackinghistory
-            WHERE WC_NAME = 'CP72'
-              AND DATE(CREATION_TIME) BETWEEN ? AND ?
-            GROUP BY VIN
+            SELECT a.VIN, MIN(a.CREATION_TIME) AS CP72_TIME, wo.MODEL
+            FROM at_om_wiptrackinghistory a
+            JOIN work_order wo ON wo.VIN = a.VIN
+            WHERE a.WC_NAME = 'CP72'
+              AND DATE(a.CREATION_TIME) BETWEEN ? AND ?
+            GROUP BY a.VIN, wo.MODEL
         ),
         defect_status AS (
             SELECT 
@@ -4776,19 +4768,17 @@ app.get('/api/drr-cp7-history', async (req, res) => {
             FROM at_qm_defect_info d
             JOIN cp72_vins cp ON d.VIN = cp.VIN
             WHERE d.POST_NAME IN (${postListStr})
-              AND d.CREATION_TIME >= ?
-              AND d.CREATION_TIME <= ?
+              AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
         ),
         vin_summary AS (
-            SELECT 
-                VIN,
-                SUM(CASE WHEN calculated_status = 'OFF' THEN 1 ELSE 0 END) AS off_defects
+            SELECT VIN, MAX(CASE WHEN calculated_status = 'OFF' THEN 1 ELSE 0 END) AS has_off
             FROM defect_status
             GROUP BY VIN
         )
         SELECT 
-            COUNT(DISTINCT cp.VIN) AS totalVins,
-            COUNT(DISTINCT CASE WHEN vs.off_defects IS NULL OR vs.off_defects = 0 THEN cp.VIN END) AS closedVins
+            cp.VIN,
+            cp.MODEL,
+            CASE WHEN vs.has_off = 0 OR vs.has_off IS NULL THEN 1 ELSE 0 END AS all_closed
         FROM cp72_vins cp
         LEFT JOIN vin_summary vs ON vs.VIN = cp.VIN
       `;
@@ -4796,29 +4786,55 @@ app.get('/api/drr-cp7-history', async (req, res) => {
         startDate, endDate,
         startDate + ' 00:00:00', endDate + ' 23:59:59'
       ]);
-      const totalVins = rows[0]?.totalVins || 0;
-      const closedVins = rows[0]?.closedVins || 0;
-      const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
-      return { totalVins, closedVins, drrPercent: Math.round(drrPercent * 10) / 10 };
+
+      const models = {};
+      rows.forEach(r => {
+        const model = r.MODEL || '-';
+        if (!models[model]) models[model] = { totalVins: 0, closedVins: 0 };
+        models[model].totalVins += 1;
+        models[model].closedVins += r.all_closed;
+      });
+
+      const totalVins = rows.length;
+      const closedVins = rows.reduce((sum, r) => sum + r.all_closed, 0);
+      const drr = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
+
+      Object.keys(models).forEach(model => {
+        const m = models[model];
+        m.drr = m.totalVins > 0 ? (m.closedVins / m.totalVins) * 100 : 0;
+        m.drr = Math.round(m.drr * 10) / 10;
+      });
+
+      return {
+        totalVins,
+        closedVins,
+        drr: Math.round(drr * 10) / 10,
+        models
+      };
     };
 
-    // Функция расчёта DRR за сегодняшние сутки (как на дашборде)
-    const calcDrrForToday = async () => {
-      // Используем логику дашборда: start/end - текущие сутки
+    // Расчёт для сегодняшнего дня (по дашборду, с моделями)
+    const calcModelsForToday = async () => {
       const now = new Date();
       const y = now.getFullYear();
       const m = String(now.getMonth() + 1).padStart(2, '0');
       const d = String(now.getDate()).padStart(2, '0');
       const start = `${y}-${m}-${d} 00:00:00`;
       const end = `${y}-${m}-${d} 23:59:59`;
-      // Повторяем запрос как в /api/drr-cp7-dashboard (без topDefects)
+
       const [cp72Rows] = await pool.query(`
-        SELECT VIN FROM at_om_wiptrackinghistory
-        WHERE WC_NAME = 'CP72' AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-        GROUP BY VIN
+        SELECT a.VIN, wo.MODEL
+        FROM at_om_wiptrackinghistory a
+        JOIN work_order wo ON wo.VIN = a.VIN
+        WHERE a.WC_NAME = 'CP72'
+          AND a.CREATION_TIME >= ? AND a.CREATION_TIME <= ?
+        GROUP BY a.VIN, wo.MODEL
       `, [start, end]);
+
       const totalVins = cp72Rows.length;
-      if (totalVins === 0) return { totalVins: 0, closedVins: 0, drrPercent: 0 };
+      if (totalVins === 0) {
+        return { totalVins: 0, closedVins: 0, drr: 0, models: {} };
+      }
 
       const [defectRows] = await pool.query(`
         SELECT d.VIN, d.STATUS
@@ -4826,43 +4842,53 @@ app.get('/api/drr-cp7-history', async (req, res) => {
         WHERE d.POST_NAME IN (${postListStr})
           AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
           AND d.VIN IN (
-            SELECT VIN FROM at_om_wiptrackinghistory
-            WHERE WC_NAME = 'CP72' AND CREATION_TIME >= ? AND CREATION_TIME <= ?
+            SELECT a.VIN FROM at_om_wiptrackinghistory a
+            WHERE a.WC_NAME = 'CP72' AND a.CREATION_TIME >= ? AND a.CREATION_TIME <= ?
           )
       `, [start, end, start, end]);
 
       const vinDefectMap = new Map();
       defectRows.forEach(row => {
-        const vin = row.VIN;
-        if (!vinDefectMap.has(vin)) vinDefectMap.set(vin, { total: 0, closed: 0 });
-        const stat = vinDefectMap.get(vin);
+        if (!vinDefectMap.has(row.VIN)) vinDefectMap.set(row.VIN, { total: 0, closed: 0 });
+        const stat = vinDefectMap.get(row.VIN);
         stat.total += 1;
         if (row.STATUS && row.STATUS.toLowerCase() === 'closed') stat.closed += 1;
       });
 
+      const models = {};
       let closedVins = 0;
       cp72Rows.forEach(row => {
         const stat = vinDefectMap.get(row.VIN);
-        if (!stat || stat.total === stat.closed) closedVins += 1;
+        const allClosed = !stat || stat.total === stat.closed;
+        if (allClosed) closedVins += 1;
+        const model = row.MODEL || '-';
+        if (!models[model]) models[model] = { totalVins: 0, closedVins: 0 };
+        models[model].totalVins += 1;
+        if (allClosed) models[model].closedVins += 1;
       });
-      const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
-      return { totalVins, closedVins, drrPercent: Math.round(drrPercent * 10) / 10 };
+
+      Object.keys(models).forEach(model => {
+        const m = models[model];
+        m.drr = m.totalVins > 0 ? (m.closedVins / m.totalVins) * 100 : 0;
+        m.drr = Math.round(m.drr * 10) / 10;
+      });
+
+      const drr = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
+      return { totalVins, closedVins, drr: Math.round(drr * 10) / 10, models };
     };
 
+    const now = new Date();
     let periods = [];
+    const typeOrder = { year: 0, month: 1, week: 2, day: 3 };
 
-    if (period === 'combo') {
-      // Комбинированный режим: последние 2 года, 3 месяца, 4 недели, 14 дней
-      const now = new Date();
-      const todayStr = formatDate(now);
-
-      // Годы (последние 2)
-      for (let i = 0; i < 2; i++) {
+    if (period === 'all') {
+      // Годы: от прошлого к текущему
+      for (let i = 1; i >= 0; i--) {
         const y = now.getFullYear() - i;
         periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
       }
-      // Месяцы (последние 3)
-      for (let i = 0; i < 3; i++) {
+      // Месяцы: от старого к текущему
+      for (let i = 2; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const y = d.getFullYear();
         const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -4870,36 +4896,33 @@ app.get('/api/drr-cp7-history', async (req, res) => {
         const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
         periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${lastDay}`, type: 'month' });
       }
-      // Недели (последние 4)
+      // Недели: от старой к текущей
       const dayOfWeek = now.getDay();
       const monday = new Date(now);
       monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-      for (let i = 0; i < 4; i++) {
+      for (let i = 3; i >= 0; i--) {
         const start = new Date(monday);
         start.setDate(monday.getDate() - i * 7);
         const end = new Date(start);
         end.setDate(start.getDate() + 6);
         periods.push({ label: `W${getISOWeek(start)} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
       }
-      // Дни (последние 14)
-      for (let i = 0; i < 14; i++) {
+      // Дни: только 7 последних (от старого к сегодня)
+      for (let i = 6; i >= 0; i--) {
         const d = new Date(now);
         d.setDate(now.getDate() - i);
         periods.push({ label: `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
       }
     } else {
-      // Обычные периоды
       const defaultCount = { year: 2, month: 3, week: 4, day: 14 }[period] || 7;
       const limit = parseInt(count, 10) || defaultCount;
-      const now = new Date();
-
       if (period === 'year') {
-        for (let i = 0; i < limit; i++) {
+        for (let i = limit - 1; i >= 0; i--) {
           const y = now.getFullYear() - i;
           periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
         }
       } else if (period === 'month') {
-        for (let i = 0; i < limit; i++) {
+        for (let i = limit - 1; i >= 0; i--) {
           const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
           const y = d.getFullYear();
           const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -4911,7 +4934,7 @@ app.get('/api/drr-cp7-history', async (req, res) => {
         const dayOfWeek = now.getDay();
         const monday = new Date(now);
         monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-        for (let i = 0; i < limit; i++) {
+        for (let i = limit - 1; i >= 0; i--) {
           const start = new Date(monday);
           start.setDate(monday.getDate() - i * 7);
           const end = new Date(start);
@@ -4919,7 +4942,7 @@ app.get('/api/drr-cp7-history', async (req, res) => {
           periods.push({ label: `W${getISOWeek(start)} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
         }
       } else if (period === 'day') {
-        for (let i = 0; i < limit; i++) {
+        for (let i = limit - 1; i >= 0; i--) {
           const d = new Date(now);
           d.setDate(now.getDate() - i);
           periods.push({ label: `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
@@ -4927,27 +4950,36 @@ app.get('/api/drr-cp7-history', async (req, res) => {
       }
     }
 
-    // Для каждого периода рассчитываем DRR
+    // Сортировка: сначала по типу (year < month < week < day), затем по дате
+    periods.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || a.startDate.localeCompare(b.startDate));
+
+    // Удаляем возможные дубликаты (если пересекаются даты)
+    const seen = new Set();
+    periods = periods.filter(p => {
+      const key = `${p.type}_${p.startDate}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
     const results = [];
     for (const p of periods) {
-      let drrResult;
+      let calcResult;
       if (p.type === 'day' && p.startDate === formatDate(new Date())) {
-        // Для сегодняшнего дня используем дашборд
-        drrResult = await calcDrrForToday();
+        calcResult = await calcModelsForToday();
       } else {
-        drrResult = await calcDrrForRange(p.startDate, p.endDate);
+        calcResult = await calcModelsForRange(p.startDate, p.endDate);
       }
       results.push({
         label: p.label,
         type: p.type,
-        drr: drrResult.drrPercent,
-        totalVins: drrResult.totalVins,
-        closedVins: drrResult.closedVins,
+        drr: calcResult.drr,
+        totalVins: calcResult.totalVins,
+        closedVins: calcResult.closedVins,
+        models: calcResult.models
       });
     }
 
-    // Убираем дубликаты по label (если комбо содержит пересечения)
-    // и сортируем в порядке добавления
     res.json({ periods: results });
   } catch (err) {
     console.error('Ошибка DRR CP7 History:', err.message);
