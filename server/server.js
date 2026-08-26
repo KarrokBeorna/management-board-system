@@ -4620,6 +4620,62 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
   }
 });
 
+// ================== EMAIL RECIPIENTS ==================
+
+// Инициализация таблицы для хранения адресатов
+async function initEmailRecipientsTable() {
+  try {
+    await notesPool.query(`
+      CREATE TABLE IF NOT EXISTS email_recipients (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        to_email VARCHAR(500) NOT NULL DEFAULT '',
+        cc_email VARCHAR(500) NOT NULL DEFAULT '',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Таблица email_recipients готова');
+  } catch (err) {
+    console.error('Ошибка создания таблицы email_recipients:', err.message);
+  }
+}
+
+// Вызываем при старте сервера (можно также в startServer)
+initEmailRecipientsTable();
+
+// Получить сохранённых адресатов
+app.get('/api/email-recipients', async (req, res) => {
+  try {
+    const [rows] = await notesPool.query('SELECT to_email, cc_email FROM email_recipients ORDER BY id DESC LIMIT 1');
+    if (rows.length > 0) {
+      res.json({ to: rows[0].to_email, cc: rows[0].cc_email });
+    } else {
+      res.json({ to: '', cc: '' });
+    }
+  } catch (err) {
+    console.error('Ошибка получения email-адресатов:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Сохранить адресатов
+app.post('/api/email-recipients', async (req, res) => {
+  try {
+    const { to, cc } = req.body;
+    // Простейшая валидация
+    const toEmail = typeof to === 'string' ? to.trim() : '';
+    const ccEmail = typeof cc === 'string' ? cc.trim() : '';
+    
+    // Удаляем старые записи и вставляем новую
+    await notesPool.query('DELETE FROM email_recipients');
+    await notesPool.query('INSERT INTO email_recipients (to_email, cc_email) VALUES (?, ?)', [toEmail, ccEmail]);
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Ошибка сохранения email-адресатов:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок

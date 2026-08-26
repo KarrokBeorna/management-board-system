@@ -4,8 +4,25 @@ import {
   ReferenceLine, LabelList, ResponsiveContainer
 } from 'recharts';
 import * as XLSX from 'xlsx';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
 const API_BASE = '';
+
+/* ===================== БРЕНДБУК ===================== */
+const BRAND = {
+  bg: '#F8FAFC',
+  cardBg: '#FFFFFF',
+  primary: '#2563EB',
+  accent: '#F59E0B',
+  text: '#1E293B',
+  textSecondary: '#64748B',
+  border: '#E2E8F0',
+  shadow: '0 8px 30px rgba(0,0,0,0.05)',
+  radius: 24,
+  radiusSmall: 12,
+  fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
+};
 
 const modelColors = {
   'ESTEO MX': '#F59E0B',
@@ -31,7 +48,328 @@ function formatPeriodLabel(period, periodType) {
   return period;
 }
 
-// ---------- Стилизованный дропдаун моделей (как в SgpAudit) ----------
+/* ============ УНИВЕРСАЛЬНЫЙ КОМПОНЕНТ АВТОРАССЫЛКИ ============ */
+const EmailSenderButton = ({ targetRef, pageTitle }) => {
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [composeModalOpen, setComposeModalOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [emailForm, setEmailForm] = useState({
+    to: '',
+    cc: '',
+    subject: pageTitle || 'Отчёт',
+    body: '',
+  });
+  const [savedMessage, setSavedMessage] = useState('');
+
+  const correctPassword = 'report2024'; // пароль для доступа к настройке письма
+
+  // Загрузка сохранённых адресатов при открытии окна настройки письма
+  const loadSavedRecipients = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/email-recipients`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data && typeof data === 'object') {
+          setEmailForm(prev => ({
+            ...prev,
+            to: data.to || '',
+            cc: data.cc || '',
+          }));
+        }
+      }
+    } catch (err) {
+      console.error('Не удалось загрузить сохранённых адресатов', err);
+    }
+  };
+
+  // Сохранение адресатов на сервер
+  const saveRecipients = async () => {
+    try {
+      await fetch(`${API_BASE}/api/email-recipients`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: emailForm.to, cc: emailForm.cc }),
+      });
+      setSavedMessage('Адресаты сохранены');
+      setTimeout(() => setSavedMessage(''), 3000);
+    } catch (err) {
+      console.error('Не удалось сохранить адресатов', err);
+    }
+  };
+
+  const handlePasswordSubmit = () => {
+    if (password === correctPassword) {
+      setPasswordModalOpen(false);
+      setComposeModalOpen(true);
+      setPassword('');
+      setError('');
+      loadSavedRecipients(); // подгружаем сохранённые адреса
+    } else {
+      setError('Неверный пароль');
+    }
+  };
+
+  const handleSendEmail = async () => {
+    try {
+      // Сохраняем адресатов перед отправкой
+      await saveRecipients();
+
+      // Генерируем PDF
+      const canvas = await html2canvas(targetRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        windowWidth: targetRef.current.scrollWidth,
+        windowHeight: targetRef.current.scrollHeight,
+      });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      const pdfBlob = pdf.output('blob');
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+
+      // Открываем почтовый клиент
+      const mailtoLink = `mailto:${emailForm.to}?cc=${emailForm.cc}&subject=${encodeURIComponent(emailForm.subject)}&body=${encodeURIComponent(emailForm.body)}`;
+      window.location.href = mailtoLink;
+
+      // Скачиваем PDF, чтобы пользователь мог вручную прикрепить
+      const link = document.createElement('a');
+      link.href = pdfUrl;
+      link.download = `${pageTitle || 'report'}.pdf`;
+      link.click();
+      URL.revokeObjectURL(pdfUrl);
+
+      setComposeModalOpen(false);
+    } catch (err) {
+      console.error('Ошибка при генерации или отправке PDF:', err);
+      alert('Не удалось сгенерировать PDF');
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => setPasswordModalOpen(true)}
+        style={{
+          padding: '12px 24px',
+          borderRadius: BRAND.radiusSmall,
+          border: 'none',
+          fontWeight: 700,
+          fontSize: '1rem',
+          background: BRAND.accent,
+          color: '#FFFFFF',
+          cursor: 'pointer',
+          boxShadow: BRAND.shadow,
+          transition: 'all 0.2s',
+          fontFamily: BRAND.fontFamily,
+        }}
+      >
+        📧 Авторассылка
+      </button>
+
+      {/* Модальное окно пароля */}
+      {passwordModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, width: '100%', height: '100%',
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 2000,
+        }}>
+          <div style={{
+            background: '#fff',
+            padding: 30,
+            borderRadius: BRAND.radius,
+            boxShadow: BRAND.shadow,
+            width: '400px',
+            fontFamily: BRAND.fontFamily,
+          }}>
+            <h3 style={{ marginTop: 0, color: BRAND.text }}>Введите пароль</h3>
+            {error && <p style={{ color: '#EF4444' }}>{error}</p>}
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handlePasswordSubmit()}
+              style={{
+                width: '100%',
+                padding: '10px 15px',
+                borderRadius: BRAND.radiusSmall,
+                border: `1px solid ${BRAND.border}`,
+                marginBottom: 15,
+                fontSize: '1rem',
+                fontFamily: BRAND.fontFamily,
+              }}
+              autoFocus
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                onClick={() => setPasswordModalOpen(false)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: BRAND.radiusSmall,
+                  border: `1px solid ${BRAND.border}`,
+                  background: '#fff',
+                  cursor: 'pointer',
+                  fontFamily: BRAND.fontFamily,
+                }}
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handlePasswordSubmit}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: BRAND.radiusSmall,
+                  border: 'none',
+                  background: BRAND.primary,
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontFamily: BRAND.fontFamily,
+                }}
+              >
+                ОК
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно настройки письма */}
+      {composeModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, width: '100%', height: '100%',
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 2001,
+        }}>
+          <div style={{
+            background: '#fff',
+            padding: 30,
+            borderRadius: BRAND.radius,
+            boxShadow: BRAND.shadow,
+            width: '500px',
+            fontFamily: BRAND.fontFamily,
+          }}>
+            <h3 style={{ marginTop: 0, color: BRAND.text }}>Настройка письма</h3>
+            {savedMessage && <p style={{ color: '#10B981' }}>{savedMessage}</p>}
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600, color: BRAND.textSecondary }}>Кому:</label>
+              <input
+                type="text"
+                value={emailForm.to}
+                onChange={(e) => setEmailForm({ ...emailForm, to: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  borderRadius: BRAND.radiusSmall,
+                  border: `1px solid ${BRAND.border}`,
+                  fontFamily: BRAND.fontFamily,
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600, color: BRAND.textSecondary }}>Копия:</label>
+              <input
+                type="text"
+                value={emailForm.cc}
+                onChange={(e) => setEmailForm({ ...emailForm, cc: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  borderRadius: BRAND.radiusSmall,
+                  border: `1px solid ${BRAND.border}`,
+                  fontFamily: BRAND.fontFamily,
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600, color: BRAND.textSecondary }}>Тема:</label>
+              <input
+                type="text"
+                value={emailForm.subject}
+                onChange={(e) => setEmailForm({ ...emailForm, subject: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  borderRadius: BRAND.radiusSmall,
+                  border: `1px solid ${BRAND.border}`,
+                  fontFamily: BRAND.fontFamily,
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: 15 }}>
+              <label style={{ display: 'block', marginBottom: 5, fontWeight: 600, color: BRAND.textSecondary }}>Сообщение:</label>
+              <textarea
+                rows={4}
+                value={emailForm.body}
+                onChange={(e) => setEmailForm({ ...emailForm, body: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  borderRadius: BRAND.radiusSmall,
+                  border: `1px solid ${BRAND.border}`,
+                  fontFamily: BRAND.fontFamily,
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 15 }}>
+              <button
+                onClick={saveRecipients}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: BRAND.radiusSmall,
+                  border: `1px solid ${BRAND.border}`,
+                  background: '#fff',
+                  cursor: 'pointer',
+                  fontFamily: BRAND.fontFamily,
+                }}
+              >
+                💾 Сохранить адресатов
+              </button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => setComposeModalOpen(false)}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: BRAND.radiusSmall,
+                    border: `1px solid ${BRAND.border}`,
+                    background: '#fff',
+                    cursor: 'pointer',
+                    fontFamily: BRAND.fontFamily,
+                  }}
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={handleSendEmail}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: BRAND.radiusSmall,
+                    border: 'none',
+                    background: BRAND.primary,
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontFamily: BRAND.fontFamily,
+                  }}
+                >
+                  Отправить
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+/* ============ ДРОПДАУН МОДЕЛЕЙ ============ */
 const ModelFilterDropdown = ({ allModels, selectedModels, onChange }) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
@@ -58,22 +396,24 @@ const ModelFilterDropdown = ({ allModels, selectedModels, onChange }) => {
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
-          padding: '8px 16px',
-          borderRadius: 8,
-          border: '1px solid #D1D5DB',
+          padding: '12px 24px',
+          borderRadius: BRAND.radiusSmall,
+          border: `1px solid ${BRAND.border}`,
           background: '#FFFFFF',
-          fontWeight: 600,
-          fontSize: 14,
-          color: '#374151',
+          fontWeight: 700,
+          fontSize: '1rem',
+          color: BRAND.textSecondary,
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           gap: 6,
-          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+          transition: 'all 0.2s',
+          fontFamily: BRAND.fontFamily,
         }}
       >
         <span>🏷️ Модели</span>
-        <span style={{ color: '#6B7280', fontSize: 13, fontWeight: 400 }}>
+        <span style={{ color: BRAND.textSecondary, fontSize: '0.9rem', fontWeight: 400 }}>
           {selectedModels.length === allModels.length ? 'Все' : selectedModels.length}
         </span>
       </button>
@@ -84,12 +424,12 @@ const ModelFilterDropdown = ({ allModels, selectedModels, onChange }) => {
           left: 0,
           marginTop: 4,
           background: '#FFFFFF',
-          borderRadius: 12,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          borderRadius: BRAND.radiusSmall,
+          boxShadow: BRAND.shadow,
           padding: 12,
           minWidth: 220,
           zIndex: 20,
-          border: '1px solid #F0F0F5',
+          border: `1px solid ${BRAND.border}`,
         }}>
           {allModels.map(model => (
             <label key={model} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', cursor: 'pointer', fontSize: 14 }}>
@@ -114,7 +454,7 @@ const ModelFilterDropdown = ({ allModels, selectedModels, onChange }) => {
   );
 };
 
-// ---------- График (без изменений) ----------
+/* ============ БЛОК ГРАФИКА ============ */
 const BarChartBlock = ({ title, data, periodType, isLoading, visibleModels, yAxisDomain, onDetailsClick, metricType }) => {
   if (isLoading) return <div style={styles.loading}>Загрузка...</div>;
   if (!data || data.length === 0) return <div style={styles.loading}>Нет данных</div>;
@@ -144,18 +484,18 @@ const BarChartBlock = ({ title, data, periodType, isLoading, visibleModels, yAxi
   };
 
   return (
-    <div style={{ flex: 1, minWidth: '260px', margin: '0 6px', backgroundColor: '#FFFFFF', borderRadius: 8, padding: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}
+    <div style={{ flex: 1, minWidth: '260px', margin: '0 6px', backgroundColor: BRAND.cardBg, borderRadius: BRAND.radiusSmall, padding: 10, boxShadow: BRAND.shadow }}
       onMouseLeave={() => setActiveModel(null)}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#1F2937' }}>{title}</h3>
-        <button onClick={handleDetailsClick} title="Детали" style={{ background: 'none', border: '1px solid #D1D5DB', borderRadius: 6, cursor: 'pointer', fontSize: 16, padding: '2px 8px', color: '#374151' }}>📋</button>
+        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: BRAND.text }}>{title}</h3>
+        <button onClick={handleDetailsClick} title="Детали" style={{ background: 'none', border: `1px solid ${BRAND.border}`, borderRadius: 6, cursor: 'pointer', fontSize: 16, padding: '2px 8px', color: BRAND.textSecondary }}>📋</button>
       </div>
       <ResponsiveContainer width="100%" height={200}>
         <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-          <XAxis dataKey="name" stroke="#374151" fontSize={11} interval={0} />
-          <YAxis domain={yAxisDomain || ['auto', 'auto']} stroke="#374151" fontSize={11} />
-          <Legend wrapperStyle={{ color: '#374151', fontSize: 12 }} />
+          <CartesianGrid strokeDasharray="3 3" stroke={BRAND.border} />
+          <XAxis dataKey="name" stroke={BRAND.textSecondary} fontSize={11} interval={0} />
+          <YAxis domain={yAxisDomain || ['auto', 'auto']} stroke={BRAND.textSecondary} fontSize={11} />
+          <Legend wrapperStyle={{ color: BRAND.textSecondary, fontSize: 12 }} />
           {modelsToShow.map(model => (
             <Bar
               key={model}
@@ -166,7 +506,7 @@ const BarChartBlock = ({ title, data, periodType, isLoading, visibleModels, yAxi
               onMouseEnter={() => setActiveModel(model)}
               isAnimationActive={false}
             >
-              <LabelList dataKey={model} position="top" style={{ fill: '#374151', fontSize: 10, opacity: activeModel ? (activeModel === model ? 1 : 0.3) : 1 }} />
+              <LabelList dataKey={model} position="top" style={{ fill: BRAND.textSecondary, fontSize: 10, opacity: activeModel ? (activeModel === model ? 1 : 0.3) : 1 }} />
             </Bar>
           ))}
           <ReferenceLine y={targetValue} stroke="#EF4444" strokeDasharray="5 5" label={{ value: targetValue, position: 'right', style: { fill: '#EF4444', fontSize: 12, fontWeight: 600, textDecoration: 'underline' } }} />
@@ -176,7 +516,7 @@ const BarChartBlock = ({ title, data, periodType, isLoading, visibleModels, yAxi
   );
 };
 
-// ---------- Таблица CPA (без изменений) ----------
+/* ============ ТАБЛИЦА CPA ============ */
 const EditableTable = ({ visibleModels, cp7DpuDays, cp7DrrDays, cp8DpuDays, cp8DrrDays, selectedDate }) => {
   const headers = ['Model', 'CP7 DPU OFF', 'CP7 DRR', 'CP8 DPU OFF', 'CP8 DRR', 'CPA Score'];
 
@@ -276,7 +616,7 @@ const EditableTable = ({ visibleModels, cp7DpuDays, cp7DrrDays, cp8DpuDays, cp8D
 
   return (
     <div style={{ marginBottom: 30 }}>
-      <div style={{ borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', backgroundColor: '#FFFFFF' }}>
+      <div style={{ borderRadius: BRAND.radiusSmall, overflow: 'hidden', boxShadow: BRAND.shadow, backgroundColor: BRAND.cardBg }}>
         <table style={styles.table}>
           <colgroup>
             {headers.map((_, i) => <col key={i} style={{ width: `${100 / headers.length}%` }} />)}
@@ -288,23 +628,23 @@ const EditableTable = ({ visibleModels, cp7DpuDays, cp7DrrDays, cp8DpuDays, cp8D
           </thead>
           <tbody>
             {rows.map((row, idx) => (
-              <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#F9FAFB' : '#FFFFFF' }}>
+              <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : BRAND.bg }}>
                 <td style={styles.td}>{row.model}</td>
                 <td style={styles.td}>
                   <span style={{ fontWeight: 600 }}>{row.cp7DpuOff}</span>
-                  {row.cp7DpuDate && <div style={{ fontSize: 10, color: '#6B7280' }}>{row.cp7DpuDate}</div>}
+                  {row.cp7DpuDate && <div style={{ fontSize: 10, color: BRAND.textSecondary }}>{row.cp7DpuDate}</div>}
                 </td>
                 <td style={styles.td}>
                   <span style={{ fontWeight: 600 }}>{row.cp7Drr}</span>
-                  {row.cp7DrrDate && <div style={{ fontSize: 10, color: '#6B7280' }}>{row.cp7DrrDate}</div>}
+                  {row.cp7DrrDate && <div style={{ fontSize: 10, color: BRAND.textSecondary }}>{row.cp7DrrDate}</div>}
                 </td>
                 <td style={styles.td}>
                   <span style={{ fontWeight: 600 }}>{row.cp8DpuOff}</span>
-                  {row.cp8DpuDate && <div style={{ fontSize: 10, color: '#6B7280' }}>{row.cp8DpuDate}</div>}
+                  {row.cp8DpuDate && <div style={{ fontSize: 10, color: BRAND.textSecondary }}>{row.cp8DpuDate}</div>}
                 </td>
                 <td style={styles.td}>
                   <span style={{ fontWeight: 600 }}>{row.cp8DrrMes}</span>
-                  {row.cp8DrrDate && <div style={{ fontSize: 10, color: '#6B7280' }}>{row.cp8DrrDate}</div>}
+                  {row.cp8DrrDate && <div style={{ fontSize: 10, color: BRAND.textSecondary }}>{row.cp8DrrDate}</div>}
                 </td>
                 <td style={{ ...styles.td, padding: '4px' }}>
                   <input
@@ -323,14 +663,15 @@ const EditableTable = ({ visibleModels, cp7DpuDays, cp7DrrDays, cp8DpuDays, cp8D
         <button
           onClick={handleSaveAllCpa}
           style={{
-            padding: '4px 10px',
-            fontSize: 12,
-            backgroundColor: '#6B7280',
+            padding: '8px 16px',
+            fontSize: '0.9rem',
+            backgroundColor: BRAND.primary,
             color: '#FFF',
             border: 'none',
-            borderRadius: 4,
+            borderRadius: BRAND.radiusSmall,
             cursor: 'pointer',
-            fontWeight: 500,
+            fontWeight: 600,
+            fontFamily: BRAND.fontFamily,
           }}
         >
           Сохранить CPA
@@ -340,7 +681,7 @@ const EditableTable = ({ visibleModels, cp7DpuDays, cp7DrrDays, cp8DpuDays, cp8D
   );
 };
 
-// ---------- Модальное окно (без изменений) ----------
+/* ============ МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ ============ */
 const FilterableDetailsModal = ({ isOpen, onClose, data, loading, title, error, periodType, metricType }) => {
   if (!isOpen) return null;
   const [modelFilter, setModelFilter] = useState('ALL');
@@ -388,43 +729,43 @@ const FilterableDetailsModal = ({ isOpen, onClose, data, loading, title, error, 
     <div style={styles.modalOverlay} onClick={onClose}>
       <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-          <h3 style={{ color: '#FFF', margin: 0 }}>{title || 'Детали'}</h3>
+          <h3 style={{ color: BRAND.text, margin: 0 }}>{title || 'Детали'}</h3>
           <button onClick={onClose} style={styles.closeBtn}>✕</button>
         </div>
         {error && <div style={{ color: '#EF4444', marginBottom: 8 }}>Ошибка: {error}</div>}
         {loading ? (
-          <div style={{ color: '#D1D5DB' }}>Загрузка...</div>
+          <div style={{ color: BRAND.textSecondary }}>Загрузка...</div>
         ) : !data || data.length === 0 ? (
-          <div style={{ color: '#D1D5DB' }}>Нет данных</div>
+          <div style={{ color: BRAND.textSecondary }}>Нет данных</div>
         ) : (
           <>
             <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-              <label style={{ color: '#D1D5DB', fontSize: 13 }}>
+              <label style={{ color: BRAND.textSecondary, fontSize: 13 }}>
                 Модель:
                 <select
                   value={modelFilter}
                   onChange={e => setModelFilter(e.target.value)}
-                  style={{ marginLeft: 4, padding: '2px 4px', borderRadius: 4, border: '1px solid #4B5563', background: '#374151', color: '#FFF' }}
+                  style={{ marginLeft: 4, padding: '2px 4px', borderRadius: 4, border: `1px solid ${BRAND.border}`, background: '#FFFFFF', color: BRAND.text }}
                 >
                   {models.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </label>
-              <label style={{ color: '#D1D5DB', fontSize: 13 }}>
+              <label style={{ color: BRAND.textSecondary, fontSize: 13 }}>
                 С даты:
                 <input
                   type="date"
                   value={dateFrom}
                   onChange={e => setDateFrom(e.target.value)}
-                  style={{ marginLeft: 4, padding: '2px 4px', borderRadius: 4, border: '1px solid #4B5563', background: '#374151', color: '#FFF' }}
+                  style={{ marginLeft: 4, padding: '2px 4px', borderRadius: 4, border: `1px solid ${BRAND.border}`, background: '#FFFFFF', color: BRAND.text }}
                 />
               </label>
-              <label style={{ color: '#D1D5DB', fontSize: 13 }}>
+              <label style={{ color: BRAND.textSecondary, fontSize: 13 }}>
                 По дату:
                 <input
                   type="date"
                   value={dateTo}
                   onChange={e => setDateTo(e.target.value)}
-                  style={{ marginLeft: 4, padding: '2px 4px', borderRadius: 4, border: '1px solid #4B5563', background: '#374151', color: '#FFF' }}
+                  style={{ marginLeft: 4, padding: '2px 4px', borderRadius: 4, border: `1px solid ${BRAND.border}`, background: '#FFFFFF', color: BRAND.text }}
                 />
               </label>
               <button onClick={handleExport} style={styles.exportBtn}>
@@ -432,7 +773,7 @@ const FilterableDetailsModal = ({ isOpen, onClose, data, loading, title, error, 
               </button>
             </div>
             {summary && (
-              <div style={{ color: '#D1D5DB', marginBottom: 8, fontSize: 13, display: 'flex', gap: 15 }}>
+              <div style={{ color: BRAND.textSecondary, marginBottom: 8, fontSize: 13, display: 'flex', gap: 15 }}>
                 <span>Уникальных VIN: <b>{summary.uniqueVins}</b></span>
                 {metricType === 'DPU' ? (
                   <span>Всего дефектов: <b>{summary.totalDefects}</b></span>
@@ -445,15 +786,15 @@ const FilterableDetailsModal = ({ isOpen, onClose, data, loading, title, error, 
               </div>
             )}
             <div className="custom-scroll" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', color: '#FFF', fontSize: 13 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', color: BRAND.text, fontSize: 13 }}>
                 <thead>
-                  <tr style={{ backgroundColor: '#374151' }}>
+                  <tr style={{ backgroundColor: BRAND.bg }}>
                     {Object.keys(data[0]).map(col => <th key={col} style={styles.detailTh}>{col}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredData.map((row, idx) => (
-                    <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#1F2937' : '#111827' }}>
+                    <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : BRAND.bg }}>
                       {Object.keys(data[0]).map(col => <td key={col} style={styles.detailTd}>{row[col]}</td>)}
                     </tr>
                   ))}
@@ -467,7 +808,7 @@ const FilterableDetailsModal = ({ isOpen, onClose, data, loading, title, error, 
   );
 };
 
-// ---------- Топ-10 дефектов (без изменений) ----------
+/* ============ ТОП-10 ДЕФЕКТОВ ============ */
 const TodayTopDefects = ({ checkpoint, defectType, onDefectTypeChange, dateFrom, onDateFromChange, dateTo, onDateToChange }) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -495,34 +836,34 @@ const TodayTopDefects = ({ checkpoint, defectType, onDefectTypeChange, dateFrom,
 
   const filterBar = (
     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-      <label style={{ fontSize: 13, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }}>
+      <label style={{ fontSize: 13, color: BRAND.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
         Тип:
         <select
           value={defectType}
           onChange={e => onDefectTypeChange(e.target.value)}
-          style={{ padding: '2px 4px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13 }}
+          style={{ padding: '6px 10px', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}`, fontSize: 13, background: '#fff' }}
         >
           <option value="offline">Offline</option>
           <option value="online">Online</option>
           <option value="default">Default</option>
         </select>
       </label>
-      <label style={{ fontSize: 13, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }}>
+      <label style={{ fontSize: 13, color: BRAND.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
         с
         <input
           type="date"
           value={dateFrom}
           onChange={e => onDateFromChange(e.target.value)}
-          style={{ padding: '2px 4px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13, width: 120 }}
+          style={{ padding: '6px 10px', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}`, fontSize: 13, width: 140, background: '#fff' }}
         />
       </label>
-      <label style={{ fontSize: 13, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }}>
+      <label style={{ fontSize: 13, color: BRAND.textSecondary, display: 'flex', alignItems: 'center', gap: 4 }}>
         по
         <input
           type="date"
           value={dateTo}
           onChange={e => onDateToChange(e.target.value)}
-          style={{ padding: '2px 4px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13, width: 120 }}
+          style={{ padding: '6px 10px', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}`, fontSize: 13, width: 140, background: '#fff' }}
         />
       </label>
     </div>
@@ -530,8 +871,8 @@ const TodayTopDefects = ({ checkpoint, defectType, onDefectTypeChange, dateFrom,
 
   if (loading) {
     return (
-      <div style={{ marginTop: 20, color: '#6B7280' }}>
-        <h3 style={{ color: '#1F2937', marginBottom: 12 }}>Топ‑10 дефектов ({checkpoint})</h3>
+      <div style={{ marginTop: 20, color: BRAND.textSecondary }}>
+        <h3 style={{ color: BRAND.text, marginBottom: 12 }}>Топ‑10 дефектов ({checkpoint})</h3>
         {filterBar}
         <p>Загрузка...</p>
       </div>
@@ -540,8 +881,8 @@ const TodayTopDefects = ({ checkpoint, defectType, onDefectTypeChange, dateFrom,
 
   if (!data || data.length === 0) {
     return (
-      <div style={{ marginTop: 20, color: '#6B7280' }}>
-        <h3 style={{ color: '#1F2937', marginBottom: 12 }}>Топ‑10 дефектов ({checkpoint})</h3>
+      <div style={{ marginTop: 20, color: BRAND.textSecondary }}>
+        <h3 style={{ color: BRAND.text, marginBottom: 12 }}>Топ‑10 дефектов ({checkpoint})</h3>
         {filterBar}
         <p>Нет данных за выбранный период</p>
       </div>
@@ -568,8 +909,8 @@ const TodayTopDefects = ({ checkpoint, defectType, onDefectTypeChange, dateFrom,
 
   return (
     <div style={{ marginTop: 40 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 12, marginBottom: 16, borderBottom: '2px solid #E5E7EB', paddingBottom: 8 }}>
-        <h3 style={{ color: '#1F2937', fontSize: 20, fontWeight: 700, margin: 0 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 12, marginBottom: 16, borderBottom: `2px solid ${BRAND.border}`, paddingBottom: 8 }}>
+        <h3 style={{ color: BRAND.text, fontSize: 20, fontWeight: 700, margin: 0 }}>
           Топ‑10 дефектов ({checkpoint})
         </h3>
         {filterBar}
@@ -580,33 +921,33 @@ const TodayTopDefects = ({ checkpoint, defectType, onDefectTypeChange, dateFrom,
           if (!items || items.length === 0) {
             return (
               <div key={model} style={{
-                backgroundColor: '#FFFFFF',
-                borderRadius: 8,
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                backgroundColor: BRAND.cardBg,
+                borderRadius: BRAND.radiusSmall,
+                boxShadow: BRAND.shadow,
                 padding: 12,
                 flex: '1 1 220px',
                 minWidth: '200px',
               }}>
                 <h4 style={{
-                  color: modelColors[model] || '#6B7280',
+                  color: modelColors[model] || BRAND.textSecondary,
                   fontSize: 16,
                   fontWeight: 700,
                   marginBottom: 8,
-                  borderBottom: `2px solid ${modelColors[model] || '#6B7280'}`,
+                  borderBottom: `2px solid ${modelColors[model] || BRAND.textSecondary}`,
                   paddingBottom: 4,
                 }}>
                   {model}
                 </h4>
-                <p style={{ color: '#6B7280', fontSize: 13, textAlign: 'center' }}>Нет данных за выбранный период</p>
+                <p style={{ color: BRAND.textSecondary, fontSize: 13, textAlign: 'center' }}>Нет данных за выбранный период</p>
               </div>
             );
           }
 
           return (
             <div key={model} style={{
-              backgroundColor: '#FFFFFF',
-              borderRadius: 8,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+              backgroundColor: BRAND.cardBg,
+              borderRadius: BRAND.radiusSmall,
+              boxShadow: BRAND.shadow,
               padding: 12,
               flex: '1 1 220px',
               minWidth: '200px',
@@ -623,16 +964,16 @@ const TodayTopDefects = ({ checkpoint, defectType, onDefectTypeChange, dateFrom,
               </h4>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
-                  <tr style={{ backgroundColor: '#F3F4F6' }}>
-                    <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 600, color: '#374151' }}>Деталь – Дефект</th>
-                    <th style={{ textAlign: 'center', padding: '4px 6px', fontWeight: 600, color: '#374151', width: 40 }}>Кол.</th>
+                  <tr style={{ backgroundColor: BRAND.bg }}>
+                    <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 600, color: BRAND.textSecondary }}>Деталь – Дефект</th>
+                    <th style={{ textAlign: 'center', padding: '4px 6px', fontWeight: 600, color: BRAND.textSecondary, width: 40 }}>Кол.</th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((item, idx) => (
-                    <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#F9FAFB' : '#FFFFFF' }}>
-                      <td style={{ padding: '4px 6px', color: '#1F2937' }}>{item.name}</td>
-                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, color: '#1F2937' }}>{item.count}</td>
+                    <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : BRAND.bg }}>
+                      <td style={{ padding: '4px 6px', color: BRAND.text }}>{item.name}</td>
+                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 600, color: BRAND.text }}>{item.count}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -645,7 +986,7 @@ const TodayTopDefects = ({ checkpoint, defectType, onDefectTypeChange, dateFrom,
   );
 };
 
-// ---------- Группа графиков (без изменений) ----------
+/* ============ ГРУППА ГРАФИКОВ ============ */
 const ChartsGroup = ({ title, checkpoint, visibleModels, cpDpuDays, cpDrrDays, dpuEndpoint, drrEndpoint, onDetailsClick }) => {
   const [blockCollapsed, setBlockCollapsed] = useState(false);
   const [dpuCollapsed, setDpuCollapsed] = useState(false);
@@ -701,7 +1042,7 @@ const ChartsGroup = ({ title, checkpoint, visibleModels, cpDpuDays, cpDrrDays, d
   return (
     <div style={{ marginBottom: 30 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-        <h2 style={{ color: '#1F2937', fontSize: 22, fontWeight: 700, margin: 0 }}>{title}</h2>
+        <h2 style={{ color: BRAND.text, fontSize: 22, fontWeight: 700, margin: 0 }}>{title}</h2>
         <button onClick={toggleBlock} style={styles.collapseBtn}>
           {blockCollapsed ? '▼' : '▲'}
         </button>
@@ -711,14 +1052,14 @@ const ChartsGroup = ({ title, checkpoint, visibleModels, cpDpuDays, cpDrrDays, d
         <>
           {/* DPU */}
           <div style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 8,
+            backgroundColor: BRAND.cardBg,
+            borderRadius: BRAND.radiusSmall,
             padding: 16,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+            boxShadow: BRAND.shadow,
             marginBottom: 20,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <h3 style={{ color: '#4B5563', fontSize: 15, fontWeight: 600, margin: 0 }}>DPU</h3>
+              <h3 style={{ color: BRAND.textSecondary, fontSize: 15, fontWeight: 600, margin: 0 }}>DPU</h3>
               <button onClick={toggleDpu} style={styles.collapseBtn}>
                 {dpuCollapsed ? '▼' : '▲'}
               </button>
@@ -734,13 +1075,13 @@ const ChartsGroup = ({ title, checkpoint, visibleModels, cpDpuDays, cpDrrDays, d
 
           {/* DRR */}
           <div style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 8,
+            backgroundColor: BRAND.cardBg,
+            borderRadius: BRAND.radiusSmall,
             padding: 16,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+            boxShadow: BRAND.shadow,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <h3 style={{ color: '#4B5563', fontSize: 15, fontWeight: 600, margin: 0 }}>DRR</h3>
+              <h3 style={{ color: BRAND.textSecondary, fontSize: 15, fontWeight: 600, margin: 0 }}>DRR</h3>
               <button onClick={toggleDrr} style={styles.collapseBtn}>
                 {drrCollapsed ? '▼' : '▲'}
               </button>
@@ -759,7 +1100,7 @@ const ChartsGroup = ({ title, checkpoint, visibleModels, cpDpuDays, cpDrrDays, d
   );
 };
 
-// ========== ОСНОВНОЙ КОМПОНЕНТ ==========
+/* ============ ОСНОВНОЙ КОМПОНЕНТ СТРАНИЦЫ ============ */
 export default function ModelStatusPage() {
   const allModels = Object.keys(modelColors);
   const [selectedModels, setSelectedModels] = useState(allModels);
@@ -771,13 +1112,14 @@ export default function ModelStatusPage() {
   const [cp8DrrDays, setCp8DrrDays] = useState([]);
   const [dataLoaded, setDataLoaded] = useState(false);
 
-  const today = new Date().toISOString().split('T')[0];
+  // Вчерашняя дата для дефолтных фильтров топ-10
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
   const [defectTypeCP7, setDefectTypeCP7] = useState('offline');
-  const [dateFromCP7, setDateFromCP7] = useState(today);
-  const [dateToCP7, setDateToCP7] = useState(today);
+  const [dateFromCP7, setDateFromCP7] = useState(yesterday);
+  const [dateToCP7, setDateToCP7] = useState(yesterday);
   const [defectTypeCP8, setDefectTypeCP8] = useState('offline');
-  const [dateFromCP8, setDateFromCP8] = useState(today);
-  const [dateToCP8, setDateToCP8] = useState(today);
+  const [dateFromCP8, setDateFromCP8] = useState(yesterday);
+  const [dateToCP8, setDateToCP8] = useState(yesterday);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
@@ -786,6 +1128,8 @@ export default function ModelStatusPage() {
   const [modalError, setModalError] = useState(null);
   const [modalPeriodType, setModalPeriodType] = useState('day');
   const [modalMetricType, setModalMetricType] = useState('DPU');
+
+  const pageRef = useRef(null);
 
   useEffect(() => {
     const fetchAllDaily = async () => {
@@ -855,22 +1199,66 @@ export default function ModelStatusPage() {
     setModalError(null);
   };
 
+  const handleExportPdf = async () => {
+    try {
+      const canvas = await html2canvas(pageRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        windowWidth: pageRef.current.scrollWidth,
+        windowHeight: pageRef.current.scrollHeight,
+      });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save('ModelStatus.pdf');
+    } catch (err) {
+      console.error('Ошибка при генерации PDF:', err);
+      alert('Не удалось сгенерировать PDF');
+    }
+  };
+
   if (!dataLoaded) {
     return <div style={styles.loading}>Загрузка данных...</div>;
   }
 
   return (
-    <div style={styles.container}>
-      <h1 style={styles.mainTitle}>Model Status</h1>
+    <div ref={pageRef} style={styles.container}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 10 }}>
+        <h1 style={styles.mainTitle}>Model Status</h1>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={handleExportPdf}
+            style={{
+              padding: '12px 24px',
+              borderRadius: BRAND.radiusSmall,
+              border: 'none',
+              fontWeight: 700,
+              fontSize: '1rem',
+              background: BRAND.primary,
+              color: '#FFFFFF',
+              cursor: 'pointer',
+              boxShadow: BRAND.shadow,
+              transition: 'all 0.2s',
+              fontFamily: BRAND.fontFamily,
+            }}
+          >
+            📄 Выгрузка в PDF
+          </button>
+          <EmailSenderButton targetRef={pageRef} pageTitle="Model Status" />
+        </div>
+      </div>
 
-      {/* Фильтры и таблица в стильной карточке (как в SgpAudit) */}
+      {/* Фильтры и таблица */}
       <div style={{
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
+        backgroundColor: BRAND.cardBg,
+        borderRadius: BRAND.radius,
         padding: 24,
         marginBottom: 30,
-        boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-        border: '1px solid #F0F0F5',
+        boxShadow: BRAND.shadow,
+        border: `1px solid ${BRAND.border}`,
       }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, marginBottom: 20 }}>
           <ModelFilterDropdown
@@ -879,18 +1267,19 @@ export default function ModelStatusPage() {
             onChange={setSelectedModels}
           />
 
-          <span style={{ fontSize: 14, color: '#374151', fontWeight: 500 }}>Режим таблицы:</span>
+          <span style={{ fontSize: 14, color: BRAND.textSecondary, fontWeight: 500 }}>Режим таблицы:</span>
           <select
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
             style={{
-              padding: '8px 12px',
-              borderRadius: 8,
-              border: '1px solid #D1D5DB',
+              padding: '10px 15px',
+              borderRadius: BRAND.radiusSmall,
+              border: `1px solid ${BRAND.border}`,
               fontSize: 14,
-              background: '#F9FAFB',
-              color: '#374151',
+              background: '#FFFFFF',
+              color: BRAND.textSecondary,
               fontWeight: 500,
+              fontFamily: BRAND.fontFamily,
             }}
           >
             <option value="default">По умолчанию</option>
@@ -958,23 +1347,24 @@ export default function ModelStatusPage() {
   );
 }
 
+/* ============ СТИЛИ ============ */
 const styles = {
   container: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: BRAND.bg,
     minHeight: '100vh',
     padding: 20,
-    color: '#111827',
-    fontFamily: 'Segoe UI, Arial, sans-serif',
+    color: BRAND.text,
+    fontFamily: BRAND.fontFamily,
   },
-  mainTitle: { fontSize: 26, marginBottom: 24, fontWeight: 700, color: '#1F2937' },
+  mainTitle: { fontSize: '2.5rem', marginBottom: 24, fontWeight: 900, color: BRAND.text },
   collapseBtn: {
     background: 'none',
-    border: '1px solid #D1D5DB',
-    borderRadius: 4,
+    border: `1px solid ${BRAND.border}`,
+    borderRadius: BRAND.radiusSmall,
     cursor: 'pointer',
     fontSize: 14,
     padding: '2px 8px',
-    color: '#374151',
+    color: BRAND.textSecondary,
     lineHeight: 1,
   },
   table: {
@@ -982,30 +1372,30 @@ const styles = {
     borderCollapse: 'collapse',
     tableLayout: 'fixed',
   },
-  tableHeaderRow: { backgroundColor: '#F3F4F6' },
+  tableHeaderRow: { backgroundColor: BRAND.bg },
   th: {
     padding: '10px 8px',
-    borderBottom: '2px solid #E5E7EB',
+    borderBottom: `2px solid ${BRAND.border}`,
     textAlign: 'center',
     fontWeight: 600,
-    color: '#374151',
-    fontSize: 20,
+    color: BRAND.textSecondary,
+    fontSize: 16,
   },
   td: {
     padding: '8px',
-    borderBottom: '1px solid #E5E7EB',
+    borderBottom: `1px solid ${BRAND.border}`,
     textAlign: 'center',
-    color: '#1F2937',
-    fontSize: 20,
+    color: BRAND.text,
+    fontSize: 16,
     fontWeight: 500,
   },
   input: {
     width: '80px',
-    padding: '4px',
-    border: '1px solid #D1D5DB',
-    borderRadius: 4,
+    padding: '6px',
+    border: `1px solid ${BRAND.border}`,
+    borderRadius: BRAND.radiusSmall,
     backgroundColor: '#FFFFFF',
-    color: '#1F2937',
+    color: BRAND.text,
     textAlign: 'center',
     fontSize: 15,
   },
@@ -1022,26 +1412,26 @@ const styles = {
     zIndex: 1000,
   },
   modalContent: {
-    backgroundColor: '#1F2937',
-    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: BRAND.radius,
     padding: 20,
     maxWidth: '850px',
     width: '95%',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+    boxShadow: BRAND.shadow,
   },
   closeBtn: {
     background: 'transparent',
     border: 'none',
-    color: '#FFF',
+    color: BRAND.text,
     fontSize: 18,
     cursor: 'pointer',
   },
   exportBtn: {
     padding: '6px 14px',
-    backgroundColor: '#2563EB',
+    backgroundColor: BRAND.primary,
     color: '#FFF',
     border: 'none',
-    borderRadius: 4,
+    borderRadius: BRAND.radiusSmall,
     fontWeight: 600,
     fontSize: 13,
     cursor: 'pointer',
@@ -1049,18 +1439,20 @@ const styles = {
   detailTh: {
     padding: '6px 8px',
     textAlign: 'left',
-    borderBottom: '1px solid #4B5563',
+    borderBottom: `1px solid ${BRAND.border}`,
     fontWeight: 600,
+    color: BRAND.textSecondary,
   },
   detailTd: {
     padding: '6px 8px',
-    borderBottom: '1px solid #4B5563',
+    borderBottom: `1px solid ${BRAND.border}`,
     whiteSpace: 'nowrap',
+    color: BRAND.text,
   },
   loading: {
     textAlign: 'center',
     padding: 20,
     fontSize: 18,
-    color: '#6B7280',
+    color: BRAND.textSecondary,
   },
 };
