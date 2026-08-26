@@ -60,16 +60,28 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     subject: pageTitle || 'Отчёт',
     body: '',
     signatureText: '',
-    signatureImage: '', // base64 строка
+    signatureImage: '',
     senderName: 'MBS Quality System',
   });
   const [schedule, setSchedule] = useState({
-    days: [1, 2, 3, 4, 5], // 0=вс, 1=пн, ...
+    days: [1, 2, 3, 4, 5], 
     times: ['08:00', '12:00', '16:00'],
   });
   const [savedMessage, setSavedMessage] = useState('');
 
   const correctPassword = '1234561';
+
+  // ===== БЛОКИРОВКА ПРОКРУТКИ ФОНА =====
+  useEffect(() => {
+    if (passwordModalOpen || settingsModalOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [passwordModalOpen, settingsModalOpen]);
 
   // Загрузка сохранённых настроек
   const loadSettings = async () => {
@@ -139,16 +151,16 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     }
   };
 
-  // Генерация PDF с масштабом 200% и многостраничностью без обрезания
+  // Генерация PDF с масштабом 200%
   const generatePdf = async () => {
     const canvas = await html2canvas(targetRef.current, {
-      scale: 2, // 200% – высокое разрешение
+      scale: 2,
       useCORS: true,
       logging: false,
       windowWidth: targetRef.current.scrollWidth,
       windowHeight: targetRef.current.scrollHeight,
     });
-    const imgData = canvas.toDataURL('image/jpeg', 0.85); // JPEG, качество 85%
+    const imgData = canvas.toDataURL('image/jpeg', 0.85);
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
@@ -172,21 +184,17 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
   // Отправка: генерируем PDF, скачиваем и открываем почтовый клиент
   const handleSendNow = async () => {
     try {
-      await saveSettings(); // сохранить настройки
-
-      // Генерируем PDF
+      await saveSettings();
       const pdf = await generatePdf();
       const pdfBlob = pdf.output('blob');
       const pdfUrl = URL.createObjectURL(pdfBlob);
 
-      // Скачиваем PDF
       const link = document.createElement('a');
       link.href = pdfUrl;
       link.download = `${pageTitle || 'report'}.pdf`;
       link.click();
       URL.revokeObjectURL(pdfUrl);
 
-      // Открываем почтовый клиент
       const mailtoLink = `mailto:${emailForm.to}?cc=${emailForm.cc}&subject=${encodeURIComponent(emailForm.subject)}&body=${encodeURIComponent(emailForm.body)}`;
       window.location.href = mailtoLink;
 
@@ -233,48 +241,59 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
   ];
 
-  // Стили модальных окон
+  // ===== УЛУЧШЕННЫЕ СТИЛИ =====
   const overlayStyle = {
     position: 'fixed',
     top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(15, 23, 42, 0.7)', // Темнее для фокуса
+    backdropFilter: 'blur(6px)', // Размытие фона
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2000,
+    padding: '20px',
   };
 
   const modalStyle = {
     backgroundColor: '#FFFFFF',
-    borderRadius: BRAND.radius,
-    boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
-    width: '90%',
-    maxWidth: '500px',
+    borderRadius: '24px',
+    boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+    width: '100%',
+    maxWidth: '480px',
     maxHeight: '90vh',
     overflowY: 'auto',
-    padding: '30px',
+    padding: '32px',
     fontFamily: BRAND.fontFamily,
     color: BRAND.text,
     boxSizing: 'border-box',
-    margin: '0 auto', // гарантирует равные отступы слева и справа
+    margin: '0 auto',
+    border: '1px solid rgba(255,255,255,0.5)',
+    position: 'relative',
   };
 
   const modalWideStyle = {
     ...modalStyle,
-    maxWidth: '700px',
+    maxWidth: '720px',
   };
 
   const inputStyle = {
     width: '100%',
-    padding: '10px 12px',
-    borderRadius: BRAND.radiusSmall,
-    border: `1px solid ${BRAND.border}`,
-    fontSize: '0.9rem',
+    padding: '12px 16px',
+    borderRadius: '10px',
+    border: '1px solid #CBD5E1',
+    fontSize: '0.95rem',
     fontFamily: BRAND.fontFamily,
     color: BRAND.text,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F8FAFC',
     outline: 'none',
-    transition: 'border-color 0.2s',
+    transition: 'all 0.2s',
+    boxSizing: 'border-box',
+    marginBottom: '16px',
+    ':focus': {
+      borderColor: BRAND.primary,
+      backgroundColor: '#FFFFFF',
+      boxShadow: '0 0 0 4px rgba(37,99,235,0.1)',
+    }
   };
 
   const labelStyle = {
@@ -282,32 +301,33 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
     marginBottom: '6px',
     fontWeight: 600,
     fontSize: '0.85rem',
-    color: BRAND.textSecondary,
+    color: '#475569',
     letterSpacing: '0.02em',
   };
 
   const buttonPrimary = {
-    padding: '10px 20px',
-    borderRadius: BRAND.radiusSmall,
+    padding: '12px 24px',
+    borderRadius: '10px',
     border: 'none',
     background: BRAND.primary,
     color: '#FFFFFF',
     fontWeight: 600,
     cursor: 'pointer',
-    fontSize: '0.9rem',
-    transition: 'background 0.2s',
+    fontSize: '0.95rem',
+    transition: 'all 0.2s',
+    boxShadow: '0 4px 12px rgba(37,99,235,0.2)',
   };
 
   const buttonSecondary = {
-    padding: '10px 20px',
-    borderRadius: BRAND.radiusSmall,
-    border: `1px solid ${BRAND.border}`,
+    padding: '12px 24px',
+    borderRadius: '10px',
+    border: '1px solid #CBD5E1',
     background: '#FFFFFF',
     color: BRAND.text,
     fontWeight: 600,
     cursor: 'pointer',
-    fontSize: '0.9rem',
-    transition: 'background 0.2s',
+    fontSize: '0.95rem',
+    transition: 'all 0.2s',
   };
 
   return (
@@ -316,7 +336,7 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
         onClick={() => setPasswordModalOpen(true)}
         style={{
           padding: '12px 24px',
-          borderRadius: BRAND.radiusSmall,
+          borderRadius: '10px',
           border: 'none',
           fontWeight: 700,
           fontSize: '1rem',
@@ -335,18 +355,34 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
       {passwordModalOpen && (
         <div style={overlayStyle}>
           <div style={modalStyle}>
-            <h3 style={{ marginTop: 0, marginBottom: 20, color: BRAND.text, fontWeight: 700 }}>Введите пароль</h3>
-            {error && <p style={{ color: '#EF4444', marginBottom: 10 }}>{error}</p>}
+            <div style={{
+              width: '48px',
+              height: '48px',
+              backgroundColor: '#EFF6FF',
+              borderRadius: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '24px',
+              marginBottom: '16px',
+              color: BRAND.primary,
+            }}>
+              🔒
+            </div>
+            <h3 style={{ margin: '0 0 8px 0', color: BRAND.text, fontWeight: 700, fontSize: '1.5rem' }}>Введите пароль</h3>
+            <p style={{ margin: '0 0 20px 0', color: BRAND.textSecondary, fontSize: '0.9rem' }}>Для доступа к настройкам авторассылки</p>
+            
+            {error && <p style={{ color: '#EF4444', marginBottom: 10, fontSize: '0.9rem' }}>{error}</p>}
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handlePasswordSubmit()}
               placeholder="Пароль"
-              style={{ ...inputStyle, marginBottom: 15 }}
+              style={inputStyle}
               autoFocus
             />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: '8px' }}>
               <button onClick={() => setPasswordModalOpen(false)} style={buttonSecondary}>
                 Отмена
               </button>
@@ -362,52 +398,65 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
       {settingsModalOpen && (
         <div style={overlayStyle}>
           <div style={modalWideStyle}>
-            <h3 style={{ marginTop: 0, marginBottom: 24, color: BRAND.text, fontWeight: 700, fontSize: '1.4rem' }}>
-              Настройка авторассылки
-            </h3>
-            {savedMessage && <p style={{ color: '#10B981', marginBottom: 12 }}>{savedMessage}</p>}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '24px',
+              borderBottom: '1px solid #E2E8F0',
+              paddingBottom: '16px',
+            }}>
+              <h3 style={{ margin: 0, color: BRAND.text, fontWeight: 700, fontSize: '1.5rem' }}>
+                ⚙️ Настройка авторассылки
+              </h3>
+              <button onClick={() => setSettingsModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: BRAND.textSecondary, lineHeight: 1 }}>×</button>
+            </div>
+            
+            {savedMessage && <p style={{ color: '#10B981', marginBottom: 12, fontWeight: 600, fontSize: '0.9rem' }}>{savedMessage}</p>}
 
-            <div style={{ marginBottom: 16 }}>
-              <label style={labelStyle}>Кому:</label>
-              <input
-                type="text"
-                value={emailForm.to}
-                onChange={(e) => setEmailForm({ ...emailForm, to: e.target.value })}
-                style={inputStyle}
-              />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div>
+                <label style={labelStyle}>Кому:</label>
+                <input
+                  type="text"
+                  value={emailForm.to}
+                  onChange={(e) => setEmailForm({ ...emailForm, to: e.target.value })}
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Копия:</label>
+                <input
+                  type="text"
+                  value={emailForm.cc}
+                  onChange={(e) => setEmailForm({ ...emailForm, cc: e.target.value })}
+                  style={inputStyle}
+                />
+              </div>
             </div>
 
-            <div style={{ marginBottom: 16 }}>
-              <label style={labelStyle}>Копия:</label>
-              <input
-                type="text"
-                value={emailForm.cc}
-                onChange={(e) => setEmailForm({ ...emailForm, cc: e.target.value })}
-                style={inputStyle}
-              />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div>
+                <label style={labelStyle}>Отправитель (имя):</label>
+                <input
+                  type="text"
+                  value={emailForm.senderName}
+                  onChange={(e) => setEmailForm({ ...emailForm, senderName: e.target.value })}
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Тема:</label>
+                <input
+                  type="text"
+                  value={emailForm.subject}
+                  onChange={(e) => setEmailForm({ ...emailForm, subject: e.target.value })}
+                  style={inputStyle}
+                />
+              </div>
             </div>
 
-            <div style={{ marginBottom: 16 }}>
-              <label style={labelStyle}>Отправитель (имя):</label>
-              <input
-                type="text"
-                value={emailForm.senderName}
-                onChange={(e) => setEmailForm({ ...emailForm, senderName: e.target.value })}
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ marginBottom: 16 }}>
-              <label style={labelStyle}>Тема:</label>
-              <input
-                type="text"
-                value={emailForm.subject}
-                onChange={(e) => setEmailForm({ ...emailForm, subject: e.target.value })}
-                style={inputStyle}
-              />
-            </div>
-
-            <div style={{ marginBottom: 16 }}>
+            <div>
               <label style={labelStyle}>Текст письма:</label>
               <textarea
                 rows={4}
@@ -417,7 +466,7 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
               />
             </div>
 
-            <div style={{ marginBottom: 16 }}>
+            <div>
               <label style={labelStyle}>Подпись (текст):</label>
               <textarea
                 rows={3}
@@ -427,24 +476,24 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
               />
             </div>
 
-            <div style={{ marginBottom: 16 }}>
+            <div>
               <label style={labelStyle}>Изображение подписи (логотип):</label>
               <input
                 type="file"
                 accept="image/*"
                 onChange={handleSignatureUpload}
-                style={{ marginBottom: 8 }}
+                style={{ marginBottom: 12, fontSize: '0.9rem', color: BRAND.textSecondary }}
               />
               {emailForm.signatureImage && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '12px' }}>
                   <img
                     src={emailForm.signatureImage}
                     alt="Подпись"
-                    style={{ maxWidth: '180px', maxHeight: '80px', border: `1px solid ${BRAND.border}`, borderRadius: 4 }}
+                    style={{ maxWidth: '180px', maxHeight: '80px', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '4px', backgroundColor: '#FFFFFF' }}
                   />
                   <button
                     onClick={() => setEmailForm({ ...emailForm, signatureImage: '' })}
-                    style={{ padding: '4px 8px', fontSize: '0.8rem', cursor: 'pointer', border: `1px solid ${BRAND.border}`, borderRadius: 4, background: '#FFFFFF' }}
+                    style={{ padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer', border: '1px solid #FCA5A5', borderRadius: '6px', background: '#FEF2F2', color: '#DC2626', fontWeight: 600 }}
                   >
                     Удалить
                   </button>
@@ -452,39 +501,47 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
               )}
             </div>
 
-            <div style={{ marginBottom: 20 }}>
+            <div style={{ marginBottom: '20px' }}>
               <label style={labelStyle}>Дни недели:</label>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: '16px' }}>
                 {dayNames.map((name, idx) => (
-                  <label key={idx} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: '0.9rem' }}>
+                  <label key={idx} style={{
+                    display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.9rem',
+                    padding: '6px 12px', borderRadius: '8px', backgroundColor: schedule.days.includes(idx) ? '#EFF6FF' : '#F8FAFC', border: '1px solid ' + (schedule.days.includes(idx) ? '#93C5FD' : '#E2E8F0')
+                  }}>
                     <input
                       type="checkbox"
                       checked={schedule.days.includes(idx)}
                       onChange={() => toggleDay(idx)}
+                      style={{ accentColor: BRAND.primary }}
                     />
                     {name}
                   </label>
                 ))}
               </div>
 
-              <label style={{ ...labelStyle, marginTop: 15 }}>Время отправки (можно несколько):</label>
+              <label style={labelStyle}>Время отправки (можно несколько):</label>
               <div style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 8,
-                maxHeight: '140px',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                gap: '10px',
+                maxHeight: '160px',
                 overflowY: 'auto',
-                border: `1px solid ${BRAND.border}`,
-                padding: 10,
-                borderRadius: BRAND.radiusSmall,
-                background: '#FFFFFF',
+                border: '1px solid #E2E8F0',
+                padding: '12px',
+                borderRadius: '10px',
+                backgroundColor: '#F8FAFC',
               }}>
                 {timeOptions.map(time => (
-                  <label key={time} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: '0.85rem', background: schedule.times.includes(time) ? '#EFF6FF' : 'transparent', padding: '2px 6px', borderRadius: 4 }}>
+                  <label key={time} style={{
+                    display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.85rem',
+                    padding: '6px 8px', borderRadius: '6px', backgroundColor: schedule.times.includes(time) ? '#EFF6FF' : '#FFFFFF', border: '1px solid ' + (schedule.times.includes(time) ? '#93C5FD' : '#E2E8F0')
+                  }}>
                     <input
                       type="checkbox"
                       checked={schedule.times.includes(time)}
                       onChange={() => toggleTime(time)}
+                      style={{ accentColor: BRAND.primary }}
                     />
                     {time}
                   </label>
@@ -492,10 +549,10 @@ const EmailSenderButton = ({ targetRef, pageTitle }) => {
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginTop: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginTop: '24px', borderTop: '1px solid #E2E8F0', paddingTop: '20px' }}>
               <div style={{ display: 'flex', gap: 10 }}>
                 <button onClick={saveSettings} style={buttonSecondary}>
-                  💾 Сохранить настройки
+                  💾 Сохранить
                 </button>
                 <button onClick={() => setSettingsModalOpen(false)} style={buttonSecondary}>
                   Закрыть
