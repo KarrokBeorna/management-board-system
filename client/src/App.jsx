@@ -17,6 +17,7 @@ import HoldsSgpPage from './HoldsSgpPage';
 import SgpManagementPage from './SgpManagementPage';
 import DrrCp7DashboardPage from './DrrCp7DashboardPage';
 import favicon from './assets/weblog.png';
+import DrrCp7HistoryPage from './DrrCp7HistoryPage';
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="/tl-map" element={<TLMapPage />} />
         <Route path="/holds-sgp" element={<HoldsSgpPage />} />
         <Route path="/drr-cp7-dashboard" element={<DrrCp7DashboardPage />} />
+        <Route path="/drr-cp7-history" element={<DrrCp7HistoryPage />} />
       </Route>
     </Routes>
   );

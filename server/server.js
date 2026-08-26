@@ -4620,6 +4620,171 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
   }
 });
 
+// ================== EMAIL SETTINGS ==================
+
+// Создание таблицы, если её ещё нет
+async function initEmailSettingsTable() {
+  try {
+    await notesPool.query(`
+      CREATE TABLE IF NOT EXISTS email_settings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        to_email VARCHAR(1000) NOT NULL DEFAULT '',
+        cc_email VARCHAR(1000) NOT NULL DEFAULT '',
+        subject VARCHAR(500) NOT NULL DEFAULT '',
+        body TEXT,
+        signature_text TEXT,
+        signature_image LONGTEXT,
+        sender_name VARCHAR(255) DEFAULT 'MBS Quality System',
+        schedule_days VARCHAR(100) DEFAULT '1,2,3,4,5',
+        schedule_times VARCHAR(500) DEFAULT '08:00,12:00,16:00',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Таблица email_settings готова');
+  } catch (err) {
+    console.error('Ошибка создания таблицы email_settings:', err.message);
+  }
+}
+
+// Вызываем при старте сервера (можно в startServer перед app.listen)
+initEmailSettingsTable();
+
+// Получить настройки
+app.get('/api/email-settings', async (req, res) => {
+  try {
+    const [rows] = await notesPool.query('SELECT * FROM email_settings ORDER BY id DESC LIMIT 1');
+    if (rows.length === 0) {
+      return res.json({
+        to: '',
+        cc: '',
+        subject: '',
+        body: '',
+        signature_text: '',
+        signature_image: '',
+        sender_name: 'MBS Quality System',
+        schedule: { days: [1,2,3,4,5], times: ['08:00','12:00','16:00'] },
+      });
+    }
+    const row = rows[0];
+    res.json({
+      to: row.to_email,
+      cc: row.cc_email,
+      subject: row.subject,
+      body: row.body,
+      signature_text: row.signature_text,
+      signature_image: row.signature_image,
+      sender_name: row.sender_name,
+      schedule: {
+        days: row.schedule_days ? row.schedule_days.split(',').map(Number) : [],
+        times: row.schedule_times ? row.schedule_times.split(',') : [],
+      },
+    });
+  } catch (err) {
+    console.error('Ошибка получения email-settings:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Сохранить настройки
+app.post('/api/email-settings', async (req, res) => {
+  try {
+    const {
+      to, cc, subject, body,
+      signature_text, signature_image, sender_name, schedule,
+    } = req.body;
+
+    const daysStr = Array.isArray(schedule?.days) ? schedule.days.join(',') : '';
+    const timesStr = Array.isArray(schedule?.times) ? schedule.times.join(',') : '';
+
+    // Удаляем старые записи и вставляем новую (одна строка настроек)
+    await notesPool.query('DELETE FROM email_settings');
+    await notesPool.query(`
+      INSERT INTO email_settings 
+        (to_email, cc_email, subject, body, signature_text, signature_image, sender_name, schedule_days, schedule_times)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [to, cc, subject, body, signature_text, signature_image, sender_name, daysStr, timesStr]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Ошибка сохранения email-settings:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/drr-cp7-history', async (req, res) => {
+  try {
+    const { filter = 'all', date } = req.query;
+    if (!date) return res.status(400).json({ error: 'date обязателен' });
+
+    const postLists = {
+      all: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ],
+      cp7: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'EXT1', 'PIP2', 'PIP4', 'PIP9'
+      ],
+      pip: [
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ]
+    };
+
+    const postList = postLists[filter] || postLists.all;
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    const sql = `
+      WITH cp72_vins AS (
+          SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
+          FROM at_om_wiptrackinghistory
+          WHERE WC_NAME = 'CP72' AND DATE(CREATION_TIME) = ?
+          GROUP BY VIN
+      ),
+      defect_status AS (
+          SELECT 
+              d.VIN,
+              COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) AS repair_time,
+              cp.CP72_TIME,
+              DATE_ADD(cp.CP72_TIME, INTERVAL 17 MINUTE) AS ADJUSTED_CP72_TIME,
+              CASE 
+                  WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) IS NULL THEN 'OFF'
+                  WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) < DATE_ADD(cp.CP72_TIME, INTERVAL 17 MINUTE) THEN 'CLOSED'
+                  ELSE 'OFF'
+              END AS calculated_status
+          FROM at_qm_defect_info d
+          JOIN cp72_vins cp ON d.VIN = cp.VIN
+          WHERE d.POST_NAME IN (${postListStr})
+      ),
+      vin_summary AS (
+          SELECT 
+              VIN,
+              COUNT(*) AS total_defects,
+              SUM(CASE WHEN calculated_status = 'CLOSED' THEN 1 ELSE 0 END) AS closed_defects,
+              SUM(CASE WHEN calculated_status = 'OFF' THEN 1 ELSE 0 END) AS off_defects
+          FROM defect_status
+          GROUP BY VIN
+      )
+      SELECT 
+          COUNT(DISTINCT CASE WHEN vs.off_defects = 0 THEN vs.VIN END) AS closedVins,
+          COUNT(DISTINCT cp.VIN) AS totalVins
+      FROM cp72_vins cp
+      LEFT JOIN vin_summary vs ON vs.VIN = cp.VIN
+    `;
+
+    const [rows] = await pool.query(sql, [date]);
+    const totalVins = rows[0]?.totalVins || 0;
+    const closedVins = rows[0]?.closedVins || 0;
+    const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
+
+    res.json({ totalVins, closedVins, drrPercent: Math.round(drrPercent * 10) / 10 });
+  } catch (err) {
+    console.error('Ошибка DRR CP7 History:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок

@@ -17,6 +17,8 @@ import HoldsSgpPage from './assets/hold.png';
 import sgpManagementPreview from './assets/cp8.png';
 import DrrCp7DashboardPage from './assets/cp7drr.png'; 
 
+//<ReportCard to="/drr-cp7-history" imgSrc={cp7historyPreview} caption="DRR CP7 History" accentColor="#10B981" />
+//import cp7historyPreview from './assets/123.png'; 
 // ====== СТИЛИ ======
 const sectionStyle = {
   backgroundColor: '#FFFFFF',
