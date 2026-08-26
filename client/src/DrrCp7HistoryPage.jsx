@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   ReferenceLine, Label, ResponsiveContainer, Cell, LabelList
 } from 'recharts';
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
 
 const API_BASE = '';
 
@@ -50,66 +52,58 @@ const buttonStyle = {
   gap: 6,
 };
 
+const thStyle = {
+  textAlign: 'center',
+  fontWeight: 600,
+  color: '#374151',
+  borderBottom: '2px solid #E5E7EB',
+  background: '#F9FAFB',
+  whiteSpace: 'nowrap',
+  padding: '6px 4px',
+  fontSize: '11px',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+
+const tdStyle = {
+  textAlign: 'center',
+  borderBottom: '1px solid #F0F0F5',
+  color: '#1F2937',
+  whiteSpace: 'nowrap',
+  padding: '4px 4px',
+  fontSize: '14px',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+
 export default function DrrCp7HistoryPage() {
   const [filter, setFilter] = useState('all');
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 13); // последние 14 дней
-    return d.toISOString().split('T')[0];
-  });
-  const [dateTo, setDateTo] = useState(() => {
-    const d = new Date();
-    return d.toISOString().split('T')[0];
-  });
+  const [period, setPeriod] = useState('month'); // year | month | week | day
+  const [count, setCount] = useState({ year: 2, month: 3, week: 4, day: 14 }[period] || 3);
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Сегодняшняя дата по московскому времени (UTC+3)
-  const todayMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-  const formatDateLabel = (dateStr) => {
-    const parts = dateStr.split('-');
-    return `${parts[2]}.${parts[1]}`;
+  // При смене периода сбрасываем count на дефолт
+  const handlePeriodChange = (newPeriod) => {
+    setPeriod(newPeriod);
+    const defaults = { year: 2, month: 3, week: 4, day: 14 };
+    setCount(defaults[newPeriod]);
   };
 
   const loadHistory = async () => {
     setLoading(true);
     setError(null);
     try {
-      const dates = [];
-      let current = new Date(dateFrom);
-      const end = new Date(dateTo);
-      while (current <= end) {
-        dates.push(current.toISOString().split('T')[0]);
-        current.setDate(current.getDate() + 1);
-      }
-
-      const results = await Promise.all(
-        dates.map(async (date) => {
-          let value;
-          if (date === todayMoscow) {
-            // Для сегодняшнего дня используем дашборд (сутки)
-            const start = `${date} 00:00:00`;
-            const end = `${date} 23:59:59`;
-            const params = new URLSearchParams({ filter, startTime: start, endTime: end });
-            const res = await fetch(`${API_BASE}/api/drr-cp7-dashboard?${params.toString()}`);
-            if (!res.ok) throw new Error('Ошибка загрузки сегодня');
-            const json = await res.json();
-            value = json.drrPercent;
-          } else {
-            // Для прошлых дней используем исторический расчёт
-            const params = new URLSearchParams({ filter, date });
-            const res = await fetch(`${API_BASE}/api/drr-cp7-history?${params.toString()}`);
-            if (!res.ok) throw new Error('Ошибка загрузки истории');
-            const json = await res.json();
-            value = json.drrPercent;
-          }
-          return { label: formatDateLabel(date), value };
-        })
-      );
-
-      setData(results);
+      const params = new URLSearchParams({
+        filter,
+        period,
+        count: count,
+      });
+      const res = await fetch(`${API_BASE}/api/drr-cp7-history?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки данных');
+      const json = await res.json();
+      setData(json.periods || []);
     } catch (err) {
       console.error(err);
       setError(err.message);
@@ -120,7 +114,32 @@ export default function DrrCp7HistoryPage() {
 
   useEffect(() => {
     loadHistory();
-  }, [filter, dateFrom, dateTo]);
+  }, [filter, period, count]);
+
+  // Данные для графика
+  const chartData = useMemo(() => {
+    return data.map(d => ({
+      label: d.label,
+      drr: d.drr,
+      totalVins: d.totalVins,
+      closedVins: d.closedVins,
+    }));
+  }, [data]);
+
+  // Экспорт в Excel
+  const exportToExcel = () => {
+    const exportData = data.map(d => ({
+      'Период': d.label,
+      'DRR %': d.drr,
+      'Всего авто': d.totalVins,
+      'ОК авто': d.closedVins,
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'DRR CP7 History');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `drr_cp7_history_${period}.xlsx`);
+  };
 
   return (
     <div style={{ padding: '20px 30px 20px 16px', fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
@@ -132,14 +151,28 @@ export default function DrrCp7HistoryPage() {
         <button onClick={() => setFilter('cp7')} style={tabStyle(filter === 'cp7')}>CP7</button>
         <button onClick={() => setFilter('pip')} style={tabStyle(filter === 'pip')}>PIP</button>
 
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
+          <button onClick={() => handlePeriodChange('year')} style={tabStyle(period === 'year')}>Год</button>
+          <button onClick={() => handlePeriodChange('month')} style={tabStyle(period === 'month')}>Месяц</button>
+          <button onClick={() => handlePeriodChange('week')} style={tabStyle(period === 'week')}>Неделя</button>
+          <button onClick={() => handlePeriodChange('day')} style={tabStyle(period === 'day')}>День</button>
+        </div>
+
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
-          Период:
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
-          <span>—</span>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
+          Кол-во периодов:
+          <input
+            type="number"
+            min="1"
+            max="50"
+            value={count}
+            onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
+            style={{ ...inputStyle, width: 80 }}
+          />
         </label>
 
         <button onClick={loadHistory} style={buttonStyle}>🔄 Обновить</button>
+        <button onClick={exportToExcel} style={{ ...buttonStyle, background: '#059669' }}>📥 Экспорт</button>
       </div>
 
       {/* График */}
@@ -154,19 +187,48 @@ export default function DrrCp7HistoryPage() {
           <p style={{ textAlign: 'center', color: '#DC2626', padding: 20 }}>❌ {error}</p>
         ) : (
           <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+            <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
               <XAxis dataKey="label" tick={{ fontSize: 12 }} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
               <ReferenceLine y={80} stroke="#EF4444" strokeDasharray="5 5">
                 <Label value="80%" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 700 }} />
               </ReferenceLine>
-              <Bar dataKey="value" barSize={30} radius={[6, 6, 0, 0]} fill="#10B981">
-                <LabelList dataKey="value" position="top" formatter={(v) => `${v}%`} style={{ fill: '#1F2937', fontSize: 12, fontWeight: 600 }} />
+              <Bar dataKey="drr" barSize={30} radius={[6, 6, 0, 0]} fill="#10B981">
+                <LabelList dataKey="drr" position="top" formatter={(v) => `${v}%`} style={{ fill: '#1F2937', fontSize: 12, fontWeight: 600 }} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         )}
+      </div>
+
+      {/* Таблица */}
+      <div style={cardStyle}>
+        <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 20 }}>
+          Данные по DRR
+        </h2>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ backgroundColor: '#F9FAFB' }}>
+                <th style={thStyle}>Период</th>
+                <th style={thStyle}>DRR %</th>
+                <th style={thStyle}>Всего авто</th>
+                <th style={thStyle}>ОК авто</th>
+              </tr>
+            </thead>
+            <tbody>
+              {chartData.map((row, idx) => (
+                <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                  <td style={tdStyle}>{row.label}</td>
+                  <td style={{ ...tdStyle, fontWeight: 700, color: '#10B981' }}>{row.drr}%</td>
+                  <td style={tdStyle}>{row.totalVins}</td>
+                  <td style={tdStyle}>{row.closedVins}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

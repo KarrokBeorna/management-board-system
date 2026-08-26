@@ -4713,9 +4713,7 @@ app.post('/api/email-settings', async (req, res) => {
 
 app.get('/api/drr-cp7-history', async (req, res) => {
   try {
-    const { filter = 'all', date } = req.query;
-    if (!date) return res.status(400).json({ error: 'date обязателен' });
-
+    const { filter = 'all', period = 'month', count } = req.query;
     const postLists = {
       all: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
@@ -4735,55 +4733,147 @@ app.get('/api/drr-cp7-history', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    const sql = `
-      WITH cp72_vins AS (
-          SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
-          FROM at_om_wiptrackinghistory
-          WHERE WC_NAME = 'CP72' AND DATE(CREATION_TIME) = ?
-          GROUP BY VIN
-      ),
-      defect_status AS (
-          SELECT 
-              d.VIN,
-              COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) AS repair_time,
-              cp.CP72_TIME,
-              DATE_ADD(cp.CP72_TIME, INTERVAL 17 MINUTE) AS ADJUSTED_CP72_TIME,
-              CASE 
-                  WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) IS NULL THEN 'OFF'
-                  WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) < DATE_ADD(cp.CP72_TIME, INTERVAL 17 MINUTE) THEN 'CLOSED'
-                  ELSE 'OFF'
-              END AS calculated_status
-          FROM at_qm_defect_info d
-          JOIN cp72_vins cp ON d.VIN = cp.VIN
-          WHERE d.POST_NAME IN (${postListStr})
-      ),
-      vin_summary AS (
-          SELECT 
-              VIN,
-              COUNT(*) AS total_defects,
-              SUM(CASE WHEN calculated_status = 'CLOSED' THEN 1 ELSE 0 END) AS closed_defects,
-              SUM(CASE WHEN calculated_status = 'OFF' THEN 1 ELSE 0 END) AS off_defects
-          FROM defect_status
-          GROUP BY VIN
-      )
-      SELECT 
-          COUNT(DISTINCT CASE WHEN vs.off_defects = 0 THEN vs.VIN END) AS closedVins,
-          COUNT(DISTINCT cp.VIN) AS totalVins
-      FROM cp72_vins cp
-      LEFT JOIN vin_summary vs ON vs.VIN = cp.VIN
-    `;
+    // Определяем количество периодов по умолчанию
+    const defaultCount = {
+      year: 2,
+      month: 3,
+      week: 4,
+      day: 14
+    }[period] || 7;
+    const limit = parseInt(count, 10) || defaultCount;
 
-    const [rows] = await pool.query(sql, [date]);
-    const totalVins = rows[0]?.totalVins || 0;
-    const closedVins = rows[0]?.closedVins || 0;
-    const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
+    // Генерируем список периодов: массив объектов {label, startDate, endDate}
+    const now = new Date();
+    const periods = [];
 
-    res.json({ totalVins, closedVins, drrPercent: Math.round(drrPercent * 10) / 10 });
+    if (period === 'year') {
+      for (let i = 0; i < limit; i++) {
+        const y = now.getFullYear() - i;
+        periods.push({
+          label: String(y),
+          startDate: `${y}-01-01`,
+          endDate: `${y}-12-31`
+        });
+      }
+    } else if (period === 'month') {
+      for (let i = 0; i < limit; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+        const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+        periods.push({
+          label: `${monthName} ${y}`,
+          startDate: `${y}-${m}-01`,
+          endDate: `${y}-${m}-${lastDay}`
+        });
+      }
+    } else if (period === 'week') {
+      // Находим понедельник текущей недели
+      const dayOfWeek = now.getDay(); // 0 = воскресенье
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      for (let i = 0; i < limit; i++) {
+        const start = new Date(monday);
+        start.setDate(monday.getDate() - i * 7);
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        const label = `W${getISOWeek(start)} ${start.getFullYear()}`;
+        periods.push({
+          label,
+          startDate: formatDate(start),
+          endDate: formatDate(end)
+        });
+      }
+    } else { // day
+      for (let i = 0; i < limit; i++) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        const label = `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;
+        periods.push({
+          label,
+          startDate: formatDate(d),
+          endDate: formatDate(d)
+        });
+      }
+    }
+
+    // Для каждого периода выполняем запрос и собираем результат
+    const results = [];
+    for (const p of periods) {
+      const sql = `
+        WITH cp72_vins AS (
+            SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
+            FROM at_om_wiptrackinghistory
+            WHERE WC_NAME = 'CP72'
+              AND DATE(CREATION_TIME) BETWEEN ? AND ?
+            GROUP BY VIN
+        ),
+        defect_status AS (
+            SELECT 
+                d.VIN,
+                COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) AS repair_time,
+                cp.CP72_TIME,
+                DATE_ADD(cp.CP72_TIME, INTERVAL 2 MINUTE) AS ADJUSTED_CP72_TIME,
+                CASE 
+                    WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) IS NULL THEN 'OFF'
+                    WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) < DATE_ADD(cp.CP72_TIME, INTERVAL 17 MINUTE) THEN 'CLOSED'
+                    ELSE 'OFF'
+                END AS calculated_status
+            FROM at_qm_defect_info d
+            JOIN cp72_vins cp ON d.VIN = cp.VIN
+            WHERE d.POST_NAME IN (${postListStr})
+              AND d.CREATION_TIME >= ?
+              AND d.CREATION_TIME <= ?
+        ),
+        vin_summary AS (
+            SELECT 
+                VIN,
+                COUNT(*) AS total_defects,
+                SUM(CASE WHEN calculated_status = 'CLOSED' THEN 1 ELSE 0 END) AS closed_defects,
+                SUM(CASE WHEN calculated_status = 'OFF' THEN 1 ELSE 0 END) AS off_defects
+            FROM defect_status
+            GROUP BY VIN
+        )
+        SELECT 
+            COUNT(DISTINCT CASE WHEN vs.off_defects = 0 THEN vs.VIN END) AS closedVins,
+            COUNT(DISTINCT cp.VIN) AS totalVins
+        FROM cp72_vins cp
+        LEFT JOIN vin_summary vs ON vs.VIN = cp.VIN
+      `;
+
+      // Параметры: для cp72 диапазон дат, для дефектов – тот же диапазон (по creation_time)
+      const [rows] = await pool.query(sql, [
+        p.startDate, p.endDate,
+        p.startDate + ' 00:00:00', p.endDate + ' 23:59:59'
+      ]);
+
+      const totalVins = rows[0]?.totalVins || 0;
+      const closedVins = rows[0]?.closedVins || 0;
+      const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
+
+      results.push({
+        label: p.label,
+        drr: Math.round(drrPercent * 10) / 10,
+        totalVins,
+        closedVins
+      });
+    }
+
+    res.json({ periods: results });
   } catch (err) {
     console.error('Ошибка DRR CP7 History:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+// Вспомогательные функции (можно вынести в начало файла)
+function formatDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 // ================== ЗАМЕТКИ ==================
 
