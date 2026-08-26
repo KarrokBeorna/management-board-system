@@ -318,7 +318,7 @@ export default function DrrCp7DashboardPage() {
                 pointerEvents: 'none',
               }}>
                 <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
-                <div style={{ fontSize: '7.5rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
+                <div style={{ fontSize: '6.9rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {drrData.drrPercent.toFixed(1)}%
                 </div>
               </div>
