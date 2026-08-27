@@ -19,6 +19,8 @@ import DrrCp7DashboardPage from './DrrCp7DashboardPage';
 import favicon from './assets/weblog.png';
 import DrrCp7HistoryPage from './DrrCp7HistoryPage';
 
+import TestPage from './testpage'; // путь может быть другим, если файл в папке pages
+
 export default function App() {
   return (
     <Routes>
@@ -39,6 +41,8 @@ export default function App() {
         <Route path="/holds-sgp" element={<HoldsSgpPage />} />
         <Route path="/drr-cp7-dashboard" element={<DrrCp7DashboardPage />} />
         <Route path="/drr-cp7-history" element={<DrrCp7HistoryPage />} />
+
+        <Route path="/testpage" element={<TestPage />} />
       </Route>
     </Routes>
   );

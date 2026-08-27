@@ -5015,6 +5015,159 @@ app.get('/api/drr-cp7-history', async (req, res) => {
   }
 });
 
+app.get('/api/testpage-data', async (req, res) => {
+  try {
+    const { filter = 'all', startTime, endTime } = req.query;
+    if (!startTime || !endTime) {
+      return res.status(400).json({ error: 'startTime и endTime обязательны' });
+    }
+
+    const postLists = {
+      all: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ],
+      cp7: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'EXT1', 'PIP2', 'PIP4', 'PIP9'
+      ],
+      pip: [
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ]
+    };
+    const postList = postLists[filter] || postLists.all;
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    const sql = `
+      WITH cp72_vins AS (
+          SELECT 
+              VIN,
+              MIN(CREATION_TIME) AS CP72_TIME
+          FROM at_om_wiptrackinghistory
+          WHERE WC_NAME = 'CP72'
+            AND CREATION_TIME >= ?
+            AND CREATION_TIME <= ?
+          GROUP BY VIN
+      ),
+      defect_status AS (
+          SELECT 
+              d.VIN,
+              d.PART_NAME,
+              d.PROBLEM_TYPE,
+              d.PROBLEM_GRADE,
+              d.POST_NAME,
+              d.CREATION_TIME,
+              COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) AS repair_time,
+              cp.CP72_TIME,
+              DATE_ADD(cp.CP72_TIME, INTERVAL 17 MINUTE) AS ADJUSTED_CP72_TIME,
+              CASE 
+                  WHEN (d.PART_NAME IS NULL OR TRIM(d.PART_NAME) = '') 
+                       AND (d.PROBLEM_TYPE IS NULL OR TRIM(d.PROBLEM_TYPE) = '') 
+                  THEN 'CLOSED'
+                  WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) IS NULL THEN 'CLOSED'
+                  WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) < DATE_ADD(cp.CP72_TIME, INTERVAL 17 MINUTE) THEN 'CLOSED'
+                  ELSE 'OFF'
+              END AS calculated_status
+          FROM at_qm_defect_info d
+          JOIN cp72_vins cp ON d.VIN = cp.VIN
+          WHERE d.POST_NAME IN (${postListStr})
+            AND d.CREATION_TIME >= ?
+            AND d.CREATION_TIME <= ?
+      ),
+      vin_summary AS (
+          SELECT 
+              VIN,
+              COUNT(*) AS total_defects,
+              SUM(CASE WHEN calculated_status = 'CLOSED' THEN 1 ELSE 0 END) AS closed_defects,
+              SUM(CASE WHEN calculated_status = 'OFF' THEN 1 ELSE 0 END) AS off_defects
+          FROM defect_status
+          GROUP BY VIN
+      )
+      SELECT 
+          d.VIN,
+          wo.MODEL,
+          d.PART_NAME,
+          d.PROBLEM_TYPE,
+          d.PROBLEM_GRADE,
+          d.POST_NAME,
+          d.calculated_status AS STATUS,
+          d.CREATION_TIME,
+          d.repair_time AS REPAIR_TIME,
+          d.CP72_TIME,
+          d.ADJUSTED_CP72_TIME,
+          CASE 
+              WHEN vs.off_defects = 0 THEN 1 
+              ELSE 0 
+          END AS ALL_DEFECTS_CLOSED
+      FROM defect_status d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      LEFT JOIN vin_summary vs ON vs.VIN = d.VIN
+      ORDER BY d.VIN, d.CREATION_TIME
+    `;
+
+    const [rows] = await pool.query(sql, [startTime, endTime, startTime, endTime]);
+
+    if (!rows.length) {
+      return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
+    }
+
+    const vinMap = new Map();
+    rows.forEach(row => {
+      const vin = row.VIN;
+      if (!vinMap.has(vin)) {
+        vinMap.set(vin, { allClosed: row.ALL_DEFECTS_CLOSED === 1, model: row.MODEL || '-' });
+      }
+      if (row.ALL_DEFECTS_CLOSED === 0) {
+        vinMap.get(vin).allClosed = false;
+      }
+      if (row.MODEL) {
+        vinMap.get(vin).model = row.MODEL;
+      }
+    });
+
+    const totalVins = vinMap.size;
+    const closedVins = Array.from(vinMap.values()).filter(v => v.allClosed).length;
+    const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
+
+    const notClosedVins = new Set(
+      Array.from(vinMap.entries())
+        .filter(([, v]) => !v.allClosed)
+        .map(([vin]) => vin)
+    );
+
+    const defectMap = new Map();
+    rows.forEach(row => {
+      if (!notClosedVins.has(row.VIN)) return;
+      const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
+      if (!defectMap.has(mpp)) {
+        defectMap.set(mpp, { mpp, grade: row.PROBLEM_GRADE || '-', affectedVins: new Set() });
+      }
+      defectMap.get(mpp).affectedVins.add(row.VIN);
+    });
+
+    const topDefects = Array.from(defectMap.values())
+      .map(d => ({
+        mpp: d.mpp,
+        grade: d.grade,
+        affectedVins: d.affectedVins.size,
+      }))
+      .sort((a, b) => b.affectedVins - a.affectedVins)
+      .slice(0, 20);
+
+    res.json({
+      totalVins,
+      closedVins,
+      drrPercent: Math.round(drrPercent * 10) / 10,
+      topDefects,
+    });
+  } catch (err) {
+    console.error('Ошибка testpage-data:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок
