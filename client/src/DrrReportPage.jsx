@@ -99,15 +99,10 @@ const shopColors = {
 };
 
 export default function DrrReportPage() {
-  const today = new Date();
-  const twoYearsAgo = new Date(today.getFullYear() - 2, 0, 1);
-  const initialDateFrom = twoYearsAgo.toISOString().split('T')[0];
-  const initialDateTo = today.toISOString().split('T')[0];
-
   const [activeTab, setActiveTab] = useState('factory');
   const [selectedModel, setSelectedModel] = useState('ALL');
-  const [dateFrom, setDateFrom] = useState(initialDateFrom);
-  const [dateTo, setDateTo] = useState(initialDateTo);
+  const [period, setPeriod] = useState('all'); // all | year | month | week | day
+  const [count, setCount] = useState(3);
   const [dataPoints, setDataPoints] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -121,10 +116,19 @@ export default function DrrReportPage() {
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
+  const handlePeriodChange = (newPeriod) => {
+    setPeriod(newPeriod);
+    if (newPeriod !== 'all') {
+      const defaults = { year: 2, month: 3, week: 4, day: 14 };
+      setCount(defaults[newPeriod] || 3);
+    }
+  };
+
   useEffect(() => {
     if (activeTab !== 'factory') return;
     setLoading(true);
-    const params = new URLSearchParams({ dateFrom, dateTo });
+    const params = new URLSearchParams({ period });
+    if (period !== 'all' && count) params.append('count', count);
     fetch(`${API_BASE}/api/drr-retrospective?${params.toString()}`)
       .then(res => res.json())
       .then(json => {
@@ -135,7 +139,7 @@ export default function DrrReportPage() {
         console.error('Ошибка загрузки DRR:', err);
         setLoading(false);
       });
-  }, [activeTab, dateFrom, dateTo]);
+  }, [activeTab, period, count]);
 
   const loadDrrByShop = async () => {
     setDrrLoading(true);
@@ -268,9 +272,7 @@ export default function DrrReportPage() {
       
       return {
         week,
-        // AS инвертирован: показываем процент дефектов
         AS: Math.max(0, Math.min(100, 100 - asValue)),
-        // BS и PS - оригинальные значения DRR (годные %)
         BS: bsValue,
         PS: psValue,
       };
@@ -317,12 +319,27 @@ export default function DrrReportPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
             <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937' }}>Выход годной продукции с первого раза - Ретроспектива</h2>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <label style={{ fontSize: 14, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 6 }}>
-                Период:
-                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
-                <span>—</span>
-                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
-              </label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
+                <button onClick={() => handlePeriodChange('all')} style={tabStyle(period === 'all')}>Все</button>
+                <button onClick={() => handlePeriodChange('year')} style={tabStyle(period === 'year')}>Год</button>
+                <button onClick={() => handlePeriodChange('month')} style={tabStyle(period === 'month')}>Месяц</button>
+                <button onClick={() => handlePeriodChange('week')} style={tabStyle(period === 'week')}>Неделя</button>
+                <button onClick={() => handlePeriodChange('day')} style={tabStyle(period === 'day')}>День</button>
+              </div>
+              {period !== 'all' && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
+                  Кол-во периодов:
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={count}
+                    onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
+                    style={{ ...inputStyle, width: 80 }}
+                  />
+                </label>
+              )}
               <label style={{ fontSize: 14, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 6 }}>
                 Модель:
                 <select
@@ -420,7 +437,6 @@ export default function DrrReportPage() {
       {/* ========== ПО ЦЕХАМ ========== */}
       {activeTab === 'workshops' && (
         <>
-          {/* Подвкладки + кнопка импорта */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
             <button onClick={() => setShopTab('graphs')} style={{
               ...tabStyle(shopTab === 'graphs'),
@@ -455,14 +471,12 @@ export default function DrrReportPage() {
             </label>
           </div>
 
-          {/* ===== ГРАФИКИ ЦЕХОВ ===== */}
           {shopTab === 'graphs' && (
             <>
               {drrLoading ? (
                 <p style={{ textAlign: 'center', padding: 40 }}>Загрузка...</p>
               ) : shopChartData.length > 0 ? (
                 <>
-                  {/* AS - процент дефектов (инвертированный) */}
                   <div style={cardStyle}>
                     <h2 style={{ fontSize: 20, fontWeight: 700, color: '#F59E0B', marginBottom: 20 }}>🔧 Цех сборки (AS) — % дефектов</h2>
                     <ResponsiveContainer width="100%" height={250}>
@@ -478,7 +492,6 @@ export default function DrrReportPage() {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* BS - DRR % (годные), ось Y узкая для выразительности */}
                   <div style={cardStyle}>
                     <h2 style={{ fontSize: 20, fontWeight: 700, color: '#3B82F6', marginBottom: 20 }}>🔩 Цех сварки (BS) — DRR %</h2>
                     <ResponsiveContainer width="100%" height={250}>
@@ -494,7 +507,6 @@ export default function DrrReportPage() {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* PS - DRR % (годные), ось Y узкая для выразительности */}
                   <div style={cardStyle}>
                     <h2 style={{ fontSize: 20, fontWeight: 700, color: '#10B981', marginBottom: 20 }}>🎨 Цех окраски (PS) — DRR %</h2>
                     <ResponsiveContainer width="100%" height={250}>
@@ -516,7 +528,6 @@ export default function DrrReportPage() {
             </>
           )}
 
-          {/* ===== ПОДСТРАНИЦЫ ЦЕХОВ ===== */}
           {['AS', 'BS', 'PS'].includes(shopTab) && (
             <div style={cardStyle}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
@@ -540,7 +551,6 @@ export default function DrrReportPage() {
                 <p style={{ textAlign: 'center', padding: 40 }}>Загрузка...</p>
               ) : shopData && shopData.data.length > 0 ? (
                 <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
-                  {/* Круговая диаграмма слева - 40% */}
                   <div style={{ flex: '0 0 40%', maxWidth: '40%' }}>
                     <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 16, fontSize: 18 }}>
                       Доля дефектов {shopTab}
@@ -571,7 +581,6 @@ export default function DrrReportPage() {
                         <Tooltip />
                       </PieChart>
                     </ResponsiveContainer>
-                    {/* Легенда снизу, каждый элемент с новой строки, выравнивание по левому краю */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16, alignItems: 'flex-start' }}>
                       {pieData.map((d, i) => (
                         <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 14, color: '#1F2937', textAlign: 'left' }}>
@@ -582,7 +591,6 @@ export default function DrrReportPage() {
                     </div>
                   </div>
 
-                  {/* Таблица справа - 60% */}
                   <div style={{ flex: '0 0 60%', maxWidth: '60%', overflowX: 'auto' }}>
                     <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 16, fontSize: 18 }}>
                       Топы дефектов {shopTab}
