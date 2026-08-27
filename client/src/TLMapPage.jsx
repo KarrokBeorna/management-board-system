@@ -269,6 +269,14 @@ const formatSpec = (spec) => {
   return spec;
 };
 
+const formatDuration = (seconds) => {
+  if (seconds === null || seconds === undefined) return '';
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${days}:${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
+
 // ====== МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ ПО ЗОНЕ ======
 function DetailsModal({ zoneName, label, count, details, onClose }) {
   const modalOverlayStyle = {
@@ -313,11 +321,12 @@ function DetailsModal({ zoneName, label, count, details, onClose }) {
     const exportData = details.map(d => ({
       'VIN': d.vin, 'MODEL': d.model, 'SPEC': d.spec,
       'LOT': d.lot, 'COLOR': d.color, 'SEQ': d.seq,
+      'Время входа': d.entry_time ? new Date(d.entry_time).toLocaleString('ru-RU') : '',
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, `${zoneName}_${label}`);
-    ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 8 }];
+    ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 20 }];
     XLSX.writeFile(wb, `TL_Map_${zoneName}_${label}.xlsx`);
   };
 
@@ -344,6 +353,7 @@ function DetailsModal({ zoneName, label, count, details, onClose }) {
                 <th style={thStyle}>LOT</th>
                 <th style={thStyle}>COLOR</th>
                 <th style={thStyle}>SEQ</th>
+                <th style={thStyle}>Время входа</th>
               </tr>
             </thead>
             <tbody>
@@ -355,6 +365,7 @@ function DetailsModal({ zoneName, label, count, details, onClose }) {
                   <td style={tdStyle}>{detail.lot}</td>
                   <td style={tdStyle}>{detail.color}</td>
                   <td style={tdStyle}>{detail.seq}</td>
+                  <td style={tdStyle}>{detail.entry_time ? new Date(detail.entry_time).toLocaleString('ru-RU') : ''}</td>
                 </tr>
               ))}
             </tbody>
@@ -375,7 +386,7 @@ function PassedTodayModal({ zoneName, uniqueCount, totalRecords, details, onClos
   };
   const modalContentStyle = {
     backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24,
-    maxWidth: 1000, width: '90%', maxHeight: '80vh',
+    maxWidth: 1200, width: '90%', maxHeight: '80vh',
     boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
     display: 'flex', flexDirection: 'column',
   };
@@ -409,12 +420,14 @@ function PassedTodayModal({ zoneName, uniqueCount, totalRecords, details, onClos
       'VIN': d.vin,
       'MODEL': d.model,
       'SEQ': d.seq,
-      'ВРЕМЯ': d.pass_time ? new Date(d.pass_time).toLocaleTimeString('ru-RU') : '',
+      'Время входа': d.pass_time ? new Date(d.pass_time).toLocaleTimeString('ru-RU') : '',
+      'Время выхода': d.exit_time ? new Date(d.exit_time).toLocaleTimeString('ru-RU') : '',
+      'Время на посту': d.duration !== null && d.duration !== undefined ? formatDuration(d.duration) : '',
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, `${zoneName}_passed_today`);
-    ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 15 }];
+    ws['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 15 }];
     XLSX.writeFile(wb, `TL_Map_${zoneName}_passed_today.xlsx`);
   };
 
@@ -440,7 +453,9 @@ function PassedTodayModal({ zoneName, uniqueCount, totalRecords, details, onClos
                 <th style={thStyle}>VIN</th>
                 <th style={thStyle}>MODEL</th>
                 <th style={thStyle}>SEQ</th>
-                <th style={thStyle}>ВРЕМЯ</th>
+                <th style={thStyle}>Время входа</th>
+                <th style={thStyle}>Время выхода</th>
+                <th style={thStyle}>Время на посту</th>
               </tr>
             </thead>
             <tbody>
@@ -450,6 +465,146 @@ function PassedTodayModal({ zoneName, uniqueCount, totalRecords, details, onClos
                   <td style={tdStyle}>{detail.model}</td>
                   <td style={tdStyle}>{detail.seq}</td>
                   <td style={tdStyle}>{detail.pass_time ? new Date(detail.pass_time).toLocaleTimeString('ru-RU') : ''}</td>
+                  <td style={tdStyle}>{detail.exit_time ? new Date(detail.exit_time).toLocaleTimeString('ru-RU') : ''}</td>
+                  <td style={tdStyle}>{detail.duration !== null && detail.duration !== undefined ? formatDuration(detail.duration) : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ====== МОДАЛЬНОЕ ОКНО АНАЛИТИКИ ======
+function AnalyticsModal({ data, onClose, onApplyFilter }) {
+  const modalOverlayStyle = {
+    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 1000,
+  };
+  const modalContentStyle = {
+    backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24,
+    maxWidth: 1300, width: '95%', maxHeight: '90vh',
+    boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+    display: 'flex', flexDirection: 'column',
+  };
+  const modalHeaderStyle = {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 16, gap: 12, flexWrap: 'wrap',
+  };
+  const modalTitleStyle = {
+    fontSize: 22, fontWeight: 800, color: '#1F2937', margin: 0,
+  };
+  const closeButtonStyle = {
+    padding: '8px 12px', borderRadius: 8, border: 'none',
+    background: '#F3F4F6', color: '#374151', fontSize: 16,
+    fontWeight: 700, cursor: 'pointer',
+  };
+  const filterRowStyle = {
+    display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
+    marginBottom: 16,
+  };
+  const inputStyle = {
+    padding: '8px 12px',
+    borderRadius: 8,
+    border: '1px solid #D1D5DB',
+    fontSize: 14,
+    background: '#F9FAFB',
+  };
+  const tableContainerStyle = { overflowY: 'auto', flex: 1 };
+  const thStyle = {
+    padding: '10px 12px', textAlign: 'left', fontWeight: 600,
+    color: '#374151', borderBottom: '2px solid #E5E7EB',
+    background: '#F9FAFB', whiteSpace: 'nowrap',
+    position: 'sticky', top: 0, zIndex: 5,
+  };
+  const tdStyle = {
+    padding: '8px 12px', textAlign: 'left',
+    borderBottom: '1px solid #F0F0F5', color: '#1F2937', fontSize: 13,
+  };
+
+  // Состояние для фильтра дат
+  const [dateFrom, setDateFrom] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01T00:00`;
+  });
+  const [dateTo, setDateTo] = useState(() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const h = String(now.getHours()).padStart(2, '0');
+    const mi = String(now.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${d}T${h}:${mi}`;
+  });
+
+  const handleApply = () => {
+    onApplyFilter(dateFrom, dateTo);
+  };
+
+  const handleExport = () => {
+    const exportData = data.map((row, idx) => ({
+      '№': idx + 1,
+      'VIN': row.vin,
+      'Текущая зона': row.current_zone || '—',
+      'Время входа': row.entry_time ? new Date(row.entry_time).toLocaleString('ru-RU') : '',
+      'Время на посту (ч)': row.stay_hours,
+      'Накопительный %': row.cumPercent !== undefined ? row.cumPercent + '%' : '',
+      'Ремзона вход': row.rem_in ? new Date(row.rem_in).toLocaleString('ru-RU') : '',
+      'Ремзона выход': row.rem_out ? new Date(row.rem_out).toLocaleString('ru-RU') : '',
+      'Время в ремзоне (ч)': row.rem_duration_hours,
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Analytics');
+    XLSX.writeFile(wb, 'TL_Map_Analytics.xlsx');
+  };
+
+  return (
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
+        <div style={modalHeaderStyle}>
+          <h2 style={modalTitleStyle}>Аналитика по времени</h2>
+          <button style={closeButtonStyle} onClick={onClose}>✕</button>
+        </div>
+        <div style={filterRowStyle}>
+          <span>Период (прохождение CP72):</span>
+          <input type="datetime-local" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
+          <span>—</span>
+          <input type="datetime-local" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
+          <button style={{ ...buttonStyle, padding: '8px 16px' }} onClick={handleApply}>Применить</button>
+          <button style={{ ...exportButtonStyle, padding: '8px 16px' }} onClick={handleExport}>Экспорт</button>
+        </div>
+        <div style={tableContainerStyle}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>№</th>
+                <th style={thStyle}>VIN</th>
+                <th style={thStyle}>Текущая зона</th>
+                <th style={thStyle}>Время входа</th>
+                <th style={thStyle}>Время на посту (ч)</th>
+                <th style={thStyle}>Накопительный %</th>
+                <th style={thStyle}>Ремзона вход</th>
+                <th style={thStyle}>Ремзона выход</th>
+                <th style={thStyle}>Время в ремзоне (ч)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((row, idx) => (
+                <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                  <td style={tdStyle}>{idx + 1}</td>
+                  <td style={tdStyle}>{row.vin}</td>
+                  <td style={tdStyle}>{row.current_zone || '—'}</td>
+                  <td style={tdStyle}>{row.entry_time ? new Date(row.entry_time).toLocaleString('ru-RU') : ''}</td>
+                  <td style={tdStyle}>{row.stay_hours}</td>
+                  <td style={tdStyle}>{row.cumPercent !== undefined ? row.cumPercent.toFixed(1) + '%' : ''}</td>
+                  <td style={tdStyle}>{row.rem_in ? new Date(row.rem_in).toLocaleString('ru-RU') : ''}</td>
+                  <td style={tdStyle}>{row.rem_out ? new Date(row.rem_out).toLocaleString('ru-RU') : ''}</td>
+                  <td style={tdStyle}>{row.rem_duration_hours}</td>
                 </tr>
               ))}
             </tbody>
@@ -470,6 +625,13 @@ export default function TLMapPage() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [selectedPassedToday, setSelectedPassedToday] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
+
+  // Новые состояния для аналитики
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [analyticsData, setAnalyticsData] = useState([]);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsDateFrom, setAnalyticsDateFrom] = useState('');
+  const [analyticsDateTo, setAnalyticsDateTo] = useState('');
 
   const ALL_MODELS = ['A8', 'J6', 'J7', 'J8', 'MX'];
 
@@ -513,6 +675,54 @@ export default function TLMapPage() {
     return () => clearInterval(interval);
   }, [fetchData, fetchPassedToday]);
 
+  // Функция загрузки аналитики
+  const loadAnalytics = async (dateFrom, dateTo) => {
+    setAnalyticsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (dateFrom) params.append('startTime', dateFrom);
+      if (dateTo) params.append('endTime', dateTo);
+      const res = await fetch(`${API_BASE}/api/tl-map-analytics?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки аналитики');
+      const json = await res.json();
+      // Сортировка по убыванию stay_hours
+      const sorted = json.sort((a, b) => (b.stay_hours || 0) - (a.stay_hours || 0));
+      // Добавляем накопительный процент
+      const totalHours = sorted.reduce((sum, row) => sum + (row.stay_hours || 0), 0);
+      let cumSum = 0;
+      const enriched = sorted.map(row => {
+        cumSum += (row.stay_hours || 0);
+        row.cumPercent = totalHours > 0 ? (cumSum / totalHours) * 100 : 0;
+        return row;
+      });
+      setAnalyticsData(enriched);
+    } catch (err) {
+      console.error('Ошибка аналитики:', err);
+      setAnalyticsData([]);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  const handleOpenAnalytics = () => {
+    // Устанавливаем дефолтные даты: начало текущего месяца и текущий момент
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const firstDay = `${y}-${m}-01T00:00`;
+    const current = `${y}-${m}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    setAnalyticsDateFrom(firstDay);
+    setAnalyticsDateTo(current);
+    setShowAnalytics(true);
+    loadAnalytics(firstDay, current);
+  };
+
+  const handleApplyAnalyticsFilter = (from, to) => {
+    setAnalyticsDateFrom(from);
+    setAnalyticsDateTo(to);
+    loadAnalytics(from, to);
+  };
+
   const processedData = useMemo(() => {
     const zonesMap = {};
     const detailsMap = {};
@@ -528,6 +738,7 @@ export default function TLMapPage() {
       if (!detailsMap[detailsKey]) detailsMap[detailsKey] = [];
       detailsMap[detailsKey].push({
         vin: row.vin, model, spec, lot: row.lot, color: row.color, seq: row.seq,
+        entry_time: row.entry_time, // добавляем время входа
       });
       
       if (!zonesMap[zone]) zonesMap[zone] = {};
@@ -535,7 +746,6 @@ export default function TLMapPage() {
       zonesMap[zone][spec]++;
     });
     
-    // ВСЕГДА создаем все 5 зон
     const zones = ZONE_ORDER.map(zoneName => ({
       zoneName,
       items: zonesMap[zoneName] 
@@ -612,6 +822,7 @@ export default function TLMapPage() {
 
   const handleCloseModal = () => setSelectedItem(null);
   const handleClosePassedToday = () => setSelectedPassedToday(null);
+  const handleCloseAnalytics = () => setShowAnalytics(false);
 
   if (loading) {
     return (
@@ -643,6 +854,7 @@ export default function TLMapPage() {
         <h1 style={titleStyle}>Наполнение постов Testline</h1>
         <div style={headerButtonsStyle}>
           {lastUpdate && <span style={lastUpdateStyle}>Обновлено: {lastUpdate.toLocaleTimeString('ru-RU')}</span>}
+          <button style={{ ...buttonStyle, background: '#7C3AED' }} onClick={handleOpenAnalytics}>📊 Аналитика</button>
           <button style={{ ...buttonStyle, background: showModelFilter ? '#1E40AF' : '#2563EB' }} onClick={() => setShowModelFilter(!showModelFilter)}>
             {showModelFilter ? 'Скрыть фильтр' : 'Модели'}
           </button>
@@ -724,6 +936,14 @@ export default function TLMapPage() {
           totalRecords={selectedPassedToday.totalRecords}
           details={selectedPassedToday.details}
           onClose={handleClosePassedToday}
+        />
+      )}
+
+      {showAnalytics && (
+        <AnalyticsModal
+          data={analyticsData}
+          onClose={handleCloseAnalytics}
+          onApplyFilter={handleApplyAnalyticsFilter}
         />
       )}
     </div>

@@ -3275,16 +3275,18 @@ app.get('/api/tl-map', async (req, res) => {
         IFNULL(LEFT(SUBSTRING_INDEX(mat.material_desc, '_', 1), 5), '???') AS spec,
         RIGHT(ord.plan_unit_code, 4) AS lot,
         SUBSTR(vh.material_no, 8, 2) AS color,
-        vh.sequence_number AS seq
+        vh.sequence_number AS seq,
+        MAX(mv.gmt_create) AS entry_time
       FROM tm_vhc_test_line_online tlo
       INNER JOIN tm_vhc_vehicle vh ON tlo.vin = vh.vin
       LEFT JOIN tm_bas_material_relation mat ON mat.material_no = vh.material_no AND mat.is_deleted = 0
       INNER JOIN tm_ofm_order ord ON tlo.vin = ord.vin
+      LEFT JOIN tm_vhc_test_line_movement mv ON mv.vin = tlo.vin AND mv.node_nature = tlo.node_nature AND mv.is_deleted = 0
       WHERE tlo.node_nature IN ('TLWA','TLRT','TLADAS','TLTT','CPA')
         AND vh.vehicle_status IN ('Key_Uloc_Type_CP72', 'Key_Uloc_Type_CP7')
+      GROUP BY tlo.vin, tlo.node_nature, ord.product, mat.material_desc, ord.plan_unit_code, vh.material_no, vh.sequence_number
       ORDER BY tlo.node_nature, tlo.vin
     `;
-    
     const [rows] = await mesPool.query(sql);
     res.json(rows);
   } catch (err) {
@@ -3336,9 +3338,122 @@ app.get('/api/tl-map-passed-today-details', async (req, res) => {
       ORDER BY tvtlm.gmt_create DESC
     `;
     const [rows] = await mesPool.query(sql, [zone]);
-    res.json(rows);
+
+    // Для каждого VIN найдём время выхода (следующая запись движения в любой другой зоне после pass_time)
+    const vins = [...new Set(rows.map(r => r.vin))];
+    const exitMap = {};
+    if (vins.length > 0) {
+      const placeholders = vins.map(() => '?').join(',');
+      const exitSql = `
+        SELECT vin, MIN(gmt_create) AS exit_time
+        FROM tm_vhc_test_line_movement
+        WHERE vin IN (${placeholders})
+          AND node_nature IN ('TLWA','TLRT','TLADAS','TLTT','CPA','CPFINAL','CP8')
+          AND is_deleted = 0
+          AND gmt_create > (
+            SELECT MIN(gmt_create) FROM tm_vhc_test_line_movement
+            WHERE vin = vin_temp.vin AND node_nature = ? AND is_deleted = 0
+          )
+        GROUP BY vin
+      `;
+      // Упростим: выполним отдельный запрос для каждого VIN (или используем оконные функции, но для простоты)
+      for (const vin of vins) {
+        const [exitRows] = await mesPool.query(
+          `SELECT MIN(gmt_create) AS exit_time
+           FROM tm_vhc_test_line_movement
+           WHERE vin = ? AND node_nature != ? AND is_deleted = 0
+             AND gmt_create > (
+               SELECT MIN(gmt_create) FROM tm_vhc_test_line_movement
+               WHERE vin = ? AND node_nature = ? AND is_deleted = 0
+             )`,
+          [vin, zone, vin, zone]
+        );
+        if (exitRows.length > 0 && exitRows[0].exit_time) {
+          exitMap[vin] = exitRows[0].exit_time;
+        }
+      }
+    }
+
+    const enriched = rows.map(r => {
+      const exitTime = exitMap[r.vin] || null;
+      const passDate = new Date(r.pass_time);
+      const exitDate = exitTime ? new Date(exitTime) : null;
+      const durationSec = exitDate ? Math.floor((exitDate - passDate) / 1000) : null;
+      return { ...r, exit_time: exitTime, duration: durationSec };
+    });
+
+    res.json(enriched);
   } catch (err) {
     console.error('Ошибка TL Map passed today details:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/tl-map-analytics', async (req, res) => {
+  try {
+    // 1. Текущее расположение и время входа
+    const [onlineRows] = await mesPool.query(`
+      SELECT 
+        tlo.vin,
+        tlo.node_nature AS current_zone,
+        MAX(mv.gmt_create) AS entry_time
+      FROM tm_vhc_test_line_online tlo
+      LEFT JOIN tm_vhc_test_line_movement mv 
+        ON mv.vin = tlo.vin AND mv.node_nature = tlo.node_nature AND mv.is_deleted = 0
+      WHERE tlo.node_nature IN ('TLWA','TLRT','TLADAS','TLTT','CPA')
+      GROUP BY tlo.vin, tlo.node_nature
+    `);
+
+    const vins = onlineRows.map(r => r.vin);
+    if (vins.length === 0) return res.json([]);
+
+    // 2. Последняя ремзона для каждого VIN
+    const placeholders = vins.map(() => '?').join(',');
+    const [remRows] = await mesPool.query(`
+      SELECT 
+        vin,
+        MIN(gmt_create) AS rem_in,
+        MAX(gmt_create) AS rem_out
+      FROM tm_vhc_test_line_movement
+      WHERE vin IN (${placeholders})
+        AND node_nature LIKE 'REP%'
+        AND is_deleted = 0
+      GROUP BY vin
+    `, vins);
+
+    const remMap = {};
+    remRows.forEach(r => {
+      const diffMs = r.rem_out ? new Date(r.rem_out) - new Date(r.rem_in) : null;
+      remMap[r.vin] = {
+        rem_in: r.rem_in,
+        rem_out: r.rem_out,
+        duration_hours: diffMs && diffMs > 0 ? +(diffMs / 3600000).toFixed(2) : null,
+      };
+    });
+
+    // 3. Собираем результат
+    const result = onlineRows.map(row => {
+      const rem = remMap[row.vin] || {};
+      // Время нахождения на текущем посту = сейчас - entry_time (в часах)
+      const entryTime = row.entry_time ? new Date(row.entry_time) : null;
+      const stayHours = entryTime ? +((Date.now() - entryTime) / 3600000).toFixed(2) : null;
+      return {
+        vin: row.vin,
+        current_zone: row.current_zone,
+        entry_time: row.entry_time,
+        stay_hours: stayHours,
+        rem_in: rem.rem_in || null,
+        rem_out: rem.rem_out || null,
+        rem_duration_hours: rem.duration_hours || null,
+      };
+    });
+
+    // Сортировка по убыванию времени нахождения на текущем посту
+    result.sort((a, b) => (b.stay_hours || 0) - (a.stay_hours || 0));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка TL Map Analytics:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
