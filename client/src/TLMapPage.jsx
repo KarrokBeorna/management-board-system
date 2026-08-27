@@ -477,7 +477,7 @@ function PassedTodayModal({ zoneName, uniqueCount, totalRecords, details, onClos
   );
 }
 
-// ====== МОДАЛЬНОЕ ОКНО АНАЛИТИКИ ======
+// ====== МОДАЛЬНОЕ ОКНО АНАЛИТИКИ (ПАРЕТО) ======
 function AnalyticsModal({ data, onClose, onApplyFilter }) {
   const modalOverlayStyle = {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -549,10 +549,9 @@ function AnalyticsModal({ data, onClose, onApplyFilter }) {
     const exportData = data.map((row, idx) => ({
       '№': idx + 1,
       'VIN': row.vin,
-      'Текущая зона': row.current_zone || '—',
-      'Время входа': row.entry_time ? new Date(row.entry_time).toLocaleString('ru-RU') : '',
-      'Время на посту (ч)': row.stay_hours,
-      'Накопительный %': row.cumPercent !== undefined ? row.cumPercent + '%' : '',
+      'Текущее расположение': row.current_zone,
+      'Суммарное время на TL (ч)': row.total_stay_hours,
+      'Накопительный %': row.cum_percent,
       'Ремзона вход': row.rem_in ? new Date(row.rem_in).toLocaleString('ru-RU') : '',
       'Ремзона выход': row.rem_out ? new Date(row.rem_out).toLocaleString('ru-RU') : '',
       'Время в ремзоне (ч)': row.rem_duration_hours,
@@ -567,11 +566,11 @@ function AnalyticsModal({ data, onClose, onApplyFilter }) {
     <div style={modalOverlayStyle} onClick={onClose}>
       <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
         <div style={modalHeaderStyle}>
-          <h2 style={modalTitleStyle}>Аналитика по времени</h2>
+          <h2 style={modalTitleStyle}>Аналитика (Парето) по времени на TL-постах</h2>
           <button style={closeButtonStyle} onClick={onClose}>✕</button>
         </div>
         <div style={filterRowStyle}>
-          <span>Период (прохождение CP72):</span>
+          <span>Период прохождения CP72:</span>
           <input type="datetime-local" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
           <span>—</span>
           <input type="datetime-local" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
@@ -584,9 +583,8 @@ function AnalyticsModal({ data, onClose, onApplyFilter }) {
               <tr>
                 <th style={thStyle}>№</th>
                 <th style={thStyle}>VIN</th>
-                <th style={thStyle}>Текущая зона</th>
-                <th style={thStyle}>Время входа</th>
-                <th style={thStyle}>Время на посту (ч)</th>
+                <th style={thStyle}>Текущее расположение</th>
+                <th style={thStyle}>Суммарное время на TL (ч)</th>
                 <th style={thStyle}>Накопительный %</th>
                 <th style={thStyle}>Ремзона вход</th>
                 <th style={thStyle}>Ремзона выход</th>
@@ -594,19 +592,24 @@ function AnalyticsModal({ data, onClose, onApplyFilter }) {
               </tr>
             </thead>
             <tbody>
-              {data.map((row, idx) => (
-                <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                  <td style={tdStyle}>{idx + 1}</td>
-                  <td style={tdStyle}>{row.vin}</td>
-                  <td style={tdStyle}>{row.current_zone || '—'}</td>
-                  <td style={tdStyle}>{row.entry_time ? new Date(row.entry_time).toLocaleString('ru-RU') : ''}</td>
-                  <td style={tdStyle}>{row.stay_hours}</td>
-                  <td style={tdStyle}>{row.cumPercent !== undefined ? row.cumPercent.toFixed(1) + '%' : ''}</td>
-                  <td style={tdStyle}>{row.rem_in ? new Date(row.rem_in).toLocaleString('ru-RU') : ''}</td>
-                  <td style={tdStyle}>{row.rem_out ? new Date(row.rem_out).toLocaleString('ru-RU') : ''}</td>
-                  <td style={tdStyle}>{row.rem_duration_hours}</td>
-                </tr>
-              ))}
+              {data.map((row, idx) => {
+                // Подсветка первых 20% строк (или пока кум. процент <= 80%)
+                const isTop20 = row.cum_percent <= 80;
+                return (
+                  <tr key={idx} style={{
+                    backgroundColor: isTop20 ? '#FEF9C3' : (idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'),
+                  }}>
+                    <td style={tdStyle}>{idx + 1}</td>
+                    <td style={tdStyle}>{row.vin}</td>
+                    <td style={tdStyle}>{row.current_zone}</td>
+                    <td style={tdStyle}>{row.total_stay_hours}</td>
+                    <td style={tdStyle}>{row.cum_percent}%</td>
+                    <td style={tdStyle}>{row.rem_in ? new Date(row.rem_in).toLocaleString('ru-RU') : '—'}</td>
+                    <td style={tdStyle}>{row.rem_out ? new Date(row.rem_out).toLocaleString('ru-RU') : '—'}</td>
+                    <td style={tdStyle}>{row.rem_duration_hours ?? '—'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -630,8 +633,6 @@ export default function TLMapPage() {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [analyticsData, setAnalyticsData] = useState([]);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [analyticsDateFrom, setAnalyticsDateFrom] = useState('');
-  const [analyticsDateTo, setAnalyticsDateTo] = useState('');
 
   const ALL_MODELS = ['A8', 'J6', 'J7', 'J8', 'MX'];
 
@@ -685,17 +686,7 @@ export default function TLMapPage() {
       const res = await fetch(`${API_BASE}/api/tl-map-analytics?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки аналитики');
       const json = await res.json();
-      // Сортировка по убыванию stay_hours
-      const sorted = json.sort((a, b) => (b.stay_hours || 0) - (a.stay_hours || 0));
-      // Добавляем накопительный процент
-      const totalHours = sorted.reduce((sum, row) => sum + (row.stay_hours || 0), 0);
-      let cumSum = 0;
-      const enriched = sorted.map(row => {
-        cumSum += (row.stay_hours || 0);
-        row.cumPercent = totalHours > 0 ? (cumSum / totalHours) * 100 : 0;
-        return row;
-      });
-      setAnalyticsData(enriched);
+      setAnalyticsData(json);
     } catch (err) {
       console.error('Ошибка аналитики:', err);
       setAnalyticsData([]);
@@ -705,21 +696,16 @@ export default function TLMapPage() {
   };
 
   const handleOpenAnalytics = () => {
-    // Устанавливаем дефолтные даты: начало текущего месяца и текущий момент
     const now = new Date();
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
     const firstDay = `${y}-${m}-01T00:00`;
     const current = `${y}-${m}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    setAnalyticsDateFrom(firstDay);
-    setAnalyticsDateTo(current);
     setShowAnalytics(true);
     loadAnalytics(firstDay, current);
   };
 
   const handleApplyAnalyticsFilter = (from, to) => {
-    setAnalyticsDateFrom(from);
-    setAnalyticsDateTo(to);
     loadAnalytics(from, to);
   };
 
@@ -738,7 +724,7 @@ export default function TLMapPage() {
       if (!detailsMap[detailsKey]) detailsMap[detailsKey] = [];
       detailsMap[detailsKey].push({
         vin: row.vin, model, spec, lot: row.lot, color: row.color, seq: row.seq,
-        entry_time: row.entry_time, // добавляем время входа
+        entry_time: row.entry_time,
       });
       
       if (!zonesMap[zone]) zonesMap[zone] = {};

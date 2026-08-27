@@ -3391,67 +3391,203 @@ app.get('/api/tl-map-passed-today-details', async (req, res) => {
 
 app.get('/api/tl-map-analytics', async (req, res) => {
   try {
-    // 1. Текущее расположение и время входа
-    const [onlineRows] = await mesPool.query(`
-      SELECT 
-        tlo.vin,
-        tlo.node_nature AS current_zone,
-        MAX(mv.gmt_create) AS entry_time
-      FROM tm_vhc_test_line_online tlo
-      LEFT JOIN tm_vhc_test_line_movement mv 
-        ON mv.vin = tlo.vin AND mv.node_nature = tlo.node_nature AND mv.is_deleted = 0
-      WHERE tlo.node_nature IN ('TLWA','TLRT','TLADAS','TLTT','CPA')
-      GROUP BY tlo.vin, tlo.node_nature
-    `);
+    const { startTime, endTime } = req.query;
 
-    const vins = onlineRows.map(r => r.vin);
+    // ---------- 1. Отбираем VIN, прошедшие CP72 за период ----------
+    let cp72Condition = '';
+    const cp72Params = [];
+    if (startTime) {
+      cp72Condition += ' AND cp72.scan_time >= ?';
+      cp72Params.push(startTime);
+    }
+    if (endTime) {
+      cp72Condition += ' AND cp72.scan_time <= ?';
+      cp72Params.push(endTime);
+    }
+
+    const cp72Sql = `
+      SELECT DISTINCT vin
+      FROM ti_mes_movement
+      WHERE uloc_no = 'CP72'
+        AND is_deleted = 0
+        ${cp72Condition}
+    `;
+    const [cp72Rows] = await mesPool.query(cp72Sql, cp72Params);
+    const vins = cp72Rows.map(r => r.vin);
     if (vins.length === 0) return res.json([]);
 
-    // 2. Последняя ремзона для каждого VIN
     const placeholders = vins.map(() => '?').join(',');
-    const [remRows] = await mesPool.query(`
+
+    // ---------- 2. Получаем все завершённые сессии на TL-постах ----------
+    const movementSql = `
       SELECT 
         vin,
-        MIN(gmt_create) AS rem_in,
-        MAX(gmt_create) AS rem_out
+        node_nature AS zone,
+        gmt_create AS enter_time,
+        LEAD(gmt_create) OVER (PARTITION BY vin ORDER BY gmt_create ASC) AS exit_time
+      FROM tm_vhc_test_line_movement
+      WHERE vin IN (${placeholders})
+        AND node_nature IN ('TLWA','TLRT','TLADAS','TLTT','CPA')
+        AND is_deleted = 0
+    `;
+    const [movementRows] = await mesPool.query(movementSql, vins);
+
+    // Фильтруем только завершённые сессии (есть и enter_time, и exit_time)
+    const completedSessions = movementRows.filter(r => r.exit_time);
+
+    // Суммируем время по каждому VIN и посту
+    const vinTotalByZone = {};
+    const vinTotalAll = {};
+    completedSessions.forEach(session => {
+      const durationSec = (new Date(session.exit_time) - new Date(session.enter_time)) / 1000;
+      if (durationSec <= 0) return;
+      const vin = session.vin;
+      const zone = session.zone;
+      if (!vinTotalByZone[vin]) vinTotalByZone[vin] = {};
+      if (!vinTotalByZone[vin][zone]) vinTotalByZone[vin][zone] = 0;
+      vinTotalByZone[vin][zone] += durationSec;
+      vinTotalAll[vin] = (vinTotalAll[vin] || 0) + durationSec;
+    });
+
+    // ---------- 3. Текущее расположение по приоритету (как в time-points) ----------
+    const locationSql = `
+      SELECT
+        t.vin,
+        MAX(IF(t.uloc_no = 'CP8', t.scan_time, NULL)) AS CP8,
+        MAX(IF(t.uloc_no = 'CPFINAL', t.scan_time, NULL)) AS CPFINAL,
+        MAX(IF(t.uloc_no = 'CP72', t.scan_time, NULL)) AS CP72,
+        MAX(IF(t.uloc_no = 'AGMAS01003', t.scan_time, NULL)) AS CP7,
+        MAX(IF(t.uloc_no = 'AGMAS01001', t.scan_time, NULL)) AS TRIMIN,
+        MAX(IF(t.uloc_no = 'AGMPS01002', t.scan_time, NULL)) AS CP6,
+        MAX(IF(t.uloc_no = 'AGMBS01002', t.scan_time, NULL)) AS CP5
+      FROM ti_mes_movement t
+      WHERE t.vin IN (${placeholders})
+        AND t.is_deleted = 0
+      GROUP BY t.vin
+    `;
+    const [locRows] = await mesPool.query(locationSql, vins);
+    const locMap = {};
+    locRows.forEach(r => {
+      let location = 'Нет данных';
+      if (r.CP8) location = 'CP8';
+      else if (r.CPFINAL) location = 'CPFINAL';
+      else if (r.CP72) location = 'CP72';
+      else if (r.CP7) location = 'CP7';
+      else if (r.TRIMIN) location = 'TRIMIN';
+      else if (r.CP6) location = 'CP6';
+      else if (r.CP5) location = 'CP5';
+      else {
+        // если есть TL-зоны, то "На тестах"
+        const hasTL = vinTotalByZone[r.vin] && Object.keys(vinTotalByZone[r.vin]).length > 0;
+        if (hasTL) location = 'На тестах';
+        else location = 'Планирование';
+      }
+      locMap[r.vin] = location;
+    });
+
+    // ---------- 4. Последняя ремзона ----------
+    const remSql = `
+      SELECT vin, gmt_create, node_nature
       FROM tm_vhc_test_line_movement
       WHERE vin IN (${placeholders})
         AND node_nature LIKE 'REP%'
         AND is_deleted = 0
-      GROUP BY vin
-    `, vins);
+      ORDER BY vin, gmt_create DESC
+    `;
+    const [remRows] = await mesPool.query(remSql, vins);
 
+    // Для каждого VIN находим последнюю REP-запись и последующую запись (для выхода)
     const remMap = {};
-    remRows.forEach(r => {
-      const diffMs = r.rem_out ? new Date(r.rem_out) - new Date(r.rem_in) : null;
-      remMap[r.vin] = {
-        rem_in: r.rem_in,
-        rem_out: r.rem_out,
-        duration_hours: diffMs && diffMs > 0 ? +(diffMs / 3600000).toFixed(2) : null,
+    const lastRepByVin = {};
+    const nextMovementByVin = {};
+
+    // Получаем все движения для этих VIN (кроме REP) для нахождения выхода
+    const allMovementsSql = `
+      SELECT vin, gmt_create, node_nature
+      FROM tm_vhc_test_line_movement
+      WHERE vin IN (${placeholders})
+        AND is_deleted = 0
+        AND node_nature NOT LIKE 'REP%'
+      ORDER BY vin, gmt_create ASC
+    `;
+    const [allMovements] = await mesPool.query(allMovementsSql, vins);
+
+    // Группируем все движения по VIN
+    const movementsByVin = {};
+    vins.forEach(vin => { movementsByVin[vin] = []; });
+    allMovements.forEach(m => {
+      if (movementsByVin[m.vin]) movementsByVin[m.vin].push(m.gmt_create);
+    });
+
+    // Для каждого VIN находим последнюю REP-запись
+    vins.forEach(vin => {
+      const vinRepRows = remRows.filter(r => r.vin === vin);
+      if (vinRepRows.length > 0) {
+        lastRepByVin[vin] = vinRepRows[0].gmt_create; // самая последняя REP
+        // Ищем первую запись после lastRep в общем списке не REP
+        const repTime = new Date(lastRepByVin[vin]).getTime();
+        const laterMovements = movementsByVin[vin].filter(gmt => new Date(gmt).getTime() > repTime);
+        if (laterMovements.length > 0) {
+          nextMovementByVin[vin] = laterMovements[0]; // выход
+        }
+      }
+    });
+
+    vins.forEach(vin => {
+      const remIn = lastRepByVin[vin] || null;
+      const remOut = nextMovementByVin[vin] || null;
+      let remDurationHours = null;
+      if (remIn && remOut) {
+        const diffMs = new Date(remOut) - new Date(remIn);
+        if (diffMs > 0) remDurationHours = +(diffMs / 3600000).toFixed(2);
+      }
+      remMap[vin] = {
+        rem_in: remIn,
+        rem_out: remOut,
+        rem_duration_hours: remDurationHours,
       };
     });
 
-    // 3. Собираем результат
-    const result = onlineRows.map(row => {
-      const rem = remMap[row.vin] || {};
-      // Время нахождения на текущем посту = сейчас - entry_time (в часах)
-      const entryTime = row.entry_time ? new Date(row.entry_time) : null;
-      const stayHours = entryTime ? +((Date.now() - entryTime) / 3600000).toFixed(2) : null;
+    // ---------- 5. Сборка результата ----------
+    const result = vins.map(vin => {
+      const totalSec = vinTotalAll[vin] || 0;
+      const stayHours = +(totalSec / 3600).toFixed(2);
+      // Найдём пост с максимальным временем (не выводим, но можно оставить в данных)
+      const zones = vinTotalByZone[vin] || {};
+      let maxZone = null;
+      let maxZoneSec = 0;
+      for (const [zone, sec] of Object.entries(zones)) {
+        if (sec > maxZoneSec) {
+          maxZoneSec = sec;
+          maxZone = zone;
+        }
+      }
+      const rem = remMap[vin] || {};
       return {
-        vin: row.vin,
-        current_zone: row.current_zone,
-        entry_time: row.entry_time,
-        stay_hours: stayHours,
-        rem_in: rem.rem_in || null,
-        rem_out: rem.rem_out || null,
-        rem_duration_hours: rem.duration_hours || null,
+        vin,
+        current_zone: locMap[vin] || 'Нет данных',
+        total_stay_hours: stayHours,
+        max_zone: maxZone, // можно не выводить, если не нужно
+        max_zone_hours: maxZoneSec ? +(maxZoneSec / 3600).toFixed(2) : null,
+        rem_in: rem.rem_in,
+        rem_out: rem.rem_out,
+        rem_duration_hours: rem.rem_duration_hours,
       };
     });
 
-    // Сортировка по убыванию времени нахождения на текущем посту
-    result.sort((a, b) => (b.stay_hours || 0) - (a.stay_hours || 0));
+    // Сортировка по убыванию общего времени на постах
+    result.sort((a, b) => b.total_stay_hours - a.total_stay_hours);
 
-    res.json(result);
+    // Добавляем накопительный процент
+    const totalHours = result.reduce((sum, r) => sum + r.total_stay_hours, 0);
+    let cumSum = 0;
+    const enriched = result.map(r => {
+      cumSum += r.total_stay_hours;
+      r.cum_percent = totalHours > 0 ? +((cumSum / totalHours) * 100).toFixed(2) : 0;
+      return r;
+    });
+
+    res.json(enriched);
   } catch (err) {
     console.error('Ошибка TL Map Analytics:', err.message);
     res.status(500).json({ error: err.message });
