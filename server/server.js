@@ -4566,12 +4566,12 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
     const postLists = {
       all: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'REPAIR', 'REPAIR_Final',
         'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
       ],
       cp7: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'REPAIR', 'REPAIR_Final',
         'EXT1', 'PIP2', 'PIP4', 'PIP9'
       ],
       pip: [
@@ -4771,12 +4771,12 @@ app.get('/api/drr-cp7-history', async (req, res) => {
     const postLists = {
       all: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'REPAIR', 'REPAIR_Final',
         'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
       ],
       cp7: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'REPAIR', 'REPAIR_Final',
         'EXT1', 'PIP2', 'PIP4', 'PIP9'
       ],
       pip: [
@@ -5025,12 +5025,12 @@ app.get('/api/testpage-data', async (req, res) => {
     const postLists = {
       all: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'REPAIR', 'REPAIR_Final',
         'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
       ],
       cp7: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'CP8 Touch Up', 'REPAIR', 'REPAIR_Final',
+        'REPAIR', 'REPAIR_Final',
         'EXT1', 'PIP2', 'PIP4', 'PIP9'
       ],
       pip: [
@@ -5068,7 +5068,7 @@ app.get('/api/testpage-data', async (req, res) => {
                        AND (d.PROBLEM_TYPE IS NULL OR TRIM(d.PROBLEM_TYPE) = '') 
                   THEN 'CLOSED'
                   -- Если ремонт выполнен до скорректированного CP72 -> CLOSED
-                  WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) < DATE_ADD(cp.CP72_TIME, INTERVAL 17 MINUTE) THEN 'CLOSED'
+                  WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) < DATE_ADD(cp.CP72_TIME, INTERVAL 5 MINUTE) THEN 'CLOSED'
                   -- Всё остальное (включая repair_time IS NULL) -> OFF
                   ELSE 'OFF'
               END AS calculated_status
