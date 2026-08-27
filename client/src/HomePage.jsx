@@ -16,9 +16,8 @@ import tlMapPreview from './assets/tlmap.png';
 import HoldsSgpPage from './assets/hold.png';
 import sgpManagementPreview from './assets/cp8.png';
 import DrrCp7DashboardPage from './assets/cp7drr.png'; 
+import cp7historyPreview from './assets/cp7hist.png'; 
 
-//<ReportCard to="/drr-cp7-history" imgSrc={cp7historyPreview} caption="DRR CP7 History" accentColor="#10B981" />
-//import cp7historyPreview from './assets/123.png'; 
 // ====== СТИЛИ ======
 const sectionStyle = {
   backgroundColor: '#FFFFFF',
@@ -257,6 +256,7 @@ export default function HomePage() {
           <ReportCard to="/daily-dashboard" imgSrc={dailyDashboardPreview} caption="Daily Dashboard" accentColor="#0cb428" />
           <ReportCard to="/tl-map" imgSrc={tlMapPreview} caption="TL Map" accentColor="#0ad5c8" />
           <ReportCard to="/drr-cp7-dashboard" imgSrc={DrrCp7DashboardPage} caption="DRR CP7 Dashboard" accentColor="#3a2ac5" />
+          <ReportCard to="/drr-cp7-history" imgSrc={cp7historyPreview} caption="DRR CP7 History" accentColor="#10B981" />
         </div>
       </AnimatedSection>
 
