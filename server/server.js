@@ -5063,11 +5063,13 @@ app.get('/api/testpage-data', async (req, res) => {
               cp.CP72_TIME,
               DATE_ADD(cp.CP72_TIME, INTERVAL 17 MINUTE) AS ADJUSTED_CP72_TIME,
               CASE 
+                  -- Пустые PART_NAME и PROBLEM_TYPE -> CLOSED
                   WHEN (d.PART_NAME IS NULL OR TRIM(d.PART_NAME) = '') 
                        AND (d.PROBLEM_TYPE IS NULL OR TRIM(d.PROBLEM_TYPE) = '') 
                   THEN 'CLOSED'
-                  WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) IS NULL THEN 'CLOSED'
+                  -- Если ремонт выполнен до скорректированного CP72 -> CLOSED
                   WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) < DATE_ADD(cp.CP72_TIME, INTERVAL 17 MINUTE) THEN 'CLOSED'
+                  -- Всё остальное (включая repair_time IS NULL) -> OFF
                   ELSE 'OFF'
               END AS calculated_status
           FROM at_qm_defect_info d
