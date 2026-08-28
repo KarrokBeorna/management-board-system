@@ -3357,37 +3357,42 @@ app.get('/api/tl-map-passed-today-details', async (req, res) => {
       return res.json(result);
     }
 
-    // Собираем все VIN, для которых нужно найти выход
     const vins = [...new Set(rows.map(r => r.vin))];
     const placeholders = vins.map(() => '?').join(',');
 
-    // Получаем все записи следующей зоны для этих VIN за последние дни (для надёжности, начиная с сегодняшнего утра)
-    const exitsSql = `
-      SELECT vin, MIN(gmt_create) AS exit_time
-      FROM tm_vhc_test_line_movement
-      WHERE vin IN (${placeholders})
-        AND node_nature = ?
-        AND is_deleted = 0
-      GROUP BY vin
-    `;
-    // Но нам нужны все выходы, а не только минимальный, т.к. входов может быть несколько.
-    // Поэтому выберем все записи следующей зоны, отсортированные по VIN и времени.
-    const exitsAllSql = `
-      SELECT vin, gmt_create
-      FROM tm_vhc_test_line_movement
-      WHERE vin IN (${placeholders})
-        AND node_nature = ?
-        AND is_deleted = 0
-      ORDER BY vin, gmt_create ASC
-    `;
-    const [exitRows] = await mesPool.query(exitsAllSql, [...vins, nextZone]);
+    let exitsByVin = {};
 
-    // Группируем выходы по VIN
-    const exitsByVin = {};
-    exitRows.forEach(e => {
-      if (!exitsByVin[e.vin]) exitsByVin[e.vin] = [];
-      exitsByVin[e.vin].push(new Date(e.gmt_create));
-    });
+    if (nextZone === 'CPFINAL') {
+      // Выход из TLTT ищем в ti_mes_movement (uloc_no = 'CPFINAL')
+      const cpfinalSql = `
+        SELECT vin, scan_time AS gmt_create
+        FROM ti_mes_movement
+        WHERE vin IN (${placeholders})
+          AND uloc_no = 'CPFINAL'
+          AND is_deleted = 0
+        ORDER BY vin, scan_time ASC
+      `;
+      const [cpfinalRows] = await mesPool.query(cpfinalSql, vins);
+      cpfinalRows.forEach(r => {
+        if (!exitsByVin[r.vin]) exitsByVin[r.vin] = [];
+        exitsByVin[r.vin].push(new Date(r.gmt_create));
+      });
+    } else {
+      // Выход для TLWA, TLRT, TLADAS ищем в tm_vhc_test_line_movement
+      const exitsAllSql = `
+        SELECT vin, gmt_create
+        FROM tm_vhc_test_line_movement
+        WHERE vin IN (${placeholders})
+          AND node_nature = ?
+          AND is_deleted = 0
+        ORDER BY vin, gmt_create ASC
+      `;
+      const [exitRows] = await mesPool.query(exitsAllSql, [...vins, nextZone]);
+      exitRows.forEach(e => {
+        if (!exitsByVin[e.vin]) exitsByVin[e.vin] = [];
+        exitsByVin[e.vin].push(new Date(e.gmt_create));
+      });
+    }
 
     // Для каждой записи входа находим первый выход после входа
     const enriched = rows.map(r => {
@@ -3657,6 +3662,37 @@ app.get('/api/tl-map-analytics', async (req, res) => {
     res.json(enriched);
   } catch (err) {
     console.error('Ошибка TL Map Analytics:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/tl-map-vin-history', async (req, res) => {
+  try {
+    const { vin } = req.query;
+    if (!vin) return res.status(400).json({ error: 'VIN не указан' });
+
+    const sql = `
+      SELECT 
+        vin,
+        node_nature AS zone,
+        gmt_create AS event_time
+      FROM tm_vhc_test_line_movement
+      WHERE vin = ?
+        AND is_deleted = 0
+      ORDER BY gmt_create ASC
+    `;
+    const [rows] = await mesPool.query(sql, [vin]);
+
+    const result = rows.map(r => ({
+      vin: r.vin,
+      zone: r.zone,
+      event_time: r.event_time,
+      source: 'TL Movement'
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка TL Map VIN history:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -3,7 +3,6 @@ import * as XLSX from 'xlsx';
 
 const API_BASE = '';
 
-// ====== СТИЛИ ======
 const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
@@ -243,7 +242,6 @@ const filterCheckboxStyle = {
   cursor: 'pointer',
 };
 
-// ====== КОНСТАНТЫ ======
 const MODEL_ORDER = ['A8', 'J6', 'J7', 'J8', 'MX'];
 const ZONE_ORDER = ['TLWA', 'TLRT', 'TLADAS', 'TLTT', 'CPA'];
 
@@ -278,8 +276,17 @@ const formatDuration = (seconds) => {
   return `${days}:${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 };
 
-// ====== МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ ПО ЗОНЕ ======
+const useLockBodyScroll = () => {
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = 'auto';
+    };
+  }, []);
+};
+
 function DetailsModal({ zoneName, label, count, details, onClose }) {
+  useLockBodyScroll();
   const modalOverlayStyle = {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -377,8 +384,8 @@ function DetailsModal({ zoneName, label, count, details, onClose }) {
   );
 }
 
-// ====== МОДАЛЬНОЕ ОКНО ПРОШЕДШИХ ЗА СЕГОДНЯ ======
 function PassedTodayModal({ zoneName, uniqueCount, totalRecords, details, onClose }) {
+  useLockBodyScroll();
   const modalOverlayStyle = {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -478,8 +485,8 @@ function PassedTodayModal({ zoneName, uniqueCount, totalRecords, details, onClos
   );
 }
 
-// ====== МОДАЛЬНОЕ ОКНО АНАЛИТИКИ (ПАРЕТО) ======
 function AnalyticsModal({ data, onClose, onApplyFilter, onVinClick }) {
+  useLockBodyScroll();
   const modalOverlayStyle = {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -487,8 +494,8 @@ function AnalyticsModal({ data, onClose, onApplyFilter, onVinClick }) {
     zIndex: 1000,
   };
   const modalContentStyle = {
-    backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24,
-    maxWidth: 1300, width: '95%', maxHeight: '90vh',
+    backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16,
+    maxWidth: '95vw', width: '95vw', maxHeight: '90vh',
     boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
     display: 'flex', flexDirection: 'column',
   };
@@ -515,16 +522,16 @@ function AnalyticsModal({ data, onClose, onApplyFilter, onVinClick }) {
     fontSize: 14,
     background: '#F9FAFB',
   };
-  const tableContainerStyle = { overflowY: 'auto', flex: 1 };
+  const tableContainerStyle = { overflowY: 'auto', overflowX: 'hidden', flex: 1 };
   const thStyle = {
-    padding: '10px 12px', textAlign: 'left', fontWeight: 600,
+    padding: '8px 10px', textAlign: 'left', fontWeight: 600,
     color: '#374151', borderBottom: '2px solid #E5E7EB',
     background: '#F9FAFB', whiteSpace: 'nowrap',
     position: 'sticky', top: 0, zIndex: 5,
   };
   const tdStyle = {
-    padding: '8px 12px', textAlign: 'left',
-    borderBottom: '1px solid #F0F0F5', color: '#1F2937', fontSize: 13,
+    padding: '6px 10px', textAlign: 'left',
+    borderBottom: '1px solid #F0F0F5', color: '#1F2937', fontSize: 12,
   };
 
   const [dateFrom, setDateFrom] = useState(() => {
@@ -617,8 +624,8 @@ function AnalyticsModal({ data, onClose, onApplyFilter, onVinClick }) {
   );
 }
 
-// ====== МОДАЛЬНОЕ ОКНО ИСТОРИИ VIN ======
 function VINHistoryModal({ vin, onClose }) {
+  useLockBodyScroll();
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -656,6 +663,13 @@ function VINHistoryModal({ vin, onClose }) {
   const tdStyle = {
     padding: '8px 12px', textAlign: 'left',
     borderBottom: '1px solid #F0F0F5', color: '#1F2937', fontSize: 13,
+  };
+
+  const getZoneColor = (zone) => {
+    if (zone.startsWith('REP')) return '#FDE68A';
+    if (zone === 'TLWA' || zone === 'TLRT' || zone === 'TLADAS' || zone === 'TLTT') return '#BFDBFE';
+    if (zone === 'CPFINAL') return '#A7F3D0';
+    return '#FFFFFF';
   };
 
   useEffect(() => {
@@ -712,7 +726,7 @@ function VINHistoryModal({ vin, onClose }) {
               </thead>
               <tbody>
                 {history.map((event, idx) => (
-                  <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                  <tr key={idx} style={{ backgroundColor: getZoneColor(event.zone) }}>
                     <td style={tdStyle}>{idx + 1}</td>
                     <td style={tdStyle}>{new Date(event.event_time).toLocaleString('ru-RU')}</td>
                     <td style={tdStyle}>{event.zone}</td>
