@@ -3324,6 +3324,18 @@ app.get('/api/tl-map-passed-today', async (req, res) => {
 app.get('/api/tl-map-passed-today-details', async (req, res) => {
   try {
     const { zone } = req.query;
+    if (!zone) return res.status(400).json({ error: 'Не указана зона' });
+
+    // Определяем следующий узел для выхода из зоны
+    const nextZoneMap = {
+      'TLWA': 'TLRT',
+      'TLRT': 'TLADAS',
+      'TLADAS': 'TLTT',
+      'TLTT': 'CPFINAL',
+    };
+    const nextZone = nextZoneMap[zone] || null;
+
+    // Получаем все записи входов в выбранную зону за сегодня
     const sql = `
       SELECT 
         tvtlm.vin,
@@ -3335,51 +3347,69 @@ app.get('/api/tl-map-passed-today-details', async (req, res) => {
       WHERE tvtlm.node_nature = ?
         AND DATE(tvtlm.gmt_create) = CURDATE()
         AND tvtlm.is_deleted = 0
-      ORDER BY tvtlm.gmt_create DESC
+      ORDER BY tvtlm.vin, tvtlm.gmt_create ASC
     `;
     const [rows] = await mesPool.query(sql, [zone]);
 
-    // Для каждого VIN найдём время выхода (следующая запись движения в любой другой зоне после pass_time)
-    const vins = [...new Set(rows.map(r => r.vin))];
-    const exitMap = {};
-    if (vins.length > 0) {
-      const placeholders = vins.map(() => '?').join(',');
-      const exitSql = `
-        SELECT vin, MIN(gmt_create) AS exit_time
-        FROM tm_vhc_test_line_movement
-        WHERE vin IN (${placeholders})
-          AND node_nature IN ('TLWA','TLRT','TLADAS','TLTT','CPA','CPFINAL','CP8')
-          AND is_deleted = 0
-          AND gmt_create > (
-            SELECT MIN(gmt_create) FROM tm_vhc_test_line_movement
-            WHERE vin = vin_temp.vin AND node_nature = ? AND is_deleted = 0
-          )
-        GROUP BY vin
-      `;
-      // Упростим: выполним отдельный запрос для каждого VIN (или используем оконные функции, но для простоты)
-      for (const vin of vins) {
-        const [exitRows] = await mesPool.query(
-          `SELECT MIN(gmt_create) AS exit_time
-           FROM tm_vhc_test_line_movement
-           WHERE vin = ? AND node_nature != ? AND is_deleted = 0
-             AND gmt_create > (
-               SELECT MIN(gmt_create) FROM tm_vhc_test_line_movement
-               WHERE vin = ? AND node_nature = ? AND is_deleted = 0
-             )`,
-          [vin, zone, vin, zone]
-        );
-        if (exitRows.length > 0 && exitRows[0].exit_time) {
-          exitMap[vin] = exitRows[0].exit_time;
-        }
-      }
+    if (rows.length === 0 || !nextZone) {
+      // Для зон без следующего (например, CPA) выход и длительность не считаем
+      const result = rows.map(r => ({ ...r, exit_time: null, duration: null }));
+      return res.json(result);
     }
 
+    // Собираем все VIN, для которых нужно найти выход
+    const vins = [...new Set(rows.map(r => r.vin))];
+    const placeholders = vins.map(() => '?').join(',');
+
+    // Получаем все записи следующей зоны для этих VIN за последние дни (для надёжности, начиная с сегодняшнего утра)
+    const exitsSql = `
+      SELECT vin, MIN(gmt_create) AS exit_time
+      FROM tm_vhc_test_line_movement
+      WHERE vin IN (${placeholders})
+        AND node_nature = ?
+        AND is_deleted = 0
+      GROUP BY vin
+    `;
+    // Но нам нужны все выходы, а не только минимальный, т.к. входов может быть несколько.
+    // Поэтому выберем все записи следующей зоны, отсортированные по VIN и времени.
+    const exitsAllSql = `
+      SELECT vin, gmt_create
+      FROM tm_vhc_test_line_movement
+      WHERE vin IN (${placeholders})
+        AND node_nature = ?
+        AND is_deleted = 0
+      ORDER BY vin, gmt_create ASC
+    `;
+    const [exitRows] = await mesPool.query(exitsAllSql, [...vins, nextZone]);
+
+    // Группируем выходы по VIN
+    const exitsByVin = {};
+    exitRows.forEach(e => {
+      if (!exitsByVin[e.vin]) exitsByVin[e.vin] = [];
+      exitsByVin[e.vin].push(new Date(e.gmt_create));
+    });
+
+    // Для каждой записи входа находим первый выход после входа
     const enriched = rows.map(r => {
-      const exitTime = exitMap[r.vin] || null;
+      const vinExits = exitsByVin[r.vin] || [];
       const passDate = new Date(r.pass_time);
-      const exitDate = exitTime ? new Date(exitTime) : null;
-      const durationSec = exitDate ? Math.floor((exitDate - passDate) / 1000) : null;
-      return { ...r, exit_time: exitTime, duration: durationSec };
+      let exitTime = null;
+      for (const exit of vinExits) {
+        if (exit > passDate) {
+          exitTime = exit;
+          break;
+        }
+      }
+      let duration = null;
+      if (exitTime) {
+        const diffSec = Math.floor((exitTime - passDate) / 1000);
+        if (diffSec >= 0) duration = diffSec;
+      }
+      return {
+        ...r,
+        exit_time: exitTime ? exitTime.toISOString() : null,
+        duration,
+      };
     });
 
     res.json(enriched);
@@ -3418,7 +3448,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
 
     const placeholders = vins.map(() => '?').join(',');
 
-    // ---------- 2. Все движения этих VIN (для TL-зон, REP-зон и расчёта времени) ----------
+    // ---------- 2. Все движения этих VIN ----------
     const movementSql = `
       SELECT vin, node_nature, gmt_create
       FROM tm_vhc_test_line_movement
@@ -3428,33 +3458,62 @@ app.get('/api/tl-map-analytics', async (req, res) => {
     `;
     const [movementRows] = await mesPool.query(movementSql, vins);
 
+    // Группируем движения по VIN
     const movementsByVin = {};
     vins.forEach(vin => { movementsByVin[vin] = []; });
     movementRows.forEach(row => {
       if (movementsByVin[row.vin]) {
-        movementsByVin[row.vin].push({ zone: row.node_nature, time: row.gmt_create });
+        movementsByVin[row.vin].push({ zone: row.node_nature, time: new Date(row.gmt_create) });
       }
     });
 
-    // ---------- 3. Расчёт суммарного времени на TL-постах (завершённые сессии) ----------
-    const tlZones = ['TLWA', 'TLRT', 'TLADAS', 'TLTT']; // CPA исключена
+    // ---------- 3. Расчёт суммарного времени на TL-постах (полные циклы TLWA..TLTT -> CPFINAL) ----------
     const vinTotalSeconds = {};
 
     for (const vin of vins) {
       const moves = movementsByVin[vin];
       let totalSec = 0;
-      for (let i = 0; i < moves.length; i++) {
-        const current = moves[i];
-        if (tlZones.includes(current.zone)) {
-          if (i + 1 < moves.length) {
-            const next = moves[i + 1];
-            const enterTime = new Date(current.time);
-            const exitTime = new Date(next.time);
-            const diffSec = (exitTime - enterTime) / 1000;
-            if (diffSec > 0) {
-              totalSec += diffSec;
+      let i = 0;
+      const n = moves.length;
+      while (i < n) {
+        if (moves[i].zone === 'TLWA') {
+          // Ищем последовательность TLRT, TLADAS, TLTT, CPFINAL
+          let j = i + 1;
+          let tlrtTime = null, tladasTime = null, tlttTime = null, cpfinalTime = null;
+
+          while (j < n && moves[j].zone !== 'TLRT') j++;
+          if (j < n) tlrtTime = moves[j].time;
+          else break;
+
+          j++;
+          while (j < n && moves[j].zone !== 'TLADAS') j++;
+          if (j < n) tladasTime = moves[j].time;
+          else break;
+
+          j++;
+          while (j < n && moves[j].zone !== 'TLTT') j++;
+          if (j < n) tlttTime = moves[j].time;
+          else break;
+
+          j++;
+          while (j < n && moves[j].zone !== 'CPFINAL') j++;
+          if (j < n) cpfinalTime = moves[j].time;
+          else break;
+
+          // Все точки найдены, считаем время цикла = CPFINAL - TLWA
+          if (tlrtTime && tladasTime && tlttTime && cpfinalTime) {
+            const cycleSec = Math.floor((cpfinalTime - moves[i].time) / 1000);
+            if (cycleSec > 0) {
+              totalSec += cycleSec;
             }
+            // Переходим к следующему элементу после CPFINAL
+            i = j + 1;
+          } else {
+            // Неполный цикл – выходим из цикла while
+            break;
           }
+        } else {
+          i++;
         }
       }
       vinTotalSeconds[vin] = totalSec;
@@ -3479,7 +3538,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
     const [locRows] = await mesPool.query(locationSql, vins);
     const locDataByVin = new Map(locRows.map(r => [r.vin, r]));
 
-    // ---------- 5. Данные о складе (Inbound/Outbound) ----------
+    // ---------- 5. Данные о складе ----------
     const [lesRows] = await lesPool.query(
       `SELECT tbs.vin, tbs.in_storage_time, tbs.out_storage_time
        FROM tv_biz_storage_car tbs
@@ -3488,13 +3547,14 @@ app.get('/api/tl-map-analytics', async (req, res) => {
     );
     const lesMap = new Map(lesRows.map(r => [r.vin, r]));
 
-    // ---------- 6. Определение текущего расположения ----------
+    // ---------- 6. Определение текущего расположения и ремзоны ----------
     const remMap = {};
     const currentZoneMap = {};
 
     for (const vin of vins) {
-      // --- Ремзона ---
       const moves = movementsByVin[vin];
+
+      // --- Ремзона ---
       let lastRepIndex = -1;
       for (let i = moves.length - 1; i >= 0; i--) {
         if (moves[i].zone.startsWith('REP')) {
@@ -3510,36 +3570,35 @@ app.get('/api/tl-map-analytics', async (req, res) => {
         }
         let remDurationSeconds = null;
         if (remOut) {
-          const diffMs = new Date(remOut) - new Date(remIn);
+          const diffMs = remOut - remIn;
           if (diffMs > 0) remDurationSeconds = Math.floor(diffMs / 1000);
         }
         remMap[vin] = {
-          rem_in: remIn,
-          rem_out: remOut,
+          rem_in: remIn.toISOString(),
+          rem_out: remOut ? remOut.toISOString() : null,
           rem_duration_seconds: remDurationSeconds,
         };
       } else {
         remMap[vin] = { rem_in: null, rem_out: null, rem_duration_seconds: null };
       }
 
-      // --- Текущее расположение (самая поздняя точка) ---
+      // --- Текущее расположение ---
       const points = [];
       const loc = locDataByVin.get(vin);
       if (loc) {
-        if (loc.CP5) points.push({ label: 'CP5', time: loc.CP5 });
-        if (loc.CP6) points.push({ label: 'CP6', time: loc.CP6 });
-        if (loc.TRIMIN) points.push({ label: 'TRIMIN', time: loc.TRIMIN });
-        if (loc.CP7) points.push({ label: 'CP7', time: loc.CP7 });
-        if (loc.CP72) points.push({ label: 'CP72', time: loc.CP72 });
-        if (loc.CPFINAL) points.push({ label: 'CPFINAL', time: loc.CPFINAL });
-        if (loc.CP8) points.push({ label: 'CP8', time: loc.CP8 });
+        if (loc.CP5) points.push({ label: 'CP5', time: new Date(loc.CP5) });
+        if (loc.CP6) points.push({ label: 'CP6', time: new Date(loc.CP6) });
+        if (loc.TRIMIN) points.push({ label: 'TRIMIN', time: new Date(loc.TRIMIN) });
+        if (loc.CP7) points.push({ label: 'CP7', time: new Date(loc.CP7) });
+        if (loc.CP72) points.push({ label: 'CP72', time: new Date(loc.CP72) });
+        if (loc.CPFINAL) points.push({ label: 'CPFINAL', time: new Date(loc.CPFINAL) });
+        if (loc.CP8) points.push({ label: 'CP8', time: new Date(loc.CP8) });
       }
       const les = lesMap.get(vin);
       if (les) {
-        if (les.in_storage_time) points.push({ label: 'Inbound', time: les.in_storage_time });
-        if (les.out_storage_time) points.push({ label: 'Outbound', time: les.out_storage_time });
+        if (les.in_storage_time) points.push({ label: 'Inbound', time: new Date(les.in_storage_time) });
+        if (les.out_storage_time) points.push({ label: 'Outbound', time: new Date(les.out_storage_time) });
       }
-      // TL и REP из movement
       moves.forEach(m => {
         if (['TLWA', 'TLRT', 'TLADAS', 'TLTT'].includes(m.zone) || m.zone.startsWith('REP')) {
           points.push({ label: m.zone, time: m.time });
@@ -3549,7 +3608,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
       let currentZone = 'Планирование';
       let maxTime = null;
       for (const p of points) {
-        if (!maxTime || new Date(p.time) > new Date(maxTime)) {
+        if (!maxTime || p.time > maxTime) {
           maxTime = p.time;
           currentZone = p.label;
         }
@@ -3564,17 +3623,17 @@ app.get('/api/tl-map-analytics', async (req, res) => {
       return {
         vin,
         current_zone: currentZoneMap[vin],
-        total_stay_seconds: Math.round(totalSec),
+        total_stay_seconds: totalSec,
         rem_in: rem.rem_in,
         rem_out: rem.rem_out,
         rem_duration_seconds: rem.rem_duration_seconds,
       };
     });
 
-    // Сортировка по убыванию общего времени (в секундах)
+    // Сортировка по убыванию времени
     result.sort((a, b) => b.total_stay_seconds - a.total_stay_seconds);
 
-    // Кумулятивный процент на основе секунд
+    // Кумулятивный процент
     const totalAllSeconds = result.reduce((sum, r) => sum + r.total_stay_seconds, 0);
     let cumSum = 0;
     const enriched = result.map(r => {
