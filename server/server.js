@@ -3393,7 +3393,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
 
-    // ---------- 1. Отбираем VIN, прошедшие CP72 за период ----------
+    // ---------- 1. VIN, прошедшие CP72 за период ----------
     let cp72Condition = '';
     const cp72Params = [];
     if (startTime) {
@@ -3418,38 +3418,53 @@ app.get('/api/tl-map-analytics', async (req, res) => {
 
     const placeholders = vins.map(() => '?').join(',');
 
-    // ---------- 2. Получаем все завершённые сессии на TL-постах ----------
+    // ---------- 2. Все движения этих VIN (для определения выходов и ремзон) ----------
     const movementSql = `
-      SELECT 
-        vin,
-        node_nature AS zone,
-        gmt_create AS enter_time,
-        LEAD(gmt_create) OVER (PARTITION BY vin ORDER BY gmt_create ASC) AS exit_time
+      SELECT vin, node_nature, gmt_create
       FROM tm_vhc_test_line_movement
       WHERE vin IN (${placeholders})
-        AND node_nature IN ('TLWA','TLRT','TLADAS','TLTT','CPA')
         AND is_deleted = 0
+      ORDER BY vin, gmt_create ASC
     `;
     const [movementRows] = await mesPool.query(movementSql, vins);
 
-    // Фильтруем только завершённые сессии (есть и enter_time, и exit_time)
-    const completedSessions = movementRows.filter(r => r.exit_time);
-
-    // Суммируем время по каждому VIN и посту
-    const vinTotalByZone = {};
-    const vinTotalAll = {};
-    completedSessions.forEach(session => {
-      const durationSec = (new Date(session.exit_time) - new Date(session.enter_time)) / 1000;
-      if (durationSec <= 0) return;
-      const vin = session.vin;
-      const zone = session.zone;
-      if (!vinTotalByZone[vin]) vinTotalByZone[vin] = {};
-      if (!vinTotalByZone[vin][zone]) vinTotalByZone[vin][zone] = 0;
-      vinTotalByZone[vin][zone] += durationSec;
-      vinTotalAll[vin] = (vinTotalAll[vin] || 0) + durationSec;
+    // Группируем движения по VIN
+    const movementsByVin = {};
+    vins.forEach(vin => { movementsByVin[vin] = []; });
+    movementRows.forEach(row => {
+      if (movementsByVin[row.vin]) {
+        movementsByVin[row.vin].push({ zone: row.node_nature, time: row.gmt_create });
+      }
     });
 
-    // ---------- 3. Текущее расположение по приоритету (как в time-points) ----------
+    // ---------- 3. Расчёт суммарного времени на TL-постах (завершённые сессии) ----------
+    const tlZones = ['TLWA', 'TLRT', 'TLADAS', 'TLTT']; // CPA исключена
+    const vinTotalSeconds = {}; // vin -> суммарное время (сек) на TL-постах
+
+    for (const vin of vins) {
+      const moves = movementsByVin[vin];
+      let totalSec = 0;
+      // Проходим по всем движениям, ищем входы в TL-зоны и последующий выход
+      for (let i = 0; i < moves.length; i++) {
+        const current = moves[i];
+        if (tlZones.includes(current.zone)) {
+          // Ищем следующую запись (выход)
+          if (i + 1 < moves.length) {
+            const next = moves[i + 1];
+            const enterTime = new Date(current.time);
+            const exitTime = new Date(next.time);
+            const diffSec = (exitTime - enterTime) / 1000;
+            if (diffSec > 0) {
+              totalSec += diffSec;
+            }
+          }
+          // Если следующей записи нет, сессия не завершена — игнорируем
+        }
+      }
+      vinTotalSeconds[vin] = totalSec;
+    }
+
+    // ---------- 4. Текущее расположение (как в time-points) ----------
     const locationSql = `
       SELECT
         t.vin,
@@ -3468,7 +3483,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
     const [locRows] = await mesPool.query(locationSql, vins);
     const locMap = {};
     locRows.forEach(r => {
-      let location = 'Нет данных';
+      let location = 'Планирование';
       if (r.CP8) location = 'CP8';
       else if (r.CPFINAL) location = 'CPFINAL';
       else if (r.CP72) location = 'CP72';
@@ -3476,114 +3491,64 @@ app.get('/api/tl-map-analytics', async (req, res) => {
       else if (r.TRIMIN) location = 'TRIMIN';
       else if (r.CP6) location = 'CP6';
       else if (r.CP5) location = 'CP5';
-      else {
-        // если есть TL-зоны, то "На тестах"
-        const hasTL = vinTotalByZone[r.vin] && Object.keys(vinTotalByZone[r.vin]).length > 0;
-        if (hasTL) location = 'На тестах';
-        else location = 'Планирование';
-      }
+      else if (vinTotalSeconds[r.vin] > 0) location = 'На тестах';
       locMap[r.vin] = location;
     });
 
-    // ---------- 4. Последняя ремзона ----------
-    const remSql = `
-      SELECT vin, gmt_create, node_nature
-      FROM tm_vhc_test_line_movement
-      WHERE vin IN (${placeholders})
-        AND node_nature LIKE 'REP%'
-        AND is_deleted = 0
-      ORDER BY vin, gmt_create DESC
-    `;
-    const [remRows] = await mesPool.query(remSql, vins);
-
-    // Для каждого VIN находим последнюю REP-запись и последующую запись (для выхода)
+    // ---------- 5. Последняя ремзона ----------
     const remMap = {};
-    const lastRepByVin = {};
-    const nextMovementByVin = {};
-
-    // Получаем все движения для этих VIN (кроме REP) для нахождения выхода
-    const allMovementsSql = `
-      SELECT vin, gmt_create, node_nature
-      FROM tm_vhc_test_line_movement
-      WHERE vin IN (${placeholders})
-        AND is_deleted = 0
-        AND node_nature NOT LIKE 'REP%'
-      ORDER BY vin, gmt_create ASC
-    `;
-    const [allMovements] = await mesPool.query(allMovementsSql, vins);
-
-    // Группируем все движения по VIN
-    const movementsByVin = {};
-    vins.forEach(vin => { movementsByVin[vin] = []; });
-    allMovements.forEach(m => {
-      if (movementsByVin[m.vin]) movementsByVin[m.vin].push(m.gmt_create);
-    });
-
-    // Для каждого VIN находим последнюю REP-запись
-    vins.forEach(vin => {
-      const vinRepRows = remRows.filter(r => r.vin === vin);
-      if (vinRepRows.length > 0) {
-        lastRepByVin[vin] = vinRepRows[0].gmt_create; // самая последняя REP
-        // Ищем первую запись после lastRep в общем списке не REP
-        const repTime = new Date(lastRepByVin[vin]).getTime();
-        const laterMovements = movementsByVin[vin].filter(gmt => new Date(gmt).getTime() > repTime);
-        if (laterMovements.length > 0) {
-          nextMovementByVin[vin] = laterMovements[0]; // выход
+    for (const vin of vins) {
+      const moves = movementsByVin[vin];
+      // Найти последнюю запись с zone LIKE 'REP%'
+      let lastRepIndex = -1;
+      for (let i = moves.length - 1; i >= 0; i--) {
+        if (moves[i].zone.startsWith('REP')) {
+          lastRepIndex = i;
+          break;
         }
       }
-    });
-
-    vins.forEach(vin => {
-      const remIn = lastRepByVin[vin] || null;
-      const remOut = nextMovementByVin[vin] || null;
-      let remDurationHours = null;
-      if (remIn && remOut) {
-        const diffMs = new Date(remOut) - new Date(remIn);
-        if (diffMs > 0) remDurationHours = +(diffMs / 3600000).toFixed(2);
+      if (lastRepIndex >= 0) {
+        const remIn = moves[lastRepIndex].time;
+        // Выход из ремзоны — следующая запись после lastRep
+        let remOut = null;
+        if (lastRepIndex + 1 < moves.length) {
+          remOut = moves[lastRepIndex + 1].time;
+        }
+        let remDurationHours = null;
+        if (remOut) {
+          const diffMs = new Date(remOut) - new Date(remIn);
+          if (diffMs > 0) remDurationHours = +(diffMs / 3600000).toFixed(2);
+        }
+        remMap[vin] = { rem_in: remIn, rem_out: remOut, rem_duration_hours: remDurationHours };
+      } else {
+        remMap[vin] = { rem_in: null, rem_out: null, rem_duration_hours: null };
       }
-      remMap[vin] = {
-        rem_in: remIn,
-        rem_out: remOut,
-        rem_duration_hours: remDurationHours,
-      };
-    });
+    }
 
-    // ---------- 5. Сборка результата ----------
+    // ---------- 6. Сборка результата ----------
     const result = vins.map(vin => {
-      const totalSec = vinTotalAll[vin] || 0;
-      const stayHours = +(totalSec / 3600).toFixed(2);
-      // Найдём пост с максимальным временем (не выводим, но можно оставить в данных)
-      const zones = vinTotalByZone[vin] || {};
-      let maxZone = null;
-      let maxZoneSec = 0;
-      for (const [zone, sec] of Object.entries(zones)) {
-        if (sec > maxZoneSec) {
-          maxZoneSec = sec;
-          maxZone = zone;
-        }
-      }
-      const rem = remMap[vin] || {};
+      const totalSec = vinTotalSeconds[vin] || 0;
+      const totalHours = +(totalSec / 3600).toFixed(2);
+      const rem = remMap[vin];
       return {
         vin,
-        current_zone: locMap[vin] || 'Нет данных',
-        total_stay_hours: stayHours,
-        max_zone: maxZone, // можно не выводить, если не нужно
-        max_zone_hours: maxZoneSec ? +(maxZoneSec / 3600).toFixed(2) : null,
+        current_zone: locMap[vin],
+        total_stay_hours: totalHours,
         rem_in: rem.rem_in,
         rem_out: rem.rem_out,
         rem_duration_hours: rem.rem_duration_hours,
       };
     });
 
-    // Сортировка по убыванию общего времени на постах
+    // Сортировка по убыванию общего времени
     result.sort((a, b) => b.total_stay_hours - a.total_stay_hours);
 
-    // Добавляем накопительный процент
-    const totalHours = result.reduce((sum, r) => sum + r.total_stay_hours, 0);
+    // Кумулятивный процент
+    const totalAllHours = result.reduce((sum, r) => sum + r.total_stay_hours, 0);
     let cumSum = 0;
     const enriched = result.map(r => {
       cumSum += r.total_stay_hours;
-      r.cum_percent = totalHours > 0 ? +((cumSum / totalHours) * 100).toFixed(2) : 0;
+      r.cum_percent = totalAllHours > 0 ? +((cumSum / totalAllHours) * 100).toFixed(2) : 0;
       return r;
     });
 

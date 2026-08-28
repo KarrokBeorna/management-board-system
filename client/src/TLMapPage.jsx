@@ -420,8 +420,8 @@ function PassedTodayModal({ zoneName, uniqueCount, totalRecords, details, onClos
       'VIN': d.vin,
       'MODEL': d.model,
       'SEQ': d.seq,
-      'Время входа': d.pass_time ? new Date(d.pass_time).toLocaleTimeString('ru-RU') : '',
-      'Время выхода': d.exit_time ? new Date(d.exit_time).toLocaleTimeString('ru-RU') : '',
+      'Время входа': d.pass_time ? new Date(d.pass_time).toLocaleString('ru-RU') : '',
+      'Время выхода': d.exit_time ? new Date(d.exit_time).toLocaleString('ru-RU') : '',
       'Время на посту': d.duration !== null && d.duration !== undefined ? formatDuration(d.duration) : '',
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
