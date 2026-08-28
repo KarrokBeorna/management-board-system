@@ -3407,7 +3407,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
 
     const cp72Sql = `
       SELECT DISTINCT vin
-      FROM ti_mes_movement
+      FROM ti_mes_movement AS cp72
       WHERE uloc_no = 'CP72'
         AND is_deleted = 0
         ${cp72Condition}
@@ -3558,7 +3558,6 @@ app.get('/api/tl-map-analytics', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 app.get('/api/holds-sgp', async (req, res) => {
   try {
