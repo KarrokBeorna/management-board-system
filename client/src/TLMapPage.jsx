@@ -548,12 +548,37 @@ function AnalyticsModal({ data, onClose, onApplyFilter, onVinClick }) {
     return `${y}-${m}-${d}T${h}:${mi}`;
   });
 
+  const allZones = useMemo(() => [...new Set(data.map(r => r.current_zone))], [data]);
+  const [selectedZones, setSelectedZones] = useState(() => allZones.filter(z => z !== 'Inbound' && z !== 'Outbound'));
+
+  useEffect(() => {
+    if (allZones.length > 0 && selectedZones.length === 0) {
+      setSelectedZones(allZones.filter(z => z !== 'Inbound' && z !== 'Outbound'));
+    }
+  }, [allZones, selectedZones]);
+
   const handleApply = () => {
     onApplyFilter(dateFrom, dateTo);
   };
 
+  const toggleZone = (zone) => {
+    setSelectedZones(prev =>
+      prev.includes(zone) ? prev.filter(z => z !== zone) : [...prev, zone]
+    );
+  };
+
+  const filteredData = useMemo(() => {
+    const filtered = data.filter(row => selectedZones.includes(row.current_zone));
+    const totalAll = filtered.reduce((sum, r) => sum + (r.total_stay_seconds || 0), 0);
+    let cum = 0;
+    return filtered.map(r => {
+      cum += (r.total_stay_seconds || 0);
+      return { ...r, cum_percent: totalAll > 0 ? +((cum / totalAll) * 100).toFixed(2) : 0 };
+    });
+  }, [data, selectedZones]);
+
   const handleExport = () => {
-    const exportData = data.map((row, idx) => ({
+    const exportData = filteredData.map((row, idx) => ({
       '№': idx + 1,
       'VIN': row.vin,
       'Текущее расположение': row.current_zone,
@@ -584,6 +609,19 @@ function AnalyticsModal({ data, onClose, onApplyFilter, onVinClick }) {
           <button style={{ ...buttonStyle, padding: '8px 16px' }} onClick={handleApply}>Применить</button>
           <button style={{ ...exportButtonStyle, padding: '8px 16px' }} onClick={handleExport}>Экспорт</button>
         </div>
+        <div style={{ ...filterContainerStyle, marginBottom: 12 }}>
+          <span style={{ fontWeight: 600, marginRight: 8 }}>Текущее расположение:</span>
+          {allZones.map(zone => (
+            <label key={zone} style={filterCheckboxStyle}>
+              <input
+                type="checkbox"
+                checked={selectedZones.includes(zone)}
+                onChange={() => toggleZone(zone)}
+              />
+              {zone}
+            </label>
+          ))}
+        </div>
         <div style={tableContainerStyle}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
@@ -599,7 +637,7 @@ function AnalyticsModal({ data, onClose, onApplyFilter, onVinClick }) {
               </tr>
             </thead>
             <tbody>
-              {data.map((row, idx) => {
+              {filteredData.map((row, idx) => {
                 const isTop20 = row.cum_percent <= 80;
                 return (
                   <tr key={idx} style={{
@@ -666,9 +704,9 @@ function VINHistoryModal({ vin, onClose }) {
   };
 
   const getZoneColor = (zone) => {
-    if (zone.startsWith('REP')) return '#FCA5A5';   // красный для ремзон
-    if (zone === 'TLWA' || zone === 'TLRT' || zone === 'TLADAS' || zone === 'TLTT') return '#86EFAC'; // зелёный для TL-постов
-    return '#FFFFFF';                               // белый по умолчанию (включая CPFINAL)
+    if (zone.startsWith('REP')) return '#FCA5A5';
+    if (zone === 'TLWA' || zone === 'TLRT' || zone === 'TLADAS' || zone === 'TLTT') return '#86EFAC';
+    return '#FFFFFF';
   };
 
   useEffect(() => {
@@ -725,9 +763,9 @@ function VINHistoryModal({ vin, onClose }) {
               </thead>
               <tbody>
                 {history.map((event, idx) => (
-                  <tr 
-                    key={idx} 
-                    style={{ 
+                  <tr
+                    key={idx}
+                    style={{
                       backgroundColor: getZoneColor(event.zone),
                       fontWeight: event.zone === 'CPFINAL' ? 'bold' : 'normal'
                     }}
