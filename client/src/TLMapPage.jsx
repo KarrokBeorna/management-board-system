@@ -464,8 +464,8 @@ function PassedTodayModal({ zoneName, uniqueCount, totalRecords, details, onClos
                   <td style={tdStyle}>{detail.vin}</td>
                   <td style={tdStyle}>{detail.model}</td>
                   <td style={tdStyle}>{detail.seq}</td>
-                  <td style={tdStyle}>{detail.pass_time ? new Date(detail.pass_time).toLocaleTimeString('ru-RU') : ''}</td>
-                  <td style={tdStyle}>{detail.exit_time ? new Date(detail.exit_time).toLocaleTimeString('ru-RU') : ''}</td>
+                  <td style={tdStyle}>{detail.pass_time ? new Date(detail.pass_time).toLocaleString('ru-RU') : ''}</td>
+                  <td style={tdStyle}>{detail.exit_time ? new Date(detail.exit_time).toLocaleString('ru-RU') : ''}</td>
                   <td style={tdStyle}>{detail.duration !== null && detail.duration !== undefined ? formatDuration(detail.duration) : ''}</td>
                 </tr>
               ))}
@@ -526,7 +526,6 @@ function AnalyticsModal({ data, onClose, onApplyFilter }) {
     borderBottom: '1px solid #F0F0F5', color: '#1F2937', fontSize: 13,
   };
 
-  // Состояние для фильтра дат
   const [dateFrom, setDateFrom] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01T00:00`;
@@ -550,11 +549,11 @@ function AnalyticsModal({ data, onClose, onApplyFilter }) {
       '№': idx + 1,
       'VIN': row.vin,
       'Текущее расположение': row.current_zone,
-      'Суммарное время на TL (ч)': row.total_stay_hours,
+      'Суммарное время на TL': formatDuration(row.total_stay_seconds),
       'Накопительный %': row.cum_percent,
       'Ремзона вход': row.rem_in ? new Date(row.rem_in).toLocaleString('ru-RU') : '',
       'Ремзона выход': row.rem_out ? new Date(row.rem_out).toLocaleString('ru-RU') : '',
-      'Время в ремзоне (ч)': row.rem_duration_hours,
+      'Время в ремзоне': row.rem_duration_seconds ? formatDuration(row.rem_duration_seconds) : '—',
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -584,16 +583,15 @@ function AnalyticsModal({ data, onClose, onApplyFilter }) {
                 <th style={thStyle}>№</th>
                 <th style={thStyle}>VIN</th>
                 <th style={thStyle}>Текущее расположение</th>
-                <th style={thStyle}>Суммарное время на TL (ч)</th>
+                <th style={thStyle}>Суммарное время на TL</th>
                 <th style={thStyle}>Накопительный %</th>
                 <th style={thStyle}>Ремзона вход</th>
                 <th style={thStyle}>Ремзона выход</th>
-                <th style={thStyle}>Время в ремзоне (ч)</th>
+                <th style={thStyle}>Время в ремзоне</th>
               </tr>
             </thead>
             <tbody>
               {data.map((row, idx) => {
-                // Подсветка первых 20% строк (или пока кум. процент <= 80%)
                 const isTop20 = row.cum_percent <= 80;
                 return (
                   <tr key={idx} style={{
@@ -602,11 +600,11 @@ function AnalyticsModal({ data, onClose, onApplyFilter }) {
                     <td style={tdStyle}>{idx + 1}</td>
                     <td style={tdStyle}>{row.vin}</td>
                     <td style={tdStyle}>{row.current_zone}</td>
-                    <td style={tdStyle}>{row.total_stay_hours}</td>
+                    <td style={tdStyle}>{formatDuration(row.total_stay_seconds)}</td>
                     <td style={tdStyle}>{row.cum_percent}%</td>
                     <td style={tdStyle}>{row.rem_in ? new Date(row.rem_in).toLocaleString('ru-RU') : '—'}</td>
                     <td style={tdStyle}>{row.rem_out ? new Date(row.rem_out).toLocaleString('ru-RU') : '—'}</td>
-                    <td style={tdStyle}>{row.rem_duration_hours ?? '—'}</td>
+                    <td style={tdStyle}>{row.rem_duration_seconds ? formatDuration(row.rem_duration_seconds) : '—'}</td>
                   </tr>
                 );
               })}
@@ -629,7 +627,6 @@ export default function TLMapPage() {
   const [selectedPassedToday, setSelectedPassedToday] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
 
-  // Новые состояния для аналитики
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [analyticsData, setAnalyticsData] = useState([]);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -676,7 +673,6 @@ export default function TLMapPage() {
     return () => clearInterval(interval);
   }, [fetchData, fetchPassedToday]);
 
-  // Функция загрузки аналитики
   const loadAnalytics = async (dateFrom, dateTo) => {
     setAnalyticsLoading(true);
     try {
@@ -712,36 +708,36 @@ export default function TLMapPage() {
   const processedData = useMemo(() => {
     const zonesMap = {};
     const detailsMap = {};
-    
+
     rawData.forEach(row => {
       const zone = row.vehicle_status;
       const spec = formatSpec(row.spec);
       const model = row.model || spec.split('.')[0];
-      
+
       if (!zone || !ZONE_ORDER.includes(zone)) return;
-      
+
       const detailsKey = `${zone}_${spec}`;
       if (!detailsMap[detailsKey]) detailsMap[detailsKey] = [];
       detailsMap[detailsKey].push({
         vin: row.vin, model, spec, lot: row.lot, color: row.color, seq: row.seq,
         entry_time: row.entry_time,
       });
-      
+
       if (!zonesMap[zone]) zonesMap[zone] = {};
       if (!zonesMap[zone][spec]) zonesMap[zone][spec] = 0;
       zonesMap[zone][spec]++;
     });
-    
+
     const zones = ZONE_ORDER.map(zoneName => ({
       zoneName,
-      items: zonesMap[zoneName] 
+      items: zonesMap[zoneName]
         ? Object.keys(zonesMap[zoneName]).map(spec => ({
             label: spec,
             count: zonesMap[zoneName][spec],
           }))
         : [],
     }));
-    
+
     return { zones, detailsMap };
   }, [rawData]);
 
@@ -771,7 +767,7 @@ export default function TLMapPage() {
       const res = await fetch(`${API_BASE}/api/tl-map-passed-today-details?zone=${zoneName}`);
       if (!res.ok) throw new Error('Ошибка загрузки');
       const json = await res.json();
-      
+
       setSelectedPassedToday({
         zoneName,
         uniqueCount: passedTodayData[zoneName] || 0,
@@ -835,7 +831,7 @@ export default function TLMapPage() {
         .items-scroll::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
         .items-scroll { scrollbar-width: thin; scrollbar-color: #d1d5db transparent; }
       `}</style>
-      
+
       <div style={headerStyle}>
         <h1 style={titleStyle}>Наполнение постов Testline</h1>
         <div style={headerButtonsStyle}>
