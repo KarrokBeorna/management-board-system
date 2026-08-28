@@ -666,10 +666,9 @@ function VINHistoryModal({ vin, onClose }) {
   };
 
   const getZoneColor = (zone) => {
-    if (zone.startsWith('REP')) return '#FDE68A';
-    if (zone === 'TLWA' || zone === 'TLRT' || zone === 'TLADAS' || zone === 'TLTT') return '#BFDBFE';
-    if (zone === 'CPFINAL') return '#A7F3D0';
-    return '#FFFFFF';
+    if (zone.startsWith('REP')) return '#FCA5A5';   // красный для ремзон
+    if (zone === 'TLWA' || zone === 'TLRT' || zone === 'TLADAS' || zone === 'TLTT') return '#86EFAC'; // зелёный для TL-постов
+    return '#FFFFFF';                               // белый по умолчанию (включая CPFINAL)
   };
 
   useEffect(() => {
@@ -726,7 +725,13 @@ function VINHistoryModal({ vin, onClose }) {
               </thead>
               <tbody>
                 {history.map((event, idx) => (
-                  <tr key={idx} style={{ backgroundColor: getZoneColor(event.zone) }}>
+                  <tr 
+                    key={idx} 
+                    style={{ 
+                      backgroundColor: getZoneColor(event.zone),
+                      fontWeight: event.zone === 'CPFINAL' ? 'bold' : 'normal'
+                    }}
+                  >
                     <td style={tdStyle}>{idx + 1}</td>
                     <td style={tdStyle}>{new Date(event.event_time).toLocaleString('ru-RU')}</td>
                     <td style={tdStyle}>{event.zone}</td>

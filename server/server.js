@@ -3671,26 +3671,59 @@ app.get('/api/tl-map-vin-history', async (req, res) => {
     const { vin } = req.query;
     if (!vin) return res.status(400).json({ error: 'VIN не указан' });
 
-    const sql = `
-      SELECT 
-        vin,
-        node_nature AS zone,
-        gmt_create AS event_time
-      FROM tm_vhc_test_line_movement
-      WHERE vin = ?
-        AND is_deleted = 0
-      ORDER BY gmt_create ASC
-    `;
-    const [rows] = await mesPool.query(sql, [vin]);
+    // 1. TL и REP зоны из tm_vhc_test_line_movement
+    const [tlRows] = await mesPool.query(
+      `SELECT 
+         vin,
+         node_nature AS zone,
+         gmt_create AS event_time
+       FROM tm_vhc_test_line_movement
+       WHERE vin = ? AND is_deleted = 0
+       ORDER BY gmt_create ASC`,
+      [vin]
+    );
 
-    const result = rows.map(r => ({
-      vin: r.vin,
-      zone: r.zone,
-      event_time: r.event_time,
-      source: 'TL Movement'
-    }));
+    // 2. MES чекпоинты из ti_mes_movement
+    const [mesRows] = await mesPool.query(
+      `SELECT 
+         vin,
+         CASE 
+           WHEN uloc_no = 'AGMBS01002' THEN 'CP5'
+           WHEN uloc_no = 'AGMPS01002' THEN 'CP6'
+           WHEN uloc_no = 'AGMAS01001' THEN 'TRIMIN'
+           WHEN uloc_no = 'AGMAS01003' THEN 'CP7'
+           WHEN uloc_no = 'CP72' THEN 'CP72'
+           WHEN uloc_no = 'CPFINAL' THEN 'CPFINAL'
+           WHEN uloc_no = 'AGMAS01004' THEN 'CP8'
+           ELSE uloc_no
+         END AS zone,
+         scan_time AS event_time
+       FROM ti_mes_movement
+       WHERE vin = ? AND is_deleted = 0
+       ORDER BY scan_time ASC`,
+      [vin]
+    );
 
-    res.json(result);
+    // Формируем единый массив с указанием источника
+    const history = [
+      ...tlRows.map(r => ({
+        vin: r.vin,
+        zone: r.zone,
+        event_time: r.event_time,
+        source: 'TL Movement'
+      })),
+      ...mesRows.map(r => ({
+        vin: r.vin,
+        zone: r.zone,
+        event_time: r.event_time,
+        source: 'MES Movement'
+      }))
+    ];
+
+    // Сортируем по времени
+    history.sort((a, b) => new Date(a.event_time) - new Date(b.event_time));
+
+    res.json(history);
   } catch (err) {
     console.error('Ошибка TL Map VIN history:', err.message);
     res.status(500).json({ error: err.message });
