@@ -3704,6 +3704,24 @@ app.get('/api/tl-map-vin-history', async (req, res) => {
       [vin]
     );
 
+    // 3. Складские события Inbound/Outbound из tv_biz_storage_car
+    const [lesRows] = await lesPool.query(
+      `SELECT 
+         vin,
+         'Inbound' AS zone,
+         in_storage_time AS event_time
+       FROM tv_biz_storage_car
+       WHERE vin = ? AND in_storage_time IS NOT NULL
+       UNION ALL
+       SELECT 
+         vin,
+         'Outbound' AS zone,
+         out_storage_time AS event_time
+       FROM tv_biz_storage_car
+       WHERE vin = ? AND out_storage_time IS NOT NULL`,
+      [vin, vin]
+    );
+
     // Формируем единый массив с указанием источника
     const history = [
       ...tlRows.map(r => ({
@@ -3717,6 +3735,12 @@ app.get('/api/tl-map-vin-history', async (req, res) => {
         zone: r.zone,
         event_time: r.event_time,
         source: 'MES Movement'
+      })),
+      ...lesRows.map(r => ({
+        vin: r.vin,
+        zone: r.zone,
+        event_time: r.event_time,
+        source: 'LES Storage'
       }))
     ];
 
