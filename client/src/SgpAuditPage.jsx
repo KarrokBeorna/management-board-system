@@ -182,6 +182,7 @@ export default function SgpAuditPage() {
   const [neighborData, setNeighborData] = useState([]);
   const [neighborTargetTime, setNeighborTargetTime] = useState(null);
   const [neighborLocations, setNeighborLocations] = useState({});
+  const [neighborModelComplect, setNeighborModelComplect] = useState({});
 
   // Analytics (скрыта)
   const [auditStartDate, setAuditStartDate] = useState('');
@@ -507,6 +508,39 @@ export default function SgpAuditPage() {
     }
   };
 
+  // ====== Получение модели и комплектации (новый метод) ======
+  const fetchModelComplect = async (vinList) => {
+    if (!vinList || vinList.length === 0) return {};
+    try {
+      const uniqueVins = [...new Set(vinList.filter(v => v && v !== 'N/A'))];
+      if (uniqueVins.length === 0) return {};
+
+      const batchSize = 200;
+      const batches = [];
+      for (let i = 0; i < uniqueVins.length; i += batchSize) {
+        batches.push(uniqueVins.slice(i, i + batchSize));
+      }
+
+      const allResponses = await Promise.all(
+        batches.map(async (batch) => {
+          const res = await fetch(`${API_BASE}/api/vehicles-model-complect?vins=${batch.join(',')}`);
+          if (!res.ok) throw new Error('Ошибка загрузки модели/комплектации');
+          return res.json();
+        })
+      );
+
+      const map = {};
+      allResponses.forEach(modelsMap => {
+        Object.keys(modelsMap).forEach(vin => { map[vin] = modelsMap[vin]; });
+      });
+
+      return map;
+    } catch (err) {
+      console.error('Ошибка получения моделей и комплектаций:', err);
+      return {};
+    }
+  };
+
   // ====== Загрузка соседей по точке ======
   const loadNeighbors = async () => {
     if (!neighborVin.trim()) return;
@@ -515,6 +549,7 @@ export default function SgpAuditPage() {
     setNeighborData([]);
     setNeighborTargetTime(null);
     setNeighborLocations({});
+    setNeighborModelComplect({});
     try {
       const params = new URLSearchParams({
         checkpoint: neighborCheckpoint,
@@ -532,6 +567,12 @@ export default function SgpAuditPage() {
         const vins = json.data.map(item => item.vin);
         const locInfo = await fetchCurrentLocations(vins);
         setNeighborLocations(locInfo);
+
+        const modelComplectInfo = await fetchModelComplect(vins);
+        setNeighborModelComplect(modelComplectInfo);
+      } else {
+        setNeighborLocations({});
+        setNeighborModelComplect({});
       }
     } catch (err) {
       console.error('Ошибка neighbors:', err);
@@ -544,19 +585,24 @@ export default function SgpAuditPage() {
 
   const exportNeighborsToExcel = () => {
     if (!neighborData.length) return;
-    const exportData = neighborData.map(item => ({
-      'VIN': item.vin,
-      [`Время ${neighborCheckpoint}`]: formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time),
-      'Текущее расположение': neighborLocations[item.vin]
-        ? neighborLocations[item.vin].isInStorage
-          ? neighborLocations[item.vin].storageString
-          : neighborLocations[item.vin].checkpoint || '-'
-        : '-',
-    }));
+    const exportData = neighborData.map(item => {
+      const details = neighborModelComplect[item.vin] || {};
+      return {
+        'VIN': item.vin,
+        [`Время ${neighborCheckpoint}`]: formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time),
+        'Текущее расположение': neighborLocations[item.vin]
+          ? neighborLocations[item.vin].isInStorage
+            ? neighborLocations[item.vin].storageString
+            : neighborLocations[item.vin].checkpoint || '-'
+          : '-',
+        'Модель': details.model || '-',
+        'Комплектация': details.material_desc || '-',
+      };
+    });
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Соседи');
-    ws['!cols'] = [{ wch: 20 }, { wch: 25 }, { wch: 25 }];
+    ws['!cols'] = [{ wch: 20 }, { wch: 25 }, { wch: 25 }, { wch: 15 }, { wch: 20 }];
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     XLSX.writeFile(wb, `Соседи_${neighborCheckpoint}_${dateStr}.xlsx`);
@@ -577,9 +623,13 @@ export default function SgpAuditPage() {
         else locationStr = loc.checkpoint || '-';
       }
 
+      const details = neighborModelComplect[item.vin] || {};
+
       const rowData = {
         'VIN': item.vin,
         'Текущее расположение': locationStr,
+        'Модель': details.model || '-',
+        'Комплектация': details.material_desc || '-',
       };
 
       const isAfter = loc && (loc.checkpoint === 'CP8' || loc.isInStorage || loc.isSold);
@@ -985,9 +1035,6 @@ export default function SgpAuditPage() {
         <button onClick={() => setActiveTab('neighbors')} style={tabStyle(activeTab === 'neighbors')}>
           Соседи по точке
         </button>
-        {/* <button onClick={() => setActiveTab('analytics')} style={tabStyle(activeTab === 'analytics')}>
-          Аналитика по аудиту
-        </button> */}
       </div>
 
       {/* ========== Time Points ========== */}
@@ -1280,6 +1327,8 @@ export default function SgpAuditPage() {
                     <th style={{ ...thStyle, position: 'sticky', top: 0 }}>VIN</th>
                     <th style={{ ...thStyle, position: 'sticky', top: 0 }}>Время {neighborCheckpoint}</th>
                     <th style={{ ...thStyle, position: 'sticky', top: 0 }}>Текущее расположение</th>
+                    <th style={{ ...thStyle, position: 'sticky', top: 0 }}>Модель</th>
+                    <th style={{ ...thStyle, position: 'sticky', top: 0 }}>Комплектация</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1296,6 +1345,7 @@ export default function SgpAuditPage() {
                         displayLocation = loc.checkpoint || '-';
                       }
                     }
+                    const details = neighborModelComplect[item.vin] || {};
                     return (
                       <tr 
                         key={idx} 
@@ -1308,6 +1358,8 @@ export default function SgpAuditPage() {
                           {formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time)}
                         </td>
                         <td style={tdStyle}>{displayLocation}</td>
+                        <td style={tdStyle}>{details.model || '-'}</td>
+                        <td style={tdStyle}>{details.material_desc || '-'}</td>
                       </tr>
                     );
                   })}

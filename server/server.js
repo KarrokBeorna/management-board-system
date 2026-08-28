@@ -4854,6 +4854,43 @@ app.get('/api/vehicles-models', async (req, res) => {
   }
 });
 
+app.get('/api/vehicles-model-complect', async (req, res) => {
+  try {
+    const { vins } = req.query;
+    if (!vins) return res.status(400).json({ error: 'vins обязателен' });
+    const vinList = vins.split(',').map(v => v.trim()).filter(Boolean);
+    if (vinList.length === 0) return res.json({});
+
+    const placeholders = vinList.map(() => '?').join(',');
+
+    const [rows] = await mesPool.query(
+      `SELECT 
+         too.vin,
+         too.product AS model,
+         tbmr.material_desc AS material_desc
+       FROM tm_ofm_order too
+       LEFT JOIN tm_vhc_vehicle tvv ON too.vin = tvv.vin
+       LEFT JOIN tm_bas_material_relation tbmr 
+         ON tbmr.material_no = too.material_no AND tbmr.is_deleted = 0
+       WHERE too.vin IN (${placeholders})`,
+      vinList
+    );
+
+    const map = {};
+    rows.forEach(r => { 
+      map[r.vin] = { 
+        model: r.model || '-', 
+        material_desc: r.material_desc || '-' 
+      }; 
+    });
+
+    res.json(map);
+  } catch (err) {
+    console.error('Ошибка vehicles-model-complect:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/drr-cp7-dashboard', async (req, res) => {
   try {
     const { filter = 'all', startTime, endTime } = req.query;
