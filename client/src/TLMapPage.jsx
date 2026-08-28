@@ -274,7 +274,8 @@ const formatDuration = (seconds) => {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  return `${days}:${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  const secs = Math.floor(seconds % 60);
+  return `${days}:${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 };
 
 // ====== МОДАЛЬНОЕ ОКНО ДЕТАЛЕЙ ПО ЗОНЕ ======
@@ -353,7 +354,7 @@ function DetailsModal({ zoneName, label, count, details, onClose }) {
                 <th style={thStyle}>LOT</th>
                 <th style={thStyle}>COLOR</th>
                 <th style={thStyle}>SEQ</th>
-                <th style={thStyle}>Время входа</th>
+                <th style={thStyle}>Время входа (ДД.ММ.ГГГГ, ЧЧ:ММ:СС)</th>
               </tr>
             </thead>
             <tbody>
@@ -453,9 +454,9 @@ function PassedTodayModal({ zoneName, uniqueCount, totalRecords, details, onClos
                 <th style={thStyle}>VIN</th>
                 <th style={thStyle}>MODEL</th>
                 <th style={thStyle}>SEQ</th>
-                <th style={thStyle}>Время входа</th>
-                <th style={thStyle}>Время выхода</th>
-                <th style={thStyle}>Время на посту</th>
+                <th style={thStyle}>Время входа (ДД.ММ.ГГГГ, ЧЧ:ММ:СС)</th>
+                <th style={thStyle}>Время выхода (ДД.ММ.ГГГГ, ЧЧ:ММ:СС)</th>
+                <th style={thStyle}>Время на посту (Д:Ч:М:С)</th>
               </tr>
             </thead>
             <tbody>
@@ -478,7 +479,7 @@ function PassedTodayModal({ zoneName, uniqueCount, totalRecords, details, onClos
 }
 
 // ====== МОДАЛЬНОЕ ОКНО АНАЛИТИКИ (ПАРЕТО) ======
-function AnalyticsModal({ data, onClose, onApplyFilter }) {
+function AnalyticsModal({ data, onClose, onApplyFilter, onVinClick }) {
   const modalOverlayStyle = {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -583,11 +584,11 @@ function AnalyticsModal({ data, onClose, onApplyFilter }) {
                 <th style={thStyle}>№</th>
                 <th style={thStyle}>VIN</th>
                 <th style={thStyle}>Текущее расположение</th>
-                <th style={thStyle}>Суммарное время на TL</th>
+                <th style={thStyle}>Суммарное время на TL (Д:Ч:М:С)</th>
                 <th style={thStyle}>Накопительный %</th>
-                <th style={thStyle}>Ремзона вход</th>
-                <th style={thStyle}>Ремзона выход</th>
-                <th style={thStyle}>Время в ремзоне</th>
+                <th style={thStyle}>Ремзона вход (ДД.ММ.ГГГГ, ЧЧ:ММ:СС)</th>
+                <th style={thStyle}>Ремзона выход (ДД.ММ.ГГГГ, ЧЧ:ММ:СС)</th>
+                <th style={thStyle}>Время в ремзоне (Д:Ч:М:С)</th>
               </tr>
             </thead>
             <tbody>
@@ -598,7 +599,7 @@ function AnalyticsModal({ data, onClose, onApplyFilter }) {
                     backgroundColor: isTop20 ? '#FEF9C3' : (idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'),
                   }}>
                     <td style={tdStyle}>{idx + 1}</td>
-                    <td style={tdStyle}>{row.vin}</td>
+                    <td style={{ ...tdStyle, cursor: 'pointer', color: '#2563EB', textDecoration: 'underline' }} onClick={() => onVinClick(row.vin)}>{row.vin}</td>
                     <td style={tdStyle}>{row.current_zone}</td>
                     <td style={tdStyle}>{formatDuration(row.total_stay_seconds)}</td>
                     <td style={tdStyle}>{row.cum_percent}%</td>
@@ -611,6 +612,117 @@ function AnalyticsModal({ data, onClose, onApplyFilter }) {
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ====== МОДАЛЬНОЕ ОКНО ИСТОРИИ VIN ======
+function VINHistoryModal({ vin, onClose }) {
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const modalOverlayStyle = {
+    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 1100,
+  };
+  const modalContentStyle = {
+    backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24,
+    maxWidth: 900, width: '90%', maxHeight: '85vh',
+    boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+    display: 'flex', flexDirection: 'column',
+  };
+  const modalHeaderStyle = {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 16, gap: 12, flexWrap: 'wrap',
+  };
+  const modalTitleStyle = {
+    fontSize: 20, fontWeight: 800, color: '#1F2937', margin: 0,
+  };
+  const closeButtonStyle = {
+    padding: '8px 12px', borderRadius: 8, border: 'none',
+    background: '#F3F4F6', color: '#374151', fontSize: 16,
+    fontWeight: 700, cursor: 'pointer',
+  };
+  const tableContainerStyle = { overflowY: 'auto', flex: 1 };
+  const thStyle = {
+    padding: '10px 12px', textAlign: 'left', fontWeight: 600,
+    color: '#374151', borderBottom: '2px solid #E5E7EB',
+    background: '#F9FAFB', whiteSpace: 'nowrap',
+    position: 'sticky', top: 0, zIndex: 5,
+  };
+  const tdStyle = {
+    padding: '8px 12px', textAlign: 'left',
+    borderBottom: '1px solid #F0F0F5', color: '#1F2937', fontSize: 13,
+  };
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/tl-map-vin-history?vin=${vin}`);
+        if (!res.ok) throw new Error('Ошибка загрузки истории');
+        const data = await res.json();
+        setHistory(data);
+      } catch (err) {
+        console.error('Ошибка истории VIN:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchHistory();
+  }, [vin]);
+
+  const handleExport = () => {
+    const exportData = history.map((event, idx) => ({
+      '№': idx + 1,
+      'Время': new Date(event.event_time).toLocaleString('ru-RU'),
+      'Зона': event.zone,
+      'Источник': event.source,
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `История_${vin}`);
+    XLSX.writeFile(wb, `История_${vin}.xlsx`);
+  };
+
+  return (
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
+        <div style={modalHeaderStyle}>
+          <h2 style={modalTitleStyle}>История перемещений VIN: {vin}</h2>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={{ ...exportButtonStyle, padding: '8px 16px', fontSize: 13 }} onClick={handleExport}>📥 Экспорт</button>
+            <button style={closeButtonStyle} onClick={onClose}>✕</button>
+          </div>
+        </div>
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 20 }}>Загрузка...</div>
+        ) : (
+          <div style={tableContainerStyle}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>№</th>
+                  <th style={thStyle}>Время (ДД.ММ.ГГГГ, ЧЧ:ММ:СС)</th>
+                  <th style={thStyle}>Зона</th>
+                  <th style={thStyle}>Источник</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((event, idx) => (
+                  <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                    <td style={tdStyle}>{idx + 1}</td>
+                    <td style={tdStyle}>{new Date(event.event_time).toLocaleString('ru-RU')}</td>
+                    <td style={tdStyle}>{event.zone}</td>
+                    <td style={tdStyle}>{event.source}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -630,6 +742,8 @@ export default function TLMapPage() {
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [analyticsData, setAnalyticsData] = useState([]);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+
+  const [selectedVinHistory, setSelectedVinHistory] = useState(null);
 
   const ALL_MODELS = ['A8', 'J6', 'J7', 'J8', 'MX'];
 
@@ -703,6 +817,14 @@ export default function TLMapPage() {
 
   const handleApplyAnalyticsFilter = (from, to) => {
     loadAnalytics(from, to);
+  };
+
+  const handleVinClick = (vin) => {
+    setSelectedVinHistory(vin);
+  };
+
+  const handleCloseVinHistory = () => {
+    setSelectedVinHistory(null);
   };
 
   const processedData = useMemo(() => {
@@ -926,6 +1048,14 @@ export default function TLMapPage() {
           data={analyticsData}
           onClose={handleCloseAnalytics}
           onApplyFilter={handleApplyAnalyticsFilter}
+          onVinClick={handleVinClick}
+        />
+      )}
+
+      {selectedVinHistory && (
+        <VINHistoryModal
+          vin={selectedVinHistory}
+          onClose={handleCloseVinHistory}
         />
       )}
     </div>
