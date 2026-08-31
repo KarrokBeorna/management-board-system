@@ -3509,7 +3509,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
 
     const placeholders = vins.map(() => '?').join(',');
 
-    // ---------- 2. Получаем времена CP72 и CPFINAL (или последнюю точку) ----------
+    // ---------- 2. Получаем времена CP72 и CPFINAL ----------
     const cp72TimesSql = `
       SELECT vin, MIN(scan_time) AS cp72_time
       FROM ti_mes_movement
@@ -3534,22 +3534,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
     const cpfinalTimeMap = {};
     cpfinalTimesRows.forEach(r => { cpfinalTimeMap[r.vin] = r.cpfinal_time; });
 
-    // Для тех, у кого нет CPFINAL, найдём последнюю точку после CP72
-    const lastPointAfterCp72Sql = `
-      SELECT t.vin, MAX(t.scan_time) AS last_time
-      FROM ti_mes_movement t
-      WHERE t.vin IN (${placeholders})
-        AND t.is_deleted = 0
-        AND t.scan_time > (
-          SELECT MIN(scan_time) FROM ti_mes_movement WHERE vin = t.vin AND uloc_no = 'CP72' AND is_deleted = 0
-        )
-      GROUP BY t.vin
-    `;
-    const [lastPointRows] = await mesPool.query(lastPointAfterCp72Sql, vins);
-    const lastPointMap = {};
-    lastPointRows.forEach(r => { lastPointMap[r.vin] = r.last_time; });
-
-    // ---------- 3. Все движения этих VIN (для ремзон и location) ----------
+    // ---------- 3. Все движения TL/REP/CPA из tm_vhc_test_line_movement ----------
     const movementSql = `
       SELECT vin, node_nature, gmt_create
       FROM tm_vhc_test_line_movement
@@ -3567,28 +3552,33 @@ app.get('/api/tl-map-analytics', async (req, res) => {
       }
     });
 
-    // ---------- 4. Данные о чекпоинтах из MES (для определения текущего расположения) ----------
-    const locationSql = `
-      SELECT
-        t.vin,
-        MAX(IF(t.uloc_no = 'CP8', t.scan_time, NULL)) AS CP8,
-        MAX(IF(t.uloc_no = 'CPFINAL', t.scan_time, NULL)) AS CPFINAL,
-        MAX(IF(t.uloc_no = 'CP72', t.scan_time, NULL)) AS CP72,
-        MAX(IF(t.uloc_no = 'AGMAS01003', t.scan_time, NULL)) AS CP7,
-        MAX(IF(t.uloc_no = 'AGMAS01001', t.scan_time, NULL)) AS TRIMIN,
-        MAX(IF(t.uloc_no = 'AGMPS01002', t.scan_time, NULL)) AS CP6,
-        MAX(IF(t.uloc_no = 'AGMBS01002', t.scan_time, NULL)) AS CP5
-      FROM ti_mes_movement t
-      WHERE t.vin IN (${placeholders})
-        AND t.is_deleted = 0
-      GROUP BY t.vin
+    // ---------- 4. Все MES-точки (CP5..CP8, CP72, CPFINAL) ----------
+    const mesAllSql = `
+      SELECT vin, uloc_no, scan_time
+      FROM ti_mes_movement
+      WHERE vin IN (${placeholders})
+        AND is_deleted = 0
+      ORDER BY vin, scan_time ASC
     `;
-    // Исправляем выборку CP8: используем правильный код
-    const locationSqlCorrected = locationSql.replace("MAX(IF(t.uloc_no = 'CP8', t.scan_time, NULL)) AS CP8", "MAX(IF(t.uloc_no = 'AGMAS01004', t.scan_time, NULL)) AS CP8");
-    const [locRows] = await mesPool.query(locationSqlCorrected, vins);
-    const locDataByVin = new Map(locRows.map(r => [r.vin, r]));
+    const [mesAllRows] = await mesPool.query(mesAllSql, vins);
+    const mesPointsByVin = {};
+    vins.forEach(vin => { mesPointsByVin[vin] = []; });
+    mesAllRows.forEach(r => {
+      if (mesPointsByVin[r.vin]) {
+        mesPointsByVin[r.vin].push({
+          zone: r.uloc_no === 'AGMBS01002' ? 'CP5' :
+                r.uloc_no === 'AGMPS01002' ? 'CP6' :
+                r.uloc_no === 'AGMAS01001' ? 'TRIMIN' :
+                r.uloc_no === 'AGMAS01003' ? 'CP7' :
+                r.uloc_no === 'CP72' ? 'CP72' :
+                r.uloc_no === 'CPFINAL' ? 'CPFINAL' :
+                r.uloc_no === 'AGMAS01004' ? 'CP8' : r.uloc_no,
+          time: new Date(r.scan_time)
+        });
+      }
+    });
 
-    // ---------- 5. Данные о складе ----------
+    // ---------- 5. Складские точки (Inbound/Outbound) ----------
     const [lesRows] = await lesPool.query(
       `SELECT tbs.vin, tbs.in_storage_time, tbs.out_storage_time
        FROM tv_biz_storage_car tbs
@@ -3597,14 +3587,48 @@ app.get('/api/tl-map-analytics', async (req, res) => {
     );
     const lesMap = new Map(lesRows.map(r => [r.vin, r]));
 
-    // ---------- 6. Определение текущего расположения и ремзоны ----------
-    const remMap = {};
-    const currentZoneMap = {};
+    // ---------- 6. Для каждого VIN определяем текущее расположение, ремзону и суммарное время ----------
+    const result = [];
 
     for (const vin of vins) {
-      const moves = movementsByVin[vin];
+      const moves = movementsByVin[vin] || [];
+      const mesPoints = mesPointsByVin[vin] || [];
+      const les = lesMap.get(vin);
 
-      // --- Ремзона: последняя REP-зона и следующая запись после неё ---
+      const cp72Time = cp72TimeMap[vin] ? new Date(cp72TimeMap[vin]) : null;
+      const cpfinalTime = cpfinalTimeMap[vin] ? new Date(cpfinalTimeMap[vin]) : null;
+
+      // --- Все точки для определения последней (после CP72) ---
+      const allPointsAfterCp72 = [];
+      if (cp72Time) {
+        mesPoints.forEach(p => {
+          if (p.time > cp72Time) allPointsAfterCp72.push(p);
+        });
+        moves.forEach(m => {
+          if (m.time > cp72Time) allPointsAfterCp72.push(m);
+        });
+        if (les) {
+          if (les.in_storage_time && new Date(les.in_storage_time) > cp72Time) {
+            allPointsAfterCp72.push({ zone: 'Inbound', time: new Date(les.in_storage_time) });
+          }
+          if (les.out_storage_time && new Date(les.out_storage_time) > cp72Time) {
+            allPointsAfterCp72.push({ zone: 'Outbound', time: new Date(les.out_storage_time) });
+          }
+        }
+      }
+
+      // --- Суммарное время на TL: CPFINAL - CP72, либо последняя точка после CP72 ---
+      let totalSec = 0;
+      if (cp72Time && cpfinalTime) {
+        totalSec = Math.floor((cpfinalTime - cp72Time) / 1000);
+        if (totalSec < 0) totalSec = 0;
+      } else if (cp72Time && allPointsAfterCp72.length > 0) {
+        const lastTime = allPointsAfterCp72.reduce((max, p) => p.time > max ? p.time : max, allPointsAfterCp72[0].time);
+        totalSec = Math.floor((lastTime - cp72Time) / 1000);
+        if (totalSec < 0) totalSec = 0;
+      }
+
+      // --- Ремзона: последняя REP-зона, выход = первая не REP после неё ---
       let lastRepIndex = -1;
       for (let i = moves.length - 1; i >= 0; i--) {
         if (moves[i].zone.startsWith('REP')) {
@@ -3612,96 +3636,57 @@ app.get('/api/tl-map-analytics', async (req, res) => {
           break;
         }
       }
+
+      let remIn = null;
+      let remOut = null;
+      let remDurationSeconds = null;
+
       if (lastRepIndex >= 0) {
-        const remIn = moves[lastRepIndex].time;
-        let remOut = null;
-        if (lastRepIndex + 1 < moves.length) {
-          remOut = moves[lastRepIndex + 1].time;
+        remIn = moves[lastRepIndex].time;
+        // Ищем первый выход (не REP) после lastRepIndex
+        for (let j = lastRepIndex + 1; j < moves.length; j++) {
+          if (!moves[j].zone.startsWith('REP')) {
+            remOut = moves[j].time;
+            break;
+          }
         }
-        let remDurationSeconds = null;
-        if (remOut && remOut > remIn) {
+        if (remOut) {
           const diffMs = remOut - remIn;
           if (diffMs > 0) remDurationSeconds = Math.floor(diffMs / 1000);
+          else remDurationSeconds = null; // если выход раньше входа (ошибка данных)
         }
-        // Если разница нулевая или выход не найден, время не выводим
-        if (remDurationSeconds === 0) remDurationSeconds = null;
-        remMap[vin] = {
-          rem_in: remIn.toISOString(),
-          rem_out: remOut ? remOut.toISOString() : null,
-          rem_duration_seconds: remDurationSeconds,
-        };
-      } else {
-        remMap[vin] = { rem_in: null, rem_out: null, rem_duration_seconds: null };
       }
 
       // --- Текущее расположение: самая поздняя точка среди всех источников ---
-      const points = [];
-      const loc = locDataByVin.get(vin);
-      if (loc) {
-        if (loc.CP5) points.push({ label: 'CP5', time: new Date(loc.CP5) });
-        if (loc.CP6) points.push({ label: 'CP6', time: new Date(loc.CP6) });
-        if (loc.TRIMIN) points.push({ label: 'TRIMIN', time: new Date(loc.TRIMIN) });
-        if (loc.CP7) points.push({ label: 'CP7', time: new Date(loc.CP7) });
-        if (loc.CP72) points.push({ label: 'CP72', time: new Date(loc.CP72) });
-        if (loc.CPFINAL) points.push({ label: 'CPFINAL', time: new Date(loc.CPFINAL) });
-        if (loc.CP8) points.push({ label: 'CP8', time: new Date(loc.CP8) });
-      }
-      const les = lesMap.get(vin);
+      const allPointsForLocation = [
+        ...mesPoints,
+        ...moves,
+      ];
       if (les) {
-        if (les.in_storage_time) points.push({ label: 'Inbound', time: new Date(les.in_storage_time) });
-        if (les.out_storage_time) points.push({ label: 'Outbound', time: new Date(les.out_storage_time) });
+        if (les.in_storage_time) allPointsForLocation.push({ zone: 'Inbound', time: new Date(les.in_storage_time) });
+        if (les.out_storage_time) allPointsForLocation.push({ zone: 'Outbound', time: new Date(les.out_storage_time) });
       }
-      // Добавляем TL и REP из movements
-      moves.forEach(m => {
-        if (['TLWA', 'TLRT', 'TLADAS', 'TLTT'].includes(m.zone) || m.zone.startsWith('REP')) {
-          points.push({ label: m.zone, time: m.time });
-        }
-      });
 
       let currentZone = 'Планирование';
       let maxTime = null;
-      for (const p of points) {
+      allPointsForLocation.forEach(p => {
         if (!maxTime || p.time > maxTime) {
           maxTime = p.time;
-          currentZone = p.label;
+          currentZone = p.zone;
         }
-      }
-      currentZoneMap[vin] = currentZone;
-    }
+      });
 
-    // ---------- 7. Расчёт суммарного времени на TL (CPFINAL - CP72) ----------
-    const vinTotalSeconds = {};
-    for (const vin of vins) {
-      const cp72Time = cp72TimeMap[vin] ? new Date(cp72TimeMap[vin]) : null;
-      const cpfinalTime = cpfinalTimeMap[vin] ? new Date(cpfinalTimeMap[vin]) : null;
-      let totalSec = 0;
-
-      if (cp72Time && cpfinalTime) {
-        totalSec = Math.floor((cpfinalTime - cp72Time) / 1000);
-        if (totalSec < 0) totalSec = 0;
-      } else if (cp72Time && lastPointMap[vin]) {
-        const lastTime = new Date(lastPointMap[vin]);
-        totalSec = Math.floor((lastTime - cp72Time) / 1000);
-        if (totalSec < 0) totalSec = 0;
-      }
-      vinTotalSeconds[vin] = totalSec;
-    }
-
-    // ---------- 8. Сборка результата ----------
-    const result = vins.map(vin => {
-      const totalSec = vinTotalSeconds[vin] || 0;
-      const rem = remMap[vin];
-      return {
+      result.push({
         vin,
-        current_zone: currentZoneMap[vin],
+        current_zone: currentZone,
         total_stay_seconds: totalSec,
-        rem_in: rem.rem_in,
-        rem_out: rem.rem_out,
-        rem_duration_seconds: rem.rem_duration_seconds,
-      };
-    });
+        rem_in: remIn ? remIn.toISOString() : null,
+        rem_out: remOut ? remOut.toISOString() : null,
+        rem_duration_seconds: remDurationSeconds,
+      });
+    }
 
-    // Сортировка по убыванию времени
+    // Сортировка по убыванию суммарного времени
     result.sort((a, b) => b.total_stay_seconds - a.total_stay_seconds);
 
     // Кумулятивный процент
