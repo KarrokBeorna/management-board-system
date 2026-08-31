@@ -3628,7 +3628,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
         if (totalSec < 0) totalSec = 0;
       }
 
-      // --- Ремзоны: суммируем все завершённые сессии ---
+      // --- Ремзоны: суммируем все завершённые сессии + текущая, если есть ---
       let totalRemSeconds = 0;
       let inRem = false;
       let currentRemStart = null;
@@ -3658,8 +3658,15 @@ app.get('/api/tl-map-analytics', async (req, res) => {
         }
       }
 
-      // Если последняя сессия не завершена (ещё в ремзоне)
+      // Если последняя сессия не завершена (сейчас в ремзоне), добавляем время до текущего момента
       const stillInRem = inRem;
+      if (stillInRem && currentRemStart) {
+        const now = new Date();
+        const diffMs = now - currentRemStart;
+        if (diffMs > 0) {
+          totalRemSeconds += Math.floor(diffMs / 1000);
+        }
+      }
 
       // --- Текущее расположение: самая поздняя точка среди всех источников ---
       const allPointsForLocation = [
@@ -3685,7 +3692,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
         current_zone: currentZone,
         total_stay_seconds: totalSec,
         rem_in: lastRemStart ? lastRemStart.toISOString() : null,
-        rem_out: lastRemExit ? lastRemExit.toISOString() : null,
+        rem_out: stillInRem ? null : (lastRemExit ? lastRemExit.toISOString() : null),
         rem_duration_seconds: totalRemSeconds > 0 ? totalRemSeconds : null,
         in_rem: stillInRem,
       });
