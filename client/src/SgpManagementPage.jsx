@@ -595,105 +595,109 @@ export default function SgpManagementPage() {
         </div>
       </div>
 
-      {/* Фильтры */}
-      <div style={filterContainerStyle}>
-        <div style={filterGroupStyle}>
-          <span style={filterLabelStyle}>Статус блок:</span>
-          <button 
-            style={filterButtonStyle(blockStatusFilter.includes('Блок'))}
-            onClick={() => toggleFilter('block', 'Блок')}
-          >
-            Блок
-          </button>
-          <button 
-            style={filterButtonStyle(blockStatusFilter.includes('Не блок'))}
-            onClick={() => toggleFilter('block', 'Не блок')}
-          >
-            Не блок
-          </button>
-        </div>
-        
-        <div style={filterGroupStyle}>
-          <span style={filterLabelStyle}>Статус устранения:</span>
-          <button 
-            style={filterButtonStyle(resolutionStatusFilter.includes('Устранено'))}
-            onClick={() => toggleFilter('resolution', 'Устранено')}
-          >
-            Устранено
-          </button>
-          <button 
-            style={filterButtonStyle(resolutionStatusFilter.includes('Не устранено'))}
-            onClick={() => toggleFilter('resolution', 'Не устранено')}
-          >
-            Не устранено
-          </button>
-        </div>
-        
-        <div style={filterGroupStyle}>
-          <span style={filterLabelStyle}>Статус хранения:</span>
-          <button 
-            style={filterButtonStyle(storageStatusFilter.includes('In stock'))}
-            onClick={() => toggleFilter('storage', 'In stock')}
-          >
-            In stock
-          </button>
-          <button 
-            style={filterButtonStyle(storageStatusFilter.includes('Outbound'))}
-            onClick={() => toggleFilter('storage', 'Outbound')}
-          >
-            Outbound
-          </button>
-          <button 
-            style={filterButtonStyle(storageStatusFilter.includes('Unknown'))}
-            onClick={() => toggleFilter('storage', 'Unknown')}
-          >
-            Unknown
-          </button>
+        {/* Фильтры */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
+        {/* Первая строка: статусы */}
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={filterGroupStyle}>
+            <span style={filterLabelStyle}>Статус блок:</span>
+            <button 
+                style={filterButtonStyle(blockStatusFilter.includes('Блок'))}
+                onClick={() => toggleFilter('block', 'Блок')}
+            >
+                Блок
+            </button>
+            <button 
+                style={filterButtonStyle(blockStatusFilter.includes('Не блок'))}
+                onClick={() => toggleFilter('block', 'Не блок')}
+            >
+                Не блок
+            </button>
+            </div>
+            
+            <div style={filterGroupStyle}>
+            <span style={filterLabelStyle}>Статус устранения:</span>
+            <button 
+                style={filterButtonStyle(resolutionStatusFilter.includes('Устранено'))}
+                onClick={() => toggleFilter('resolution', 'Устранено')}
+            >
+                Устранено
+            </button>
+            <button 
+                style={filterButtonStyle(resolutionStatusFilter.includes('Не устранено'))}
+                onClick={() => toggleFilter('resolution', 'Не устранено')}
+            >
+                Не устранено
+            </button>
+            </div>
+            
+            <div style={filterGroupStyle}>
+            <span style={filterLabelStyle}>Статус хранения:</span>
+            <button 
+                style={filterButtonStyle(storageStatusFilter.includes('In stock'))}
+                onClick={() => toggleFilter('storage', 'In stock')}
+            >
+                In stock
+            </button>
+            <button 
+                style={filterButtonStyle(storageStatusFilter.includes('Outbound'))}
+                onClick={() => toggleFilter('storage', 'Outbound')}
+            >
+                Outbound
+            </button>
+            <button 
+                style={filterButtonStyle(storageStatusFilter.includes('Unknown'))}
+                onClick={() => toggleFilter('storage', 'Unknown')}
+            >
+                Unknown
+            </button>
+            </div>
         </div>
 
-        {/* Поиск по VIN */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>VIN:</span>
-          <input
-            type="text"
-            value={searchVin}
-            onChange={(e) => setSearchVin(e.target.value)}
-            placeholder="Введите VIN..."
-            style={{ ...inputStyle, width: 180 }}
-          />
-          {searchVin && (
-            <button
-              onClick={() => setSearchVin('')}
-              style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
-            >
-              ✕
-            </button>
-          )}
-        </div>
+        {/* Вторая строка: поиск VIN и комплектация */}
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'nowrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>VIN:</span>
+            <input
+                type="text"
+                value={searchVin}
+                onChange={(e) => setSearchVin(e.target.value)}
+                placeholder="Введите VIN..."
+                style={{ ...inputStyle, width: 180 }}
+            />
+            {searchVin && (
+                <button
+                onClick={() => setSearchVin('')}
+                style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
+                >
+                ✕
+                </button>
+            )}
+            </div>
 
-        {/* Фильтр по комплектации */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>Комплектация:</span>
-          <select
-            value={complectFilter}
-            onChange={(e) => setComplectFilter(e.target.value)}
-            style={{ ...inputStyle, minWidth: 150 }}
-          >
-            <option value="">Все</option>
-            {complectOptions.map((comp, idx) => (
-              <option key={idx} value={comp}>{comp}</option>
-            ))}
-          </select>
-          {complectFilter && (
-            <button
-              onClick={() => setComplectFilter('')}
-              style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>Комплектация:</span>
+            <select
+                value={complectFilter}
+                onChange={(e) => setComplectFilter(e.target.value)}
+                style={{ ...inputStyle, minWidth: 150 }}
             >
-              ✕
-            </button>
-          )}
+                <option value="">Все</option>
+                {complectOptions.map((comp, idx) => (
+                <option key={idx} value={comp}>{comp}</option>
+                ))}
+            </select>
+            {complectFilter && (
+                <button
+                onClick={() => setComplectFilter('')}
+                style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
+                >
+                ✕
+                </button>
+            )}
+            </div>
         </div>
-      </div>
+        </div>
 
       <div style={cardStyle}>
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
