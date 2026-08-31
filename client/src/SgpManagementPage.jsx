@@ -7,7 +7,7 @@ const API_BASE = '';
 const containerStyle = {
   padding: 30,
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
-  maxWidth: 1400,
+  maxWidth: 1600,
   margin: '0 auto',
   background: '#FFFFFF',
   minHeight: 'calc(100vh - 60px)',
@@ -103,14 +103,15 @@ const cardStyle = {
 };
 
 const tableWrapperStyle = {
-  maxHeight: 'calc(100vh - 450px)',
+  maxHeight: 'calc(100vh - 500px)',
   overflowY: 'auto',
+  overflowX: 'hidden',
   borderRadius: 8,
   position: 'relative',
 };
 
 const thStyle = {
-  padding: '10px 10px',
+  padding: '10px 8px',
   textAlign: 'left',
   fontWeight: 700,
   color: '#374151',
@@ -124,12 +125,15 @@ const thStyle = {
 };
 
 const tdStyle = {
-  padding: '8px 10px',
+  padding: '8px 8px',
   textAlign: 'left',
   borderBottom: '1px solid #F3F4F6',
   color: '#1F2937',
-  fontSize: 13,
+  fontSize: 12,
   verticalAlign: 'middle',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
 };
 
 const totalRowStyle = {
@@ -190,7 +194,6 @@ const filterLabelStyle = {
   marginRight: 4,
 };
 
-// Стиль для полей ввода
 const inputStyle = {
   padding: '8px 12px',
   borderRadius: 8,
@@ -199,7 +202,6 @@ const inputStyle = {
   background: '#F9FAFB',
 };
 
-// Стиль для меток в модальном окне
 const labelStyle = {
   display: 'flex',
   alignItems: 'center',
@@ -220,8 +222,9 @@ export default function SgpManagementPage() {
   const [storageStatusFilter, setStorageStatusFilter] = useState(['In stock']);
 
   const [highlightedVin, setHighlightedVin] = useState(null);
+  const [searchVin, setSearchVin] = useState('');
+  const [complectFilter, setComplectFilter] = useState('');
 
-  // Состояния модального окна экспорта на холды
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportReasons, setExportReasons] = useState([]);
   const [exportSearch, setExportSearch] = useState('');
@@ -229,7 +232,6 @@ export default function SgpManagementPage() {
   const [customReason, setCustomReason] = useState('');
   const [exportReasonLoading, setExportReasonLoading] = useState(false);
 
-  // Закрытие подсветки при клике вне
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (highlightedVin && !event.target.closest('td[data-vin]')) {
@@ -240,7 +242,6 @@ export default function SgpManagementPage() {
     return () => document.removeEventListener('click', handleClickOutside);
   }, [highlightedVin]);
 
-  // Escape для закрытия модалки
   useEffect(() => {
     const handleEsc = (event) => {
       if (event.key === 'Escape') {
@@ -295,7 +296,6 @@ export default function SgpManagementPage() {
     return models;
   }, [rawData]);
 
-  // Количество уникальных VIN в In stock для модели
   const getInStockCount = (model) => {
     const data = model === 'ALL' ? rawData : rawData.filter(d => d.model === model);
     return new Set(data.filter(d => d.storage_status === 'In stock').map(d => d.vin)).size;
@@ -306,7 +306,8 @@ export default function SgpManagementPage() {
     return rawData.filter(d => d.model === activeModel);
   }, [rawData, activeModel]);
 
-  const filteredData = useMemo(() => {
+  // Применяем фильтры статусов и поиска по VIN
+  const filteredByStatuses = useMemo(() => {
     let result = filteredByModel;
     if (blockStatusFilter.length > 0) {
       result = result.filter(d => blockStatusFilter.includes(d.block_status));
@@ -317,29 +318,51 @@ export default function SgpManagementPage() {
     if (storageStatusFilter.length > 0) {
       result = result.filter(d => storageStatusFilter.includes(d.storage_status));
     }
+    if (searchVin.trim()) {
+      const vinSearch = searchVin.trim().toLowerCase();
+      result = result.filter(d => d.vin && d.vin.toLowerCase().includes(vinSearch));
+    }
     return result;
-  }, [filteredByModel, blockStatusFilter, resolutionStatusFilter, storageStatusFilter]);
+  }, [filteredByModel, blockStatusFilter, resolutionStatusFilter, storageStatusFilter, searchVin]);
+
+  // Динамический список комплектаций на основе уже отфильтрованных данных (без учёта complectFilter)
+  const complectOptions = useMemo(() => {
+    const unique = [...new Set(filteredByStatuses.map(d => d.complectation).filter(Boolean))].sort();
+    return unique;
+  }, [filteredByStatuses]);
+
+  // Если выбранная комплектация больше не доступна, сбрасываем
+  useEffect(() => {
+    if (complectFilter && !complectOptions.includes(complectFilter)) {
+      setComplectFilter('');
+    }
+  }, [complectOptions, complectFilter]);
+
+  // Окончательная фильтрация с учётом выбранной комплектации
+  const filteredData = useMemo(() => {
+    if (complectFilter) {
+      return filteredByStatuses.filter(d => d.complectation === complectFilter);
+    }
+    return filteredByStatuses;
+  }, [filteredByStatuses, complectFilter]);
 
   useEffect(() => {
     setBlockStatusFilter([]);
     setResolutionStatusFilter([]);
     setStorageStatusFilter(['In stock']);
     setHighlightedVin(null);
+    setSearchVin('');
+    setComplectFilter('');
   }, [activeModel]);
 
-  // Статистика по уникальным VIN
   const stats = useMemo(() => {
     const uniqueVins = (arr) => new Set(arr.map(d => d.vin)).size;
-    
     const inStockRows = filteredByModel.filter(d => d.storage_status === 'In stock');
     const outboundRows = filteredByModel.filter(d => d.storage_status === 'Outbound');
-    
     const totalInStock = uniqueVins(inStockRows);
     const totalOutbound = uniqueVins(outboundRows);
-    
     const inStockBlock = uniqueVins(inStockRows.filter(d => d.block_status === 'Блок'));
     const inStockNotBlock = uniqueVins(inStockRows.filter(d => d.block_status === 'Не блок'));
-    
     return { totalInStock, totalOutbound, inStockBlock, inStockNotBlock };
   }, [filteredByModel]);
 
@@ -357,11 +380,11 @@ export default function SgpManagementPage() {
     setHighlightedVin(prev => prev === vin ? null : vin);
   };
 
-  // Экспорт текущей таблицы
   const handleExportCurrent = () => {
     const exportData = filteredData.map(d => ({
       'VIN': d.vin,
       'Модель': d.model,
+      'Комплектация': d.complectation || '—',
       'Статус блок': d.block_status,
       'Причина': d.reason || '',
       'Дата постановки': d.hold_date ? formatDateTime(d.hold_date) : '—',
@@ -372,6 +395,7 @@ export default function SgpManagementPage() {
     exportData.push({
       'VIN': 'ИТОГО',
       'Модель': '',
+      'Комплектация': '',
       'Статус блок': '',
       'Причина': '',
       'Дата постановки': '',
@@ -384,7 +408,7 @@ export default function SgpManagementPage() {
     const sheetName = activeModel === 'ALL' ? 'Все модели' : activeModel;
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
     ws['!cols'] = [
-      { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 45 },
+      { wch: 20 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 45 },
       { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 15 },
     ];
     const now = new Date();
@@ -392,7 +416,6 @@ export default function SgpManagementPage() {
     XLSX.writeFile(wb, `SGP_Management_${activeModel === 'ALL' ? 'All' : activeModel}_${dateStr}.xlsx`);
   };
 
-  // Открыть модалку экспорта на холды
   const openExportModal = async () => {
     setShowExportModal(true);
     setExportReasonLoading(true);
@@ -432,17 +455,13 @@ export default function SgpManagementPage() {
     return exportReasons.filter(r => r.toLowerCase().includes(exportSearch.toLowerCase()));
   }, [exportReasons, exportSearch]);
 
-  // Экспорт на холды с причиной
   const handleExportToHoldsWithReason = () => {
     const finalReason = selectedReason || customReason;
     if (!finalReason) return;
-    
-    // Извлекаем уникальные VIN
     const uniqueVins = [...new Set(filteredData.map(d => d.vin))];
-    
     const exportData = uniqueVins.map(vin => ({
-        'VIN': vin,
-        'Причина': finalReason,
+      'VIN': vin,
+      'Причина': finalReason,
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -461,6 +480,7 @@ export default function SgpManagementPage() {
     const exportData = rawData.map(d => ({
       'VIN': d.vin,
       'Модель': d.model,
+      'Комплектация': d.complectation || '—',
       'Статус блок': d.block_status,
       'Причина': d.reason || '',
       'Дата постановки': d.hold_date ? formatDateTime(d.hold_date) : '—',
@@ -471,6 +491,7 @@ export default function SgpManagementPage() {
     exportData.push({
       'VIN': 'ИТОГО',
       'Модель': '',
+      'Комплектация': '',
       'Статус блок': '',
       'Причина': '',
       'Дата постановки': '',
@@ -482,7 +503,7 @@ export default function SgpManagementPage() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Все модели');
     ws['!cols'] = [
-      { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 45 },
+      { wch: 20 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 45 },
       { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 15 },
     ];
     const now = new Date();
@@ -553,7 +574,7 @@ export default function SgpManagementPage() {
         })}
       </div>
 
-      {/* Иерархическая статистика по уникальным VIN */}
+      {/* Статистика */}
       <div style={statsContainerStyle}>
         <div style={statsRowStyle}>
           <div style={statCardStyle('#10B981', '#F0FDF4')}>
@@ -629,6 +650,49 @@ export default function SgpManagementPage() {
             Unknown
           </button>
         </div>
+
+        {/* Поиск по VIN */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>VIN:</span>
+          <input
+            type="text"
+            value={searchVin}
+            onChange={(e) => setSearchVin(e.target.value)}
+            placeholder="Введите VIN..."
+            style={{ ...inputStyle, width: 180 }}
+          />
+          {searchVin && (
+            <button
+              onClick={() => setSearchVin('')}
+              style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Фильтр по комплектации */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>Комплектация:</span>
+          <select
+            value={complectFilter}
+            onChange={(e) => setComplectFilter(e.target.value)}
+            style={{ ...inputStyle, minWidth: 150 }}
+          >
+            <option value="">Все</option>
+            {complectOptions.map((comp, idx) => (
+              <option key={idx} value={comp}>{comp}</option>
+            ))}
+          </select>
+          {complectFilter && (
+            <button
+              onClick={() => setComplectFilter('')}
+              style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={cardStyle}>
@@ -645,14 +709,15 @@ export default function SgpManagementPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
             <thead>
               <tr>
-                <th style={{ ...thStyle, width: '15%' }}>VIN</th>
-                <th style={{ ...thStyle, width: '10%' }}>Модель</th>
-                <th style={{ ...thStyle, width: '8%' }}>Статус блок</th>
-                <th style={{ ...thStyle, width: '20%' }}>Причина</th>
-                <th style={{ ...thStyle, width: '14%' }}>Дата постановки</th>
-                <th style={{ ...thStyle, width: '11%' }}>Статус устранения</th>
-                <th style={{ ...thStyle, width: '11%' }}>Статус хранения</th>
-                <th style={{ ...thStyle, width: '11%' }}>Расположение</th>
+                <th style={{ ...thStyle, width: '14%' }}>VIN</th>
+                <th style={{ ...thStyle, width: '9%' }}>Модель</th>
+                <th style={{ ...thStyle, width: '16%' }}>Комплектация</th>
+                <th style={{ ...thStyle, width: '7%' }}>Статус блок</th>
+                <th style={{ ...thStyle, width: '18%' }}>Причина</th>
+                <th style={{ ...thStyle, width: '12%' }}>Дата постановки</th>
+                <th style={{ ...thStyle, width: '10%' }}>Статус устранения</th>
+                <th style={{ ...thStyle, width: '10%' }}>Статус хранения</th>
+                <th style={{ ...thStyle, width: '10%' }}>Расположение</th>
               </tr>
             </thead>
             <tbody>
@@ -681,6 +746,7 @@ export default function SgpManagementPage() {
                       {row.vin}
                     </td>
                     <td style={{ ...tdStyle, fontWeight: 700, fontSize: 12 }}>{row.model}</td>
+                    <td style={{ ...tdStyle, fontSize: 12 }}>{row.complectation || '—'}</td>
                     <td style={tdStyle}>
                       <span style={{
                         padding: '4px 8px',
@@ -694,7 +760,7 @@ export default function SgpManagementPage() {
                         {row.block_status}
                       </span>
                     </td>
-                    <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4' }}>{row.reason || '—'}</td>
+                    <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4', whiteSpace: 'normal' }}>{row.reason || '—'}</td>
                     <td style={{ ...tdStyle, fontSize: 11, whiteSpace: 'nowrap' }}>
                       {row.hold_date ? formatDateTime(row.hold_date) : '—'}
                     </td>
@@ -720,6 +786,7 @@ export default function SgpManagementPage() {
             <tfoot>
               <tr style={totalRowStyle}>
                 <td style={{ ...tdStyle, fontWeight: 800 }}>ИТОГО</td>
+                <td style={tdStyle}></td>
                 <td style={tdStyle}></td>
                 <td style={tdStyle}></td>
                 <td style={tdStyle}></td>
