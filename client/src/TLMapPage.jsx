@@ -585,10 +585,8 @@ function AnalyticsModal({ data, onClose, onApplyFilter, onVinClick }) {
       'Суммарное время на TL': formatDuration(row.total_stay_seconds),
       'Накопительный %': row.cum_percent,
       'Ремзона вход': row.rem_in ? new Date(row.rem_in).toLocaleString('ru-RU') : '',
-      'Ремзона выход': row.rem_out ? new Date(row.rem_out).toLocaleString('ru-RU') : '',
-      'Время в ремзоне': row.in_rem
-        ? `Сейчас в ремзоне,\nвремя в ремзоне: ${formatDuration(row.rem_duration_seconds)}`
-        : (row.rem_duration_seconds ? formatDuration(row.rem_duration_seconds) : '—'),
+      'Ремзона выход': row.in_rem ? 'Сейчас в ремзоне' : (row.rem_out ? new Date(row.rem_out).toLocaleString('ru-RU') : ''),
+      'Время в ремзоне': row.rem_duration_seconds ? formatDuration(row.rem_duration_seconds) : '—',
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -651,15 +649,11 @@ function AnalyticsModal({ data, onClose, onApplyFilter, onVinClick }) {
                     <td style={tdStyle}>{formatDuration(row.total_stay_seconds)}</td>
                     <td style={tdStyle}>{row.cum_percent}%</td>
                     <td style={tdStyle}>{row.rem_in ? new Date(row.rem_in).toLocaleString('ru-RU') : '—'}</td>
-                    <td style={tdStyle}>{row.rem_out ? new Date(row.rem_out).toLocaleString('ru-RU') : '—'}</td>
                     <td style={tdStyle}>
-                      {row.in_rem ? (
-                        <div style={{ whiteSpace: 'pre-line' }}>
-                          {`Сейчас в ремзоне,\nвремя в ремзоне: ${formatDuration(row.rem_duration_seconds)}`}
-                        </div>
-                      ) : (
-                        row.rem_duration_seconds ? formatDuration(row.rem_duration_seconds) : '—'
-                      )}
+                      {row.in_rem ? 'Сейчас в ремзоне' : (row.rem_out ? new Date(row.rem_out).toLocaleString('ru-RU') : '—')}
+                    </td>
+                    <td style={tdStyle}>
+                      {row.rem_duration_seconds ? formatDuration(row.rem_duration_seconds) : '—'}
                     </td>
                   </tr>
                 );
