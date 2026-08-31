@@ -42,7 +42,7 @@ export default function App() {
         <Route path="/holds-sgp" element={<HoldsSgpPage />} />
         <Route path="/drr-cp7-dashboard" element={<DrrCp7DashboardPage />} />
         <Route path="/drr-cp7-history" element={<DrrCp7HistoryPage />} />
-        <Route path="/drr-cp8-dashboard" element={<DrrCp7DashboardPage />} />
+        <Route path="/drr-cp8-dashboard" element={<DrrCp8DashboardPage />} />
 
         <Route path="/testpage" element={<TestPage />} />
       </Route>
