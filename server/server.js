@@ -5759,6 +5759,212 @@ app.get('/api/testpage-data', async (req, res) => {
   }
 });
 
+app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
+  try {
+    const { startTime, endTime } = req.query;
+
+    let rangeStart, rangeEnd;
+    if (startTime && endTime) {
+      rangeStart = startTime;
+      rangeEnd = endTime;
+    } else {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      rangeStart = `${y}-${m}-${d} 00:00:00`;
+      rangeEnd = `${y}-${m}-${d} 23:59:59`;
+    }
+
+    // 1. Получить VIN, прошедшие CPFINAL за период (MES)
+    const [cpfinalRows] = await mesPool.query(`
+      SELECT DISTINCT vin
+      FROM ti_mes_movement
+      WHERE uloc_no = 'CPFINAL'
+        AND scan_time >= ?
+        AND scan_time < ?
+    `, [rangeStart, rangeEnd]);
+
+    const vins = cpfinalRows.map(r => r.vin);
+    if (vins.length === 0) {
+      return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0 });
+    }
+
+    const placeholders = vins.map(() => '?').join(',');
+
+    // 2. TLTT_time для каждого VIN (IoT)
+    const [tlttRows] = await pool.query(`
+      SELECT VIN, MAX(CREATION_TIME) AS TLTT_TIME
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'TLTT'
+        AND CREATION_TIME >= ?
+        AND CREATION_TIME < ?
+        AND VIN IN (${placeholders})
+      GROUP BY VIN
+    `, [rangeStart, rangeEnd, ...vins]);
+
+    const tlttMap = new Map(tlttRows.map(r => [r.VIN, r.TLTT_TIME]));
+
+    // 3. Дефекты по выбранным постам для этих VIN за период
+    const defectPosts = ['TLTT','CP8','TLADAS','TLWA','TLRT','CPA','CP8','CP8 Gate','CP8-gate','360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT','CP8 Touch Up'];
+    const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
+
+    const [defectRows] = await pool.query(`
+      SELECT
+        d.VIN,
+        d.STATUS,
+        COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) AS repair_time
+      FROM at_qm_defect_info d
+      WHERE d.POST_NAME IN (${defectPostsStr})
+        AND d.CREATION_TIME >= ?
+        AND d.CREATION_TIME < ?
+        AND d.VIN IN (${placeholders})
+    `, [rangeStart, rangeEnd, ...vins]);
+
+    // 4. Определяем closed для каждого VIN
+    const vinDefectMap = new Map();
+    defectRows.forEach(row => {
+      const vin = row.VIN;
+      if (!vinDefectMap.has(vin)) {
+        vinDefectMap.set(vin, { total: 0, closed: 0 });
+      }
+      const stat = vinDefectMap.get(vin);
+      stat.total += 1;
+      const isClosed = 
+        (row.STATUS && row.STATUS.toLowerCase() === 'closed') ||
+        (row.repair_time && tlttMap.has(vin) && new Date(row.repair_time) < new Date(tlttMap.get(vin)));
+      if (isClosed) stat.closed += 1;
+    });
+
+    let closedVins = 0;
+    cpfinalRows.forEach(row => {
+      const stat = vinDefectMap.get(row.vin);
+      if (!stat || stat.total === stat.closed) {
+        closedVins += 1;
+      }
+    });
+
+    const drrPercent = (closedVins / vins.length) * 100;
+    res.json({
+      totalVins: vins.length,
+      closedVins,
+      drrPercent: Math.round(drrPercent * 10) / 10,
+    });
+  } catch (err) {
+    console.error('Ошибка DRR CPFINAL Dashboard:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
+  try {
+    const { startTime, endTime } = req.query;
+
+    let rangeStart, rangeEnd;
+    if (startTime && endTime) {
+      rangeStart = startTime;
+      rangeEnd = endTime;
+    } else {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      rangeStart = `${y}-${m}-${d} 00:00:00`;
+      rangeEnd = `${y}-${m}-${d} 23:59:59`;
+    }
+
+    // 1. CPFINAL VIN
+    const [cpfinalRows] = await mesPool.query(`
+      SELECT DISTINCT vin
+      FROM ti_mes_movement
+      WHERE uloc_no = 'CPFINAL'
+        AND scan_time >= ?
+        AND scan_time < ?
+    `, [rangeStart, rangeEnd]);
+
+    const vins = cpfinalRows.map(r => r.vin);
+    if (vins.length === 0) return res.json([]);
+
+    const placeholders = vins.map(() => '?').join(',');
+
+    // 2. TLTT_time
+    const [tlttRows] = await pool.query(`
+      SELECT VIN, MAX(CREATION_TIME) AS TLTT_TIME
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'TLTT'
+        AND CREATION_TIME >= ?
+        AND CREATION_TIME < ?
+        AND VIN IN (${placeholders})
+      GROUP BY VIN
+    `, [rangeStart, rangeEnd, ...vins]);
+
+    const tlttMap = new Map(tlttRows.map(r => [r.VIN, r.TLTT_TIME]));
+
+    // 3. Дефекты
+    const defectPosts = ['TLTT','CP8','TLADAS','TLWA','TLRT','CPA','CP8','CP8 Gate','CP8-gate','360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT','CP8 Touch Up'];
+    const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
+
+    const [defectRows] = await pool.query(`
+      SELECT
+        d.VIN,
+        wo.MODEL,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.PROBLEM_GRADE,
+        d.STATUS,
+        COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) AS repair_time
+      FROM at_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.POST_NAME IN (${defectPostsStr})
+        AND d.CREATION_TIME >= ?
+        AND d.CREATION_TIME < ?
+        AND d.VIN IN (${placeholders})
+    `, [rangeStart, rangeEnd, ...vins]);
+
+    // 4. Определяем открытые VIN
+    const openVins = new Set();
+    const vinDefectMap = new Map();
+    defectRows.forEach(row => {
+      const vin = row.VIN;
+      const isClosed = 
+        (row.STATUS && row.STATUS.toLowerCase() === 'closed') ||
+        (row.repair_time && tlttMap.has(vin) && new Date(row.repair_time) < new Date(tlttMap.get(vin)));
+      if (!isClosed) {
+        openVins.add(vin);
+      }
+    });
+
+    // 5. Группируем только открытые дефекты
+    const defectGroupMap = new Map();
+    defectRows.forEach(row => {
+      if (!openVins.has(row.VIN)) return;
+      const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
+      if (!defectGroupMap.has(mpp)) {
+        defectGroupMap.set(mpp, {
+          mpp,
+          grade: row.PROBLEM_GRADE || '-',
+          affectedVins: new Set(),
+        });
+      }
+      defectGroupMap.get(mpp).affectedVins.add(row.VIN);
+    });
+
+    const topDefects = Array.from(defectGroupMap.values())
+      .map(d => ({
+        mpp: d.mpp,
+        grade: d.grade,
+        affectedVins: d.affectedVins.size,
+      }))
+      .sort((a, b) => b.affectedVins - a.affectedVins)
+      .slice(0, 20);
+
+    res.json(topDefects);
+  } catch (err) {
+    console.error('Ошибка DRR CPFINAL Top Defects:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок
