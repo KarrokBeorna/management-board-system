@@ -55,7 +55,7 @@ const mainFullScreen = {
 
 export default function Layout() {
   const location = useLocation();
-  const isFullScreen = location.pathname === '/report' || location.pathname === '/daily-top' || location.pathname === '/model-status' || location.pathname === '/checkpoint-map' || location.pathname === '/warranty' || location.pathname === '/tl-map' || location.pathname === '/drr-cp7-dashboard';
+  const isFullScreen = location.pathname === '/report' || location.pathname === '/daily-top' || location.pathname === '/model-status' || location.pathname === '/checkpoint-map' || location.pathname === '/warranty' || location.pathname === '/tl-map' || location.pathname === '/drr-cp7-dashboard' || location.pathname === '/drr-cp8-dashboard';
 
   return (
     <>

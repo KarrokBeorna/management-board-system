@@ -3587,7 +3587,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
     );
     const lesMap = new Map(lesRows.map(r => [r.vin, r]));
 
-    // ---------- 6. Для каждого VIN определяем текущее расположение, ремзону и суммарное время ----------
+    // ---------- 6. Обработка каждого VIN ----------
     const result = [];
 
     for (const vin of vins) {
@@ -3598,7 +3598,7 @@ app.get('/api/tl-map-analytics', async (req, res) => {
       const cp72Time = cp72TimeMap[vin] ? new Date(cp72TimeMap[vin]) : null;
       const cpfinalTime = cpfinalTimeMap[vin] ? new Date(cpfinalTimeMap[vin]) : null;
 
-      // --- Все точки для определения последней (после CP72) ---
+      // --- Все точки после CP72 ---
       const allPointsAfterCp72 = [];
       if (cp72Time) {
         mesPoints.forEach(p => {
@@ -3628,34 +3628,38 @@ app.get('/api/tl-map-analytics', async (req, res) => {
         if (totalSec < 0) totalSec = 0;
       }
 
-      // --- Ремзона: последняя REP-зона, выход = первая не REP после неё ---
-      let lastRepIndex = -1;
-      for (let i = moves.length - 1; i >= 0; i--) {
-        if (moves[i].zone.startsWith('REP')) {
-          lastRepIndex = i;
-          break;
-        }
-      }
+      // --- Ремзоны: суммируем все завершённые сессии ---
+      let totalRemSeconds = 0;
+      let inRem = false;
+      let currentRemStart = null;
+      let lastRemStart = null;
+      let lastRemExit = null;
 
-      let remIn = null;
-      let remOut = null;
-      let remDurationSeconds = null;
-
-      if (lastRepIndex >= 0) {
-        remIn = moves[lastRepIndex].time;
-        // Ищем первый выход (не REP) после lastRepIndex
-        for (let j = lastRepIndex + 1; j < moves.length; j++) {
-          if (!moves[j].zone.startsWith('REP')) {
-            remOut = moves[j].time;
-            break;
+      for (let i = 0; i < moves.length; i++) {
+        const m = moves[i];
+        if (m.zone.startsWith('REP')) {
+          if (!inRem) {
+            inRem = true;
+            currentRemStart = m.time;
+            lastRemStart = m.time;
+            lastRemExit = null;
+          }
+        } else {
+          if (inRem) {
+            const exitTime = m.time;
+            const diffMs = exitTime - currentRemStart;
+            if (diffMs > 0) {
+              totalRemSeconds += Math.floor(diffMs / 1000);
+              lastRemExit = exitTime;
+            }
+            inRem = false;
+            currentRemStart = null;
           }
         }
-        if (remOut) {
-          const diffMs = remOut - remIn;
-          if (diffMs > 0) remDurationSeconds = Math.floor(diffMs / 1000);
-          else remDurationSeconds = null; // если выход раньше входа (ошибка данных)
-        }
       }
+
+      // Если последняя сессия не завершена (ещё в ремзоне)
+      const stillInRem = inRem;
 
       // --- Текущее расположение: самая поздняя точка среди всех источников ---
       const allPointsForLocation = [
@@ -3680,9 +3684,10 @@ app.get('/api/tl-map-analytics', async (req, res) => {
         vin,
         current_zone: currentZone,
         total_stay_seconds: totalSec,
-        rem_in: remIn ? remIn.toISOString() : null,
-        rem_out: remOut ? remOut.toISOString() : null,
-        rem_duration_seconds: remDurationSeconds,
+        rem_in: lastRemStart ? lastRemStart.toISOString() : null,
+        rem_out: lastRemExit ? lastRemExit.toISOString() : null,
+        rem_duration_seconds: totalRemSeconds > 0 ? totalRemSeconds : null,
+        in_rem: stillInRem,
       });
     }
 
