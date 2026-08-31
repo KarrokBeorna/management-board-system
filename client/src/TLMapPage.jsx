@@ -549,11 +549,11 @@ function AnalyticsModal({ data, onClose, onApplyFilter, onVinClick }) {
   });
 
   const allZones = useMemo(() => [...new Set(data.map(r => r.current_zone))], [data]);
-  const [selectedZones, setSelectedZones] = useState(() => allZones.filter(z => z !== 'Inbound' && z !== 'Outbound'));
+  const [selectedZones, setSelectedZones] = useState(() => allZones.filter(z => z !== 'Inbound' && z !== 'Outbound' && z !== 'CP8'));
 
   useEffect(() => {
     if (allZones.length > 0 && selectedZones.length === 0) {
-      setSelectedZones(allZones.filter(z => z !== 'Inbound' && z !== 'Outbound'));
+      setSelectedZones(allZones.filter(z => z !== 'Inbound' && z !== 'Outbound' && z !== 'CP8'));
     }
   }, [allZones, selectedZones]);
 
