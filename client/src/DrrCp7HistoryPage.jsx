@@ -104,13 +104,18 @@ export default function DrrCp7HistoryPage() {
   const [filter, setFilter] = useState('all');
   const [period, setPeriod] = useState('all');
   const [count, setCount] = useState(3);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const handlePeriodChange = (newPeriod) => {
     setPeriod(newPeriod);
-    if (newPeriod !== 'all') {
+    if (newPeriod === 'all') {
+      setFromDate('');
+      setToDate('');
+    } else {
       const defaults = { year: 2, month: 3, week: 4, day: 14 };
       setCount(defaults[newPeriod] || 3);
     }
@@ -122,6 +127,10 @@ export default function DrrCp7HistoryPage() {
     try {
       const params = new URLSearchParams({ filter, period });
       if (period !== 'all' && count) params.append('count', count);
+      if (period !== 'all' && fromDate && toDate) {
+        params.append('fromDate', fromDate);
+        params.append('toDate', toDate);
+      }
       const res = await fetch(`${API_BASE}/api/drr-cp7-history?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
@@ -136,7 +145,7 @@ export default function DrrCp7HistoryPage() {
 
   useEffect(() => {
     loadHistory();
-  }, [filter, period, count]);
+  }, [filter, period, count, fromDate, toDate]);
 
   const chartData = useMemo(() => {
     return data.map(d => ({
@@ -198,17 +207,44 @@ export default function DrrCp7HistoryPage() {
         </div>
 
         {period !== 'all' && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
-            Кол-во периодов:
-            <input
-              type="number"
-              min="1"
-              max="50"
-              value={count}
-              onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
-              style={{ ...inputStyle, width: 80 }}
-            />
-          </label>
+          <>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
+              Кол-во периодов:
+              <input
+                type="number"
+                min="1"
+                max="50"
+                value={count}
+                onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
+                style={{ ...inputStyle, width: 80 }}
+              />
+            </label>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>От:</span>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                style={inputStyle}
+              />
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>По:</span>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                style={inputStyle}
+              />
+              {(fromDate || toDate) && (
+                <button
+                  onClick={() => { setFromDate(''); setToDate(''); }}
+                  style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </>
         )}
 
         <button onClick={loadHistory} style={buttonStyle}>🔄 Обновить</button>
