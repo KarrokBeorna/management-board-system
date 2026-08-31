@@ -2546,7 +2546,7 @@ app.get('/api/vin-defect-search', async (req, res) => {
 
 app.get('/api/drr-retrospective', async (req, res) => {
   try {
-    const { period = 'all', count } = req.query;
+    const { period = 'all', count, fromDate, toDate } = req.query;
 
     // Функция получения DRR для одного периода
     const getDrr = async (startDate, endDate, label, type) => {
@@ -2612,16 +2612,19 @@ app.get('/api/drr-retrospective', async (req, res) => {
       return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
     };
 
+    const pad = (num) => String(num).padStart(2, '0');
+
     const now = new Date();
     const periods = [];
 
+    const typeOrder = { year: 0, month: 1, week: 2, day: 3 };
+
     if (period === 'all') {
-      // Годы: последние 2
+      // существующая логика для всех периодов
       for (let i = 1; i >= 0; i--) {
         const y = now.getFullYear() - i;
         periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
       }
-      // Месяцы: последние 3
       for (let i = 2; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const y = d.getFullYear();
@@ -2630,7 +2633,6 @@ app.get('/api/drr-retrospective', async (req, res) => {
         const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
         periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${String(lastDay).padStart(2, '0')}`, type: 'month' });
       }
-      // Недели: последние 4
       const dayOfWeek = now.getDay();
       const monday = new Date(now);
       monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
@@ -2642,54 +2644,108 @@ app.get('/api/drr-retrospective', async (req, res) => {
         const weekNum = getISOWeek(start);
         periods.push({ label: `W${weekNum} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
       }
-      // Дни: последние 7
       for (let i = 6; i >= 0; i--) {
         const d = new Date(now);
         d.setDate(now.getDate() - i);
-        periods.push({ label: `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
+        periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
       }
     } else {
-      // Отдельные периоды
-      const defaultCount = { year: 2, month: 3, week: 4, day: 14 }[period] || 7;
-      const limit = parseInt(count, 10) || defaultCount;
+      if (fromDate && toDate) {
+        // Генерация периодов на основе заданного диапазона
+        let from = new Date(fromDate + 'T00:00:00');
+        let to = new Date(toDate + 'T00:00:00');
+        if (from > to) [from, to] = [to, from];
 
-      if (period === 'year') {
-        for (let i = limit - 1; i >= 0; i--) {
-          const y = now.getFullYear() - i;
-          periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+        if (period === 'day') {
+          for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+            const dateStr = formatDate(d);
+            periods.push({
+              label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`,
+              startDate: dateStr,
+              endDate: dateStr,
+              type: 'day'
+            });
+          }
+        } else if (period === 'month') {
+          let d = new Date(from.getFullYear(), from.getMonth(), 1);
+          while (d <= to) {
+            const y = d.getFullYear();
+            const m = d.getMonth() + 1;
+            const lastDay = new Date(y, m, 0).getDate();
+            const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+            periods.push({
+              label: `${monthName} ${y}`,
+              startDate: `${y}-${pad(m)}-01`,
+              endDate: `${y}-${pad(m)}-${lastDay}`,
+              type: 'month'
+            });
+            d.setMonth(d.getMonth() + 1);
+          }
+        } else if (period === 'week') {
+          const day = from.getDay();
+          const monday = new Date(from);
+          monday.setDate(from.getDate() - (day === 0 ? 6 : day - 1));
+          for (let start = new Date(monday); start <= to; start.setDate(start.getDate() + 7)) {
+            const end = new Date(start);
+            end.setDate(start.getDate() + 6);
+            periods.push({
+              label: `W${getISOWeek(start)} ${start.getFullYear()}`,
+              startDate: formatDate(start),
+              endDate: formatDate(end),
+              type: 'week'
+            });
+          }
+        } else if (period === 'year') {
+          for (let y = from.getFullYear(); y <= to.getFullYear(); y++) {
+            periods.push({
+              label: String(y),
+              startDate: `${y}-01-01`,
+              endDate: `${y}-12-31`,
+              type: 'year'
+            });
+          }
         }
-      } else if (period === 'month') {
-        for (let i = limit - 1; i >= 0; i--) {
-          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-          const y = d.getFullYear();
-          const m = String(d.getMonth() + 1).padStart(2, '0');
-          const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
-          const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
-          periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${String(lastDay).padStart(2, '0')}`, type: 'month' });
-        }
-      } else if (period === 'week') {
-        const dayOfWeek = now.getDay();
-        const monday = new Date(now);
-        monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-        for (let i = limit - 1; i >= 0; i--) {
-          const start = new Date(monday);
-          start.setDate(monday.getDate() - i * 7);
-          const end = new Date(start);
-          end.setDate(start.getDate() + 6);
-          const weekNum = getISOWeek(start);
-          periods.push({ label: `W${weekNum} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
-        }
-      } else if (period === 'day') {
-        for (let i = limit - 1; i >= 0; i--) {
-          const d = new Date(now);
-          d.setDate(now.getDate() - i);
-          periods.push({ label: `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
+      } else {
+        // Существующая логика на основе count
+        const defaultCount = { year: 2, month: 3, week: 4, day: 14 }[period] || 7;
+        const limit = parseInt(count, 10) || defaultCount;
+
+        if (period === 'year') {
+          for (let i = limit - 1; i >= 0; i--) {
+            const y = now.getFullYear() - i;
+            periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+          }
+        } else if (period === 'month') {
+          for (let i = limit - 1; i >= 0; i--) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+            const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+            periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${String(lastDay).padStart(2, '0')}`, type: 'month' });
+          }
+        } else if (period === 'week') {
+          const dayOfWeek = now.getDay();
+          const monday = new Date(now);
+          monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+          for (let i = limit - 1; i >= 0; i--) {
+            const start = new Date(monday);
+            start.setDate(monday.getDate() - i * 7);
+            const end = new Date(start);
+            end.setDate(start.getDate() + 6);
+            const weekNum = getISOWeek(start);
+            periods.push({ label: `W${weekNum} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
+          }
+        } else if (period === 'day') {
+          for (let i = limit - 1; i >= 0; i--) {
+            const d = new Date(now);
+            d.setDate(now.getDate() - i);
+            periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
+          }
         }
       }
     }
 
-    // Сортируем периоды: год < месяц < неделя < день, внутри по дате
-    const typeOrder = { year: 0, month: 1, week: 2, day: 3 };
     periods.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || a.startDate.localeCompare(b.startDate));
 
     const result = [];

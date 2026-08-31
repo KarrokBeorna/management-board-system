@@ -103,6 +103,8 @@ export default function DrrReportPage() {
   const [selectedModel, setSelectedModel] = useState('ALL');
   const [period, setPeriod] = useState('all'); // all | year | month | week | day
   const [count, setCount] = useState(3);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [dataPoints, setDataPoints] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -118,7 +120,10 @@ export default function DrrReportPage() {
 
   const handlePeriodChange = (newPeriod) => {
     setPeriod(newPeriod);
-    if (newPeriod !== 'all') {
+    if (newPeriod === 'all') {
+      setFromDate('');
+      setToDate('');
+    } else {
       const defaults = { year: 2, month: 3, week: 4, day: 14 };
       setCount(defaults[newPeriod] || 3);
     }
@@ -129,6 +134,10 @@ export default function DrrReportPage() {
     setLoading(true);
     const params = new URLSearchParams({ period });
     if (period !== 'all' && count) params.append('count', count);
+    if (period !== 'all' && fromDate && toDate) {
+      params.append('fromDate', fromDate);
+      params.append('toDate', toDate);
+    }
     fetch(`${API_BASE}/api/drr-retrospective?${params.toString()}`)
       .then(res => res.json())
       .then(json => {
@@ -139,7 +148,7 @@ export default function DrrReportPage() {
         console.error('Ошибка загрузки DRR:', err);
         setLoading(false);
       });
-  }, [activeTab, period, count]);
+  }, [activeTab, period, count, fromDate, toDate]);
 
   const loadDrrByShop = async () => {
     setDrrLoading(true);
@@ -262,7 +271,6 @@ export default function DrrReportPage() {
   const totalCols = chartData.length + 1;
   const colWidth = `${100 / totalCols}%`;
 
-  // Данные для графика по цехам
   const shopChartData = useMemo(() => {
     if (!drrData) return [];
     return drrData.weeks.map((week, idx) => {
@@ -279,7 +287,6 @@ export default function DrrReportPage() {
     });
   }, [drrData]);
 
-  // Данные для круговой диаграммы
   const pieData = useMemo(() => {
     if (!shopData || !shopData.data.length) return [];
     const lastWeek = shopData.weeks[shopData.weeks.length - 1];
@@ -328,17 +335,44 @@ export default function DrrReportPage() {
                 <button onClick={() => handlePeriodChange('day')} style={tabStyle(period === 'day')}>День</button>
               </div>
               {period !== 'all' && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
-                  Кол-во периодов:
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    value={count}
-                    onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
-                    style={{ ...inputStyle, width: 80 }}
-                  />
-                </label>
+                <>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
+                    Кол-во периодов:
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={count}
+                      onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
+                      style={{ ...inputStyle, width: 80 }}
+                    />
+                  </label>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>От:</span>
+                    <input
+                      type="date"
+                      value={fromDate}
+                      onChange={(e) => setFromDate(e.target.value)}
+                      style={inputStyle}
+                    />
+                    <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>По:</span>
+                    <input
+                      type="date"
+                      value={toDate}
+                      onChange={(e) => setToDate(e.target.value)}
+                      style={inputStyle}
+                    />
+                    {(fromDate || toDate) && (
+                      <button
+                        onClick={() => { setFromDate(''); setToDate(''); }}
+                        style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </>
               )}
               <label style={{ fontSize: 14, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 6 }}>
                 Модель:
