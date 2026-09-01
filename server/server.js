@@ -5759,7 +5759,7 @@ app.get('/api/testpage-data', async (req, res) => {
   }
 });
 
-app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
+app.get('/api/drr-cp8-dashboard', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
 
@@ -5776,24 +5776,28 @@ app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
       rangeEnd = `${y}-${m}-${d} 23:59:59`;
     }
 
-    // 1. VIN, прошедшие CPFINAL за период
-    const [cpfinalRows] = await mesPool.query(`
+    // 1. VIN, прошедшие CP72 за период (MES)
+    const [cp72Rows] = await mesPool.query(`
       SELECT DISTINCT vin
       FROM ti_mes_movement
-      WHERE uloc_no = 'CPFINAL'
+      WHERE uloc_no = 'CP72'
         AND scan_time >= ?
         AND scan_time < ?
     `, [rangeStart, rangeEnd]);
 
-    if (cpfinalRows.length === 0) {
+    if (cp72Rows.length === 0) {
       return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0 });
     }
 
-    const vins = cpfinalRows.map(r => r.vin);
+    const vins = cp72Rows.map(r => r.vin);
     const placeholders = vins.map(() => '?').join(',');
 
-    // 2. Дефекты по выбранным постам
-    const defectPosts = ['TLTT','CP8','TLADAS','TLWA','TLRT','CPA'];
+    // 2. Дефекты по расширенному списку постов для этих VIN
+    const defectPosts = [
+      'TLTT','CP8','TLADAS','TLWA','TLRT','CPA',
+      'CP8 Gate','CP8-gate','360','ADAS','ADAS+RB',
+      'TEST TRACK','TRACK','WA','WT','CP8 Touch Up'
+    ];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
     const [defectRows] = await pool.query(`
@@ -5815,25 +5819,25 @@ app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
       }
     });
 
-    // 4. Подсчёт closedVins (OK)
+    // 4. Подсчёт closedVins (OK) – автомобиль OK, если нет открытых дефектов
     let closedVins = 0;
-    cpfinalRows.forEach(row => {
+    cp72Rows.forEach(row => {
       if (!vinHasOpenDefect.has(row.vin)) closedVins += 1;
     });
 
-    const drrPercent = (closedVins / cpfinalRows.length) * 100;
+    const drrPercent = (closedVins / cp72Rows.length) * 100;
     res.json({
-      totalVins: cpfinalRows.length,
+      totalVins: cp72Rows.length,
       closedVins,
       drrPercent: Math.round(drrPercent * 10) / 10,
     });
   } catch (err) {
-    console.error('Ошибка DRR CPFINAL Dashboard:', err.message);
+    console.error('Ошибка DRR CP8 Dashboard:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
+app.get('/api/drr-cp8-top-defects', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
 
@@ -5850,22 +5854,26 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
       rangeEnd = `${y}-${m}-${d} 23:59:59`;
     }
 
-    // 1. CPFINAL VIN
-    const [cpfinalRows] = await mesPool.query(`
+    // 1. VIN, прошедшие CP72 (MES)
+    const [cp72Rows] = await mesPool.query(`
       SELECT DISTINCT vin
       FROM ti_mes_movement
-      WHERE uloc_no = 'CPFINAL'
+      WHERE uloc_no = 'CP72'
         AND scan_time >= ?
         AND scan_time < ?
     `, [rangeStart, rangeEnd]);
 
-    if (cpfinalRows.length === 0) return res.json([]);
+    if (cp72Rows.length === 0) return res.json([]);
 
-    const vins = cpfinalRows.map(r => r.vin);
+    const vins = cp72Rows.map(r => r.vin);
     const placeholders = vins.map(() => '?').join(',');
 
-    // 2. Дефекты
-    const defectPosts = ['TLTT','CP8','TLADAS','TLWA','TLRT','CPA'];
+    // 2. Дефекты по расширенному списку постов
+    const defectPosts = [
+      'TLTT','CP8','TLADAS','TLWA','TLRT','CPA',
+      'CP8 Gate','CP8-gate','360','ADAS','ADAS+RB',
+      'TEST TRACK','TRACK','WA','WT','CP8 Touch Up'
+    ];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
     const [defectRows] = await pool.query(`
@@ -5892,7 +5900,7 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
       }
     });
 
-    // 4. Группируем только открытые дефекты этих VIN
+    // 4. Группируем дефекты только для этих VIN
     const defectGroupMap = new Map();
     defectRows.forEach(row => {
       if (!openVins.has(row.VIN)) return;
@@ -5918,7 +5926,7 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
 
     res.json(topDefects);
   } catch (err) {
-    console.error('Ошибка DRR CPFINAL Top Defects:', err.message);
+    console.error('Ошибка DRR CP8 Top Defects:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

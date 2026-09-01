@@ -215,13 +215,13 @@ export default function DrrCpfinalDashboardPage() {
       const { start, end } = getTimeRange(timeFilter);
 
       const drrParams = new URLSearchParams({ startTime: start, endTime: end });
-      const drrRes = await fetch(`${API_BASE}/api/drr-cpfinal-dashboard?${drrParams.toString()}`);
+      const drrRes = await fetch(`${API_BASE}/api/drr-cp8-dashboard?${drrParams.toString()}`);
       if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
       const drrJson = await drrRes.json();
       setDrrData(drrJson);
 
       const defectsParams = new URLSearchParams({ startTime: start, endTime: end });
-      const defectsRes = await fetch(`${API_BASE}/api/drr-cpfinal-top-defects?${defectsParams.toString()}`);
+      const defectsRes = await fetch(`${API_BASE}/api/drr-cp8-top-defects?${defectsParams.toString()}`);
       if (!defectsRes.ok) throw new Error('Ошибка загрузки топа дефектов');
       const defectsJson = await defectsRes.json();
       setTopDefects(defectsJson);
