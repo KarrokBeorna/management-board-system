@@ -5776,14 +5776,13 @@ app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
       rangeEnd = `${y}-${m}-${d} 23:59:59`;
     }
 
-    // 1. VIN и время CPFINAL
+    // 1. VIN, прошедшие CPFINAL за период
     const [cpfinalRows] = await mesPool.query(`
-      SELECT vin, MIN(scan_time) AS cpfinal_time
+      SELECT DISTINCT vin
       FROM ti_mes_movement
       WHERE uloc_no = 'CPFINAL'
         AND scan_time >= ?
         AND scan_time < ?
-      GROUP BY vin
     `, [rangeStart, rangeEnd]);
 
     if (cpfinalRows.length === 0) {
@@ -5791,31 +5790,16 @@ app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
     }
 
     const vins = cpfinalRows.map(r => r.vin);
-    const cpfinalTimeMap = new Map(cpfinalRows.map(r => [r.vin, new Date(r.cpfinal_time)]));
     const placeholders = vins.map(() => '?').join(',');
 
-    // 2. TLTT_time
-    const [tlttRows] = await pool.query(`
-      SELECT VIN, MAX(CREATION_TIME) AS TLTT_TIME
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'TLTT'
-        AND CREATION_TIME >= ?
-        AND CREATION_TIME < ?
-        AND VIN IN (${placeholders})
-      GROUP BY VIN
-    `, [rangeStart, rangeEnd, ...vins]);
-
-    const tlttMap = new Map(tlttRows.map(r => [r.VIN, r.TLTT_TIME]));
-
-    // 3. Дефекты
+    // 2. Дефекты по выбранным постам
     const defectPosts = ['TLTT','CP8','TLADAS','TLWA','TLRT','CPA'];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN,
-        d.STATUS,
-        COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) AS repair_time
+        d.STATUS
       FROM at_qm_defect_info d
       WHERE d.POST_NAME IN (${defectPostsStr})
         AND d.CREATION_TIME >= ?
@@ -5823,27 +5807,18 @@ app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
         AND d.VIN IN (${placeholders})
     `, [rangeStart, rangeEnd, ...vins]);
 
-    // 4. Определяем closed
-    const vinDefectMap = new Map();
+    // 3. Для каждого VIN определяем, есть ли хотя бы один не closed дефект
+    const vinHasOpenDefect = new Set();
     defectRows.forEach(row => {
-      const vin = row.VIN;
-      if (!vinDefectMap.has(vin)) {
-        vinDefectMap.set(vin, { total: 0, closed: 0 });
+      if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
+        vinHasOpenDefect.add(row.VIN);
       }
-      const stat = vinDefectMap.get(vin);
-      stat.total += 1;
-
-      const isClosed =
-        (row.STATUS && row.STATUS.toLowerCase() === 'closed') ||
-        (row.repair_time && tlttMap.has(vin) && new Date(row.repair_time) < new Date(tlttMap.get(vin)));
-
-      if (isClosed) stat.closed += 1;
     });
 
+    // 4. Подсчёт closedVins (OK)
     let closedVins = 0;
     cpfinalRows.forEach(row => {
-      const stat = vinDefectMap.get(row.vin);
-      if (!stat || stat.total === stat.closed) closedVins += 1;
+      if (!vinHasOpenDefect.has(row.vin)) closedVins += 1;
     });
 
     const drrPercent = (closedVins / cpfinalRows.length) * 100;
@@ -5877,34 +5852,19 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
 
     // 1. CPFINAL VIN
     const [cpfinalRows] = await mesPool.query(`
-      SELECT vin, MIN(scan_time) AS cpfinal_time
+      SELECT DISTINCT vin
       FROM ti_mes_movement
       WHERE uloc_no = 'CPFINAL'
         AND scan_time >= ?
         AND scan_time < ?
-      GROUP BY vin
     `, [rangeStart, rangeEnd]);
 
     if (cpfinalRows.length === 0) return res.json([]);
 
     const vins = cpfinalRows.map(r => r.vin);
-    const cpfinalTimeMap = new Map(cpfinalRows.map(r => [r.vin, new Date(r.cpfinal_time)]));
     const placeholders = vins.map(() => '?').join(',');
 
-    // 2. TLTT_time
-    const [tlttRows] = await pool.query(`
-      SELECT VIN, MAX(CREATION_TIME) AS TLTT_TIME
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'TLTT'
-        AND CREATION_TIME >= ?
-        AND CREATION_TIME < ?
-        AND VIN IN (${placeholders})
-      GROUP BY VIN
-    `, [rangeStart, rangeEnd, ...vins]);
-
-    const tlttMap = new Map(tlttRows.map(r => [r.VIN, r.TLTT_TIME]));
-
-    // 3. Дефекты
+    // 2. Дефекты
     const defectPosts = ['TLTT','CP8','TLADAS','TLWA','TLRT','CPA'];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
@@ -5915,8 +5875,7 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
         d.PART_NAME,
         d.PROBLEM_TYPE,
         d.PROBLEM_GRADE,
-        d.STATUS,
-        COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) AS repair_time
+        d.STATUS
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.POST_NAME IN (${defectPostsStr})
@@ -5925,17 +5884,15 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
         AND d.VIN IN (${placeholders})
     `, [rangeStart, rangeEnd, ...vins]);
 
-    // 4. Открытые VIN
+    // 3. Находим VIN, у которых есть хотя бы один не closed дефект
     const openVins = new Set();
     defectRows.forEach(row => {
-      const vin = row.VIN;
-      const isClosed =
-        (row.STATUS && row.STATUS.toLowerCase() === 'closed') ||
-        (row.repair_time && tlttMap.has(vin) && new Date(row.repair_time) < new Date(tlttMap.get(vin)));
-      if (!isClosed) openVins.add(vin);
+      if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
+        openVins.add(row.VIN);
+      }
     });
 
-    // 5. Группировка
+    // 4. Группируем только открытые дефекты этих VIN
     const defectGroupMap = new Map();
     defectRows.forEach(row => {
       if (!openVins.has(row.VIN)) return;
