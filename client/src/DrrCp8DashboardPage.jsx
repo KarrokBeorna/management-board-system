@@ -145,82 +145,62 @@ const getDefaultTimeFilter = () => {
 
 const getTimeRange = (timeFilter) => {
   const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const year = nowMoscow.getUTCFullYear();
-  const month = String(nowMoscow.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(nowMoscow.getUTCDate()).padStart(2, '0');
   const hours = nowMoscow.getUTCHours();
   const minutes = nowMoscow.getUTCMinutes();
   const totalMinutes = hours * 60 + minutes;
 
+  const getDateStr = (date) => {
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(date.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const today = new Date(nowMoscow);
+  today.setUTCHours(0,0,0,0);
+  const yesterday = new Date(today);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const todayStr = getDateStr(today);
+  const yesterdayStr = getDateStr(yesterday);
+
   if (timeFilter === 'all') {
     return {
-      start: `${year}-${month}-${day} 00:00:00`,
-      end: `${year}-${month}-${day} 23:59:59`,
+      start: `${todayStr} 00:00:00`,
+      end: `${todayStr} 23:59:59`,
     };
   }
 
   if (timeFilter === 'day') {
-    if (totalMinutes <= 16 * 60 + 40) {
-      return {
-        start: `${year}-${month}-${day} 07:50:00`,
-        end: `${year}-${month}-${day} 16:40:00`,
-      };
-    } else {
-      const yesterday = new Date(nowMoscow);
-      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-      const y = yesterday.getUTCFullYear();
-      const m = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(yesterday.getUTCDate()).padStart(2, '0');
-      return {
-        start: `${y}-${m}-${d} 07:50:00`,
-        end: `${y}-${m}-${d} 16:40:00`,
-      };
-    }
+    const dateToUse = totalMinutes >= 7 * 60 + 50 ? todayStr : yesterdayStr;
+    return {
+      start: `${dateToUse} 07:50:00`,
+      end: `${dateToUse} 16:40:00`,
+    };
   }
 
   if (timeFilter === 'evening') {
-    let startDate = new Date(nowMoscow);
-    if (totalMinutes < 1 * 60 + 31) {
-      startDate.setUTCDate(startDate.getUTCDate() - 1);
-    }
-    const endDate = new Date(startDate);
-    endDate.setUTCDate(endDate.getUTCDate() + 1);
-
-    const fmt = (date) => {
-      const y = date.getUTCFullYear();
-      const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(date.getUTCDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
-    };
-
+    const dateToUse = totalMinutes >= 16 * 60 + 41 ? todayStr : yesterdayStr;
+    const startDateObj = new Date(dateToUse + 'T00:00:00Z');
+    const endDateObj = new Date(startDateObj);
+    endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
+    const endStr = getDateStr(endDateObj);
     return {
-      start: `${fmt(startDate)} 16:41:00`,
-      end: `${fmt(endDate)} 01:30:00`,
+      start: `${dateToUse} 16:41:00`,
+      end: `${endStr} 01:30:00`,
     };
   }
 
   if (timeFilter === 'night') {
-    if (totalMinutes >= 1 * 60 + 31 && totalMinutes <= 7 * 60 + 50) {
-      return {
-        start: `${year}-${month}-${day} 01:31:00`,
-        end: `${year}-${month}-${day} 07:50:00`,
-      };
-    } else {
-      const yesterday = new Date(nowMoscow);
-      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-      const y = yesterday.getUTCFullYear();
-      const m = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(yesterday.getUTCDate()).padStart(2, '0');
-      return {
-        start: `${y}-${m}-${d} 01:31:00`,
-        end: `${y}-${m}-${d} 07:50:00`,
-      };
-    }
+    const dateToUse = totalMinutes >= 1 * 60 + 31 ? todayStr : yesterdayStr;
+    return {
+      start: `${dateToUse} 01:31:00`,
+      end: `${dateToUse} 07:50:00`,
+    };
   }
 
   return {
-    start: `${year}-${month}-${day} 00:00:00`,
-    end: `${year}-${month}-${day} 23:59:59`,
+    start: `${todayStr} 00:00:00`,
+    end: `${todayStr} 23:59:59`,
   };
 };
 
@@ -276,7 +256,6 @@ export default function DrrCpfinalDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Функция загрузки данных
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -300,12 +279,10 @@ export default function DrrCpfinalDashboardPage() {
     }
   };
 
-  // Загрузка данных при изменении фильтра
   useEffect(() => {
     loadData();
   }, [timeFilter]);
 
-  // Автообновление смены и фильтра каждую минуту, если не выбран вручную
   useEffect(() => {
     const interval = setInterval(() => {
       const newShiftInfo = getCurrentShiftInfo();
@@ -315,12 +292,11 @@ export default function DrrCpfinalDashboardPage() {
         const defaultFilter = getDefaultTimeFilter();
         setTimeFilter(defaultFilter);
       }
-    }, 60000); // каждые 60 секунд
+    }, 60000);
 
     return () => clearInterval(interval);
   }, [isManualFilter]);
 
-  // Автообновление данных каждые 30 секунд
   useEffect(() => {
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
@@ -342,36 +318,36 @@ export default function DrrCpfinalDashboardPage() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR CPFINAL Dashboard</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Индикатор недели и смены */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginRight: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
-              background: 'linear-gradient(145deg, #FFFFFF, #F9FAFB)',
-              borderRadius: '14px',
-              padding: '8px 16px',
-              boxShadow: '0 4px 10px rgba(0,0,0,0.05)',
-              border: '1px solid #E5E7EB',
+              background: 'linear-gradient(135deg, #F8FAFC 0%, #E2E8F0 100%)',
+              borderRadius: '30px',
+              padding: '10px 22px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+              border: '1px solid #E2E8F0',
               display: 'flex',
               alignItems: 'center',
               gap: '10px',
             }}>
-              <span style={{ fontWeight: 700, fontSize: '1.4rem', color: '#6B7280' }}>CW</span>
-              <span style={{ fontWeight: 800, fontSize: '1.8rem', color: '#1F2937', letterSpacing: '0.5px' }}>
+              <span style={{ fontSize: '1.2rem', color: '#64748B', fontWeight: 700 }}>CW</span>
+              <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#1E293B', letterSpacing: '1px', lineHeight: 1 }}>
                 {shiftInfo.weekNumber}
               </span>
             </div>
             <div style={{
-              width: 40,
-              height: 40,
+              width: '54px',
+              height: '54px',
               borderRadius: '50%',
-              background: shiftInfo.shiftLetter === 'A' ? '#F59E0B' : shiftInfo.shiftLetter === 'B' ? '#3B82F6' : '#1F2937',
-              color: '#FFFFFF',
+              background: shiftInfo.shiftLetter === 'A' ? '#F59E0B' : shiftInfo.shiftLetter === 'B' ? '#3B82F6' : '#6B7280',
+              color: '#1E293B',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 900,
-              fontSize: '1.6rem',
+              fontSize: '2rem',
               lineHeight: 1,
-              boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
+              boxShadow: '0 6px 14px rgba(0,0,0,0.15)',
+              border: '3px solid #FFFFFF',
             }}>
               {shiftInfo.shiftLetter}
             </div>
