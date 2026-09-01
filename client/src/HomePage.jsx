@@ -19,7 +19,6 @@ import DrrCp7DashboardPage from './assets/cp7drr.png';
 import cp7historyPreview from './assets/cp7hist.png'; 
 import DrrCp8DashboardPage from './assets/cp8drr.png'; 
 
-
 // ====== СТИЛИ ======
 const sectionStyle = {
   backgroundColor: '#FFFFFF',
@@ -44,14 +43,14 @@ const headingStyle = {
 
 const gridStyle = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(4, 1fr)',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
   gap: 24,
 };
 
 const tabBarStyle = {
   display: 'flex',
   gap: 6,
-  marginBottom: 32,
+  marginBottom: 24,
   backgroundColor: '#E5E7EB',
   borderRadius: 14,
   padding: 6,
@@ -72,7 +71,34 @@ const tabStyle = (active) => ({
   whiteSpace: 'nowrap',
 });
 
-const getCardStyle = (isHovered, accentColor) => ({
+const searchContainerStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
+  marginBottom: 28,
+  width: '100%',
+  maxWidth: 500,
+};
+
+const searchInputStyle = {
+  flex: 1,
+  padding: '12px 20px',
+  borderRadius: 12,
+  border: '1px solid #D1D5DB',
+  fontSize: 15,
+  background: '#F9FAFB',
+  outline: 'none',
+  transition: 'border-color 0.2s, box-shadow 0.2s',
+  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+};
+
+const searchIconStyle = {
+  fontSize: 18,
+  color: '#6B7280',
+};
+
+const getCardStyle = (isHovered, accentColor, isFavorite) => ({
+  position: 'relative',
   width: '100%',
   borderRadius: 16,
   overflow: 'hidden',
@@ -110,10 +136,33 @@ const getCaptionStyle = (isHovered, accentColor) => ({
   transition: 'background-color 0.3s ease',
 });
 
+const favoriteButtonStyle = (isFavorite, isHovered) => ({
+  position: 'absolute',
+  top: 10,
+  right: 10,
+  width: 32,
+  height: 32,
+  borderRadius: '50%',
+  border: 'none',
+  background: isFavorite ? '#FBBF24' : 'rgba(255,255,255,0.9)',
+  color: isFavorite ? '#FFFFFF' : '#9CA3AF',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: 16,
+  fontWeight: 700,
+  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+  transition: 'all 0.2s ease',
+  zIndex: 5,
+  opacity: isFavorite || isHovered ? 1 : 0,
+  transform: isFavorite || isHovered ? 'scale(1)' : 'scale(0.8)',
+});
+
 // ====== КОМПОНЕНТ КАРТОЧКИ ======
-function ReportCard({ to, imgSrc, caption, accentColor = '#2563EB' }) {
+function ReportCard({ to, imgSrc, caption, accentColor = '#2563EB', isFavorite, onToggleFavorite }) {
   const [isHovered, setIsHovered] = useState(false);
-  const cardStyle = getCardStyle(isHovered, accentColor);
+  const cardStyle = getCardStyle(isHovered, accentColor, isFavorite);
   const captionStyle = getCaptionStyle(isHovered, accentColor);
 
   const isExternal = to.startsWith('http');
@@ -136,6 +185,28 @@ function ReportCard({ to, imgSrc, caption, accentColor = '#2563EB' }) {
 
   const captionBlock = <div style={captionStyle}>{caption}</div>;
 
+  const favoriteButton = (
+    <button
+      style={favoriteButtonStyle(isFavorite, isHovered)}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onToggleFavorite(to);
+      }}
+      title={isFavorite ? 'Убрать из избранного' : 'В избранное'}
+    >
+      ★
+    </button>
+  );
+
+  const innerContent = (
+    <>
+      {favoriteButton}
+      {content}
+      {captionBlock}
+    </>
+  );
+
   if (isExternal) {
     return (
       <a
@@ -146,8 +217,7 @@ function ReportCard({ to, imgSrc, caption, accentColor = '#2563EB' }) {
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        {content}
-        {captionBlock}
+        {innerContent}
       </a>
     );
   }
@@ -159,8 +229,7 @@ function ReportCard({ to, imgSrc, caption, accentColor = '#2563EB' }) {
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {content}
-      {captionBlock}
+      {innerContent}
     </Link>
   );
 }
@@ -172,17 +241,13 @@ function AnimatedSection({ title, icon, iconBg, iconColor, children, visible }) 
 
   useEffect(() => {
     if (visible) {
-      // Показываем секцию
       setShouldRender(true);
-      // Небольшая задержка для срабатывания CSS transition
       const timer = setTimeout(() => {
         setIsAnimating(true);
       }, 50);
       return () => clearTimeout(timer);
     } else {
-      // Скрываем с анимацией
       setIsAnimating(false);
-      // После завершения анимации удаляем из DOM
       const timer = setTimeout(() => {
         setShouldRender(false);
       }, 500);
@@ -221,9 +286,54 @@ function AnimatedSection({ title, icon, iconBg, iconColor, children, visible }) 
 // ====== ОСНОВНОЙ КОМПОНЕНТ ======
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState('all'); // 'all' | 'reports' | 'services'
+  const [searchTerm, setSearchTerm] = useState('');
+  const [favorites, setFavorites] = useState(() => {
+    const saved = localStorage.getItem('home_favorites');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('home_favorites', JSON.stringify(favorites));
+  }, [favorites]);
+
+  const toggleFavorite = (to) => {
+    setFavorites(prev => prev.includes(to) ? prev.filter(item => item !== to) : [...prev, to]);
+  };
 
   const showReports = activeTab === 'all' || activeTab === 'reports';
   const showServices = activeTab === 'all' || activeTab === 'services';
+
+  const allReportCards = [
+    { to: "/report", imgSrc: tablePreview, caption: "Top DRR Board", accentColor: "#3B82F6" },
+    { to: "/daily-top", imgSrc: dailyTopPreview, caption: "Daily Top CP7/CP8", accentColor: "#8B5CF6" },
+    { to: "/model-status", imgSrc: modelStatusPreview, caption: "Model Status", accentColor: "#F59E0B" },
+    { to: "/mpp-weekly-top", imgSrc: mppWeeklyPreview, caption: "DRR Defects Top CP7/СP8", accentColor: "#10B981" },
+    { to: "/drr-report", imgSrc: drrReportPreview, caption: "DRR Report", accentColor: "#3B82F6" },
+    { to: "/daily-dashboard", imgSrc: dailyDashboardPreview, caption: "Daily Dashboard", accentColor: "#F59E0B" },
+    { to: "/tl-map", imgSrc: tlMapPreview, caption: "TL Map", accentColor: "#14B8A6" },
+    { to: "/drr-cp7-dashboard", imgSrc: DrrCp7DashboardPage, caption: "DRR CP7 Dashboard", accentColor: "#6366F1" },
+    { to: "/drr-cp7-history", imgSrc: cp7historyPreview, caption: "DRR CP7 History", accentColor: "#6366F1" },
+    { to: "/drr-cp8-dashboard", imgSrc: DrrCp8DashboardPage, caption: "DRR CP8 Dashboard", accentColor: "#8B5CF6" },
+  ];
+
+  const allServiceCards = [
+    { to: "/sgp-audit", imgSrc: sgpAuditPreview, caption: "СГП Audit", accentColor: "#10B981" },
+    { to: "/sgp-management", imgSrc: sgpManagementPreview, caption: "СГП Management", accentColor: "#10B981" },
+    { to: "/part-defect-search", imgSrc: partDefectPreview, caption: "Part/Defect Search", accentColor: "#3B82F6" },
+    { to: "http://10.27.195.25:5174/time-at-points", imgSrc: externalDReportPreview, caption: "Chekpoint Passage", accentColor: "#F59E0B" },
+    { to: "/warranty", imgSrc: warrantyPreview, caption: "Warranty", accentColor: "#10B981" },
+    { to: "/holds-sgp", imgSrc: HoldsSgpPage, caption: "Holds СГП", accentColor: "#EF4444" },
+    { to: "http://10.27.195.16/reports/024", imgSrc: externalReportPreview, caption: "DRR по заводу", accentColor: "#EF4444" },
+  ];
+
+  const filterCards = (cards) => {
+    return cards.filter(card => card.caption.toLowerCase().includes(searchTerm.trim().toLowerCase()));
+  };
+
+  const filteredReportCards = filterCards(allReportCards);
+  const filteredServiceCards = filterCards(allServiceCards);
+  const filteredFavoriteReportCards = filteredReportCards.filter(card => favorites.includes(card.to));
+  const filteredFavoriteServiceCards = filteredServiceCards.filter(card => favorites.includes(card.to));
 
   return (
     <div style={{ padding: 40, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
@@ -241,26 +351,71 @@ export default function HomePage() {
         </button>
       </div>
 
+      {/* Поиск */}
+      <div style={searchContainerStyle}>
+        <span style={searchIconStyle}>🔍</span>
+        <input
+          type="text"
+          placeholder="Поиск отчёта или сервиса..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          style={searchInputStyle}
+        />
+      </div>
+
+      {/* Избранное */}
+      {(filteredFavoriteReportCards.length > 0 || filteredFavoriteServiceCards.length > 0) && (
+        <AnimatedSection
+          title="Избранное"
+          icon="⭐"
+          iconBg="#FEF3C7"
+          iconColor="#D97706"
+          visible={true}
+        >
+          <div style={gridStyle}>
+            {filteredFavoriteReportCards.map(card => (
+              <ReportCard
+                key={card.to}
+                {...card}
+                isFavorite={favorites.includes(card.to)}
+                onToggleFavorite={toggleFavorite}
+              />
+            ))}
+            {filteredFavoriteServiceCards.map(card => (
+              <ReportCard
+                key={card.to}
+                {...card}
+                isFavorite={favorites.includes(card.to)}
+                onToggleFavorite={toggleFavorite}
+              />
+            ))}
+          </div>
+        </AnimatedSection>
+      )}
+
       {/* Секция "Отчёты" */}
       <AnimatedSection
         title="Отчёты"
         icon="📊"
         iconBg="#EEF2FF"
         iconColor="#2563EB"
-        visible={showReports}
+        visible={showReports && filteredReportCards.length > 0}
       >
         <div style={gridStyle}>
-          <ReportCard to="/report" imgSrc={tablePreview} caption="Top DRR Board" accentColor="#3B82F6" />
-          <ReportCard to="/daily-top" imgSrc={dailyTopPreview} caption="Daily Top CP7/CP8" accentColor="#8B5CF6" />
-          <ReportCard to="/model-status" imgSrc={modelStatusPreview} caption="Model Status" accentColor="#F59E0B" />
-          <ReportCard to="/mpp-weekly-top" imgSrc={mppWeeklyPreview} caption="DRR Defects Top CP7/СP8" accentColor="#10B981" />
-          <ReportCard to="/drr-report" imgSrc={drrReportPreview} caption="DRR Report" accentColor="#fa0000" />
-          <ReportCard to="/daily-dashboard" imgSrc={dailyDashboardPreview} caption="Daily Dashboard" accentColor="#0cb428" />
-          <ReportCard to="/tl-map" imgSrc={tlMapPreview} caption="TL Map" accentColor="#0ad5c8" />
-          <ReportCard to="/drr-cp7-dashboard" imgSrc={DrrCp7DashboardPage} caption="DRR CP7 Dashboard" accentColor="#3a2ac5" />
-          <ReportCard to="/drr-cp7-history" imgSrc={cp7historyPreview} caption="DRR CP7 History" accentColor="#10B981" />
-          <ReportCard to="/drr-cp8-dashboard" imgSrc={DrrCp8DashboardPage} caption="DRR CP8 Dashboard" accentColor="#3a2ac5" />
+          {filteredReportCards.map(card => (
+            <ReportCard
+              key={card.to}
+              {...card}
+              isFavorite={favorites.includes(card.to)}
+              onToggleFavorite={toggleFavorite}
+            />
+          ))}
         </div>
+        {filteredReportCards.length === 0 && (
+          <p style={{ textAlign: 'center', color: '#6B7280', margin: '20px 0' }}>
+            Ничего не найдено
+          </p>
+        )}
       </AnimatedSection>
 
       {/* Секция "Сервисы" */}
@@ -269,17 +424,23 @@ export default function HomePage() {
         icon="🛠️"
         iconBg="#F0FDF4"
         iconColor="#16A34A"
-        visible={showServices}
+        visible={showServices && filteredServiceCards.length > 0}
       >
         <div style={gridStyle}>
-          <ReportCard to="/sgp-audit" imgSrc={sgpAuditPreview} caption="СГП Audit" accentColor="#10B981" />
-          <ReportCard to="/sgp-management" imgSrc={sgpManagementPreview} caption="СГП Management" accentColor="#8B5CF6" />
-          <ReportCard to="/part-defect-search" imgSrc={partDefectPreview} caption="Part/Defect Search" accentColor="#0e3bec" />
-          <ReportCard to="http://10.27.195.25:5174/time-at-points" imgSrc={externalDReportPreview} caption="Chekpoint Passage" accentColor="#fc7b02" />
-          <ReportCard to="/warranty" imgSrc={warrantyPreview} caption="Warranty" accentColor="#0cd72a" />
-          <ReportCard to="/holds-sgp" imgSrc={HoldsSgpPage} caption="Holds СГП" accentColor="#f30b2e" />
-          <ReportCard to="http://10.27.195.16/reports/024" imgSrc={externalReportPreview} caption="DRR по заводу" accentColor="#1638f9" />
+          {filteredServiceCards.map(card => (
+            <ReportCard
+              key={card.to}
+              {...card}
+              isFavorite={favorites.includes(card.to)}
+              onToggleFavorite={toggleFavorite}
+            />
+          ))}
         </div>
+        {filteredServiceCards.length === 0 && (
+          <p style={{ textAlign: 'center', color: '#6B7280', margin: '20px 0' }}>
+            Ничего не найдено
+          </p>
+        )}
       </AnimatedSection>
     </div>
   );
