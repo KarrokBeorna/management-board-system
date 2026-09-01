@@ -294,7 +294,7 @@ export default function SgpAuditPage() {
   const hasAnyFilter = useMemo(() => {
     return !!tpVinSearch.trim() ||
       (Array.isArray(tpFilters.vin) && tpFilters.vin.length > 0) ||
-      ['material_code', 'sequence_number', 'batch_num', 'kd_material_no', 'model', 'material_desc', 'colour', 'location'].some(f => tpFilters[f] && tpFilters[f].length > 0) ||
+      ['material_code', 'sequence_number', 'batch_num', 'kd_material_no', 'model', 'material_desc', 'storage_location', 'colour', 'location'].some(f => tpFilters[f] && tpFilters[f].length > 0) ||
       Object.keys(tpFilters).some(key => key.match(/^(cp5|cp6|trimIn|cp7|cp72|tlwa|tlrt|tladas|tltt|cpFinal|cp8|inbound|outbound)(From|To)$/));
   }, [tpFilters, tpVinSearch]);
 
@@ -347,7 +347,7 @@ export default function SgpAuditPage() {
       result = result.filter(d => tpFilters.vin.includes(d.vin));
     }
 
-    ['material_code', 'sequence_number', 'batch_num', 'kd_material_no', 'model', 'material_desc', 'colour', 'location'].forEach(field => {
+    ['material_code', 'sequence_number', 'batch_num', 'kd_material_no', 'model', 'material_desc', 'storage_location', 'colour', 'location'].forEach(field => {
       const selected = tpFilters[field];
       if (selected && selected.length > 0) {
         result = result.filter(d => selected.includes(d[field]));
@@ -730,6 +730,7 @@ export default function SgpAuditPage() {
     { key: 'kd_material_no', label: 'KD', filterable: true },
     { key: 'model', label: 'Model', filterable: true },
     { key: 'material_desc', label: 'Комплектация', filterable: true },
+    { key: 'storage_location', label: 'Складская локация', filterable: true },
     { key: 'colour', label: 'Цвет', filterable: true },
     { key: 'location', label: 'Расположение', filterable: true },
     { key: 'CP5', label: 'CP5', isTime: true },
@@ -816,17 +817,14 @@ export default function SgpAuditPage() {
     try {
       const vin = vinSearch.trim();
 
-      // Получаем текущее расположение
       const locRes = await fetch(`${API_BASE}/api/vehicles-current-location?vins=${encodeURIComponent(vin)}`);
       const locArray = await locRes.json();
       const loc = locArray.length > 0 ? locArray[0] : null;
 
-      // Получаем модель
       const modelRes = await fetch(`${API_BASE}/api/vehicles-models?vins=${encodeURIComponent(vin)}`);
       const modelMap = await modelRes.json();
       const model = modelMap[vin] || '-';
 
-      // Получаем складские данные (если есть)
       const storageRes = await fetch(`${API_BASE}/api/sgp-audit-storage?vin=${encodeURIComponent(vin)}`);
       const storageData = await storageRes.json();
       const storageRow = storageData && storageData.length > 0 ? storageData[0] : null;
@@ -905,11 +903,9 @@ export default function SgpAuditPage() {
   };
 
   const handleFileUpload = async (e) => {
-    // ... (аналитика скрыта)
   };
 
   const loadAnalytics = async () => {
-    // ... (аналитика скрыта)
   };
 
   useEffect(() => {
@@ -987,7 +983,6 @@ export default function SgpAuditPage() {
         Управление холдами
       </h1>
 
-      {/* Подкарточки */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 30 }}>
         <button 
           onClick={() => setActiveTab('checkpoints')} 
@@ -1024,7 +1019,6 @@ export default function SgpAuditPage() {
         </button>
       </div>
 
-      {/* Вкладки */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 30, flexWrap: 'wrap' }}>
         <button onClick={() => setActiveTab('checkpoints')} style={tabStyle(activeTab === 'checkpoints')}>
           Аудит авто Цеха Сборки
@@ -1037,7 +1031,6 @@ export default function SgpAuditPage() {
         </button>
       </div>
 
-      {/* ========== Time Points ========== */}
       {activeTab === 'timepoints' && (
         <div style={cardStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
@@ -1057,7 +1050,6 @@ export default function SgpAuditPage() {
             </div>
           </div>
 
-          {/* VIN поиск с кнопкой */}
           <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
               🔍 VIN:
@@ -1075,7 +1067,6 @@ export default function SgpAuditPage() {
             </button>
           </div>
 
-          {/* Фильтры в 2 столбца */}
           <div style={{ 
             display: 'grid', 
             gridTemplateColumns: '1fr 1fr', 
@@ -1106,10 +1097,6 @@ export default function SgpAuditPage() {
             <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка данных...</div>
           ) : timePointsError ? (
             <div style={{ textAlign: 'center', padding: 40, color: '#DC2626' }}>❌ {timePointsError}</div>
-          ) : !hasAnyFilter ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
-              Выберите фильтр точки
-            </div>
           ) : (
             <>
               <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 550px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
@@ -1197,7 +1184,6 @@ export default function SgpAuditPage() {
             </>
           )}
 
-          {/* Выпадающий фильтр */}
           {activeFilterColumn && allTimePointsData.length > 0 && (
             <div 
               className="filter-dropdown"
@@ -1242,7 +1228,6 @@ export default function SgpAuditPage() {
         </div>
       )}
 
-      {/* ========== Соседи по точке ========== */}
       {activeTab === 'neighbors' && (
         <div style={cardStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
@@ -1376,7 +1361,6 @@ export default function SgpAuditPage() {
         </div>
       )}
 
-      {/* ========== Checkpoints ========== */}
       {activeTab === 'checkpoints' && (
         <>
           <div style={{ marginBottom: 24, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', border: '1px solid #F0F0F5' }}>
@@ -1512,7 +1496,6 @@ export default function SgpAuditPage() {
         </>
       )}
 
-      {/* ========== Модальное окно экспорта на холды ========== */}
       {showExportModal && (
         <div style={{
           position: 'fixed',

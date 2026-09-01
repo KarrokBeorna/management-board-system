@@ -4494,9 +4494,10 @@ app.get('/api/time-points', async (req, res) => {
     const filteredVins = vehicles.map(v => v.vin);
     const placeholders = filteredVins.map(() => '?').join(',');
 
-    // --- Обогащение LES (in_storage_time, out_storage_time) ---
+    // --- Обогащение LES (in_storage_time, out_storage_time, складские поля) ---
     const lesDataPromise = lesPool.query(
-      `SELECT tbs.vin, tbs.in_storage_time, tbs.out_storage_time
+      `SELECT tbs.vin, tbs.in_storage_time, tbs.out_storage_time,
+              tbs.ck_no, tbs.kq_no, tbs.kw_no
        FROM tv_biz_storage_car tbs
        WHERE tbs.vin IN (${placeholders})`,
       [...filteredVins]
@@ -4518,13 +4519,20 @@ app.get('/api/time-points', async (req, res) => {
 
     const [[lesRows], [iotRows]] = await Promise.all([lesDataPromise, iotDataPromise]);
 
-    // Слияние LES
+    // Слияние LES + добавление storage_location
     const lesMap = new Map(lesRows.map(r => [r.vin, r]));
-    vehicles = vehicles.map(v => ({
-      ...v,
-      in_storage_time: lesMap.get(v.vin)?.in_storage_time || null,
-      out_storage_time: lesMap.get(v.vin)?.out_storage_time || null,
-    }));
+    vehicles = vehicles.map(v => {
+      const les = lesMap.get(v.vin);
+      const storageLocation = les 
+        ? [les.ck_no, les.kq_no, les.kw_no].filter(Boolean).join('-') 
+        : '';
+      return {
+        ...v,
+        in_storage_time: les?.in_storage_time || null,
+        out_storage_time: les?.out_storage_time || null,
+        storage_location: storageLocation || null,
+      };
+    });
 
     // Слияние IoT
     const iotMap = new Map(iotRows.map(r => [r.vin, r]));
