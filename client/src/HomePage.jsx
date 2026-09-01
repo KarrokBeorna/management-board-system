@@ -43,7 +43,7 @@ const headingStyle = {
 
 const gridStyle = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+  gridTemplateColumns: 'repeat(4, 1fr)',
   gap: 24,
 };
 
@@ -77,27 +77,48 @@ const searchContainerStyle = {
   gap: 12,
   marginBottom: 28,
   width: '100%',
-  maxWidth: 500,
+  maxWidth: 600,
+  position: 'relative',
 };
 
 const searchInputStyle = {
-  flex: 1,
-  padding: '12px 20px',
-  borderRadius: 12,
-  border: '1px solid #D1D5DB',
+  width: '100%',
+  padding: '14px 20px 14px 48px',
+  borderRadius: 14,
+  border: '1px solid #E5E7EB',
   fontSize: 15,
-  background: '#F9FAFB',
+  background: '#FFFFFF',
   outline: 'none',
   transition: 'border-color 0.2s, box-shadow 0.2s',
-  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+  boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
 };
 
 const searchIconStyle = {
+  position: 'absolute',
+  left: 16,
+  top: '50%',
+  transform: 'translateY(-50%)',
   fontSize: 18,
-  color: '#6B7280',
+  color: '#9CA3AF',
+  pointerEvents: 'none',
 };
 
-const getCardStyle = (isHovered, accentColor, isFavorite) => ({
+const clearButtonStyle = {
+  position: 'absolute',
+  right: 12,
+  top: '50%',
+  transform: 'translateY(-50%)',
+  border: 'none',
+  background: 'transparent',
+  color: '#9CA3AF',
+  fontSize: 18,
+  cursor: 'pointer',
+  padding: '4px',
+  borderRadius: '50%',
+  transition: 'background 0.2s, color 0.2s',
+};
+
+const getCardStyle = (isHovered, accentColor) => ({
   position: 'relative',
   width: '100%',
   borderRadius: 16,
@@ -162,7 +183,7 @@ const favoriteButtonStyle = (isFavorite, isHovered) => ({
 // ====== КОМПОНЕНТ КАРТОЧКИ ======
 function ReportCard({ to, imgSrc, caption, accentColor = '#2563EB', isFavorite, onToggleFavorite }) {
   const [isHovered, setIsHovered] = useState(false);
-  const cardStyle = getCardStyle(isHovered, accentColor, isFavorite);
+  const cardStyle = getCardStyle(isHovered, accentColor);
   const captionStyle = getCaptionStyle(isHovered, accentColor);
 
   const isExternal = to.startsWith('http');
@@ -285,7 +306,7 @@ function AnimatedSection({ title, icon, iconBg, iconColor, children, visible }) 
 
 // ====== ОСНОВНОЙ КОМПОНЕНТ ======
 export default function HomePage() {
-  const [activeTab, setActiveTab] = useState('all'); // 'all' | 'reports' | 'services'
+  const [activeTab, setActiveTab] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [favorites, setFavorites] = useState(() => {
     const saved = localStorage.getItem('home_favorites');
@@ -332,8 +353,8 @@ export default function HomePage() {
 
   const filteredReportCards = filterCards(allReportCards);
   const filteredServiceCards = filterCards(allServiceCards);
-  const filteredFavoriteReportCards = filteredReportCards.filter(card => favorites.includes(card.to));
-  const filteredFavoriteServiceCards = filteredServiceCards.filter(card => favorites.includes(card.to));
+  const favoriteReportCards = filteredReportCards.filter(card => favorites.includes(card.to));
+  const favoriteServiceCards = filteredServiceCards.filter(card => favorites.includes(card.to));
 
   return (
     <div style={{ padding: 40, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
@@ -361,10 +382,18 @@ export default function HomePage() {
           onChange={(e) => setSearchTerm(e.target.value)}
           style={searchInputStyle}
         />
+        {searchTerm && (
+          <button
+            style={clearButtonStyle}
+            onClick={() => setSearchTerm('')}
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       {/* Избранное */}
-      {(filteredFavoriteReportCards.length > 0 || filteredFavoriteServiceCards.length > 0) && (
+      {(favoriteReportCards.length > 0 || favoriteServiceCards.length > 0) && (
         <AnimatedSection
           title="Избранное"
           icon="⭐"
@@ -373,19 +402,19 @@ export default function HomePage() {
           visible={true}
         >
           <div style={gridStyle}>
-            {filteredFavoriteReportCards.map(card => (
+            {favoriteReportCards.map(card => (
               <ReportCard
                 key={card.to}
                 {...card}
-                isFavorite={favorites.includes(card.to)}
+                isFavorite={true}
                 onToggleFavorite={toggleFavorite}
               />
             ))}
-            {filteredFavoriteServiceCards.map(card => (
+            {favoriteServiceCards.map(card => (
               <ReportCard
                 key={card.to}
                 {...card}
-                isFavorite={favorites.includes(card.to)}
+                isFavorite={true}
                 onToggleFavorite={toggleFavorite}
               />
             ))}
