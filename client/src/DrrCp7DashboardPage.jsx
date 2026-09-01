@@ -49,10 +49,40 @@ const filterButtonStyle = (active) => ({
   transition: 'all 0.2s',
 });
 
-const timeFilterButtonStyle = (active) => ({
+const timeFilterButtonStyle = (active, activeColor) => ({
   ...filterButtonStyle(active),
-  background: active ? '#F59E0B' : '#FFFFFF',
+  background: active ? activeColor : '#FFFFFF',
   color: active ? '#FFFFFF' : '#64748B',
+});
+
+const shiftIndicatorStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  marginRight: '12px',
+  padding: '8px 16px',
+  borderRadius: '12px',
+  backgroundColor: '#FFFFFF',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+};
+
+const weekStyle = {
+  fontWeight: 800,
+  fontSize: '1.6rem',
+  color: '#1E293B',
+};
+
+const shiftLetterStyle = (letter) => ({
+  width: '32px',
+  height: '32px',
+  borderRadius: '8px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontWeight: 900,
+  fontSize: '1.4rem',
+  color: '#FFFFFF',
+  backgroundColor: letter === 'A' ? '#F59E0B' : letter === 'B' ? '#3B82F6' : '#6B7280',
 });
 
 const dashboardGridStyle = {
@@ -134,75 +164,124 @@ const getDefaultTimeFilter = () => {
   const minutes = nowMoscow.getUTCMinutes();
   const totalMinutes = hours * 60 + minutes;
 
-  if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 19 * 60 + 30) {
-    return 'day';
-  } else {
-    return 'evening';
+  if (totalMinutes >= 1 * 60 + 31 && totalMinutes < 7 * 60 + 50) {
+    return 'night';
   }
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 16 * 60 + 41) {
+    return 'day';
+  }
+  return 'evening';
 };
 
 const getTimeRange = (timeFilter) => {
   const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const year = nowMoscow.getUTCFullYear();
-  const month = String(nowMoscow.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(nowMoscow.getUTCDate()).padStart(2, '0');
   const hours = nowMoscow.getUTCHours();
   const minutes = nowMoscow.getUTCMinutes();
   const totalMinutes = hours * 60 + minutes;
 
+  const getDateStr = (date) => {
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(date.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const today = new Date(nowMoscow);
+  today.setUTCHours(0,0,0,0);
+  const yesterday = new Date(today);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const todayStr = getDateStr(today);
+  const yesterdayStr = getDateStr(yesterday);
+
   if (timeFilter === 'all') {
     return {
-      start: `${year}-${month}-${day} 00:00:00`,
-      end: `${year}-${month}-${day} 23:59:59`
+      start: `${todayStr} 00:00:00`,
+      end: `${todayStr} 23:59:59`,
     };
   }
 
   if (timeFilter === 'day') {
+    const dateToUse = totalMinutes >= 7 * 60 + 50 ? todayStr : yesterdayStr;
     return {
-      start: `${year}-${month}-${day} 07:50:00`,
-      end: `${year}-${month}-${day} 19:30:00`
+      start: `${dateToUse} 07:50:00`,
+      end: `${dateToUse} 16:40:00`,
     };
   }
 
   if (timeFilter === 'evening') {
-    const isAfterEveningStart = totalMinutes >= 19 * 60 + 31;
-    let startDate = new Date(nowMoscow);
-    let endDate = new Date(nowMoscow);
-
-    if (isAfterEveningStart) {
-      startDate.setUTCHours(19, 31, 0, 0);
-      endDate.setUTCDate(endDate.getUTCDate() + 1);
-      endDate.setUTCHours(7, 49, 0, 0);
-    } else {
-      startDate.setUTCDate(startDate.getUTCDate() - 1);
-      startDate.setUTCHours(19, 31, 0, 0);
-      endDate.setUTCHours(7, 49, 0, 0);
-    }
-
-    const fmt = (date) => {
-      const y = date.getUTCFullYear();
-      const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(date.getUTCDate()).padStart(2, '0');
-      const hh = String(date.getUTCHours()).padStart(2, '0');
-      const mm = String(date.getUTCMinutes()).padStart(2, '0');
-      return `${y}-${m}-${d} ${hh}:${mm}:00`;
-    };
-
+    const dateToUse = totalMinutes >= 16 * 60 + 41 ? todayStr : yesterdayStr;
+    const startDateObj = new Date(dateToUse + 'T00:00:00Z');
+    const endDateObj = new Date(startDateObj);
+    endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
+    const endStr = getDateStr(endDateObj);
     return {
-      start: fmt(startDate),
-      end: fmt(endDate)
+      start: `${dateToUse} 16:41:00`,
+      end: `${endStr} 01:30:00`,
+    };
+  }
+
+  if (timeFilter === 'night') {
+    const dateToUse = totalMinutes >= 1 * 60 + 31 ? todayStr : yesterdayStr;
+    return {
+      start: `${dateToUse} 01:31:00`,
+      end: `${dateToUse} 07:50:00`,
     };
   }
 
   return {
-    start: `${year}-${month}-${day} 00:00:00`,
-    end: `${year}-${month}-${day} 23:59:59`
+    start: `${todayStr} 00:00:00`,
+    end: `${todayStr} 23:59:59`,
   };
+};
+
+const getWeekNumber = (date) => {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+};
+
+const getCurrentShiftInfo = () => {
+  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const hours = nowMoscow.getUTCHours();
+  const minutes = nowMoscow.getUTCMinutes();
+  const totalMinutes = hours * 60 + minutes;
+
+  let shiftDate = new Date(nowMoscow);
+  let shiftType = 'night';
+
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
+    shiftType = 'day';
+  } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
+    shiftType = 'evening';
+    if (totalMinutes <= 1 * 60 + 30) {
+      shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
+    }
+  } else {
+    shiftType = 'night';
+  }
+
+  const weekNumber = getWeekNumber(shiftDate);
+  const isEvenWeek = weekNumber % 2 === 0;
+  let shiftLetter = 'C';
+
+  if (shiftType === 'night') {
+    shiftLetter = 'C';
+  } else if (shiftType === 'day') {
+    shiftLetter = isEvenWeek ? 'B' : 'A';
+  } else if (shiftType === 'evening') {
+    shiftLetter = isEvenWeek ? 'A' : 'B';
+  }
+
+  return { weekNumber, shiftLetter, shiftType };
 };
 
 export default function DrrCp7DashboardPage() {
   const [filter, setFilter] = useState('all');
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
+  const [isManualFilter, setIsManualFilter] = useState(false);
+  const [shiftInfo, setShiftInfo] = useState(getCurrentShiftInfo());
   const [drrData, setDrrData] = useState({ totalVins: 0, closedVins: 0, drrPercent: 0 });
   const [topDefects, setTopDefects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -214,7 +293,6 @@ export default function DrrCp7DashboardPage() {
     try {
       const { start, end } = getTimeRange(timeFilter);
 
-      // Запрос DRR данных
       const drrParams = new URLSearchParams({
         filter,
         startTime: start,
@@ -225,7 +303,6 @@ export default function DrrCp7DashboardPage() {
       const drrJson = await drrRes.json();
       setDrrData(drrJson);
 
-      // Запрос топ дефектов (MPP)
       const defectsParams = new URLSearchParams({
         filter,
         startTime: start,
@@ -244,6 +321,23 @@ export default function DrrCp7DashboardPage() {
 
   useEffect(() => {
     loadData();
+  }, [filter, timeFilter]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const newShiftInfo = getCurrentShiftInfo();
+      setShiftInfo(newShiftInfo);
+
+      if (!isManualFilter) {
+        const defaultFilter = getDefaultTimeFilter();
+        setTimeFilter(defaultFilter);
+      }
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [isManualFilter]);
+
+  useEffect(() => {
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [filter, timeFilter]);
@@ -255,18 +349,61 @@ export default function DrrCp7DashboardPage() {
     { name: 'Не прямой сход', value: Math.max(0, 100 - drrData.drrPercent) },
   ];
 
+  const handleFilterClick = (filter) => {
+    setIsManualFilter(true);
+    setTimeFilter(filter);
+  };
+
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR CP7 Dashboard</h1>
-        <div style={filterGroupStyle}>
-          <button style={filterButtonStyle(filter === 'all')} onClick={() => setFilter('all')}>Все</button>
-          <button style={filterButtonStyle(filter === 'cp7')} onClick={() => setFilter('cp7')}>CP7</button>
-          <button style={filterButtonStyle(filter === 'pip')} onClick={() => setFilter('pip')}>PIP</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {/* Индикатор недели и смены */}
+          <div style={shiftIndicatorStyle}>
+            <span style={weekStyle}>CW {shiftInfo.weekNumber}</span>
+            <div style={shiftLetterStyle(shiftInfo.shiftLetter)}>
+              {shiftInfo.shiftLetter}
+            </div>
+          </div>
 
-          <button style={timeFilterButtonStyle(timeFilter === 'all')} onClick={() => setTimeFilter('all')}>Сутки</button>
-          <button style={timeFilterButtonStyle(timeFilter === 'day')} onClick={() => setTimeFilter('day')}>День</button>
-          <button style={timeFilterButtonStyle(timeFilter === 'evening')} onClick={() => setTimeFilter('evening')}>Вечер</button>
+          {/* Фильтр по типу (Все/CP7/PIP) */}
+          <div style={filterGroupStyle}>
+            <button style={filterButtonStyle(filter === 'all')} onClick={() => setFilter('all')}>Все</button>
+            <button style={filterButtonStyle(filter === 'cp7')} onClick={() => setFilter('cp7')}>CP7</button>
+            <button style={filterButtonStyle(filter === 'pip')} onClick={() => setFilter('pip')}>PIP</button>
+          </div>
+
+          {/* Разделитель */}
+          <div style={{ width: '1px', height: '40px', backgroundColor: '#D1D5DB' }} />
+
+          {/* Фильтр времени */}
+          <div style={filterGroupStyle}>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')}
+              onClick={() => handleFilterClick('all')}
+            >
+              Сутки
+            </button>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')}
+              onClick={() => handleFilterClick('day')}
+            >
+              День
+            </button>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')}
+              onClick={() => handleFilterClick('evening')}
+            >
+              Вечер
+            </button>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')}
+              onClick={() => handleFilterClick('night')}
+            >
+              Ночь
+            </button>
+          </div>
         </div>
       </div>
 
@@ -281,7 +418,6 @@ export default function DrrCp7DashboardPage() {
       ) : (
         <div style={dashboardGridStyle}>
           
-          {/* ЛЕВАЯ КОЛОНКА (40%) - Pie Chart + цветные блоки */}
           <div style={chartColumnStyle}>
             <div style={{ position: 'relative', width: '100%', height: '600px' }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -376,7 +512,6 @@ export default function DrrCp7DashboardPage() {
             </div>
           </div>
 
-          {/* ПРАВАЯ КОЛОНКА (60%) - Таблица */}
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP7</h2>
