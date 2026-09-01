@@ -160,7 +160,6 @@ const getTimeRange = (timeFilter) => {
   }
 
   if (timeFilter === 'day') {
-    // День: 7:50-16:40 текущего дня, если сейчас до 16:40, иначе вчерашняя смена
     if (totalMinutes <= 16 * 60 + 40) {
       return {
         start: `${year}-${month}-${day} 07:50:00`,
@@ -180,7 +179,6 @@ const getTimeRange = (timeFilter) => {
   }
 
   if (timeFilter === 'evening') {
-    // Вечер: 16:41 сегодня - 1:30 завтра, либо если сейчас после полуночи, вечер начался вчера
     let startDate = new Date(nowMoscow);
     if (totalMinutes < 1 * 60 + 31) {
       startDate.setUTCDate(startDate.getUTCDate() - 1);
@@ -202,7 +200,6 @@ const getTimeRange = (timeFilter) => {
   }
 
   if (timeFilter === 'night') {
-    // Ночь: 1:31-7:50 текущего дня, если сейчас в этом интервале, иначе прошлая ночь
     if (totalMinutes >= 1 * 60 + 31 && totalMinutes <= 7 * 60 + 50) {
       return {
         start: `${year}-${month}-${day} 01:31:00`,
@@ -227,7 +224,6 @@ const getTimeRange = (timeFilter) => {
   };
 };
 
-// Вычисление номера недели (ISO 8601)
 const getWeekNumber = (date) => {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -236,7 +232,6 @@ const getWeekNumber = (date) => {
   return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
 };
 
-// Определение текущей смены
 const getCurrentShiftInfo = () => {
   const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
   const hours = nowMoscow.getUTCHours();
@@ -274,19 +269,19 @@ const getCurrentShiftInfo = () => {
 
 export default function DrrCpfinalDashboardPage() {
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
+  const [isManualFilter, setIsManualFilter] = useState(false);
+  const [shiftInfo, setShiftInfo] = useState(getCurrentShiftInfo());
   const [drrData, setDrrData] = useState({ totalVins: 0, closedVins: 0, drrPercent: 0 });
   const [topDefects, setTopDefects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const shiftInfo = getCurrentShiftInfo();
-
+  // Функция загрузки данных
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
       const { start, end } = getTimeRange(timeFilter);
-
       const drrParams = new URLSearchParams({ startTime: start, endTime: end });
       const drrRes = await fetch(`${API_BASE}/api/drr-cp8-dashboard?${drrParams.toString()}`);
       if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
@@ -305,18 +300,42 @@ export default function DrrCpfinalDashboardPage() {
     }
   };
 
+  // Загрузка данных при изменении фильтра
   useEffect(() => {
     loadData();
+  }, [timeFilter]);
+
+  // Автообновление смены и фильтра каждую минуту, если не выбран вручную
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const newShiftInfo = getCurrentShiftInfo();
+      setShiftInfo(newShiftInfo);
+
+      if (!isManualFilter) {
+        const defaultFilter = getDefaultTimeFilter();
+        setTimeFilter(defaultFilter);
+      }
+    }, 60000); // каждые 60 секунд
+
+    return () => clearInterval(interval);
+  }, [isManualFilter]);
+
+  // Автообновление данных каждые 30 секунд
+  useEffect(() => {
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [timeFilter]);
 
   const nokVins = drrData.totalVins - drrData.closedVins;
-
   const pieData = [
     { name: 'DRR', value: drrData.drrPercent },
     { name: 'Не прямой сход', value: Math.max(0, 100 - drrData.drrPercent) },
   ];
+
+  const handleFilterClick = (filter) => {
+    setIsManualFilter(true);
+    setTimeFilter(filter);
+  };
 
   return (
     <div style={containerStyle}>
@@ -324,42 +343,65 @@ export default function DrrCpfinalDashboardPage() {
         <h1 style={titleStyle}>DRR CPFINAL Dashboard</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           {/* Индикатор недели и смены */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginRight: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginRight: '20px' }}>
             <div style={{
-              backgroundColor: '#F3F4F6',
-              borderRadius: '12px',
-              padding: '10px 16px',
+              background: 'linear-gradient(145deg, #FFFFFF, #F9FAFB)',
+              borderRadius: '14px',
+              padding: '8px 16px',
+              boxShadow: '0 4px 10px rgba(0,0,0,0.05)',
+              border: '1px solid #E5E7EB',
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
-              fontWeight: 700,
-              fontSize: '1.4rem',
-              color: '#1F2937',
+              gap: '10px',
             }}>
-              <span style={{ color: '#6B7280' }}>CW</span>
-              {shiftInfo.weekNumber}
+              <span style={{ fontWeight: 700, fontSize: '1.4rem', color: '#6B7280' }}>CW</span>
+              <span style={{ fontWeight: 800, fontSize: '1.8rem', color: '#1F2937', letterSpacing: '0.5px' }}>
+                {shiftInfo.weekNumber}
+              </span>
             </div>
             <div style={{
-              width: 36,
-              height: 36,
+              width: 40,
+              height: 40,
               borderRadius: '50%',
-              backgroundColor: shiftInfo.shiftLetter === 'A' ? '#F59E0B' : shiftInfo.shiftLetter === 'B' ? '#3B82F6' : '#1F2937',
+              background: shiftInfo.shiftLetter === 'A' ? '#F59E0B' : shiftInfo.shiftLetter === 'B' ? '#3B82F6' : '#1F2937',
               color: '#FFFFFF',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 900,
               fontSize: '1.6rem',
+              lineHeight: 1,
+              boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
             }}>
               {shiftInfo.shiftLetter}
             </div>
           </div>
           <div style={{ width: '1px', height: '40px', backgroundColor: '#D1D5DB' }} />
           <div style={filterGroupStyle}>
-            <button style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')} onClick={() => setTimeFilter('all')}>Сутки</button>
-            <button style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')} onClick={() => setTimeFilter('day')}>День</button>
-            <button style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')} onClick={() => setTimeFilter('evening')}>Вечер</button>
-            <button style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')} onClick={() => setTimeFilter('night')}>Ночь</button>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')}
+              onClick={() => handleFilterClick('all')}
+            >
+              Сутки
+            </button>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')}
+              onClick={() => handleFilterClick('day')}
+            >
+              День
+            </button>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')}
+              onClick={() => handleFilterClick('evening')}
+            >
+              Вечер
+            </button>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')}
+              onClick={() => handleFilterClick('night')}
+            >
+              Ночь
+            </button>
           </div>
         </div>
       </div>
