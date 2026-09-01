@@ -318,41 +318,46 @@ export default function DrrCpfinalDashboardPage() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR CPFINAL Dashboard</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {/* УЛУЧШЕННЫЙ БЛОК НЕДЕЛИ И СМЕНЫ */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
+            {/* Капсула с номером недели */}
             <div style={{
-              background: 'linear-gradient(135deg, #F8FAFC 0%, #E2E8F0 100%)',
-              borderRadius: '30px',
-              padding: '10px 22px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-              border: '1px solid #E2E8F0',
+              background: '#FFFFFF',
+              borderRadius: '20px',
+              padding: '12px 28px',
+              boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+              border: '3px solid #E2E8F0',
               display: 'flex',
               alignItems: 'center',
-              gap: '10px',
+              gap: '12px',
             }}>
-              <span style={{ fontSize: '1.2rem', color: '#64748B', fontWeight: 700 }}>CW</span>
-              <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#1E293B', letterSpacing: '1px', lineHeight: 1 }}>
+              <span style={{ fontSize: '1.8rem', color: '#64748B', fontWeight: 800 }}>CW</span>
+              <span style={{ fontSize: '3rem', fontWeight: 900, color: '#1E293B', letterSpacing: '2px', lineHeight: 1 }}>
                 {shiftInfo.weekNumber}
               </span>
             </div>
+
+            {/* Буква смены (огромная, тёмный текст) */}
             <div style={{
-              width: '54px',
-              height: '54px',
-              borderRadius: '50%',
+              width: '80px',
+              height: '80px',
+              borderRadius: '20px',
               background: shiftInfo.shiftLetter === 'A' ? '#F59E0B' : shiftInfo.shiftLetter === 'B' ? '#3B82F6' : '#6B7280',
               color: '#1E293B',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 900,
-              fontSize: '2rem',
+              fontSize: '3.5rem',
               lineHeight: 1,
-              boxShadow: '0 6px 14px rgba(0,0,0,0.15)',
-              border: '3px solid #FFFFFF',
+              boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
+              border: '4px solid #FFFFFF',
             }}>
               {shiftInfo.shiftLetter}
             </div>
           </div>
-          <div style={{ width: '1px', height: '40px', backgroundColor: '#D1D5DB' }} />
+
+          <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
           <div style={filterGroupStyle}>
             <button
               style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')}
