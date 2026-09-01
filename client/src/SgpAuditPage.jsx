@@ -215,7 +215,13 @@ export default function SgpAuditPage() {
   }, [activeFilterColumn]);
 
   useEffect(() => {
-    const handleScroll = () => setActiveFilterColumn(null);
+    const handleScroll = (event) => {
+      // Если скролл внутри выпадающего фильтра, не закрываем
+      if (event.target.closest && event.target.closest('.filter-dropdown')) {
+        return;
+      }
+      setActiveFilterColumn(null);
+    };
     window.addEventListener('scroll', handleScroll, true);
     return () => window.removeEventListener('scroll', handleScroll, true);
   }, []);
