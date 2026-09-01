@@ -128,84 +128,68 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
-const getDefaultTimeFilter = () => {
-  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const hours = nowMoscow.getUTCHours();
-  const minutes = nowMoscow.getUTCMinutes();
-  const totalMinutes = hours * 60 + minutes;
+// Вспомогательные функции для работы с московским временем
+const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
 
-  if (totalMinutes >= 1 * 60 + 31 && totalMinutes < 7 * 60 + 50) {
-    return 'night';
-  }
-  if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 16 * 60 + 41) {
-    return 'day';
-  }
+const getMoscowMinutes = () => {
+  const moscow = getMoscowTime();
+  return moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+};
+
+const getDefaultTimeFilter = () => {
+  const totalMinutes = getMoscowMinutes();
+  if (totalMinutes >= 1 * 60 + 31 && totalMinutes < 7 * 60 + 50) return 'night';
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 16 * 60 + 41) return 'day';
   return 'evening';
 };
 
 const getTimeRange = (timeFilter) => {
-  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const hours = nowMoscow.getUTCHours();
-  const minutes = nowMoscow.getUTCMinutes();
-  const totalMinutes = hours * 60 + minutes;
+  const nowMoscow = getMoscowTime();
+  const year = nowMoscow.getUTCFullYear();
+  const month = String(nowMoscow.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(nowMoscow.getUTCDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`;
 
-  const getDateStr = (date) => {
-    const y = date.getUTCFullYear();
-    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(date.getUTCDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  };
-
-  const today = new Date(nowMoscow);
-  today.setUTCHours(0,0,0,0);
-  const yesterday = new Date(today);
+  const yesterday = new Date(nowMoscow);
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const todayStr = getDateStr(today);
-  const yesterdayStr = getDateStr(yesterday);
+  const yestYear = yesterday.getUTCFullYear();
+  const yestMonth = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
+  const yestDay = String(yesterday.getUTCDate()).padStart(2, '0');
+  const yesterdayStr = `${yestYear}-${yestMonth}-${yestDay}`;
+
+  const totalMinutes = getMoscowMinutes();
 
   if (timeFilter === 'all') {
-    return {
-      start: `${todayStr} 00:00:00`,
-      end: `${todayStr} 23:59:59`,
-    };
+    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
   }
 
   if (timeFilter === 'day') {
     const dateToUse = totalMinutes >= 7 * 60 + 50 ? todayStr : yesterdayStr;
-    return {
-      start: `${dateToUse} 07:50:00`,
-      end: `${dateToUse} 16:40:00`,
-    };
+    return { start: `${dateToUse} 07:50:00`, end: `${dateToUse} 16:40:00` };
   }
 
   if (timeFilter === 'evening') {
     const dateToUse = totalMinutes >= 16 * 60 + 41 ? todayStr : yesterdayStr;
-    const startDateObj = new Date(dateToUse + 'T00:00:00Z');
+    const startDateObj = new Date(`${dateToUse}T00:00:00Z`);
     const endDateObj = new Date(startDateObj);
     endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
-    const endStr = getDateStr(endDateObj);
-    return {
-      start: `${dateToUse} 16:41:00`,
-      end: `${endStr} 01:30:00`,
-    };
+    const endYear = endDateObj.getUTCFullYear();
+    const endMonth = String(endDateObj.getUTCMonth() + 1).padStart(2, '0');
+    const endDay = String(endDateObj.getUTCDate()).padStart(2, '0');
+    const endStr = `${endYear}-${endMonth}-${endDay}`;
+    return { start: `${dateToUse} 16:41:00`, end: `${endStr} 01:30:00` };
   }
 
   if (timeFilter === 'night') {
     const dateToUse = totalMinutes >= 1 * 60 + 31 ? todayStr : yesterdayStr;
-    return {
-      start: `${dateToUse} 01:31:00`,
-      end: `${dateToUse} 07:50:00`,
-    };
+    return { start: `${dateToUse} 01:31:00`, end: `${dateToUse} 07:50:00` };
   }
 
-  return {
-    start: `${todayStr} 00:00:00`,
-    end: `${todayStr} 23:59:59`,
-  };
+  return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
 };
 
 const getWeekNumber = (date) => {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
@@ -213,11 +197,8 @@ const getWeekNumber = (date) => {
 };
 
 const getCurrentShiftInfo = () => {
-  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const hours = nowMoscow.getUTCHours();
-  const minutes = nowMoscow.getUTCMinutes();
-  const totalMinutes = hours * 60 + minutes;
-
+  const nowMoscow = getMoscowTime();
+  const totalMinutes = getMoscowMinutes();
   let shiftDate = new Date(nowMoscow);
   let shiftType = 'night';
 
@@ -235,14 +216,9 @@ const getCurrentShiftInfo = () => {
   const weekNumber = getWeekNumber(shiftDate);
   const isEvenWeek = weekNumber % 2 === 0;
   let shiftLetter = 'C';
-
-  if (shiftType === 'night') {
-    shiftLetter = 'C';
-  } else if (shiftType === 'day') {
-    shiftLetter = isEvenWeek ? 'B' : 'A';
-  } else if (shiftType === 'evening') {
-    shiftLetter = isEvenWeek ? 'A' : 'B';
-  }
+  if (shiftType === 'night') shiftLetter = 'C';
+  else if (shiftType === 'day') shiftLetter = isEvenWeek ? 'B' : 'A';
+  else if (shiftType === 'evening') shiftLetter = isEvenWeek ? 'A' : 'B';
 
   return { weekNumber, shiftLetter, shiftType };
 };
@@ -262,22 +238,13 @@ export default function DrrCp7DashboardPage() {
     setError(null);
     try {
       const { start, end } = getTimeRange(timeFilter);
-
-      const drrParams = new URLSearchParams({
-        filter,
-        startTime: start,
-        endTime: end
-      });
+      const drrParams = new URLSearchParams({ filter, startTime: start, endTime: end });
       const drrRes = await fetch(`${API_BASE}/api/drr-cp7-dashboard?${drrParams.toString()}`);
       if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
       const drrJson = await drrRes.json();
       setDrrData(drrJson);
 
-      const defectsParams = new URLSearchParams({
-        filter,
-        startTime: start,
-        endTime: end
-      });
+      const defectsParams = new URLSearchParams({ filter, startTime: start, endTime: end });
       const defectsRes = await fetch(`${API_BASE}/api/drr-cp7-top-defects?${defectsParams.toString()}`);
       if (!defectsRes.ok) throw new Error('Ошибка загрузки топа дефектов');
       const defectsJson = await defectsRes.json();
@@ -297,13 +264,10 @@ export default function DrrCp7DashboardPage() {
     const interval = setInterval(() => {
       const newShiftInfo = getCurrentShiftInfo();
       setShiftInfo(newShiftInfo);
-
       if (!isManualFilter) {
-        const defaultFilter = getDefaultTimeFilter();
-        setTimeFilter(defaultFilter);
+        setTimeFilter(getDefaultTimeFilter());
       }
     }, 60000);
-
     return () => clearInterval(interval);
   }, [isManualFilter]);
 
@@ -313,7 +277,6 @@ export default function DrrCp7DashboardPage() {
   }, [filter, timeFilter]);
 
   const nokVins = drrData.totalVins - drrData.closedVins;
-
   const pieData = [
     { name: 'DRR', value: drrData.drrPercent },
     { name: 'Не прямой сход', value: Math.max(0, 100 - drrData.drrPercent) },
@@ -329,7 +292,7 @@ export default function DrrCp7DashboardPage() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR CP7 Dashboard</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Блок недели и смены — как в CP8 Dashboard */}
+          {/* Блок недели и смены как в CP8 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
               background: '#FFFFFF',
@@ -346,7 +309,6 @@ export default function DrrCp7DashboardPage() {
                 {shiftInfo.weekNumber}
               </span>
             </div>
-
             <div style={{
               width: '80px',
               height: '80px',
@@ -368,7 +330,7 @@ export default function DrrCp7DashboardPage() {
 
           <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
 
-          {/* Фильтры типа (Все/CP7/PIP) */}
+          {/* Фильтры типа */}
           <div style={filterGroupStyle}>
             <button style={filterButtonStyle(filter === 'all')} onClick={() => setFilter('all')}>Все</button>
             <button style={filterButtonStyle(filter === 'cp7')} onClick={() => setFilter('cp7')}>CP7</button>
@@ -379,30 +341,10 @@ export default function DrrCp7DashboardPage() {
 
           {/* Фильтры времени */}
           <div style={filterGroupStyle}>
-            <button
-              style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')}
-              onClick={() => handleFilterClick('all')}
-            >
-              Сутки
-            </button>
-            <button
-              style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')}
-              onClick={() => handleFilterClick('day')}
-            >
-              День
-            </button>
-            <button
-              style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')}
-              onClick={() => handleFilterClick('evening')}
-            >
-              Вечер
-            </button>
-            <button
-              style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')}
-              onClick={() => handleFilterClick('night')}
-            >
-              Ночь
-            </button>
+            <button style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')} onClick={() => handleFilterClick('all')}>Сутки</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')} onClick={() => handleFilterClick('day')}>День</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')} onClick={() => handleFilterClick('evening')}>Вечер</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')} onClick={() => handleFilterClick('night')}>Ночь</button>
           </div>
         </div>
       </div>
@@ -460,50 +402,17 @@ export default function DrrCp7DashboardPage() {
             </div>
 
             <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
-              <div style={{ 
-                flex: 1, 
-                backgroundColor: '#1E293B', 
-                borderRadius: '12px', 
-                padding: '16px', 
-                textAlign: 'center', 
-                color: '#FFFFFF', 
-                minHeight: '140px', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                justifyContent: 'center' 
-              }}>
+              <div style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Всего авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalVins}</div>
               </div>
-              <div style={{ 
-                flex: 1, 
-                backgroundColor: '#059669', 
-                borderRadius: '12px', 
-                padding: '16px', 
-                textAlign: 'center', 
-                color: '#FFFFFF', 
-                minHeight: '140px', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                justifyContent: 'center' 
-              }}>
+              <div style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.closedVins}</div>
               </div>
-              <div style={{ 
-                flex: 1, 
-                backgroundColor: '#DC2626', 
-                borderRadius: '12px', 
-                padding: '16px', 
-                textAlign: 'center', 
-                color: '#FFFFFF', 
-                minHeight: '140px', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                justifyContent: 'center' 
-              }}>
+              <div style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK Авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{nokVins}</div>
@@ -514,7 +423,6 @@ export default function DrrCp7DashboardPage() {
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP7</h2>
-              
               <div style={tableScrollStyle}>
                 {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -527,14 +435,8 @@ export default function DrrCp7DashboardPage() {
                     </thead>
                     <tbody>
                       {topDefects.map((defect, idx) => (
-                        <tr 
-                          key={idx} 
-                          style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}
-                        >
-                          <td style={{ 
-                            ...tdStyle, 
-                            boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none'
-                          }}>
+                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                          <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none' }}>
                             {defect.mpp}
                           </td>
                           <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
