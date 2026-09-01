@@ -3,7 +3,6 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 
-// ====== Стили (скопированы из DrrCp7DashboardPage) ======
 const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
@@ -50,9 +49,9 @@ const filterButtonStyle = (active) => ({
   transition: 'all 0.2s',
 });
 
-const timeFilterButtonStyle = (active) => ({
+const timeFilterButtonStyle = (active, activeColor) => ({
   ...filterButtonStyle(active),
-  background: active ? '#F59E0B' : '#FFFFFF',
+  background: active ? activeColor : '#FFFFFF',
   color: active ? '#FFFFFF' : '#64748B',
 });
 
@@ -135,11 +134,13 @@ const getDefaultTimeFilter = () => {
   const minutes = nowMoscow.getUTCMinutes();
   const totalMinutes = hours * 60 + minutes;
 
-  if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 19 * 60 + 30) {
-    return 'day';
-  } else {
-    return 'evening';
+  if (totalMinutes >= 1 * 60 + 31 && totalMinutes < 7 * 60 + 50) {
+    return 'night';
   }
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 16 * 60 + 41) {
+    return 'day';
+  }
+  return 'evening';
 };
 
 const getTimeRange = (timeFilter) => {
@@ -154,51 +155,121 @@ const getTimeRange = (timeFilter) => {
   if (timeFilter === 'all') {
     return {
       start: `${year}-${month}-${day} 00:00:00`,
-      end: `${year}-${month}-${day} 23:59:59`
+      end: `${year}-${month}-${day} 23:59:59`,
     };
   }
 
   if (timeFilter === 'day') {
-    return {
-      start: `${year}-${month}-${day} 07:50:00`,
-      end: `${year}-${month}-${day} 19:30:00`
-    };
+    // День: 7:50-16:40 текущего дня, если сейчас до 16:40, иначе вчерашняя смена
+    if (totalMinutes <= 16 * 60 + 40) {
+      return {
+        start: `${year}-${month}-${day} 07:50:00`,
+        end: `${year}-${month}-${day} 16:40:00`,
+      };
+    } else {
+      const yesterday = new Date(nowMoscow);
+      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+      const y = yesterday.getUTCFullYear();
+      const m = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(yesterday.getUTCDate()).padStart(2, '0');
+      return {
+        start: `${y}-${m}-${d} 07:50:00`,
+        end: `${y}-${m}-${d} 16:40:00`,
+      };
+    }
   }
 
   if (timeFilter === 'evening') {
-    const isAfterEveningStart = totalMinutes >= 19 * 60 + 31;
+    // Вечер: 16:41 сегодня - 1:30 завтра, либо если сейчас после полуночи, вечер начался вчера
     let startDate = new Date(nowMoscow);
-    let endDate = new Date(nowMoscow);
-
-    if (isAfterEveningStart) {
-      startDate.setUTCHours(19, 31, 0, 0);
-      endDate.setUTCDate(endDate.getUTCDate() + 1);
-      endDate.setUTCHours(7, 49, 0, 0);
-    } else {
+    if (totalMinutes < 1 * 60 + 31) {
       startDate.setUTCDate(startDate.getUTCDate() - 1);
-      startDate.setUTCHours(19, 31, 0, 0);
-      endDate.setUTCHours(7, 49, 0, 0);
     }
+    const endDate = new Date(startDate);
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
 
     const fmt = (date) => {
       const y = date.getUTCFullYear();
       const m = String(date.getUTCMonth() + 1).padStart(2, '0');
       const d = String(date.getUTCDate()).padStart(2, '0');
-      const hh = String(date.getUTCHours()).padStart(2, '0');
-      const mm = String(date.getUTCMinutes()).padStart(2, '0');
-      return `${y}-${m}-${d} ${hh}:${mm}:00`;
+      return `${y}-${m}-${d}`;
     };
 
     return {
-      start: fmt(startDate),
-      end: fmt(endDate)
+      start: `${fmt(startDate)} 16:41:00`,
+      end: `${fmt(endDate)} 01:30:00`,
     };
+  }
+
+  if (timeFilter === 'night') {
+    // Ночь: 1:31-7:50 текущего дня, если сейчас в этом интервале, иначе прошлая ночь
+    if (totalMinutes >= 1 * 60 + 31 && totalMinutes <= 7 * 60 + 50) {
+      return {
+        start: `${year}-${month}-${day} 01:31:00`,
+        end: `${year}-${month}-${day} 07:50:00`,
+      };
+    } else {
+      const yesterday = new Date(nowMoscow);
+      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+      const y = yesterday.getUTCFullYear();
+      const m = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(yesterday.getUTCDate()).padStart(2, '0');
+      return {
+        start: `${y}-${m}-${d} 01:31:00`,
+        end: `${y}-${m}-${d} 07:50:00`,
+      };
+    }
   }
 
   return {
     start: `${year}-${month}-${day} 00:00:00`,
-    end: `${year}-${month}-${day} 23:59:59`
+    end: `${year}-${month}-${day} 23:59:59`,
   };
+};
+
+// Вычисление номера недели (ISO 8601)
+const getWeekNumber = (date) => {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+};
+
+// Определение текущей смены
+const getCurrentShiftInfo = () => {
+  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const hours = nowMoscow.getUTCHours();
+  const minutes = nowMoscow.getUTCMinutes();
+  const totalMinutes = hours * 60 + minutes;
+
+  let shiftDate = new Date(nowMoscow);
+  let shiftType = 'night';
+
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
+    shiftType = 'day';
+  } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
+    shiftType = 'evening';
+    if (totalMinutes <= 1 * 60 + 30) {
+      shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
+    }
+  } else {
+    shiftType = 'night';
+  }
+
+  const weekNumber = getWeekNumber(shiftDate);
+  const isEvenWeek = weekNumber % 2 === 0;
+  let shiftLetter = 'C';
+
+  if (shiftType === 'night') {
+    shiftLetter = 'C';
+  } else if (shiftType === 'day') {
+    shiftLetter = isEvenWeek ? 'B' : 'A';
+  } else if (shiftType === 'evening') {
+    shiftLetter = isEvenWeek ? 'A' : 'B';
+  }
+
+  return { weekNumber, shiftLetter, shiftType };
 };
 
 export default function DrrCpfinalDashboardPage() {
@@ -207,6 +278,8 @@ export default function DrrCpfinalDashboardPage() {
   const [topDefects, setTopDefects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const shiftInfo = getCurrentShiftInfo();
 
   const loadData = async () => {
     setLoading(true);
@@ -249,10 +322,45 @@ export default function DrrCpfinalDashboardPage() {
     <div style={containerStyle}>
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR CPFINAL Dashboard</h1>
-        <div style={filterGroupStyle}>
-          <button style={timeFilterButtonStyle(timeFilter === 'all')} onClick={() => setTimeFilter('all')}>Сутки</button>
-          <button style={timeFilterButtonStyle(timeFilter === 'day')} onClick={() => setTimeFilter('day')}>День</button>
-          <button style={timeFilterButtonStyle(timeFilter === 'evening')} onClick={() => setTimeFilter('evening')}>Вечер</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {/* Индикатор недели и смены */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginRight: '20px' }}>
+            <div style={{
+              backgroundColor: '#F3F4F6',
+              borderRadius: '12px',
+              padding: '10px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontWeight: 700,
+              fontSize: '1.4rem',
+              color: '#1F2937',
+            }}>
+              <span style={{ color: '#6B7280' }}>CW</span>
+              {shiftInfo.weekNumber}
+            </div>
+            <div style={{
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              backgroundColor: shiftInfo.shiftLetter === 'A' ? '#F59E0B' : shiftInfo.shiftLetter === 'B' ? '#3B82F6' : '#1F2937',
+              color: '#FFFFFF',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 900,
+              fontSize: '1.6rem',
+            }}>
+              {shiftInfo.shiftLetter}
+            </div>
+          </div>
+          <div style={{ width: '1px', height: '40px', backgroundColor: '#D1D5DB' }} />
+          <div style={filterGroupStyle}>
+            <button style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')} onClick={() => setTimeFilter('all')}>Сутки</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')} onClick={() => setTimeFilter('day')}>День</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')} onClick={() => setTimeFilter('evening')}>Вечер</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')} onClick={() => setTimeFilter('night')}>Ночь</button>
+          </div>
         </div>
       </div>
 
@@ -266,7 +374,6 @@ export default function DrrCpfinalDashboardPage() {
         </div>
       ) : (
         <div style={dashboardGridStyle}>
-          {/* Левая колонка: Pie Chart + блоки */}
           <div style={chartColumnStyle}>
             <div style={{ position: 'relative', width: '100%', height: '600px' }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -361,7 +468,6 @@ export default function DrrCpfinalDashboardPage() {
             </div>
           </div>
 
-          {/* Правая колонка: таблица */}
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CPFINAL</h2>
