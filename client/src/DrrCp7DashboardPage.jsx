@@ -55,36 +55,6 @@ const timeFilterButtonStyle = (active, activeColor) => ({
   color: active ? '#FFFFFF' : '#64748B',
 });
 
-const shiftIndicatorStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  marginRight: '12px',
-  padding: '8px 16px',
-  borderRadius: '12px',
-  backgroundColor: '#FFFFFF',
-  boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-};
-
-const weekStyle = {
-  fontWeight: 800,
-  fontSize: '1.6rem',
-  color: '#1E293B',
-};
-
-const shiftLetterStyle = (letter) => ({
-  width: '32px',
-  height: '32px',
-  borderRadius: '8px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  fontWeight: 900,
-  fontSize: '1.4rem',
-  color: '#FFFFFF',
-  backgroundColor: letter === 'A' ? '#F59E0B' : letter === 'B' ? '#3B82F6' : '#6B7280',
-});
-
 const dashboardGridStyle = {
   display: 'flex',
   gap: '20px',
@@ -359,25 +329,55 @@ export default function DrrCp7DashboardPage() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR CP7 Dashboard</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Индикатор недели и смены */}
-          <div style={shiftIndicatorStyle}>
-            <span style={weekStyle}>CW {shiftInfo.weekNumber}</span>
-            <div style={shiftLetterStyle(shiftInfo.shiftLetter)}>
+          {/* Блок недели и смены — как в CP8 Dashboard */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
+            <div style={{
+              background: '#FFFFFF',
+              borderRadius: '20px',
+              padding: '12px 28px',
+              boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+              border: '3px solid #fdfeff',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+            }}>
+              <span style={{ fontSize: '1.8rem', color: '#64748B', fontWeight: 800 }}>CW</span>
+              <span style={{ fontSize: '3rem', fontWeight: 900, color: '#1E293B', letterSpacing: '2px', lineHeight: 1 }}>
+                {shiftInfo.weekNumber}
+              </span>
+            </div>
+
+            <div style={{
+              width: '80px',
+              height: '80px',
+              borderRadius: '20px',
+              background: shiftInfo.shiftLetter === 'A' ? '#F59E0B' : shiftInfo.shiftLetter === 'B' ? '#ffffff' : '#6B7280',
+              color: '#1E293B',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 900,
+              fontSize: '3.5rem',
+              lineHeight: 1,
+              boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
+              border: '4px solid #FFFFFF',
+            }}>
               {shiftInfo.shiftLetter}
             </div>
           </div>
 
-          {/* Фильтр по типу (Все/CP7/PIP) */}
+          <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
+
+          {/* Фильтры типа (Все/CP7/PIP) */}
           <div style={filterGroupStyle}>
             <button style={filterButtonStyle(filter === 'all')} onClick={() => setFilter('all')}>Все</button>
             <button style={filterButtonStyle(filter === 'cp7')} onClick={() => setFilter('cp7')}>CP7</button>
             <button style={filterButtonStyle(filter === 'pip')} onClick={() => setFilter('pip')}>PIP</button>
           </div>
 
-          {/* Разделитель */}
-          <div style={{ width: '1px', height: '40px', backgroundColor: '#D1D5DB' }} />
+          <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
 
-          {/* Фильтр времени */}
+          {/* Фильтры времени */}
           <div style={filterGroupStyle}>
             <button
               style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')}
@@ -417,7 +417,6 @@ export default function DrrCp7DashboardPage() {
         </div>
       ) : (
         <div style={dashboardGridStyle}>
-          
           <div style={chartColumnStyle}>
             <div style={{ position: 'relative', width: '100%', height: '600px' }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -552,7 +551,6 @@ export default function DrrCp7DashboardPage() {
               </div>
             </div>
           </div>
-
         </div>
       )}
     </div>
