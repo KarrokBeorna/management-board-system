@@ -18,7 +18,7 @@ import sgpManagementPreview from './assets/cp8.png';
 import DrrCp7DashboardPage from './assets/cp7drr.png'; 
 import cp7historyPreview from './assets/cp7hist.png'; 
 import DrrCp8DashboardPage from './assets/cp8drr.png'; 
-import drrTestlinePreview from './assets/cp8drr.png';
+import drrTestlinePreview from './assets/tldrr.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {
