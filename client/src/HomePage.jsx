@@ -336,7 +336,7 @@ export default function HomePage() {
     { to: "/drr-cp7-dashboard", imgSrc: DrrCp7DashboardPage, caption: "DRR CP7 Dashboard", accentColor: "#6366F1" },
     { to: "/drr-cp7-history", imgSrc: cp7historyPreview, caption: "DRR CP7 History", accentColor: "#6366F1" },
     { to: "/drr-cp8-dashboard", imgSrc: DrrCp8DashboardPage, caption: "DRR CP8 Dashboard", accentColor: "#8B5CF6" },
-    { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR Testline", accentColor: "#0ea5e9" }
+    { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR Testline Dashboard", accentColor: "#0ea5e9" }
   ];
 
   const allServiceCards = [
