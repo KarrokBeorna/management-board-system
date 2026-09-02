@@ -137,6 +137,20 @@ const neighborPointOptions = [
   'CPFINAL', 'CP8', 'Inbound', 'Outbound'
 ];
 
+// Анимация загрузки с мигающими точками
+const loadingAnimation = `
+  @keyframes blink {
+    0% { opacity: 0.2; }
+    20% { opacity: 1; }
+    100% { opacity: 0.2; }
+  }
+  .loading-dots span {
+    animation: blink 1.4s infinite both;
+  }
+  .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+`;
+
 export default function SgpAuditPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('checkpoints');
@@ -216,7 +230,6 @@ export default function SgpAuditPage() {
 
   useEffect(() => {
     const handleScroll = (event) => {
-      // Если скролл внутри выпадающего фильтра, не закрываем
       if (event.target.closest && event.target.closest('.filter-dropdown')) {
         return;
       }
@@ -1100,7 +1113,13 @@ export default function SgpAuditPage() {
           </div>
 
           {timePointsLoading ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка данных...</div>
+            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+              <style>{loadingAnimation}</style>
+              <div className="loading-dots" style={{ display: 'inline-block' }}>
+                <span>Загрузка данных</span>
+                <span>.</span><span>.</span><span>.</span>
+              </div>
+            </div>
           ) : timePointsError ? (
             <div style={{ textAlign: 'center', padding: 40, color: '#DC2626' }}>❌ {timePointsError}</div>
           ) : (
@@ -1309,7 +1328,13 @@ export default function SgpAuditPage() {
           )}
 
           {neighborLoading ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка данных...</div>
+            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+              <style>{loadingAnimation}</style>
+              <div className="loading-dots" style={{ display: 'inline-block' }}>
+                <span>Загрузка данных</span>
+                <span>.</span><span>.</span><span>.</span>
+              </div>
+            </div>
           ) : neighborData.length > 0 ? (
             <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid #E5E7EB', maxHeight: '500px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>

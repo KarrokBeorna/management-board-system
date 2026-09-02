@@ -4667,7 +4667,7 @@ app.get('/api/time-points', async (req, res) => {
     if (cp8From) { mesQuery += ' AND t.CP8 >= ?'; mesParams.push(cp8From); }
     if (cp8To) { mesQuery += ' AND t.CP8 <= ?'; mesParams.push(cp8To); }
 
-    mesQuery += ' ORDER BY t.CP5 DESC LIMIT 5000';
+    mesQuery += ' ORDER BY t.CP5 DESC';
 
     const [mesRows] = await mesPool.query(mesQuery, mesParams);
     
@@ -5057,9 +5057,9 @@ app.get('/api/vehicles-current-location', async (req, res) => {
       vinList
     );
 
-    // 3. LES: складские данные + out_storage_time
+    // 3. LES: складские данные + статус
     const [storageRows] = await lesPool.query(
-      `SELECT vin, ck_no, kq_no, kw_no, out_storage_time
+      `SELECT vin, ck_no, kq_no, kw_no, out_storage_time, in_storage_status
        FROM tv_biz_storage_car
        WHERE vin IN (${placeholders})`,
       vinList
@@ -5102,7 +5102,10 @@ app.get('/api/vehicles-current-location', async (req, res) => {
         }
       }
 
-      const isSold = s && s.out_storage_time !== null && s.out_storage_time !== undefined;
+      // Определяем статус: продан, если in_storage_status = 'Key_Car_In_Storage_Status_3'
+      const isSold = s && s.in_storage_status === 'Key_Car_In_Storage_Status_3';
+      
+      // На складе, если есть все три координаты и не продан
       const hasStorageData = s && s.ck_no && s.kq_no && s.kw_no &&
                              s.ck_no !== 'N/A' && s.kq_no !== 'N/A' && s.kw_no !== 'N/A';
       const isInStorage = !isSold && hasStorageData;
