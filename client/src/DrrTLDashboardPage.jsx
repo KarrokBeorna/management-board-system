@@ -224,24 +224,31 @@ export default function DrrTLDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const loadData = async () => {
+    const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const { start, end } = getTimeRange(timeFilter);
-      const params = new URLSearchParams({ startTime: start, endTime: end });
-      const res = await fetch(`${API_BASE}/api/drr-tl-dashboard?${params.toString()}`);
-      if (!res.ok) throw new Error('Ошибка загрузки DRR');
-      const json = await res.json();
-      setDrrData(json);
-      setTopDefects(json.topDefects || []);
+        const { start, end } = getTimeRange(timeFilter);
+        const baseParams = new URLSearchParams({ startTime: start, endTime: end });
+
+        // Запрос DRR
+        const drrRes = await fetch(`${API_BASE}/api/drr-tl-dashboard?${baseParams.toString()}`);
+        if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
+        const drrJson = await drrRes.json();
+        setDrrData(drrJson);
+
+        // Отдельный запрос топ дефектов
+        const defectsRes = await fetch(`${API_BASE}/api/drr-tl-top-defects?${baseParams.toString()}`);
+        if (!defectsRes.ok) throw new Error('Ошибка загрузки топ дефектов');
+        const defectsJson = await defectsRes.json();
+        setTopDefects(defectsJson);
     } catch (err) {
-      setError(err.message);
-      setTopDefects([]);
+        setError(err.message);
+        setTopDefects([]);
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
-  };
+    };
 
   useEffect(() => {
     loadData();

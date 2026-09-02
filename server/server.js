@@ -6288,6 +6288,121 @@ app.get('/api/drr-tl-dashboard', async (req, res) => {
   }
 });
 
+app.get('/api/drr-tl-top-defects', async (req, res) => {
+  try {
+    const { startTime, endTime } = req.query;
+    if (!startTime || !endTime) {
+      return res.status(400).json({ error: 'startTime и endTime обязательны' });
+    }
+
+    // 1. VIN, прошедшие TLADAS за период
+    const [tladRows] = await mesPool.query(`
+      SELECT DISTINCT VIN
+      FROM tm_vhc_test_line_movement
+      WHERE node_nature = 'TLADAS'
+        AND gmt_create >= ? AND gmt_create <= ?
+        AND is_deleted = 0
+    `, [startTime, endTime]);
+
+    if (tladRows.length === 0) {
+      return res.json([]);
+    }
+
+    const vins = tladRows.map(r => r.VIN);
+    const placeholders = vins.map(() => '?').join(',');
+
+    // 2. Все движения этих VIN
+    const [allMovements] = await mesPool.query(`
+      SELECT VIN, node_nature, gmt_create
+      FROM tm_vhc_test_line_movement
+      WHERE VIN IN (${placeholders})
+        AND is_deleted = 0
+      ORDER BY VIN, gmt_create ASC
+    `, vins);
+
+    const movementsByVin = {};
+    vins.forEach(vin => { movementsByVin[vin] = []; });
+    allMovements.forEach(row => {
+      movementsByVin[row.VIN].push({ zone: row.node_nature, time: new Date(row.gmt_create) });
+    });
+
+    // 3. Определяем NOK VIN (после TLADAS не TLTT, а REP или нет следующей)
+    const nokVinsSet = new Set();
+    for (const vin of vins) {
+      const moves = movementsByVin[vin] || [];
+      let tladIndex = -1;
+      for (let i = 0; i < moves.length; i++) {
+        if (moves[i].zone === 'TLADAS' && moves[i].time >= new Date(startTime) && moves[i].time <= new Date(endTime)) {
+          tladIndex = i;
+          break;
+        }
+      }
+      if (tladIndex === -1) continue;
+
+      let next = null;
+      if (tladIndex + 1 < moves.length) {
+        next = moves[tladIndex + 1];
+      }
+
+      if (!(next && next.zone === 'TLTT')) {
+        // NOK: либо ушло в REP, либо нет следующего движения
+        nokVinsSet.add(vin);
+      }
+    }
+
+    if (nokVinsSet.size === 0) {
+      return res.json([]);
+    }
+
+    // 4. Дефекты для NOK VIN на указанных постах
+    const nokPlaceholders = [...nokVinsSet].map(() => '?').join(',');
+    const defectPosts = ['360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA'];
+    const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
+
+    const [defectRows] = await pool.query(`
+      SELECT
+        d.VIN,
+        wo.MODEL,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.PROBLEM_GRADE
+      FROM at_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.VIN IN (${nokPlaceholders})
+        AND d.POST_NAME IN (${defectPostsStr})
+        AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
+    `, [...nokVinsSet, startTime, endTime]);
+
+    // 5. Группируем по MPP
+    const defectGroupMap = new Map();
+    defectRows.forEach(row => {
+      const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
+      if (!defectGroupMap.has(mpp)) {
+        defectGroupMap.set(mpp, {
+          mpp,
+          grade: row.PROBLEM_GRADE || '-',
+          affectedVins: new Set(),
+        });
+      }
+      defectGroupMap.get(mpp).affectedVins.add(row.VIN);
+    });
+
+    const topDefects = Array.from(defectGroupMap.values())
+      .map(d => ({
+        mpp: d.mpp,
+        grade: d.grade,
+        affectedVins: d.affectedVins.size,
+      }))
+      .sort((a, b) => b.affectedVins - a.affectedVins)
+      .slice(0, 20);
+
+    res.json(topDefects);
+  } catch (err) {
+    console.error('Ошибка DRR TL Top Defects:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок
