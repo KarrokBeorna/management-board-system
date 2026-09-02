@@ -433,7 +433,7 @@ export default function DrrTLDashboardPage() {
                       <tr>
                         <th style={thStyle}>Описание дефекта (MPP)</th>
                         <th style={thStyle}>Класс</th>
-                        <th style={thStyle}>Кол-во авто</th>
+                        <th style={thStyle}>Кол-во дефектов</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -444,7 +444,7 @@ export default function DrrTLDashboardPage() {
                           </td>
                           <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
                           <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '2rem', color: idx < 3 ? '#DC2626' : '#1E293B' }}>
-                            {defect.affectedVins}
+                            {defect.defectCount}
                           </td>
                         </tr>
                       ))}

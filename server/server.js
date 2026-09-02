@@ -6326,7 +6326,7 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
       movementsByVin[row.VIN].push({ zone: row.node_nature, time: new Date(row.gmt_create) });
     });
 
-    // 3. Определяем NOK VIN (после TLADAS не TLTT, а REP или нет следующей)
+    // 3. Определяем NOK VIN (после TLADAS не TLTT, а REP или нет следующего движения)
     const nokVinsSet = new Set();
     for (const vin of vins) {
       const moves = movementsByVin[vin] || [];
@@ -6345,7 +6345,6 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
       }
 
       if (!(next && next.zone === 'TLTT')) {
-        // NOK: либо ушло в REP, либо нет следующего движения
         nokVinsSet.add(vin);
       }
     }
@@ -6373,7 +6372,7 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
     `, [...nokVinsSet, startTime, endTime]);
 
-    // 5. Группируем по MPP
+    // 5. Группируем по MPP и считаем количество дефектов (строк)
     const defectGroupMap = new Map();
     defectRows.forEach(row => {
       const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
@@ -6381,19 +6380,19 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
         defectGroupMap.set(mpp, {
           mpp,
           grade: row.PROBLEM_GRADE || '-',
-          affectedVins: new Set(),
+          defectCount: 0,
         });
       }
-      defectGroupMap.get(mpp).affectedVins.add(row.VIN);
+      defectGroupMap.get(mpp).defectCount += 1;
     });
 
     const topDefects = Array.from(defectGroupMap.values())
       .map(d => ({
         mpp: d.mpp,
         grade: d.grade,
-        affectedVins: d.affectedVins.size,
+        defectCount: d.defectCount,
       }))
-      .sort((a, b) => b.affectedVins - a.affectedVins)
+      .sort((a, b) => b.defectCount - a.defectCount)
       .slice(0, 20);
 
     res.json(topDefects);
