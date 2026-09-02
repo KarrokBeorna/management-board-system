@@ -5939,6 +5939,133 @@ app.get('/api/drr-cp8-top-defects', async (req, res) => {
   }
 });
 
+// Эндпоинт для DRR Testline Dashboard
+app.get('/api/drr-tl-dashboard', async (req, res) => {
+  try {
+    const { startTime, endTime } = req.query;
+    if (!startTime || !endTime) {
+      return res.status(400).json({ error: 'startTime и endTime обязательны' });
+    }
+
+    // 1. Все VIN, прошедшие TLADAS за период
+    const [tladRows] = await mesPool.query(`
+      SELECT DISTINCT VIN
+      FROM tm_vhc_test_line_movement
+      WHERE node_nature = 'TLADAS'
+        AND gmt_create >= ? AND gmt_create <= ?
+        AND is_deleted = 0
+    `, [startTime, endTime]);
+
+    if (tladRows.length === 0) {
+      return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
+    }
+
+    const vins = tladRows.map(r => r.VIN);
+
+    // 2. Получаем все движения этих VIN
+    const placeholders = vins.map(() => '?').join(',');
+    const [allMovements] = await mesPool.query(`
+      SELECT VIN, node_nature, gmt_create
+      FROM tm_vhc_test_line_movement
+      WHERE VIN IN (${placeholders})
+        AND is_deleted = 0
+      ORDER BY VIN, gmt_create ASC
+    `, vins);
+
+    const movementsByVin = {};
+    vins.forEach(vin => { movementsByVin[vin] = []; });
+    allMovements.forEach(row => {
+      movementsByVin[row.VIN].push({ zone: row.node_nature, time: new Date(row.gmt_create) });
+    });
+
+    // 3. Определяем OK/NOK
+    let closedVins = 0;
+    const nokVinsSet = new Set(); // VIN с не OK
+
+    for (const vin of vins) {
+      const moves = movementsByVin[vin] || [];
+      // Найти первое TLADAS в периоде
+      let tladIndex = -1;
+      for (let i = 0; i < moves.length; i++) {
+        if (moves[i].zone === 'TLADAS' && moves[i].time >= new Date(startTime) && moves[i].time <= new Date(endTime)) {
+          tladIndex = i;
+          break;
+        }
+      }
+      if (tladIndex === -1) continue;
+
+      // Следующая запись после TLADAS
+      let next = null;
+      if (tladIndex + 1 < moves.length) {
+        next = moves[tladIndex + 1];
+      }
+
+      if (next && next.zone === 'TLTT') {
+        closedVins++;
+      } else {
+        nokVinsSet.add(vin);
+      }
+    }
+
+    const totalVins = vins.length;
+    const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
+
+    // 4. Топ дефектов для NOK VIN на указанных постах
+    let topDefects = [];
+    if (nokVinsSet.size > 0) {
+      const nokPlaceholders = [...nokVinsSet].map(() => '?').join(',');
+      const defectPosts = ['360','ADAS','ADAS+RB','WA'];
+      const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
+
+      const [defectRows] = await pool.query(`
+        SELECT
+          d.VIN,
+          wo.MODEL,
+          d.PART_NAME,
+          d.PROBLEM_TYPE,
+          d.PROBLEM_GRADE
+        FROM at_qm_defect_info d
+        LEFT JOIN work_order wo ON wo.VIN = d.VIN
+        WHERE d.VIN IN (${nokPlaceholders})
+          AND d.POST_NAME IN (${defectPostsStr})
+          AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
+      `, [...nokVinsSet, startTime, endTime]);
+
+      const defectGroupMap = new Map();
+      defectRows.forEach(row => {
+        const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
+        if (!defectGroupMap.has(mpp)) {
+          defectGroupMap.set(mpp, {
+            mpp,
+            grade: row.PROBLEM_GRADE || '-',
+            affectedVins: new Set(),
+          });
+        }
+        defectGroupMap.get(mpp).affectedVins.add(row.VIN);
+      });
+
+      topDefects = Array.from(defectGroupMap.values())
+        .map(d => ({
+          mpp: d.mpp,
+          grade: d.grade,
+          affectedVins: d.affectedVins.size,
+        }))
+        .sort((a, b) => b.affectedVins - a.affectedVins)
+        .slice(0, 20);
+    }
+
+    res.json({
+      totalVins,
+      closedVins,
+      drrPercent: Math.round(drrPercent * 10) / 10,
+      topDefects,
+    });
+  } catch (err) {
+    console.error('Ошибка DRR TL Dashboard:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок

@@ -19,6 +19,7 @@ import DrrCp7DashboardPage from './DrrCp7DashboardPage';
 import favicon from './assets/weblog.png';
 import DrrCp7HistoryPage from './DrrCp7HistoryPage';
 import DrrCp8DashboardPage from './DrrCp8DashboardPage';
+import DrrTLDashboardPage from './DrrTLDashboardPage'; // путь может отличаться
 
 import TestPage from './testpage'; // путь может быть другим, если файл в папке pages
 
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="/drr-cp7-dashboard" element={<DrrCp7DashboardPage />} />
         <Route path="/drr-cp7-history" element={<DrrCp7HistoryPage />} />
         <Route path="/drr-cp8-dashboard" element={<DrrCp8DashboardPage />} />
+        <Route path="/drr-tl-dashboard" element={<DrrTLDashboardPage />} />
 
         <Route path="/testpage" element={<TestPage />} />
       </Route>
