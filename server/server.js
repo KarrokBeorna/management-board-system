@@ -2431,13 +2431,13 @@ app.get('/api/part-defect-search', async (req, res) => {
     }
 
     const defectSql = `
-      SELECT QM_DEF.VIN, QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, QM_DEF.CREATION_TIME
+      SELECT QM_DEF.VIN, QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, QM_DEF.PROBLEM_REPLENISH, QM_DEF.CREATION_TIME
       FROM (
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_biw_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH FROM at_biw_qm_defect_info
         UNION ALL
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_paint_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH FROM at_paint_qm_defect_info
         UNION ALL
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH FROM at_qm_defect_info
       ) QM_DEF
       JOIN work_order wo ON wo.VIN = QM_DEF.VIN
       WHERE ${where}
@@ -2510,6 +2510,7 @@ app.get('/api/part-defect-search', async (req, res) => {
     const result = defectRows.map(defect => {
       const v = vehicleMap.get(defect.VIN);
       if (!v) return null;
+
       const les = storageMap.get(defect.VIN) || {};
       const iot = iotMap.get(defect.VIN) || {};
 
@@ -2547,6 +2548,7 @@ app.get('/api/part-defect-search', async (req, res) => {
         vin: defect.VIN,
         part_name: defect.PART_NAME || '',
         problem_type: defect.PROBLEM_TYPE || '',
+        problem_replenish: defect.PROBLEM_REPLENISH || '',
         defect_creation_time: defect.CREATION_TIME,
         material_code: v.material_code,
         sequence_number: v.sequence_number,
@@ -2598,15 +2600,14 @@ app.get('/api/vin-defect-search', async (req, res) => {
       params.push(dateTo);
     }
 
-    // Получаем все дефекты, удовлетворяющие условиям
     const defectSql = `
-      SELECT QM_DEF.VIN, QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, QM_DEF.CREATION_TIME
+      SELECT QM_DEF.VIN, QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, QM_DEF.PROBLEM_REPLENISH, QM_DEF.CREATION_TIME
       FROM (
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_biw_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH FROM at_biw_qm_defect_info
         UNION ALL
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_paint_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH FROM at_paint_qm_defect_info
         UNION ALL
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH FROM at_qm_defect_info
       ) QM_DEF
       JOIN work_order wo ON wo.VIN = QM_DEF.VIN
       WHERE ${where}
@@ -2679,7 +2680,7 @@ app.get('/api/vin-defect-search', async (req, res) => {
     `, vins);
     const iotMap = new Map(iotRows.map(r => [r.vin, r]));
 
-    // Формируем результат: каждая строка = один дефект
+    // Формируем результат
     const result = defectRows.map(defect => {
       const v = vehicleMap.get(defect.VIN);
       if (!v) return null;
@@ -2729,6 +2730,7 @@ app.get('/api/vin-defect-search', async (req, res) => {
         vin: defect.VIN,
         part_name: defect.PART_NAME || '',
         problem_type: defect.PROBLEM_TYPE || '',
+        problem_replenish: defect.PROBLEM_REPLENISH || '',
         defect_creation_time: defect.CREATION_TIME,
         material_code: v.material_code,
         sequence_number: v.sequence_number,

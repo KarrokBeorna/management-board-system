@@ -95,6 +95,20 @@ const filterOptionStyle = {
   transition: 'background 0.15s',
 };
 
+// Анимация загрузки (мигающие точки)
+const loadingAnimation = `
+  @keyframes blink {
+    0% { opacity: 0.2; }
+    20% { opacity: 1; }
+    100% { opacity: 0.2; }
+  }
+  .loading-dots span {
+    animation: blink 1.4s infinite both;
+  }
+  .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+`;
+
 export default function PartDefectSearchPage() {
   const [activeTab, setActiveTab] = useState('part');
 
@@ -109,7 +123,7 @@ export default function PartDefectSearchPage() {
   const [leftAllData, setLeftAllData] = useState([]);
   const [leftLoading, setLeftLoading] = useState(false);
   const [leftError, setLeftError] = useState(null);
-  const [leftUniqueMode, setLeftUniqueMode] = useState(false); // по умолчанию выключен
+  const [leftUniqueMode, setLeftUniqueMode] = useState(false);
   const [leftPage, setLeftPage] = useState(0);
   const [leftColumnFilters, setLeftColumnFilters] = useState({});
 
@@ -131,13 +145,14 @@ export default function PartDefectSearchPage() {
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
-  const pageSize = 50; // размер страницы
+  const pageSize = 50;
 
-  // Колонки таблицы
+  // Колонки таблицы (добавлен Комментарий)
   const timePointColumns = [
     { key: 'vin', label: 'VIN', filterable: true },
     { key: 'part_name', label: 'Деталь', filterable: true },
     { key: 'problem_type', label: 'Дефект', filterable: true },
+    { key: 'problem_replenish', label: 'Комментарий', filterable: false },
     { key: 'defect_creation_time', label: 'Дата дефекта', isTime: true, filterable: false },
     { key: 'material_code', label: 'Material Code', filterable: true },
     { key: 'sequence_number', label: 'Sequence', filterable: true },
@@ -161,32 +176,19 @@ export default function PartDefectSearchPage() {
     { key: 'current_zone', label: 'Текущее расположение', filterable: true },
   ];
 
-  // Агрегация уникальных VIN: объединяем part_name и problem_type через запятую
-  const getUniqueData = (data) => {
-    const map = new Map();
-    data.forEach(row => {
-      if (!map.has(row.vin)) {
-        map.set(row.vin, {
-          ...row,
-          part_name: [row.part_name],
-          problem_type: [row.problem_type],
-        });
-      } else {
-        const existing = map.get(row.vin);
-        if (!existing.part_name.includes(row.part_name)) existing.part_name.push(row.part_name);
-        if (!existing.problem_type.includes(row.problem_type)) existing.problem_type.push(row.problem_type);
-      }
+  // Убираем точные дубликаты (одинаковые vin + part_name + problem_type)
+  const getUniqueRows = (data) => {
+    const seen = new Set();
+    return data.filter(row => {
+      const key = `${row.vin}|${row.part_name}|${row.problem_type}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
-    return Array.from(map.values()).map(item => ({
-      ...item,
-      part_name: item.part_name.join(', '),
-      problem_type: item.problem_type.join(', '),
-    }));
   };
 
-  // Фильтрация данных с учётом режима уникальности
   const getFilteredData = (allData, columnFilters, uniqueMode) => {
-    let data = uniqueMode ? getUniqueData(allData) : allData;
+    let data = uniqueMode ? getUniqueRows(allData) : allData;
     if (Object.keys(columnFilters).length === 0) return data;
     return data.filter(row => {
       for (const [column, selectedValues] of Object.entries(columnFilters)) {
@@ -201,15 +203,12 @@ export default function PartDefectSearchPage() {
   const filteredLeftData = useMemo(() => getFilteredData(leftAllData, leftColumnFilters, leftUniqueMode), [leftAllData, leftColumnFilters, leftUniqueMode]);
   const filteredRightData = useMemo(() => getFilteredData(rightAllData, rightColumnFilters, rightUniqueMode), [rightAllData, rightColumnFilters, rightUniqueMode]);
 
-  // Пагинация
   const paginatedLeftData = useMemo(() => filteredLeftData.slice(leftPage * pageSize, (leftPage + 1) * pageSize), [filteredLeftData, leftPage]);
   const paginatedRightData = useMemo(() => filteredRightData.slice(rightPage * pageSize, (rightPage + 1) * pageSize), [filteredRightData, rightPage]);
 
-  // Сброс страницы при изменении режима/фильтров/данных
   useEffect(() => { setLeftPage(0); }, [leftUniqueMode, leftColumnFilters, leftAllData]);
   useEffect(() => { setRightPage(0); }, [rightUniqueMode, rightColumnFilters, rightAllData]);
 
-  // Закрытие выпадающего фильтра при клике вне
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (activeFilterColumn && !event.target.closest('.filter-dropdown') && !event.target.closest('th')) {
@@ -357,7 +356,17 @@ export default function PartDefectSearchPage() {
     totalItems,
     totalPages
   ) => {
-    if (loading) return <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка данных...</div>;
+    if (loading) {
+      return (
+        <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+          <style>{loadingAnimation}</style>
+          <div className="loading-dots" style={{ display: 'inline-block' }}>
+            <span>Загрузка данных</span>
+            <span>.</span><span>.</span><span>.</span>
+          </div>
+        </div>
+      );
+    }
     if (error) return <div style={{ textAlign: 'center', padding: 40, color: '#DC2626' }}>❌ {error}</div>;
     if (data.length === 0) return <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Нет данных</div>;
 
