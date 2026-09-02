@@ -109,6 +109,9 @@ export default function PartDefectSearchPage() {
   const [leftAllData, setLeftAllData] = useState([]);
   const [leftLoading, setLeftLoading] = useState(false);
   const [leftError, setLeftError] = useState(null);
+  const [leftUniqueMode, setLeftUniqueMode] = useState(true);
+  const [leftPage, setLeftPage] = useState(0);
+  const [leftColumnFilters, setLeftColumnFilters] = useState({});
 
   // Поиск по VIN/модели
   const [rightVin, setRightVin] = useState('');
@@ -120,18 +123,22 @@ export default function PartDefectSearchPage() {
   const [rightAllData, setRightAllData] = useState([]);
   const [rightLoading, setRightLoading] = useState(false);
   const [rightError, setRightError] = useState(null);
-
-  // Фильтры по столбцам
-  const [leftColumnFilters, setLeftColumnFilters] = useState({});
+  const [rightUniqueMode, setRightUniqueMode] = useState(true);
+  const [rightPage, setRightPage] = useState(0);
   const [rightColumnFilters, setRightColumnFilters] = useState({});
+
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
+  const pageSize = 50;
 
   // Колонки таблицы
   const timePointColumns = [
     { key: 'vin', label: 'VIN', filterable: true },
+    { key: 'part_name', label: 'Деталь', filterable: true },
+    { key: 'problem_type', label: 'Дефект', filterable: true },
+    { key: 'defect_creation_time', label: 'Дата дефекта', isTime: true, filterable: false },
     { key: 'material_code', label: 'Material Code', filterable: true },
     { key: 'sequence_number', label: 'Sequence', filterable: true },
     { key: 'kd_material_no', label: 'KD', filterable: true },
@@ -154,64 +161,32 @@ export default function PartDefectSearchPage() {
     { key: 'current_zone', label: 'Текущее расположение', filterable: true },
   ];
 
-  // Поиск по детали/дефекту
-  const searchLeft = async () => {
-    if (!leftPart.trim() && !leftDefect.trim() && leftModel === 'ALL') {
-      alert('Заполните хотя бы одно поле');
-      return;
-    }
-    setLeftLoading(true);
-    setLeftError(null);
-    try {
-      const params = new URLSearchParams();
-      if (leftPart.trim()) params.append('part', leftPart.trim());
-      if (leftDefect.trim()) params.append('defect', leftDefect.trim());
-      if (leftModel !== 'ALL') params.append('model', leftModel);
-      if (leftDateFrom) params.append('dateFrom', `${leftDateFrom} ${leftTimeFrom}:00`);
-      if (leftDateTo) params.append('dateTo', `${leftDateTo} ${leftTimeTo}:59`);
-      const res = await fetch(`${API_BASE}/api/part-defect-search?${params.toString()}`);
-      if (!res.ok) throw new Error(`Ошибка ${res.status}`);
-      const json = await res.json();
-      setLeftAllData(Array.isArray(json) ? json : []);
-      setLeftColumnFilters({});
-    } catch (err) {
-      setLeftError(err.message);
-    } finally {
-      setLeftLoading(false);
-    }
+  // Уникальные VIN: агрегируем детали и дефекты
+  const getUniqueData = (data) => {
+    const map = new Map();
+    data.forEach(row => {
+      if (!map.has(row.vin)) {
+        map.set(row.vin, { ...row, part_names: new Set([row.part_name]), problem_types: new Set([row.problem_type]) });
+      } else {
+        const existing = map.get(row.vin);
+        existing.part_names.add(row.part_name);
+        existing.problem_types.add(row.problem_type);
+      }
+    });
+    return Array.from(map.values()).map(item => ({
+      ...item,
+      part_name: [...item.part_names].join(', '),
+      problem_type: [...item.problem_types].join(', '),
+      part_names: undefined,
+      problem_types: undefined,
+    }));
   };
 
-  // Поиск по VIN/модели
-  const searchRight = async () => {
-    if (!rightVin.trim() && rightModel === 'ALL') {
-      alert('Заполните VIN или модель');
-      return;
-    }
-    setRightLoading(true);
-    setRightError(null);
-    try {
-      const params = new URLSearchParams();
-      if (rightVin.trim()) params.append('vin', rightVin.trim());
-      if (rightModel !== 'ALL') params.append('model', rightModel);
-      if (rightDateFrom) params.append('dateFrom', `${rightDateFrom} ${rightTimeFrom}:00`);
-      if (rightDateTo) params.append('dateTo', `${rightDateTo} ${rightTimeTo}:59`);
-      const res = await fetch(`${API_BASE}/api/vin-defect-search?${params.toString()}`);
-      if (!res.ok) throw new Error(`Ошибка ${res.status}`);
-      const json = await res.json();
-      setRightAllData(Array.isArray(json) ? json : []);
-      setRightColumnFilters({});
-    } catch (err) {
-      setRightError(err.message);
-    } finally {
-      setRightLoading(false);
-    }
-  };
-
-  // Фильтрация данных на клиенте
-  const getFilteredData = (allData, columnFilters) => {
-    if (!allData || allData.length === 0) return [];
-    if (Object.keys(columnFilters).length === 0) return allData;
-    return allData.filter(row => {
+  // Фильтрация
+  const getFilteredData = (allData, columnFilters, uniqueMode) => {
+    let data = uniqueMode ? getUniqueData(allData) : allData;
+    if (Object.keys(columnFilters).length === 0) return data;
+    return data.filter(row => {
       for (const [column, selectedValues] of Object.entries(columnFilters)) {
         if (selectedValues.length > 0 && !selectedValues.includes(row[column])) {
           return false;
@@ -221,10 +196,17 @@ export default function PartDefectSearchPage() {
     });
   };
 
-  const filteredLeftData = useMemo(() => getFilteredData(leftAllData, leftColumnFilters), [leftAllData, leftColumnFilters]);
-  const filteredRightData = useMemo(() => getFilteredData(rightAllData, rightColumnFilters), [rightAllData, rightColumnFilters]);
+  const filteredLeftData = useMemo(() => getFilteredData(leftAllData, leftColumnFilters, leftUniqueMode), [leftAllData, leftColumnFilters, leftUniqueMode]);
+  const filteredRightData = useMemo(() => getFilteredData(rightAllData, rightColumnFilters, rightUniqueMode), [rightAllData, rightColumnFilters, rightUniqueMode]);
 
-  // Обработчики для выпадающих фильтров
+  const paginatedLeftData = useMemo(() => filteredLeftData.slice(leftPage * pageSize, (leftPage + 1) * pageSize), [filteredLeftData, leftPage]);
+  const paginatedRightData = useMemo(() => filteredRightData.slice(rightPage * pageSize, (rightPage + 1) * pageSize), [filteredRightData, rightPage]);
+
+  // Сброс страницы при изменении данных
+  useEffect(() => { setLeftPage(0); }, [leftUniqueMode, leftColumnFilters, leftAllData]);
+  useEffect(() => { setRightPage(0); }, [rightUniqueMode, rightColumnFilters, rightAllData]);
+
+  // Закрытие выпадающего фильтра при клике вне
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (activeFilterColumn && !event.target.closest('.filter-dropdown') && !event.target.closest('th')) {
@@ -279,15 +261,76 @@ export default function PartDefectSearchPage() {
 
   const exportToExcel = (data, filename) => {
     if (!data || data.length === 0) return;
-    const ws = XLSX.utils.json_to_sheet(data);
+    const exportData = data.map(row => {
+      const clean = { ...row };
+      delete clean.part_names;
+      delete clean.problem_types;
+      return clean;
+    });
+    const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     saveAs(new Blob([buf], { type: 'application/octet-stream' }), `${filename}.xlsx`);
   };
 
+  // Функции поиска
+  const searchLeft = async () => {
+    if (!leftPart.trim() && !leftDefect.trim() && leftModel === 'ALL') {
+      alert('Заполните хотя бы одно поле');
+      return;
+    }
+    setLeftLoading(true);
+    setLeftError(null);
+    try {
+      const params = new URLSearchParams();
+      if (leftPart.trim()) params.append('part', leftPart.trim());
+      if (leftDefect.trim()) params.append('defect', leftDefect.trim());
+      if (leftModel !== 'ALL') params.append('model', leftModel);
+      if (leftDateFrom) params.append('dateFrom', `${leftDateFrom} ${leftTimeFrom}:00`);
+      if (leftDateTo) params.append('dateTo', `${leftDateTo} ${leftTimeTo}:59`);
+      const res = await fetch(`${API_BASE}/api/part-defect-search?${params.toString()}`);
+      if (!res.ok) throw new Error(`Ошибка ${res.status}`);
+      const json = await res.json();
+      setLeftAllData(Array.isArray(json) ? json : []);
+      setLeftColumnFilters({});
+      setLeftPage(0);
+    } catch (err) {
+      setLeftError(err.message);
+    } finally {
+      setLeftLoading(false);
+    }
+  };
+
+  const searchRight = async () => {
+    if (!rightVin.trim() && rightModel === 'ALL') {
+      alert('Заполните VIN или модель');
+      return;
+    }
+    setRightLoading(true);
+    setRightError(null);
+    try {
+      const params = new URLSearchParams();
+      if (rightVin.trim()) params.append('vin', rightVin.trim());
+      if (rightModel !== 'ALL') params.append('model', rightModel);
+      if (rightDateFrom) params.append('dateFrom', `${rightDateFrom} ${rightTimeFrom}:00`);
+      if (rightDateTo) params.append('dateTo', `${rightDateTo} ${rightTimeTo}:59`);
+      const res = await fetch(`${API_BASE}/api/vin-defect-search?${params.toString()}`);
+      if (!res.ok) throw new Error(`Ошибка ${res.status}`);
+      const json = await res.json();
+      setRightAllData(Array.isArray(json) ? json : []);
+      setRightColumnFilters({});
+      setRightPage(0);
+    } catch (err) {
+      setRightError(err.message);
+    } finally {
+      setRightLoading(false);
+    }
+  };
+
   const renderDateFilter = (dateFrom, setDateFrom, timeFrom, setTimeFrom, dateTo, setDateTo, timeTo, setTimeTo) => (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+      <span style={{ fontSize: 13, fontWeight: 600, color: '#4B5563' }}>Дата внесения дефекта:</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ fontSize: 13, color: '#4B5563' }}>С:</span>
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
@@ -301,20 +344,46 @@ export default function PartDefectSearchPage() {
     </div>
   );
 
-  const renderTable = (data, columns, loading, error, exportName, columnFilters, allData, activeFilterColumn, filterDropdownPos) => {
+  const renderTable = (
+    data,
+    columns,
+    loading,
+    error,
+    exportName,
+    columnFilters,
+    allData,
+    activeFilterColumn,
+    filterDropdownPos,
+    page,
+    setPage,
+    uniqueMode,
+    setUniqueMode
+  ) => {
     if (loading) return <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка данных...</div>;
     if (error) return <div style={{ textAlign: 'center', padding: 40, color: '#DC2626' }}>❌ {error}</div>;
     if (data.length === 0) return <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Нет данных</div>;
 
+    const totalPages = Math.ceil(data.length / pageSize);
+
     return (
       <>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
           <span style={{ fontWeight: 600 }}>Найдено: {data.length}</span>
-          <button onClick={() => exportToExcel(data, exportName)} style={{ ...buttonStyle, background: '#059669', padding: '6px 12px', fontSize: 12 }}>
-            📊 Excel
-          </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={uniqueMode}
+                onChange={(e) => setUniqueMode(e.target.checked)}
+              />
+              <span style={{ fontSize: 13 }}>Уникальные VIN</span>
+            </label>
+            <button onClick={() => exportToExcel(data, exportName)} style={{ ...buttonStyle, background: '#059669', padding: '6px 12px', fontSize: 12 }}>
+              📊 Excel
+            </button>
+          </div>
         </div>
-        <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 400px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
+        <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 450px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 2800 }}>
             <thead>
               <tr style={{ backgroundColor: '#F9FAFB' }}>
@@ -348,14 +417,21 @@ export default function PartDefectSearchPage() {
             </tbody>
           </table>
         </div>
+        {totalPages > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 16 }}>
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} style={{ ...buttonStyle, background: '#9CA3AF' }}>
+              ← Назад
+            </button>
+            <span style={{ alignSelf: 'center', fontWeight: 500 }}>{page + 1} / {totalPages}</span>
+            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1} style={{ ...buttonStyle, background: '#9CA3AF' }}>
+              Вперёд →
+            </button>
+          </div>
+        )}
         {activeFilterColumn && allData.length > 0 && (
           <div
             className="filter-dropdown"
-            style={{
-              ...filterDropdownStyle,
-              top: filterDropdownPos.top,
-              left: filterDropdownPos.left,
-            }}
+            style={{ ...filterDropdownStyle, top: filterDropdownPos.top, left: filterDropdownPos.left }}
           >
             <div
               style={{ ...filterOptionStyle, fontWeight: 700, borderBottom: '1px solid #E5E7EB', marginBottom: 4 }}
@@ -368,10 +444,7 @@ export default function PartDefectSearchPage() {
               return (
                 <div
                   key={val}
-                  style={{
-                    ...filterOptionStyle,
-                    background: isChecked ? '#EFF6FF' : 'transparent',
-                  }}
+                  style={{ ...filterOptionStyle, background: isChecked ? '#EFF6FF' : 'transparent' }}
                   onClick={() => handleFilterToggle(activeFilterColumn, val)}
                 >
                   <input type="checkbox" checked={isChecked} readOnly />
@@ -404,20 +477,8 @@ export default function PartDefectSearchPage() {
             Поиск по детали или дефекту
           </h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-            <input
-              type="text"
-              placeholder="Деталь (часть названия)"
-              value={leftPart}
-              onChange={e => setLeftPart(e.target.value)}
-              style={inputStyle}
-            />
-            <input
-              type="text"
-              placeholder="Дефект (часть названия)"
-              value={leftDefect}
-              onChange={e => setLeftDefect(e.target.value)}
-              style={inputStyle}
-            />
+            <input type="text" placeholder="Деталь (часть названия)" value={leftPart} onChange={e => setLeftPart(e.target.value)} style={inputStyle} />
+            <input type="text" placeholder="Дефект (часть названия)" value={leftDefect} onChange={e => setLeftDefect(e.target.value)} style={inputStyle} />
             <select value={leftModel} onChange={e => setLeftModel(e.target.value)} style={inputStyle}>
               {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все модели' : m}</option>)}
             </select>
@@ -427,7 +488,7 @@ export default function PartDefectSearchPage() {
             </button>
           </div>
           {renderTable(
-            filteredLeftData,
+            paginatedLeftData,
             timePointColumns,
             leftLoading,
             leftError,
@@ -435,7 +496,11 @@ export default function PartDefectSearchPage() {
             leftColumnFilters,
             leftAllData,
             activeFilterColumn,
-            filterDropdownPos
+            filterDropdownPos,
+            leftPage,
+            setLeftPage,
+            leftUniqueMode,
+            setLeftUniqueMode
           )}
         </div>
       )}
@@ -446,13 +511,7 @@ export default function PartDefectSearchPage() {
             Поиск по VIN или модели
           </h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-            <input
-              type="text"
-              placeholder="VIN (или часть)"
-              value={rightVin}
-              onChange={e => setRightVin(e.target.value)}
-              style={inputStyle}
-            />
+            <input type="text" placeholder="VIN (или часть)" value={rightVin} onChange={e => setRightVin(e.target.value)} style={inputStyle} />
             <select value={rightModel} onChange={e => setRightModel(e.target.value)} style={inputStyle}>
               {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все модели' : m}</option>)}
             </select>
@@ -462,7 +521,7 @@ export default function PartDefectSearchPage() {
             </button>
           </div>
           {renderTable(
-            filteredRightData,
+            paginatedRightData,
             timePointColumns,
             rightLoading,
             rightError,
@@ -470,7 +529,11 @@ export default function PartDefectSearchPage() {
             rightColumnFilters,
             rightAllData,
             activeFilterColumn,
-            filterDropdownPos
+            filterDropdownPos,
+            rightPage,
+            setRightPage,
+            rightUniqueMode,
+            setRightUniqueMode
           )}
         </div>
       )}

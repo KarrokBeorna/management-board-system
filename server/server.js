@@ -2430,30 +2430,26 @@ app.get('/api/part-defect-search', async (req, res) => {
       params.push(dateTo);
     }
 
-    const sql = `
-      SELECT DISTINCT QM_DEF.VIN
+    const defectSql = `
+      SELECT QM_DEF.VIN, QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, QM_DEF.CREATION_TIME
       FROM (
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
-        FROM at_biw_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_biw_qm_defect_info
         UNION ALL
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
-        FROM at_paint_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_paint_qm_defect_info
         UNION ALL
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
-        FROM at_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_qm_defect_info
       ) QM_DEF
       JOIN work_order wo ON wo.VIN = QM_DEF.VIN
       WHERE ${where}
       ORDER BY QM_DEF.CREATION_TIME DESC
     `;
 
-    const [rows] = await pool.query(sql, params);
-    if (rows.length === 0) return res.json([]);
+    const [defectRows] = await pool.query(defectSql, params);
+    if (defectRows.length === 0) return res.json([]);
 
-    const vins = rows.map(r => r.VIN);
+    const vins = [...new Set(defectRows.map(r => r.VIN))];
     const placeholders = vins.map(() => '?').join(',');
 
-    // 1. Time-points (MES)
     const timePointsSql = `
       SELECT
         too.vin,
@@ -2487,8 +2483,8 @@ app.get('/api/part-defect-search', async (req, res) => {
       WHERE too.vin IN (${placeholders})
     `;
     const [vehicles] = await mesPool.query(timePointsSql, vins);
+    const vehicleMap = new Map(vehicles.map(v => [v.vin, v]));
 
-    // 2. Складские данные (LES) с полем статуса
     const [storageRows] = await lesPool.query(`
       SELECT vin, in_storage_time, out_storage_time,
              in_storage_status,
@@ -2498,7 +2494,6 @@ app.get('/api/part-defect-search', async (req, res) => {
     `, vins);
     const storageMap = new Map(storageRows.map(r => [r.vin, r]));
 
-    // 3. TL времена из IoT
     const [iotRows] = await pool.query(`
       SELECT wo.vin,
              MAX(IF(aow.wc_name = 'TLWA', aow.creation_time, NULL)) AS TLWA,
@@ -2512,24 +2507,16 @@ app.get('/api/part-defect-search', async (req, res) => {
     `, vins);
     const iotMap = new Map(iotRows.map(r => [r.vin, r]));
 
-    // Формируем результат
-    const result = vehicles.map(v => {
-      const les = storageMap.get(v.vin) || {};
-      const iot = iotMap.get(v.vin) || {};
+    const result = defectRows.map(defect => {
+      const v = vehicleMap.get(defect.VIN);
+      if (!v) return null;
+      const les = storageMap.get(defect.VIN) || {};
+      const iot = iotMap.get(defect.VIN) || {};
 
-      // Собираем все точки для определения последнего чекпоинта
       const times = {
-        CP5: v.CP5,
-        CP6: v.CP6,
-        TRIMIN: v.TRIMIN,
-        CP7: v.CP7,
-        CP72: v.CP72,
-        TLWA: iot.TLWA,
-        TLRT: iot.TLRT,
-        TLADAS: iot.TLADAS,
-        TLTT: iot.TLTT,
-        CPFINAL: v.CPFINAL,
-        CP8: v.CP8,
+        CP5: v.CP5, CP6: v.CP6, TRIMIN: v.TRIMIN, CP7: v.CP7, CP72: v.CP72,
+        TLWA: iot.TLWA, TLRT: iot.TLRT, TLADAS: iot.TLADAS, TLTT: iot.TLTT,
+        CPFINAL: v.CPFINAL, CP8: v.CP8
       };
 
       const checkpoints = ['CP5','CP6','TRIMIN','CP7','CP72','TLWA','TLRT','TLADAS','TLTT','CPFINAL','CP8'];
@@ -2545,34 +2532,37 @@ app.get('/api/part-defect-search', async (req, res) => {
         }
       }
 
-      // Определяем статус
       const storageStatus = les.in_storage_status || '';
-      const isSold = storageStatus === 'Key_Car_In_Storage_Status_3'; // Outbound
+      const isSold = storageStatus === 'Key_Car_In_Storage_Status_3';
       const hasStorageData = les.ck_no && les.kq_no && les.kw_no &&
                              les.ck_no !== 'N/A' && les.kq_no !== 'N/A' && les.kw_no !== 'N/A';
       const isInStorage = !isSold && hasStorageData;
 
       let currentZone;
-      if (isSold) {
-        currentZone = 'Продан';
-      } else if (isInStorage) {
-        currentZone = `${les.ck_no}-${les.kq_no}-${les.kw_no}`;
-      } else {
-        currentZone = latestCheckpoint || 'Планирование';
-      }
+      if (isSold) currentZone = 'Продан';
+      else if (isInStorage) currentZone = `${les.ck_no}-${les.kq_no}-${les.kw_no}`;
+      else currentZone = latestCheckpoint || 'Планирование';
 
       return {
-        ...v,
+        vin: defect.VIN,
+        part_name: defect.PART_NAME || '',
+        problem_type: defect.PROBLEM_TYPE || '',
+        defect_creation_time: defect.CREATION_TIME,
+        material_code: v.material_code,
+        sequence_number: v.sequence_number,
+        kd_material_no: v.kd_material_no,
+        model: v.model,
+        material_desc: v.material_desc,
+        colour: v.colour,
+        CP5: v.CP5, CP6: v.CP6, TRIMIN: v.TRIMIN, CP7: v.CP7, CP72: v.CP72,
+        TLWA: iot.TLWA || null, TLRT: iot.TLRT || null, TLADAS: iot.TLADAS || null, TLTT: iot.TLTT || null,
+        CPFINAL: v.CPFINAL, CP8: v.CP8,
         in_storage_time: les.in_storage_time || null,
         out_storage_time: les.out_storage_time || null,
-        TLWA: iot.TLWA || null,
-        TLRT: iot.TLRT || null,
-        TLADAS: iot.TLADAS || null,
-        TLTT: iot.TLTT || null,
         location: currentZone,
         current_zone: currentZone,
       };
-    });
+    }).filter(Boolean);
 
     res.json(result);
   } catch (err) {
@@ -2608,30 +2598,28 @@ app.get('/api/vin-defect-search', async (req, res) => {
       params.push(dateTo);
     }
 
-    const sql = `
-      SELECT DISTINCT QM_DEF.VIN
+    // Получаем все дефекты, удовлетворяющие условиям
+    const defectSql = `
+      SELECT QM_DEF.VIN, QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, QM_DEF.CREATION_TIME
       FROM (
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
-        FROM at_biw_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_biw_qm_defect_info
         UNION ALL
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
-        FROM at_paint_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_paint_qm_defect_info
         UNION ALL
-        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
-        FROM at_qm_defect_info
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE FROM at_qm_defect_info
       ) QM_DEF
       JOIN work_order wo ON wo.VIN = QM_DEF.VIN
       WHERE ${where}
       ORDER BY QM_DEF.CREATION_TIME DESC
     `;
 
-    const [rows] = await pool.query(sql, params);
-    if (rows.length === 0) return res.json([]);
+    const [defectRows] = await pool.query(defectSql, params);
+    if (defectRows.length === 0) return res.json([]);
 
-    const vins = rows.map(r => r.VIN);
+    const vins = [...new Set(defectRows.map(r => r.VIN))];
     const placeholders = vins.map(() => '?').join(',');
 
-    // 1. Time-points (MES)
+    // Получаем time-points из MES
     const timePointsSql = `
       SELECT
         too.vin,
@@ -2665,8 +2653,9 @@ app.get('/api/vin-defect-search', async (req, res) => {
       WHERE too.vin IN (${placeholders})
     `;
     const [vehicles] = await mesPool.query(timePointsSql, vins);
+    const vehicleMap = new Map(vehicles.map(v => [v.vin, v]));
 
-    // 2. Складские данные (LES) с полем статуса
+    // Получаем складские данные (LES)
     const [storageRows] = await lesPool.query(`
       SELECT vin, in_storage_time, out_storage_time,
              in_storage_status,
@@ -2676,7 +2665,7 @@ app.get('/api/vin-defect-search', async (req, res) => {
     `, vins);
     const storageMap = new Map(storageRows.map(r => [r.vin, r]));
 
-    // 3. TL времена из IoT
+    // Получаем TL времена из IoT
     const [iotRows] = await pool.query(`
       SELECT wo.vin,
              MAX(IF(aow.wc_name = 'TLWA', aow.creation_time, NULL)) AS TLWA,
@@ -2690,10 +2679,13 @@ app.get('/api/vin-defect-search', async (req, res) => {
     `, vins);
     const iotMap = new Map(iotRows.map(r => [r.vin, r]));
 
-    // Формируем результат
-    const result = vehicles.map(v => {
-      const les = storageMap.get(v.vin) || {};
-      const iot = iotMap.get(v.vin) || {};
+    // Формируем результат: каждая строка = один дефект
+    const result = defectRows.map(defect => {
+      const v = vehicleMap.get(defect.VIN);
+      if (!v) return null;
+
+      const les = storageMap.get(defect.VIN) || {};
+      const iot = iotMap.get(defect.VIN) || {};
 
       const times = {
         CP5: v.CP5,
@@ -2723,32 +2715,44 @@ app.get('/api/vin-defect-search', async (req, res) => {
       }
 
       const storageStatus = les.in_storage_status || '';
-      const isSold = storageStatus === 'Key_Car_In_Storage_Status_3'; // Outbound
+      const isSold = storageStatus === 'Key_Car_In_Storage_Status_3';
       const hasStorageData = les.ck_no && les.kq_no && les.kw_no &&
                              les.ck_no !== 'N/A' && les.kq_no !== 'N/A' && les.kw_no !== 'N/A';
       const isInStorage = !isSold && hasStorageData;
 
       let currentZone;
-      if (isSold) {
-        currentZone = 'Продан';
-      } else if (isInStorage) {
-        currentZone = `${les.ck_no}-${les.kq_no}-${les.kw_no}`;
-      } else {
-        currentZone = latestCheckpoint || 'Планирование';
-      }
+      if (isSold) currentZone = 'Продан';
+      else if (isInStorage) currentZone = `${les.ck_no}-${les.kq_no}-${les.kw_no}`;
+      else currentZone = latestCheckpoint || 'Планирование';
 
       return {
-        ...v,
-        in_storage_time: les.in_storage_time || null,
-        out_storage_time: les.out_storage_time || null,
+        vin: defect.VIN,
+        part_name: defect.PART_NAME || '',
+        problem_type: defect.PROBLEM_TYPE || '',
+        defect_creation_time: defect.CREATION_TIME,
+        material_code: v.material_code,
+        sequence_number: v.sequence_number,
+        kd_material_no: v.kd_material_no,
+        model: v.model,
+        material_desc: v.material_desc,
+        colour: v.colour,
+        CP5: v.CP5,
+        CP6: v.CP6,
+        TRIMIN: v.TRIMIN,
+        CP7: v.CP7,
+        CP72: v.CP72,
         TLWA: iot.TLWA || null,
         TLRT: iot.TLRT || null,
         TLADAS: iot.TLADAS || null,
         TLTT: iot.TLTT || null,
+        CPFINAL: v.CPFINAL,
+        CP8: v.CP8,
+        in_storage_time: les.in_storage_time || null,
+        out_storage_time: les.out_storage_time || null,
         location: currentZone,
         current_zone: currentZone,
       };
-    });
+    }).filter(Boolean);
 
     res.json(result);
   } catch (err) {
