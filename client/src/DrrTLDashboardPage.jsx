@@ -418,7 +418,7 @@ export default function DrrTLDashboardPage() {
 
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
-              <h2 style={tableTitleStyle}>Топ дефектов после TLADAS</h2>
+              <h2 style={tableTitleStyle}>Топ дефектов Testline</h2>
               <div style={tableScrollStyle}>
                 {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
