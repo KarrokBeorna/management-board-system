@@ -2431,9 +2431,7 @@ app.get('/api/part-defect-search', async (req, res) => {
     }
 
     const sql = `
-      SELECT 
-        QM_DEF.VIN,
-        QM_DEF.CREATION_TIME
+      SELECT DISTINCT QM_DEF.VIN
       FROM (
         SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
         FROM at_biw_qm_defect_info
@@ -2447,41 +2445,134 @@ app.get('/api/part-defect-search', async (req, res) => {
       JOIN work_order wo ON wo.VIN = QM_DEF.VIN
       WHERE ${where}
       ORDER BY QM_DEF.CREATION_TIME DESC
-      LIMIT 2000
     `;
 
     const [rows] = await pool.query(sql, params);
-    
-    if (rows.length === 0) {
-      return res.json([]);
-    }
+    if (rows.length === 0) return res.json([]);
 
-    const vins = [...new Set(rows.map(r => r.VIN))];
-    
-    // Получаем последний пост для VIN через tm_vhc_vehicle + tm_vhc_vehicle_movement
-    const currentPostMap = new Map();
-    if (vins.length > 0) {
-      const placeholders = vins.map(() => '?').join(',');
-      const mesSql = `
-        SELECT tv.vin, m.node_nature
-        FROM tm_vhc_vehicle tv
-        JOIN tm_vhc_vehicle_movement m ON tv.id = m.tm_vhc_vehicle_id
-        JOIN (
-          SELECT tm_vhc_vehicle_id, MAX(scan_time) AS max_time
-          FROM tm_vhc_vehicle_movement
-          GROUP BY tm_vhc_vehicle_id
-        ) latest ON m.tm_vhc_vehicle_id = latest.tm_vhc_vehicle_id AND m.scan_time = latest.max_time
-        WHERE tv.vin IN (${placeholders})
-      `;
-      const [mesRows] = await mesPool.query(mesSql, vins);
-      mesRows.forEach(r => currentPostMap.set(r.vin, r.node_nature));
-    }
+    const vins = rows.map(r => r.VIN);
+    const placeholders = vins.map(() => '?').join(',');
 
-    const result = rows.map(row => ({
-      VIN: row.VIN,
-      CREATION_TIME: row.CREATION_TIME,
-      CURRENT_POST: currentPostMap.get(row.VIN) || 'Неизвестно'
-    }));
+    // 1. Time-points (MES)
+    const timePointsSql = `
+      SELECT
+        too.vin,
+        too.material_no AS material_code,
+        tvv.sequence_number,
+        uvkmm.kd_material_no,
+        too.product AS model,
+        tbmr.material_desc,
+        tbmr.ps_material_desc AS colour,
+        t.CP5, t.CP6, t.TRIMIN, t.CP7, t.CP72, t.CPFINAL, t.CP8
+      FROM tm_ofm_order too
+      LEFT JOIN tm_vhc_vehicle tvv ON too.vin = tvv.vin
+      LEFT JOIN tm_bas_material_relation tbmr 
+        ON tbmr.material_no = too.material_no AND tbmr.is_deleted = 0
+      LEFT JOIN udt_vsp_kd_material_mapping uvkmm 
+        ON CONCAT(LEFT(tbmr.material_no, 7), '**', RIGHT(tbmr.material_no, 6)) = uvkmm.material_no 
+        AND uvkmm.kd_material_no = tbmr.kd_material_no
+      LEFT JOIN (
+        SELECT vin,
+               MAX(IF(uloc_no = 'AGMBS01002', scan_time, NULL)) AS CP5,
+               MAX(IF(uloc_no = 'AGMPS01002', scan_time, NULL)) AS CP6,
+               MAX(IF(uloc_no = 'AGMAS01001', scan_time, NULL)) AS TRIMIN,
+               MAX(IF(uloc_no = 'AGMAS01003', scan_time, NULL)) AS CP7,
+               MAX(IF(uloc_no = 'CP72', scan_time, NULL)) AS CP72,
+               MAX(IF(uloc_no = 'CPFINAL', scan_time, NULL)) AS CPFINAL,
+               MAX(IF(uloc_no = 'AGMAS01004', scan_time, NULL)) AS CP8
+        FROM ti_mes_movement
+        WHERE is_deleted = 0
+        GROUP BY vin
+      ) t ON t.vin = too.vin
+      WHERE too.vin IN (${placeholders})
+    `;
+    const [vehicles] = await mesPool.query(timePointsSql, vins);
+
+    // 2. Складские данные (LES) с полем статуса
+    const [storageRows] = await lesPool.query(`
+      SELECT vin, in_storage_time, out_storage_time,
+             in_storage_status,
+             ck_no, kq_no, kw_no
+      FROM tv_biz_storage_car
+      WHERE vin IN (${placeholders})
+    `, vins);
+    const storageMap = new Map(storageRows.map(r => [r.vin, r]));
+
+    // 3. TL времена из IoT
+    const [iotRows] = await pool.query(`
+      SELECT wo.vin,
+             MAX(IF(aow.wc_name = 'TLWA', aow.creation_time, NULL)) AS TLWA,
+             MAX(IF(aow.wc_name = 'TLRT', aow.creation_time, NULL)) AS TLRT,
+             MAX(IF(aow.wc_name = 'TLADAS', aow.creation_time, NULL)) AS TLADAS,
+             MAX(IF(aow.wc_name = 'TLTT', aow.creation_time, NULL)) AS TLTT
+      FROM work_order wo
+      LEFT JOIN at_om_wiptrackinghistory aow ON wo.vin = aow.vin
+      WHERE wo.vin IN (${placeholders})
+      GROUP BY wo.vin
+    `, vins);
+    const iotMap = new Map(iotRows.map(r => [r.vin, r]));
+
+    // Формируем результат
+    const result = vehicles.map(v => {
+      const les = storageMap.get(v.vin) || {};
+      const iot = iotMap.get(v.vin) || {};
+
+      // Собираем все точки для определения последнего чекпоинта
+      const times = {
+        CP5: v.CP5,
+        CP6: v.CP6,
+        TRIMIN: v.TRIMIN,
+        CP7: v.CP7,
+        CP72: v.CP72,
+        TLWA: iot.TLWA,
+        TLRT: iot.TLRT,
+        TLADAS: iot.TLADAS,
+        TLTT: iot.TLTT,
+        CPFINAL: v.CPFINAL,
+        CP8: v.CP8,
+      };
+
+      const checkpoints = ['CP5','CP6','TRIMIN','CP7','CP72','TLWA','TLRT','TLADAS','TLTT','CPFINAL','CP8'];
+      let latestCheckpoint = null;
+      let latestTime = null;
+      for (const cp of checkpoints) {
+        if (times[cp]) {
+          const t = new Date(times[cp]);
+          if (!latestTime || t > latestTime) {
+            latestTime = t;
+            latestCheckpoint = cp;
+          }
+        }
+      }
+
+      // Определяем статус
+      const storageStatus = les.in_storage_status || '';
+      const isSold = storageStatus === 'Key_Car_In_Storage_Status_3'; // Outbound
+      const hasStorageData = les.ck_no && les.kq_no && les.kw_no &&
+                             les.ck_no !== 'N/A' && les.kq_no !== 'N/A' && les.kw_no !== 'N/A';
+      const isInStorage = !isSold && hasStorageData;
+
+      let currentZone;
+      if (isSold) {
+        currentZone = 'Продан';
+      } else if (isInStorage) {
+        currentZone = `${les.ck_no}-${les.kq_no}-${les.kw_no}`;
+      } else {
+        currentZone = latestCheckpoint || 'Планирование';
+      }
+
+      return {
+        ...v,
+        in_storage_time: les.in_storage_time || null,
+        out_storage_time: les.out_storage_time || null,
+        TLWA: iot.TLWA || null,
+        TLRT: iot.TLRT || null,
+        TLADAS: iot.TLADAS || null,
+        TLTT: iot.TLTT || null,
+        location: currentZone,
+        current_zone: currentZone,
+      };
+    });
 
     res.json(result);
   } catch (err) {
@@ -2518,7 +2609,7 @@ app.get('/api/vin-defect-search', async (req, res) => {
     }
 
     const sql = `
-      SELECT QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, COUNT(*) AS DEFECT_COUNT
+      SELECT DISTINCT QM_DEF.VIN
       FROM (
         SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
         FROM at_biw_qm_defect_info
@@ -2531,13 +2622,135 @@ app.get('/api/vin-defect-search', async (req, res) => {
       ) QM_DEF
       JOIN work_order wo ON wo.VIN = QM_DEF.VIN
       WHERE ${where}
-      GROUP BY QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE
-      ORDER BY DEFECT_COUNT DESC
-      LIMIT 2000
+      ORDER BY QM_DEF.CREATION_TIME DESC
     `;
 
     const [rows] = await pool.query(sql, params);
-    res.json(rows);
+    if (rows.length === 0) return res.json([]);
+
+    const vins = rows.map(r => r.VIN);
+    const placeholders = vins.map(() => '?').join(',');
+
+    // 1. Time-points (MES)
+    const timePointsSql = `
+      SELECT
+        too.vin,
+        too.material_no AS material_code,
+        tvv.sequence_number,
+        uvkmm.kd_material_no,
+        too.product AS model,
+        tbmr.material_desc,
+        tbmr.ps_material_desc AS colour,
+        t.CP5, t.CP6, t.TRIMIN, t.CP7, t.CP72, t.CPFINAL, t.CP8
+      FROM tm_ofm_order too
+      LEFT JOIN tm_vhc_vehicle tvv ON too.vin = tvv.vin
+      LEFT JOIN tm_bas_material_relation tbmr 
+        ON tbmr.material_no = too.material_no AND tbmr.is_deleted = 0
+      LEFT JOIN udt_vsp_kd_material_mapping uvkmm 
+        ON CONCAT(LEFT(tbmr.material_no, 7), '**', RIGHT(tbmr.material_no, 6)) = uvkmm.material_no 
+        AND uvkmm.kd_material_no = tbmr.kd_material_no
+      LEFT JOIN (
+        SELECT vin,
+               MAX(IF(uloc_no = 'AGMBS01002', scan_time, NULL)) AS CP5,
+               MAX(IF(uloc_no = 'AGMPS01002', scan_time, NULL)) AS CP6,
+               MAX(IF(uloc_no = 'AGMAS01001', scan_time, NULL)) AS TRIMIN,
+               MAX(IF(uloc_no = 'AGMAS01003', scan_time, NULL)) AS CP7,
+               MAX(IF(uloc_no = 'CP72', scan_time, NULL)) AS CP72,
+               MAX(IF(uloc_no = 'CPFINAL', scan_time, NULL)) AS CPFINAL,
+               MAX(IF(uloc_no = 'AGMAS01004', scan_time, NULL)) AS CP8
+        FROM ti_mes_movement
+        WHERE is_deleted = 0
+        GROUP BY vin
+      ) t ON t.vin = too.vin
+      WHERE too.vin IN (${placeholders})
+    `;
+    const [vehicles] = await mesPool.query(timePointsSql, vins);
+
+    // 2. Складские данные (LES) с полем статуса
+    const [storageRows] = await lesPool.query(`
+      SELECT vin, in_storage_time, out_storage_time,
+             in_storage_status,
+             ck_no, kq_no, kw_no
+      FROM tv_biz_storage_car
+      WHERE vin IN (${placeholders})
+    `, vins);
+    const storageMap = new Map(storageRows.map(r => [r.vin, r]));
+
+    // 3. TL времена из IoT
+    const [iotRows] = await pool.query(`
+      SELECT wo.vin,
+             MAX(IF(aow.wc_name = 'TLWA', aow.creation_time, NULL)) AS TLWA,
+             MAX(IF(aow.wc_name = 'TLRT', aow.creation_time, NULL)) AS TLRT,
+             MAX(IF(aow.wc_name = 'TLADAS', aow.creation_time, NULL)) AS TLADAS,
+             MAX(IF(aow.wc_name = 'TLTT', aow.creation_time, NULL)) AS TLTT
+      FROM work_order wo
+      LEFT JOIN at_om_wiptrackinghistory aow ON wo.vin = aow.vin
+      WHERE wo.vin IN (${placeholders})
+      GROUP BY wo.vin
+    `, vins);
+    const iotMap = new Map(iotRows.map(r => [r.vin, r]));
+
+    // Формируем результат
+    const result = vehicles.map(v => {
+      const les = storageMap.get(v.vin) || {};
+      const iot = iotMap.get(v.vin) || {};
+
+      const times = {
+        CP5: v.CP5,
+        CP6: v.CP6,
+        TRIMIN: v.TRIMIN,
+        CP7: v.CP7,
+        CP72: v.CP72,
+        TLWA: iot.TLWA,
+        TLRT: iot.TLRT,
+        TLADAS: iot.TLADAS,
+        TLTT: iot.TLTT,
+        CPFINAL: v.CPFINAL,
+        CP8: v.CP8,
+      };
+
+      const checkpoints = ['CP5','CP6','TRIMIN','CP7','CP72','TLWA','TLRT','TLADAS','TLTT','CPFINAL','CP8'];
+      let latestCheckpoint = null;
+      let latestTime = null;
+      for (const cp of checkpoints) {
+        if (times[cp]) {
+          const t = new Date(times[cp]);
+          if (!latestTime || t > latestTime) {
+            latestTime = t;
+            latestCheckpoint = cp;
+          }
+        }
+      }
+
+      const storageStatus = les.in_storage_status || '';
+      const isSold = storageStatus === 'Key_Car_In_Storage_Status_3'; // Outbound
+      const hasStorageData = les.ck_no && les.kq_no && les.kw_no &&
+                             les.ck_no !== 'N/A' && les.kq_no !== 'N/A' && les.kw_no !== 'N/A';
+      const isInStorage = !isSold && hasStorageData;
+
+      let currentZone;
+      if (isSold) {
+        currentZone = 'Продан';
+      } else if (isInStorage) {
+        currentZone = `${les.ck_no}-${les.kq_no}-${les.kw_no}`;
+      } else {
+        currentZone = latestCheckpoint || 'Планирование';
+      }
+
+      return {
+        ...v,
+        in_storage_time: les.in_storage_time || null,
+        out_storage_time: les.out_storage_time || null,
+        TLWA: iot.TLWA || null,
+        TLRT: iot.TLRT || null,
+        TLADAS: iot.TLADAS || null,
+        TLTT: iot.TLTT || null,
+        location: currentZone,
+        current_zone: currentZone,
+      };
+    });
+
+    res.json(result);
   } catch (err) {
     console.error('Ошибка vin-defect-search:', err.message);
     res.status(500).json({ error: err.message });
