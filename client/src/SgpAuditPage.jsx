@@ -198,6 +198,11 @@ export default function SgpAuditPage() {
   const [neighborLocations, setNeighborLocations] = useState({});
   const [neighborModelComplect, setNeighborModelComplect] = useState({});
 
+  // Новые состояния для фильтров соседей
+  const [neighborFilters, setNeighborFilters] = useState({});
+  const [activeNeighborFilterColumn, setActiveNeighborFilterColumn] = useState(null);
+  const [neighborFilterDropdownPos, setNeighborFilterDropdownPos] = useState({ top: 0, left: 0 });
+
   // Analytics (скрыта)
   const [auditStartDate, setAuditStartDate] = useState('');
   const [auditEndDate, setAuditEndDate] = useState('');
@@ -223,10 +228,13 @@ export default function SgpAuditPage() {
       if (activeFilterColumn && !event.target.closest('.filter-dropdown') && !event.target.closest('th')) {
         setActiveFilterColumn(null);
       }
+      if (activeNeighborFilterColumn && !event.target.closest('.filter-dropdown') && !event.target.closest('th')) {
+        setActiveNeighborFilterColumn(null);
+      }
     };
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
-  }, [activeFilterColumn]);
+  }, [activeFilterColumn, activeNeighborFilterColumn]);
 
   useEffect(() => {
     const handleScroll = (event) => {
@@ -234,6 +242,7 @@ export default function SgpAuditPage() {
         return;
       }
       setActiveFilterColumn(null);
+      setActiveNeighborFilterColumn(null);
     };
     window.addEventListener('scroll', handleScroll, true);
     return () => window.removeEventListener('scroll', handleScroll, true);
@@ -569,6 +578,8 @@ export default function SgpAuditPage() {
     setNeighborTargetTime(null);
     setNeighborLocations({});
     setNeighborModelComplect({});
+    setNeighborFilters({});
+    setActiveNeighborFilterColumn(null);
     try {
       const params = new URLSearchParams({
         checkpoint: neighborCheckpoint,
@@ -602,22 +613,84 @@ export default function SgpAuditPage() {
     }
   };
 
-  const exportNeighborsToExcel = () => {
-    if (!neighborData.length) return;
-    const exportData = neighborData.map(item => {
+  // Обогащённые данные соседей (с моделью, комплектацией и текущим расположением)
+  const enrichedNeighborData = useMemo(() => {
+    return neighborData.map(item => {
+      const loc = neighborLocations[item.vin];
       const details = neighborModelComplect[item.vin] || {};
+      let currentZone = '-';
+      if (loc) {
+        if (loc.isInStorage) currentZone = loc.storageString;
+        else if (loc.isSold) currentZone = 'Продан';
+        else currentZone = loc.checkpoint || '-';
+      }
       return {
-        'VIN': item.vin,
-        [`Время ${neighborCheckpoint}`]: formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time),
-        'Текущее расположение': neighborLocations[item.vin]
-          ? neighborLocations[item.vin].isInStorage
-            ? neighborLocations[item.vin].storageString
-            : neighborLocations[item.vin].checkpoint || '-'
-          : '-',
-        'Модель': details.model || '-',
-        'Комплектация': details.material_desc || '-',
+        ...item,
+        current_zone: currentZone,
+        model: details.model || '-',
+        material_desc: details.material_desc || '-',
       };
     });
+  }, [neighborData, neighborLocations, neighborModelComplect]);
+
+  // Уникальные значения для фильтров соседей
+  const getNeighborUniqueValues = (column) => {
+    const values = [...new Set(enrichedNeighborData.map(d => d[column]).filter(v => v !== null && v !== undefined && v !== ''))];
+    return values.sort();
+  };
+
+  // Обработчики фильтров соседей
+  const handleNeighborFilterHeaderClick = (column, event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setNeighborFilterDropdownPos({ top: rect.bottom + 4, left: rect.left });
+    setActiveNeighborFilterColumn(activeNeighborFilterColumn === column ? null : column);
+  };
+
+  const handleNeighborFilterToggle = (column, value) => {
+    setNeighborFilters(prev => {
+      const currentValues = prev[column] || [];
+      const newValues = currentValues.includes(value)
+        ? currentValues.filter(v => v !== value)
+        : [...currentValues, value];
+      const newFilters = { ...prev };
+      if (newValues.length > 0) newFilters[column] = newValues;
+      else delete newFilters[column];
+      return newFilters;
+    });
+  };
+
+  const handleNeighborFilterClear = (column) => {
+    setNeighborFilters(prev => {
+      const newPrev = { ...prev };
+      delete newPrev[column];
+      return newPrev;
+    });
+    setActiveNeighborFilterColumn(null);
+  };
+
+  // Отфильтрованные данные соседей
+  const filteredNeighborData = useMemo(() => {
+    let result = enrichedNeighborData;
+    if (Object.keys(neighborFilters).length === 0) return result;
+    return result.filter(row => {
+      for (const [column, selectedValues] of Object.entries(neighborFilters)) {
+        if (selectedValues.length > 0 && !selectedValues.includes(row[column])) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [enrichedNeighborData, neighborFilters]);
+
+  const exportNeighborsToExcel = () => {
+    if (!filteredNeighborData.length) return;
+    const exportData = filteredNeighborData.map(item => ({
+      'VIN': item.vin,
+      [`Время ${neighborCheckpoint}`]: formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time),
+      'Текущее расположение': item.current_zone,
+      'Модель': item.model,
+      'Комплектация': item.material_desc,
+    }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Соседи');
@@ -628,30 +701,21 @@ export default function SgpAuditPage() {
   };
 
   const exportNeighborsToHolds = () => {
-    if (!neighborData.length) return;
+    if (!filteredNeighborData.length) return;
 
     const afterCP8 = [];
     const beforeCP8 = [];
 
-    neighborData.forEach(item => {
-      const loc = neighborLocations[item.vin];
-      let locationStr = '-';
-      if (loc) {
-        if (loc.isInStorage) locationStr = loc.storageString;
-        else if (loc.isSold) locationStr = 'Продан';
-        else locationStr = loc.checkpoint || '-';
-      }
-
-      const details = neighborModelComplect[item.vin] || {};
-
+    filteredNeighborData.forEach(item => {
+      const locationStr = item.current_zone;
       const rowData = {
         'VIN': item.vin,
         'Текущее расположение': locationStr,
-        'Модель': details.model || '-',
-        'Комплектация': details.material_desc || '-',
+        'Модель': item.model,
+        'Комплектация': item.material_desc,
       };
 
-      const isAfter = loc && (loc.checkpoint === 'CP8' || loc.isInStorage || loc.isSold);
+      const isAfter = locationStr === 'CP8' || locationStr === 'Продан' || locationStr.includes('-'); // склад
       if (isAfter) {
         afterCP8.push(rowData);
       } else {
@@ -1057,7 +1121,7 @@ export default function SgpAuditPage() {
               ⏱️ Время прохождения точек
             </h2>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button style={{ ...buttonStyle, background: '#059669' }} onClick={() => exportExcel(timePointsData, 'time_points')}>
+              <button style={{ ...buttonStyle, background: '#059669' }} onClick={() => exportExcel(filteredTimePointsData, 'time_points')}>
                 📊 Excel
               </button>
               <button style={{ ...buttonStyle, background: '#F59E0B' }} onClick={openExportModal}>
@@ -1335,33 +1399,36 @@ export default function SgpAuditPage() {
                 <span>.</span><span>.</span><span>.</span>
               </div>
             </div>
-          ) : neighborData.length > 0 ? (
+          ) : filteredNeighborData.length > 0 ? (
             <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid #E5E7EB', maxHeight: '500px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ backgroundColor: '#F9FAFB' }}>
                     <th style={{ ...thStyle, position: 'sticky', top: 0 }}>VIN</th>
                     <th style={{ ...thStyle, position: 'sticky', top: 0 }}>Время {neighborCheckpoint}</th>
-                    <th style={{ ...thStyle, position: 'sticky', top: 0 }}>Текущее расположение</th>
-                    <th style={{ ...thStyle, position: 'sticky', top: 0 }}>Модель</th>
-                    <th style={{ ...thStyle, position: 'sticky', top: 0 }}>Комплектация</th>
+                    <th 
+                      style={{ ...thStyle, position: 'sticky', top: 0, cursor: 'pointer', background: neighborFilters.current_zone?.length > 0 ? '#DBEAFE' : '#F9FAFB' }}
+                      onClick={(e) => handleNeighborFilterHeaderClick('current_zone', e)}
+                    >
+                      Текущее расположение {neighborFilters.current_zone?.length > 0 && `(${neighborFilters.current_zone.length})`} ▼
+                    </th>
+                    <th 
+                      style={{ ...thStyle, position: 'sticky', top: 0, cursor: 'pointer', background: neighborFilters.model?.length > 0 ? '#DBEAFE' : '#F9FAFB' }}
+                      onClick={(e) => handleNeighborFilterHeaderClick('model', e)}
+                    >
+                      Модель {neighborFilters.model?.length > 0 && `(${neighborFilters.model.length})`} ▼
+                    </th>
+                    <th 
+                      style={{ ...thStyle, position: 'sticky', top: 0, cursor: 'pointer', background: neighborFilters.material_desc?.length > 0 ? '#DBEAFE' : '#F9FAFB' }}
+                      onClick={(e) => handleNeighborFilterHeaderClick('material_desc', e)}
+                    >
+                      Комплектация {neighborFilters.material_desc?.length > 0 && `(${neighborFilters.material_desc.length})`} ▼
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {neighborData.map((item, idx) => {
+                  {filteredNeighborData.map((item, idx) => {
                     const isTarget = item.vin === neighborVin;
-                    const loc = neighborLocations[item.vin];
-                    let displayLocation = '-';
-                    if (loc) {
-                      if (loc.isInStorage) {
-                        displayLocation = loc.storageString;
-                      } else if (loc.isSold) {
-                        displayLocation = 'Продан';
-                      } else {
-                        displayLocation = loc.checkpoint || '-';
-                      }
-                    }
-                    const details = neighborModelComplect[item.vin] || {};
                     return (
                       <tr 
                         key={idx} 
@@ -1373,9 +1440,9 @@ export default function SgpAuditPage() {
                         <td style={tdStyle}>
                           {formatDateTime(item.point_time || item.trim_in || item.creation_time || item.in_storage_time || item.out_storage_time)}
                         </td>
-                        <td style={tdStyle}>{displayLocation}</td>
-                        <td style={tdStyle}>{details.model || '-'}</td>
-                        <td style={tdStyle}>{details.material_desc || '-'}</td>
+                        <td style={tdStyle}>{item.current_zone}</td>
+                        <td style={tdStyle}>{item.model}</td>
+                        <td style={tdStyle}>{item.material_desc}</td>
                       </tr>
                     );
                   })}
@@ -1388,6 +1455,48 @@ export default function SgpAuditPage() {
                 Введите VIN, выберите точку и нажмите «Найти соседей»
               </div>
             )
+          )}
+
+          {activeNeighborFilterColumn && enrichedNeighborData.length > 0 && (
+            <div 
+              className="filter-dropdown"
+              style={{
+                ...filterDropdownStyle,
+                top: neighborFilterDropdownPos.top,
+                left: neighborFilterDropdownPos.left,
+              }}
+            >
+              <div 
+                style={{ ...filterOptionStyle, fontWeight: 700, borderBottom: '1px solid #E5E7EB', marginBottom: 4 }}
+                onClick={() => handleNeighborFilterClear(activeNeighborFilterColumn)}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+              >
+                ✕ Очистить фильтр
+              </div>
+              {getNeighborUniqueValues(activeNeighborFilterColumn).map(val => {
+                const isChecked = neighborFilters[activeNeighborFilterColumn]?.includes(val);
+                return (
+                  <div 
+                    key={val}
+                    style={{
+                      ...filterOptionStyle,
+                      background: isChecked ? '#EFF6FF' : 'transparent',
+                    }}
+                    onClick={() => handleNeighborFilterToggle(activeNeighborFilterColumn, val)}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = isChecked ? '#EFF6FF' : 'transparent'}
+                  >
+                    <input 
+                      type="checkbox" 
+                      checked={isChecked}
+                      readOnly
+                    />
+                    {val}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
