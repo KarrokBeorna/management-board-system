@@ -175,6 +175,12 @@ export default function MppWeeklyTopPage() {
   const [hiddenRows, setHiddenRows] = useState({});
   const hiddenCount = Object.values(hiddenRows).filter(Boolean).length;
 
+  // Для графика динамики
+  const [trendModalOpen, setTrendModalOpen] = useState(false);
+  const [trendData, setTrendData] = useState(null);
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendMpp, setTrendMpp] = useState('');
+
   const availableModels = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
 
@@ -451,6 +457,41 @@ export default function MppWeeklyTopPage() {
     setHiddenRows({});
   };
 
+  // Функция открытия модального окна с трендом
+  const openTrend = async (row) => {
+    setTrendMpp(row.MPP);
+    setTrendModalOpen(true);
+    setTrendLoading(true);
+    try {
+      const checkpointParam = (selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length) 
+        ? 'ALL' 
+        : selectedCheckpoints.join(',');
+      
+      const fetchTrend = (periodType) => {
+        const params = new URLSearchParams({
+          partName: row.PART_NAME,
+          problemType: row.PROBLEM_TYPE,
+          model: row.MODEL,
+          checkpoint: checkpointParam,
+          periodType,
+        });
+        return fetch(`${API_BASE}/api/mpp-defect-trend?${params.toString()}`).then(r => r.json());
+      };
+      
+      const [monthData, weekData, dayData] = await Promise.all([
+        fetchTrend('month'),
+        fetchTrend('week'),
+        fetchTrend('day'),
+      ]);
+      
+      setTrendData({ month: monthData, week: weekData, day: dayData });
+    } catch (err) {
+      alert('Ошибка загрузки тренда: ' + err.message);
+    } finally {
+      setTrendLoading(false);
+    }
+  };
+
   return (
     <div style={{ padding: 30, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
       <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 30 }}>Топ дефектов по DRR</h1>
@@ -584,9 +625,18 @@ export default function MppWeeklyTopPage() {
                           <td style={{ ...tdStyle, textAlign: 'center' }}>{row.REMZONE_PERCENT || '0.00'}</td>
                           <td style={tdStyle}>{row.POST_NAME}</td>
                           <td style={tdStyle}>
-                            <button onClick={() => handleToggleMpp(row)} style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}>
-                              {expandedMpp === row.MPP ? 'Скрыть VIN' : 'VIN'}
-                            </button>
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                              <button
+                                onClick={() => openTrend(row)}
+                                title="Динамика дефекта"
+                                style={{ ...buttonStyle, background: '#8B5CF6', padding: '4px 10px', fontSize: 12 }}
+                              >
+                                📈
+                              </button>
+                              <button onClick={() => handleToggleMpp(row)} style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}>
+                                {expandedMpp === row.MPP ? 'Скрыть VIN' : 'VIN'}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                         {expandedMpp === row.MPP && (
@@ -827,6 +877,113 @@ export default function MppWeeklyTopPage() {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {trendModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }} onClick={() => setTrendModalOpen(false)}>
+          <div style={{
+            backgroundColor: '#FFFFFF',
+            borderRadius: 16,
+            padding: 24,
+            width: '96%',
+            maxWidth: 1600,
+            maxHeight: '95vh',
+            overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1F2937' }}>
+                Динамика дефекта: {trendMpp}
+              </h3>
+              <button
+                onClick={() => setTrendModalOpen(false)}
+                style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280' }}
+              >
+                ✕
+              </button>
+            </div>
+            {trendLoading ? (
+              <p>Загрузка...</p>
+            ) : (
+              trendData && (
+                <div style={{ display: 'flex', flexDirection: 'row', gap: 20, flexWrap: 'nowrap' }}>
+                  {/* Месяцы */}
+                  <div style={{ flex: '1 1 0', minWidth: 250 }}>
+                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={trendData.month} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                        <XAxis 
+                          dataKey="period" 
+                          tick={{ fontSize: 16, fill: '#1F2937' }} 
+                          tickFormatter={(val) => {
+                            const [y, m] = val.split('-');
+                            const monthNames = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+                            return monthNames[parseInt(m,10)-1];
+                          }}
+                        />
+                        <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
+                        <Bar dataKey="defect_count" fill="#3B82F6" radius={[4,4,0,0]}>
+                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Недели */}
+                  <div style={{ flex: '1 1 0', minWidth: 250 }}>
+                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={trendData.week} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                        <XAxis 
+                          dataKey="period" 
+                          tick={{ fontSize: 16, fill: '#1F2937' }} 
+                          tickFormatter={(val) => val.split('-W')[1] ? `W${val.split('-W')[1]}` : val}
+                        />
+                        <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
+                        <Bar dataKey="defect_count" fill="#F59E0B" radius={[4,4,0,0]}>
+                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Дни – одинаковый margin и высота */}
+                  <div style={{ flex: '2 1 0', minWidth: 350 }}>
+                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={trendData.day} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                        <XAxis 
+                          dataKey="period" 
+                          interval={0} 
+                          tick={{ fontSize: 16, fill: '#1F2937' }} 
+                          tickFormatter={(val) => {
+                            const [, m, d] = val.split('-');
+                            return `${d}.${m}`;
+                          }}
+                        />
+                        <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
+                        <Bar dataKey="defect_count" fill="#10B981" radius={[4,4,0,0]}>
+                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )
+            )}
+          </div>
         </div>
       )}
     </div>
