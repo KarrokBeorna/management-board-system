@@ -915,10 +915,11 @@ export default function MppWeeklyTopPage() {
               <p>Загрузка...</p>
             ) : (
               trendData && (
-                <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 300 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+                  {/* Месяцы */}
+                  <div style={{ flex: '1 1 300px' }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
-                    <ResponsiveContainer width="100%" height={320}>
+                    <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={trendData.month} margin={{ top: 40, right: 10, left: 0, bottom: 20 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
@@ -932,14 +933,16 @@ export default function MppWeeklyTopPage() {
                         />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
                         <Bar dataKey="defect_count" fill="#3B82F6" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 12, fill: '#1F2937', fontWeight: 600 }} />
+                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
-                  <div style={{ flex: 1, minWidth: 300 }}>
+
+                  {/* Недели */}
+                  <div style={{ flex: '1 1 300px' }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
-                    <ResponsiveContainer width="100%" height={320}>
+                    <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={trendData.week} margin={{ top: 40, right: 10, left: 0, bottom: 20 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
@@ -949,20 +952,22 @@ export default function MppWeeklyTopPage() {
                         />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
                         <Bar dataKey="defect_count" fill="#F59E0B" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 12, fill: '#1F2937', fontWeight: 600 }} />
+                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
-                  <div style={{ flex: 1, minWidth: 300 }}>
+
+                  {/* Дни — на всю ширину */}
+                  <div style={{ flexBasis: '100%' }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
                     <ResponsiveContainer width="100%" height={350}>
-                      <BarChart data={trendData.day} margin={{ top: 40, right: 10, left: 0, bottom: 40 }}>
+                      <BarChart data={trendData.day} margin={{ top: 50, right: 10, left: 0, bottom: 50 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
                           dataKey="period" 
                           interval={0} 
-                          tick={{ fontSize: 11, fill: '#1F2937' }} 
+                          tick={{ fontSize: 12, fill: '#1F2937' }} 
                           tickFormatter={(val) => {
                             const [, m, d] = val.split('-');
                             return `${d}.${m}`;
@@ -970,7 +975,7 @@ export default function MppWeeklyTopPage() {
                         />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
                         <Bar dataKey="defect_count" fill="#10B981" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 12, fill: '#1F2937', fontWeight: 600 }} />
+                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
