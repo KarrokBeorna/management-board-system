@@ -919,12 +919,12 @@ export default function MppWeeklyTopPage() {
                   {/* Месяцы */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={trendData.month} margin={{ top: 40, right: 10, left: 0, bottom: 20 }}>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={trendData.month} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
                           dataKey="period" 
-                          tick={{ fontSize: 12, fill: '#1F2937' }} 
+                          tick={{ fontSize: 16, fill: '#1F2937' }} 
                           tickFormatter={(val) => {
                             const [y, m] = val.split('-');
                             const monthNames = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
@@ -942,12 +942,12 @@ export default function MppWeeklyTopPage() {
                   {/* Недели */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={trendData.week} margin={{ top: 40, right: 10, left: 0, bottom: 20 }}>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={trendData.week} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
                           dataKey="period" 
-                          tick={{ fontSize: 12, fill: '#1F2937' }} 
+                          tick={{ fontSize: 16, fill: '#1F2937' }} 
                           tickFormatter={(val) => val.split('-W')[1] ? `W${val.split('-W')[1]}` : val}
                         />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
@@ -958,16 +958,16 @@ export default function MppWeeklyTopPage() {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* Дни – больше ширины за счёт flex: 2 */}
+                  {/* Дни – одинаковый margin и высота */}
                   <div style={{ flex: '2 1 0', minWidth: 350 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={trendData.day} margin={{ top: 50, right: 10, left: 0, bottom: 40 }}>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={trendData.day} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
                           dataKey="period" 
                           interval={0} 
-                          tick={{ fontSize: 11, fill: '#1F2937' }} 
+                          tick={{ fontSize: 16, fill: '#1F2937' }} 
                           tickFormatter={(val) => {
                             const [, m, d] = val.split('-');
                             return `${d}.${m}`;
