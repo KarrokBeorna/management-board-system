@@ -328,7 +328,7 @@ export default function DrrCp8DashboardPage() {
               width: '80px',
               height: '80px',
               borderRadius: '20px',
-              background: shiftInfo.shiftLetter === 'A' ? '#F59E0B' : shiftInfo.shiftLetter === 'B' ? '#ffffff' : '#6B7280',
+              background: shiftInfo.shiftLetter === 'A' ? '#ffffff' : shiftInfo.shiftLetter === 'B' ? '#ffffff' : '#ffffff',
               color: '#1E293B',
               display: 'flex',
               alignItems: 'center',
