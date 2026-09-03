@@ -2399,6 +2399,94 @@ app.get('/api/mpp-drr-analytics', async (req, res) => {
   }
 });
 
+// ================== ДИНАМИКА ДЕФЕКТА (MPP TREND) ==================
+app.get('/api/mpp-defect-trend', async (req, res) => {
+  try {
+    const { partName, problemType, model, checkpoint, periodType } = req.query;
+    if (!partName || !problemType || !model || !periodType) {
+      return res.status(400).json({ error: 'partName, problemType, model, periodType обязательны' });
+    }
+
+    // Списки постов (как в mpp-weekly-top)
+    const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
+    const cp7Posts = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const cp8Posts = ['CP8', 'CP8 Gate', 'CP8-gate', '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'];
+    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'];
+
+    let postList = [];
+    if (!checkpoint || checkpoint === 'ALL') {
+      postList = [...new Set([...pipPosts, ...cp7Posts, ...cp8Posts])];
+    } else {
+      const checkpoints = checkpoint.split(',');
+      checkpoints.forEach(cp => {
+        if (cp === 'CP7') postList.push(...cp7Posts);
+        else if (cp === 'CP8') postList.push(...cp8Posts);
+        else if (cp === 'PIP') postList.push(...pipPosts);
+        else if (cp === 'TL')  postList.push(...tlPosts);
+      });
+      postList = [...new Set(postList)];
+    }
+
+    if (postList.length === 0) {
+      return res.json([]);
+    }
+
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    let dateCondition, groupBy, orderBy;
+    if (periodType === 'month') {
+      dateCondition = `AND QM_DEF.CREATION_DATE >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)`;
+      groupBy = `DATE_FORMAT(QM_DEF.CREATION_DATE, '%Y-%m')`;
+      orderBy = `ORDER BY period ASC`;
+    } else if (periodType === 'week') {
+      dateCondition = `AND QM_DEF.CREATION_DATE >= DATE_SUB(CURDATE(), INTERVAL 4 WEEK)`;
+      groupBy = `DATE_FORMAT(QM_DEF.CREATION_DATE, '%Y-%u')`;
+      orderBy = `ORDER BY period ASC`;
+    } else if (periodType === 'day') {
+      dateCondition = `AND QM_DEF.CREATION_DATE >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)`;
+      groupBy = `DATE(QM_DEF.CREATION_DATE)`;
+      orderBy = `ORDER BY period ASC`;
+    } else {
+      return res.status(400).json({ error: 'Неверный periodType' });
+    }
+
+    const sql = `
+      SELECT ${groupBy} AS period, COUNT(*) AS defect_count
+      FROM (
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
+        FROM at_qm_defect_info
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE QM_DEF.PART_NAME = ? 
+        AND QM_DEF.PROBLEM_TYPE = ?
+        AND wo.MODEL = ?
+        AND QM_DEF.S_OFFLINE = 1
+        AND QM_DEF.POST_NAME IN (${postListStr})
+        ${dateCondition}
+      GROUP BY period
+      ${orderBy}
+    `;
+
+    const [rows] = await pool.query(sql, [partName, problemType, model]);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка mpp-defect-trend:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/part-defect-search', async (req, res) => {
   try {
     const { part, defect, model, dateFrom, dateTo } = req.query;
