@@ -895,7 +895,7 @@ export default function MppWeeklyTopPage() {
             borderRadius: 16,
             padding: 24,
             width: '95%',
-            maxWidth: 1200,
+            maxWidth: 1400,
             maxHeight: '95vh',
             overflowY: 'auto',
             boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
@@ -916,10 +916,10 @@ export default function MppWeeklyTopPage() {
             ) : (
               trendData && (
                 <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 280 }}>
+                  <div style={{ flex: 1, minWidth: 300 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
-                    <ResponsiveContainer width="100%" height={260}>
-                      <BarChart data={trendData.month} margin={{ top: 30, right: 10, left: 0, bottom: 10 }}>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={trendData.month} margin={{ top: 40, right: 10, left: 0, bottom: 20 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
                           dataKey="period" 
@@ -937,10 +937,10 @@ export default function MppWeeklyTopPage() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
-                  <div style={{ flex: 1, minWidth: 280 }}>
+                  <div style={{ flex: 1, minWidth: 300 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
-                    <ResponsiveContainer width="100%" height={260}>
-                      <BarChart data={trendData.week} margin={{ top: 30, right: 10, left: 0, bottom: 10 }}>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={trendData.week} margin={{ top: 40, right: 10, left: 0, bottom: 20 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
                           dataKey="period" 
@@ -954,16 +954,14 @@ export default function MppWeeklyTopPage() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
-                  <div style={{ flex: 1, minWidth: 280 }}>
+                  <div style={{ flex: 1, minWidth: 300 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
-                    <ResponsiveContainer width="100%" height={260}>
-                      <BarChart data={trendData.day} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
+                    <ResponsiveContainer width="100%" height={350}>
+                      <BarChart data={trendData.day} margin={{ top: 40, right: 10, left: 0, bottom: 40 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
                           dataKey="period" 
                           interval={0} 
-                          angle={-35} 
-                          textAnchor="end" 
                           tick={{ fontSize: 11, fill: '#1F2937' }} 
                           tickFormatter={(val) => {
                             const [, m, d] = val.split('-');
