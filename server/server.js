@@ -2400,6 +2400,7 @@ app.get('/api/mpp-drr-analytics', async (req, res) => {
 });
 
 // ================== ДИНАМИКА ДЕФЕКТА (MPP TREND) ==================
+// ================== ДИНАМИКА ДЕФЕКТА (MPP TREND) ==================
 app.get('/api/mpp-defect-trend', async (req, res) => {
   try {
     const { partName, problemType, model, checkpoint, periodType } = req.query;
@@ -2453,9 +2454,8 @@ app.get('/api/mpp-defect-trend', async (req, res) => {
           periods.push(`${y}-${m}`);
         }
       } else if (periodType === 'week') {
-        // Последние 4 недели, включая текущую (понедельник-воскресенье)
         const current = new Date(now);
-        const day = current.getDay(); // 0=вс, 1=пн
+        const day = current.getDay();
         const mondayOffset = day === 0 ? -6 : 1 - day;
         const thisMonday = new Date(current);
         thisMonday.setDate(current.getDate() + mondayOffset);
@@ -2528,17 +2528,39 @@ app.get('/api/mpp-defect-trend', async (req, res) => {
     const queryParams = [partName, problemType, model, ...periods];
     const [rows] = await pool.query(sql, queryParams);
 
-    // Заполняем все периоды нулями
-    const resultMap = {};
-    periods.forEach(p => resultMap[p] = 0);
-    rows.forEach(r => {
-      resultMap[r.period] = r.defect_count;
-    });
+    // Словарь: период -> defect_count
+    const defectMap = {};
+    rows.forEach(r => { defectMap[r.period] = r.defect_count; });
 
-    const result = periods.map(p => ({
-      period: p,
-      defect_count: resultMap[p] || 0,
-    }));
+    // Для каждого периода вычисляем total_cars (количество уникальных VIN, прошедших посты)
+    const result = [];
+    for (const period of periods) {
+      let totalCars = 0;
+      // Условие для подсчёта автомобилей
+      let carCondition = '';
+      if (periodType === 'month') {
+        carCondition = `DATE_FORMAT(DATE(CREATION_TIME), '%Y-%m') = ?`;
+      } else if (periodType === 'week') {
+        carCondition = `DATE_FORMAT(DATE(CREATION_TIME), '%x-W%v') = ?`;
+      } else {
+        carCondition = `DATE(CREATION_TIME) = ?`;
+      }
+
+      const carSql = `
+        SELECT COUNT(DISTINCT VIN) AS total
+        FROM at_om_wiptrackinghistory
+        WHERE WC_NAME IN (${postListStr})
+          AND ${carCondition}
+      `;
+      const [carRows] = await pool.query(carSql, [period]);
+      totalCars = carRows[0]?.total || 0;
+
+      result.push({
+        period,
+        defect_count: defectMap[period] || 0,
+        total_cars: totalCars,
+      });
+    }
 
     res.json(result);
   } catch (err) {

@@ -180,6 +180,7 @@ export default function MppWeeklyTopPage() {
   const [trendData, setTrendData] = useState(null);
   const [trendLoading, setTrendLoading] = useState(false);
   const [trendMpp, setTrendMpp] = useState('');
+  const [trendMetric, setTrendMetric] = useState('defects'); // 'defects' или 'dpu'
 
   const availableModels = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
@@ -490,6 +491,17 @@ export default function MppWeeklyTopPage() {
     } finally {
       setTrendLoading(false);
     }
+  };
+
+  // Подготовка данных для отображения в зависимости от метрики
+  const prepareDisplayData = (data) => {
+    if (!data) return [];
+    return data.map(d => ({
+      period: d.period,
+      value: trendMetric === 'dpu' 
+        ? (d.total_cars > 0 ? Number(((d.defect_count * 1000) / d.total_cars).toFixed(2)) : 0)
+        : d.defect_count,
+    }));
   };
 
   return (
@@ -911,6 +923,40 @@ export default function MppWeeklyTopPage() {
                 ✕
               </button>
             </div>
+            {/* Переключатель метрики */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+              <button
+                onClick={() => setTrendMetric('defects')}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: 'none',
+                  fontWeight: 600,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  background: trendMetric === 'defects' ? '#2563EB' : '#E5E7EB',
+                  color: trendMetric === 'defects' ? '#FFFFFF' : '#374151',
+                }}
+              >
+                Шт. дефектов
+              </button>
+              <button
+                onClick={() => setTrendMetric('dpu')}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: 'none',
+                  fontWeight: 600,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  background: trendMetric === 'dpu' ? '#2563EB' : '#E5E7EB',
+                  color: trendMetric === 'dpu' ? '#FFFFFF' : '#374151',
+                }}
+              >
+                DPU per 1000
+              </button>
+            </div>
+
             {trendLoading ? (
               <p>Загрузка...</p>
             ) : (
@@ -918,13 +964,13 @@ export default function MppWeeklyTopPage() {
                 <div style={{ display: 'flex', flexDirection: 'row', gap: 20, flexWrap: 'nowrap' }}>
                   {/* Месяцы */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
-                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
                     <ResponsiveContainer width="100%" height={320}>
-                      <BarChart data={trendData.month} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
+                      <BarChart data={prepareDisplayData(trendData.month)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
                           dataKey="period" 
-                          tick={{ fontSize: 16, fill: '#1F2937' }} 
+                          tick={{ fontSize: 12, fill: '#1F2937' }} 
                           tickFormatter={(val) => {
                             const [y, m] = val.split('-');
                             const monthNames = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
@@ -932,8 +978,8 @@ export default function MppWeeklyTopPage() {
                           }}
                         />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
-                        <Bar dataKey="defect_count" fill="#3B82F6" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
+                        <Bar dataKey="value" fill="#3B82F6" radius={[4,4,0,0]}>
+                          <LabelList dataKey="value" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
@@ -941,41 +987,41 @@ export default function MppWeeklyTopPage() {
 
                   {/* Недели */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
-                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
                     <ResponsiveContainer width="100%" height={320}>
-                      <BarChart data={trendData.week} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
+                      <BarChart data={prepareDisplayData(trendData.week)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
                           dataKey="period" 
-                          tick={{ fontSize: 16, fill: '#1F2937' }} 
+                          tick={{ fontSize: 12, fill: '#1F2937' }} 
                           tickFormatter={(val) => val.split('-W')[1] ? `W${val.split('-W')[1]}` : val}
                         />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
-                        <Bar dataKey="defect_count" fill="#F59E0B" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
+                        <Bar dataKey="value" fill="#F59E0B" radius={[4,4,0,0]}>
+                          <LabelList dataKey="value" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
 
-                  {/* Дни – одинаковый margin и высота */}
+                  {/* Дни */}
                   <div style={{ flex: '2 1 0', minWidth: 350 }}>
-                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
                     <ResponsiveContainer width="100%" height={320}>
-                      <BarChart data={trendData.day} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
+                      <BarChart data={prepareDisplayData(trendData.day)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
                           dataKey="period" 
                           interval={0} 
-                          tick={{ fontSize: 16, fill: '#1F2937' }} 
+                          tick={{ fontSize: 11, fill: '#1F2937' }} 
                           tickFormatter={(val) => {
                             const [, m, d] = val.split('-');
                             return `${d}.${m}`;
                           }}
                         />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
-                        <Bar dataKey="defect_count" fill="#10B981" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
+                        <Bar dataKey="value" fill="#10B981" radius={[4,4,0,0]}>
+                          <LabelList dataKey="value" position="top" style={{ fontSize: 13, fill: '#1F2937', fontWeight: 700 }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
