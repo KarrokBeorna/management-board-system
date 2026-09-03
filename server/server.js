@@ -5416,6 +5416,83 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
   }
 });
 
+app.get('/api/drr-cp7-vins', async (req, res) => {
+  try {
+    const { filter = 'all', startTime, endTime, status } = req.query; // status: 'OK' или 'NOK'
+    if (!status) return res.status(400).json({ error: 'status обязателен' });
+
+    // Расчёт диапазона времени (как в /api/drr-cp7-dashboard)
+    let rangeStart, rangeEnd;
+    if (startTime && endTime) {
+      rangeStart = startTime;
+      rangeEnd = endTime;
+    } else {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      rangeStart = `${y}-${m}-${d} 00:00:00`;
+      rangeEnd = `${y}-${m}-${d} 23:59:59`;
+    }
+
+    const postLists = {
+      all: ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'],
+      cp7: ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'],
+      pip: ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9']
+    };
+    const postList = postLists[filter] || postLists.all;
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    // 1. VIN, прошедшие CP72 в окне
+    const [cp72Rows] = await pool.query(`
+      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
+      GROUP BY VIN
+    `, [rangeStart, rangeEnd]);
+
+    if (cp72Rows.length === 0) return res.json([]);
+
+    const vins = cp72Rows.map(r => r.VIN);
+    const placeholders = vins.map(() => '?').join(',');
+
+    // 2. Все дефекты этих VIN
+    const [defectRows] = await pool.query(`
+      SELECT d.VIN, d.STATUS
+      FROM at_qm_defect_info d
+      WHERE d.VIN IN (${placeholders})
+        AND d.POST_NAME IN (${postListStr})
+    `, vins);
+
+    // 3. Определяем NOK VIN (есть хотя бы один незакрытый дефект)
+    const nokSet = new Set();
+    defectRows.forEach(row => {
+      if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
+        nokSet.add(row.VIN);
+      }
+    });
+
+    // 4. Возвращаем список в зависимости от status
+    const result = cp72Rows
+      .filter(row => {
+        const isNok = nokSet.has(row.VIN);
+        if (status === 'NOK') return isNok;
+        if (status === 'OK') return !isNok;
+        return false;
+      })
+      .map(row => ({
+        vin: row.VIN,
+        cp72_time: row.CP72_TIME,
+      }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка drr-cp7-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== EMAIL SETTINGS ==================
 
 // Создание таблицы, если её ещё нет
@@ -6281,7 +6358,7 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
       movementsByVin[row.VIN].push({ zone: row.node_nature, time: new Date(row.gmt_create) });
     });
 
-    // 3. Определяем NOK VIN по самой ранней TLADAS
+    // 3. Определяем NOK VIN по самой ранней TLADAS в периоде
     const nokVinsSet = new Set();
     for (const vin of vins) {
       const moves = movementsByVin[vin] || [];
@@ -6307,7 +6384,7 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
       return res.json([]);
     }
 
-    // 4. Дефекты для NOK VIN на указанных постах (только незакрытые)
+    // 4. Дефекты для NOK VIN на указанных постах, БЕЗ фильтра по времени создания
     const nokPlaceholders = [...nokVinsSet].map(() => '?').join(',');
     const defectPosts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
@@ -6330,8 +6407,7 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.VIN IN (${nokPlaceholders})
         AND d.POST_NAME IN (${defectPostsStr})
-        AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
-    `, [...nokVinsSet, startTime, endTime]);
+    `, [...nokVinsSet]);
 
     // 5. Только незакрытые дефекты, считаем количество строк
     const defectGroupMap = new Map();
