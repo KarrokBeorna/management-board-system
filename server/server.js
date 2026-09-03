@@ -6172,7 +6172,7 @@ app.get('/api/drr-tl-dashboard', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    // 1. Все VIN, прошедшие TLADAS за период
+    // 1. VIN, прошедшие TLADAS за период
     const [tladRows] = await mesPool.query(`
       SELECT DISTINCT VIN
       FROM tm_vhc_test_line_movement
@@ -6186,9 +6186,9 @@ app.get('/api/drr-tl-dashboard', async (req, res) => {
     }
 
     const vins = tladRows.map(r => r.VIN);
-
-    // 2. Получаем все движения этих VIN
     const placeholders = vins.map(() => '?').join(',');
+
+    // 2. Все движения этих VIN
     const [allMovements] = await mesPool.query(`
       SELECT VIN, node_nature, gmt_create
       FROM tm_vhc_test_line_movement
@@ -6203,87 +6203,38 @@ app.get('/api/drr-tl-dashboard', async (req, res) => {
       movementsByVin[row.VIN].push({ zone: row.node_nature, time: new Date(row.gmt_create) });
     });
 
-    // 3. Определяем OK/NOK
-    let closedVins = 0;
-    const nokVinsSet = new Set(); // VIN с не OK
+    // 3. Определяем NOK VIN: берём самую раннюю TLADAS в периоде, смотрим следующую зону
+    const nokVins = new Set();
 
     for (const vin of vins) {
       const moves = movementsByVin[vin] || [];
-      // Найти первое TLADAS в периоде
-      let tladIndex = -1;
-      for (let i = 0; i < moves.length; i++) {
-        if (moves[i].zone === 'TLADAS' && moves[i].time >= new Date(startTime) && moves[i].time <= new Date(endTime)) {
-          tladIndex = i;
+      const tladMoves = moves.filter(m => m.zone === 'TLADAS' && m.time >= new Date(startTime) && m.time <= new Date(endTime));
+      if (tladMoves.length === 0) continue;
+
+      // Самая ранняя TLADAS
+      const firstTlad = tladMoves.reduce((min, m) => m.time < min.time ? m : min, tladMoves[0]);
+
+      // Ищем следующую запись после firstTlad
+      let nextZone = null;
+      for (const m of moves) {
+        if (m.time > firstTlad.time) {
+          nextZone = m.zone;
           break;
         }
       }
-      if (tladIndex === -1) continue;
 
-      // Следующая запись после TLADAS
-      let next = null;
-      if (tladIndex + 1 < moves.length) {
-        next = moves[tladIndex + 1];
-      }
-
-      if (next && next.zone === 'TLTT') {
-        closedVins++;
-      } else {
-        nokVinsSet.add(vin);
+      if (nextZone !== 'TLTT') {
+        nokVins.add(vin);
       }
     }
 
-    const totalVins = vins.length;
-    const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
-
-    // 4. Топ дефектов для NOK VIN на указанных постах
-    let topDefects = [];
-    if (nokVinsSet.size > 0) {
-      const nokPlaceholders = [...nokVinsSet].map(() => '?').join(',');
-      const defectPosts = ['360','ADAS','ADAS+RB','WA'];
-      const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
-
-      const [defectRows] = await pool.query(`
-        SELECT
-          d.VIN,
-          wo.MODEL,
-          d.PART_NAME,
-          d.PROBLEM_TYPE,
-          d.PROBLEM_GRADE
-        FROM at_qm_defect_info d
-        LEFT JOIN work_order wo ON wo.VIN = d.VIN
-        WHERE d.VIN IN (${nokPlaceholders})
-          AND d.POST_NAME IN (${defectPostsStr})
-          AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
-      `, [...nokVinsSet, startTime, endTime]);
-
-      const defectGroupMap = new Map();
-      defectRows.forEach(row => {
-        const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
-        if (!defectGroupMap.has(mpp)) {
-          defectGroupMap.set(mpp, {
-            mpp,
-            grade: row.PROBLEM_GRADE || '-',
-            affectedVins: new Set(),
-          });
-        }
-        defectGroupMap.get(mpp).affectedVins.add(row.VIN);
-      });
-
-      topDefects = Array.from(defectGroupMap.values())
-        .map(d => ({
-          mpp: d.mpp,
-          grade: d.grade,
-          affectedVins: d.affectedVins.size,
-        }))
-        .sort((a, b) => b.affectedVins - a.affectedVins)
-        .slice(0, 20);
-    }
+    const closedVins = vins.length - nokVins.size;
+    const drrPercent = vins.length > 0 ? (closedVins / vins.length) * 100 : 0;
 
     res.json({
-      totalVins,
+      totalVins: vins.length,
       closedVins,
       drrPercent: Math.round(drrPercent * 10) / 10,
-      topDefects,
     });
   } catch (err) {
     console.error('Ошибка DRR TL Dashboard:', err.message);
@@ -6330,26 +6281,24 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
       movementsByVin[row.VIN].push({ zone: row.node_nature, time: new Date(row.gmt_create) });
     });
 
-    // 3. Определяем NOK VIN (после TLADAS не TLTT, а REP или нет следующего движения)
+    // 3. Определяем NOK VIN по самой ранней TLADAS
     const nokVinsSet = new Set();
     for (const vin of vins) {
       const moves = movementsByVin[vin] || [];
-      let tladIndex = -1;
-      for (let i = 0; i < moves.length; i++) {
-        if (moves[i].zone === 'TLADAS' && moves[i].time >= new Date(startTime) && moves[i].time <= new Date(endTime)) {
-          tladIndex = i;
+      const tladMoves = moves.filter(m => m.zone === 'TLADAS' && m.time >= new Date(startTime) && m.time <= new Date(endTime));
+      if (tladMoves.length === 0) continue;
+
+      const firstTlad = tladMoves.reduce((min, m) => m.time < min.time ? m : min, tladMoves[0]);
+
+      let nextZone = null;
+      for (const m of moves) {
+        if (m.time > firstTlad.time) {
+          nextZone = m.zone;
           break;
         }
       }
-      if (tladIndex === -1) continue;
 
-      let next = null;
-      if (tladIndex + 1 < moves.length) {
-        next = moves[tladIndex + 1];
-      }
-
-      // OK только если следующая зона TLTT, иначе NOK
-      if (!(next && next.zone === 'TLTT')) {
+      if (nextZone !== 'TLTT') {
         nokVinsSet.add(vin);
       }
     }
@@ -6384,10 +6333,9 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
     `, [...nokVinsSet, startTime, endTime]);
 
-    // 5. Оставляем только незакрытые дефекты и группируем по MPP
+    // 5. Только незакрытые дефекты, считаем количество строк
     const defectGroupMap = new Map();
     defectRows.forEach(row => {
-      // Пропускаем закрытые дефекты
       if (row.STATUS && row.STATUS.toLowerCase() === 'closed') return;
 
       const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
