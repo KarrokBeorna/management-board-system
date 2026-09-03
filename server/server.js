@@ -5365,7 +5365,7 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
         )
     `, [rangeStart, rangeEnd, rangeStart, rangeEnd]);
 
-    // 3. Определяем VIN с незакрытыми дефектами
+    // 3. Определяем NOK VIN (у которых есть хотя бы один незакрытый дефект)
     const vinStatusMap = new Map();
     defectRows.forEach(row => {
       const vin = row.VIN;
@@ -5382,28 +5382,31 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
       if (val.hasOpen) openVins.add(vin);
     });
 
-    // 4. Группируем только открытые дефекты (незакрытые) по MPP
+    // 4. Группируем только незакрытые дефекты NOK VIN, считаем количество строк
     const defectGroupMap = new Map();
     defectRows.forEach(row => {
       if (!openVins.has(row.VIN)) return;
+      // Учитываем только незакрытые дефекты
+      if (row.STATUS && row.STATUS.toLowerCase() === 'closed') return;
+
       const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
       if (!defectGroupMap.has(mpp)) {
         defectGroupMap.set(mpp, {
           mpp,
           grade: row.PROBLEM_GRADE || '-',
-          affectedVins: new Set(),
+          defectCount: 0,
         });
       }
-      defectGroupMap.get(mpp).affectedVins.add(row.VIN);
+      defectGroupMap.get(mpp).defectCount += 1;
     });
 
     const topDefects = Array.from(defectGroupMap.values())
       .map(d => ({
         mpp: d.mpp,
         grade: d.grade,
-        affectedVins: d.affectedVins.size,
+        defectCount: d.defectCount,
       }))
-      .sort((a, b) => b.affectedVins - a.affectedVins)
+      .sort((a, b) => b.defectCount - a.defectCount)
       .slice(0, 20);
 
     res.json(topDefects);
