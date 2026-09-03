@@ -918,7 +918,7 @@ export default function MppWeeklyTopPage() {
                 <div style={{ display: 'flex', flexDirection: 'row', gap: 20, flexWrap: 'nowrap' }}>
                   {/* Месяцы */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
-                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
+                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
                     <ResponsiveContainer width="100%" height={320}>
                       <BarChart data={trendData.month} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -933,7 +933,7 @@ export default function MppWeeklyTopPage() {
                         />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
                         <Bar dataKey="defect_count" fill="#3B82F6" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
+                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
@@ -941,7 +941,7 @@ export default function MppWeeklyTopPage() {
 
                   {/* Недели */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
-                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
+                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
                     <ResponsiveContainer width="100%" height={320}>
                       <BarChart data={trendData.week} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -952,7 +952,7 @@ export default function MppWeeklyTopPage() {
                         />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
                         <Bar dataKey="defect_count" fill="#F59E0B" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
+                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
@@ -960,7 +960,7 @@ export default function MppWeeklyTopPage() {
 
                   {/* Дни – одинаковый margin и высота */}
                   <div style={{ flex: '2 1 0', minWidth: 350 }}>
-                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
+                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
                     <ResponsiveContainer width="100%" height={320}>
                       <BarChart data={trendData.day} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -975,7 +975,7 @@ export default function MppWeeklyTopPage() {
                         />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
                         <Bar dataKey="defect_count" fill="#10B981" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 13, fill: '#1F2937', fontWeight: 700 }} />
+                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
