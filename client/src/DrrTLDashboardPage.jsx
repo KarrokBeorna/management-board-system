@@ -128,8 +128,8 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
+// Вспомогательные функции для времени
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
-
 const getMoscowMinutes = () => {
   const moscow = getMoscowTime();
   return moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
@@ -219,36 +219,58 @@ export default function DrrTLDashboardPage() {
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
   const [isManualFilter, setIsManualFilter] = useState(false);
   const [shiftInfo, setShiftInfo] = useState(getCurrentShiftInfo());
-  const [drrData, setDrrData] = useState({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
+  const [drrData, setDrrData] = useState({ totalVins: 0, closedVins: 0, drrPercent: 0 });
   const [topDefects, setTopDefects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-    const loadData = async () => {
+  // Состояния для модального окна списка VIN
+  const [vinList, setVinList] = useState([]);
+  const [vinListStatus, setVinListStatus] = useState('');
+  const [showVinModal, setShowVinModal] = useState(false);
+  const [vinModalLoading, setVinModalLoading] = useState(false);
+
+  const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
-        const { start, end } = getTimeRange(timeFilter);
-        const baseParams = new URLSearchParams({ startTime: start, endTime: end });
+      const { start, end } = getTimeRange(timeFilter);
+      const params = new URLSearchParams({ startTime: start, endTime: end });
 
-        // Запрос DRR
-        const drrRes = await fetch(`${API_BASE}/api/drr-tl-dashboard?${baseParams.toString()}`);
-        if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
-        const drrJson = await drrRes.json();
-        setDrrData(drrJson);
+      const drrRes = await fetch(`${API_BASE}/api/drr-tl-dashboard?${params.toString()}`);
+      if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
+      const drrJson = await drrRes.json();
+      setDrrData(drrJson);
 
-        // Отдельный запрос топ дефектов
-        const defectsRes = await fetch(`${API_BASE}/api/drr-tl-top-defects?${baseParams.toString()}`);
-        if (!defectsRes.ok) throw new Error('Ошибка загрузки топ дефектов');
-        const defectsJson = await defectsRes.json();
-        setTopDefects(defectsJson);
+      const defectsRes = await fetch(`${API_BASE}/api/drr-tl-top-defects?${params.toString()}`);
+      if (!defectsRes.ok) throw new Error('Ошибка загрузки топ дефектов');
+      const defectsJson = await defectsRes.json();
+      setTopDefects(defectsJson);
     } catch (err) {
-        setError(err.message);
-        setTopDefects([]);
+      setError(err.message);
+      setTopDefects([]);
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
-    };
+  };
+
+  const loadVinList = async (status) => {
+    setVinModalLoading(true);
+    try {
+      const { start, end } = getTimeRange(timeFilter);
+      const params = new URLSearchParams({ startTime: start, endTime: end, status });
+      const res = await fetch(`${API_BASE}/api/drr-tl-vins?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки списка VIN');
+      const json = await res.json();
+      setVinList(json);
+      setVinListStatus(status);
+      setShowVinModal(true);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setVinModalLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -410,12 +432,18 @@ export default function DrrTLDashboardPage() {
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalVins}</div>
               </div>
-              <div style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <div 
+                style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                onClick={() => loadVinList('OK')}
+              >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.closedVins}</div>
               </div>
-              <div style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <div 
+                style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                onClick={() => loadVinList('NOK')}
+              >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK Авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{nokVins}</div>
@@ -455,6 +483,60 @@ export default function DrrTLDashboardPage() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно списка VIN */}
+      {showVinModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000,
+        }} onClick={() => setShowVinModal(false)}>
+          <div style={{
+            backgroundColor: '#FFFFFF',
+            borderRadius: 16,
+            padding: 24,
+            width: '90%',
+            maxWidth: 600,
+            maxHeight: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
+                VIN ({vinListStatus})
+              </h3>
+              <button onClick={() => setShowVinModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }}>×</button>
+            </div>
+            {vinModalLoading ? (
+              <p>Загрузка...</p>
+            ) : (
+              <div style={{ overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>VIN</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vinList.map((item, idx) => (
+                      <tr key={idx}>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

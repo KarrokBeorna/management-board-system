@@ -6441,6 +6441,80 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
   }
 });
 
+app.get('/api/drr-tl-vins', async (req, res) => {
+  try {
+    const { startTime, endTime, status } = req.query;
+    if (!startTime || !endTime || !status) {
+      return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
+    }
+
+    // 1. VIN, прошедшие TLADAS за период
+    const [tladRows] = await mesPool.query(`
+      SELECT DISTINCT VIN
+      FROM tm_vhc_test_line_movement
+      WHERE node_nature = 'TLADAS'
+        AND gmt_create >= ? AND gmt_create <= ?
+        AND is_deleted = 0
+    `, [startTime, endTime]);
+
+    if (tladRows.length === 0) return res.json([]);
+
+    const vins = tladRows.map(r => r.VIN);
+    const placeholders = vins.map(() => '?').join(',');
+
+    // 2. Все движения этих VIN
+    const [allMovements] = await mesPool.query(`
+      SELECT VIN, node_nature, gmt_create
+      FROM tm_vhc_test_line_movement
+      WHERE VIN IN (${placeholders})
+        AND is_deleted = 0
+      ORDER BY VIN, gmt_create ASC
+    `, vins);
+
+    const movementsByVin = {};
+    vins.forEach(vin => { movementsByVin[vin] = []; });
+    allMovements.forEach(row => {
+      movementsByVin[row.VIN].push({ zone: row.node_nature, time: new Date(row.gmt_create) });
+    });
+
+    // 3. Определяем OK/NOK
+    const okVins = new Set();
+    const nokVins = new Set();
+
+    for (const vin of vins) {
+      const moves = movementsByVin[vin] || [];
+      const tladMoves = moves.filter(m => m.zone === 'TLADAS' && m.time >= new Date(startTime) && m.time <= new Date(endTime));
+      if (tladMoves.length === 0) continue;
+
+      // Берём самую раннюю TLADAS
+      const firstTlad = tladMoves.reduce((min, m) => m.time < min.time ? m : min, tladMoves[0]);
+
+      let nextZone = null;
+      for (const m of moves) {
+        if (m.time > firstTlad.time) {
+          nextZone = m.zone;
+          break;
+        }
+      }
+
+      if (nextZone === 'TLTT') {
+        okVins.add(vin);
+      } else {
+        nokVins.add(vin);
+      }
+    }
+
+    // 4. Возвращаем нужный список
+    const selectedSet = status === 'OK' ? okVins : nokVins;
+    const result = Array.from(selectedSet).map(vin => ({ vin }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка drr-tl-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок
