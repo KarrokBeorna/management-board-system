@@ -894,8 +894,8 @@ export default function MppWeeklyTopPage() {
             backgroundColor: '#FFFFFF',
             borderRadius: 16,
             padding: 24,
-            width: '95%',
-            maxWidth: 1400,
+            width: '96%',
+            maxWidth: 1600,
             maxHeight: '95vh',
             overflowY: 'auto',
             boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
@@ -915,9 +915,9 @@ export default function MppWeeklyTopPage() {
               <p>Загрузка...</p>
             ) : (
               trendData && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+                <div style={{ display: 'flex', flexDirection: 'row', gap: 20, flexWrap: 'nowrap' }}>
                   {/* Месяцы */}
-                  <div style={{ flex: '1 1 300px' }}>
+                  <div style={{ flex: '1 1 0', minWidth: 250 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={trendData.month} margin={{ top: 40, right: 10, left: 0, bottom: 20 }}>
@@ -940,7 +940,7 @@ export default function MppWeeklyTopPage() {
                   </div>
 
                   {/* Недели */}
-                  <div style={{ flex: '1 1 300px' }}>
+                  <div style={{ flex: '1 1 0', minWidth: 250 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={trendData.week} margin={{ top: 40, right: 10, left: 0, bottom: 20 }}>
@@ -958,16 +958,16 @@ export default function MppWeeklyTopPage() {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* Дни — на всю ширину */}
-                  <div style={{ flexBasis: '100%' }}>
+                  {/* Дни – больше ширины за счёт flex: 2 */}
+                  <div style={{ flex: '2 1 0', minWidth: 350 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
-                    <ResponsiveContainer width="100%" height={350}>
-                      <BarChart data={trendData.day} margin={{ top: 50, right: 10, left: 0, bottom: 50 }}>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={trendData.day} margin={{ top: 50, right: 10, left: 0, bottom: 40 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis 
                           dataKey="period" 
                           interval={0} 
-                          tick={{ fontSize: 12, fill: '#1F2937' }} 
+                          tick={{ fontSize: 11, fill: '#1F2937' }} 
                           tickFormatter={(val) => {
                             const [, m, d] = val.split('-');
                             return `${d}.${m}`;
@@ -975,7 +975,7 @@ export default function MppWeeklyTopPage() {
                         />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
                         <Bar dataKey="defect_count" fill="#10B981" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
+                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 13, fill: '#1F2937', fontWeight: 700 }} />
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
