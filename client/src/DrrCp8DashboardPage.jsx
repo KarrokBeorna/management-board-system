@@ -524,6 +524,7 @@ export default function DrrCp8DashboardPage() {
                   <thead>
                     <tr>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>VIN</th>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Модель</th>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>CP72</th>
                     </tr>
                   </thead>
@@ -531,6 +532,7 @@ export default function DrrCp8DashboardPage() {
                     {vinList.map((item, idx) => (
                       <tr key={idx}>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>
                           {item.cp72_time ? new Date(item.cp72_time).toLocaleString('ru-RU') : ''}
                         </td>

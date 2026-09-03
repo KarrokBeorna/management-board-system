@@ -6426,7 +6426,7 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
     const vins = cp72Rows.map(r => r.vin);
     const placeholders = vins.map(() => '?').join(',');
 
-    // 2. Дефекты на указанных постах для этих VIN
+    // 2. Дефекты на указанных постах
     const defectPosts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
       'REPAIR', 'REPAIR_Final',
@@ -6441,9 +6441,10 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
       FROM at_qm_defect_info d
       WHERE d.VIN IN (${placeholders})
         AND d.POST_NAME IN (${defectPostsStr})
-    `, vins);
+        AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
+    `, [...vins, startTime, endTime]);
 
-    // 3. Определяем NOK VIN (есть хотя бы один незакрытый дефект)
+    // 3. NOK VIN
     const nokSet = new Set();
     defectRows.forEach(row => {
       if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
@@ -6451,7 +6452,15 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
       }
     });
 
-    // 4. Формируем список в зависимости от status
+    // 4. Получаем модели из work_order
+    const [modelRows] = await pool.query(`
+      SELECT VIN, MODEL
+      FROM work_order
+      WHERE VIN IN (${placeholders})
+    `, vins);
+    const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
+
+    // 5. Формируем итоговый список
     const result = cp72Rows
       .filter(row => {
         const isNok = nokSet.has(row.vin);
@@ -6461,6 +6470,7 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
       })
       .map(row => ({
         vin: row.vin,
+        model: modelMap.get(row.vin) || '-',
         cp72_time: row.cp72_time,
       }))
       .sort((a, b) => new Date(a.cp72_time) - new Date(b.cp72_time));
@@ -6681,7 +6691,7 @@ app.get('/api/drr-tl-vins', async (req, res) => {
       return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
     }
 
-    // 1. VIN, прошедшие TLADAS за период (уникальные)
+    // 1. VIN, прошедшие TLADAS за период
     const [tladRows] = await mesPool.query(`
       SELECT DISTINCT VIN
       FROM tm_vhc_test_line_movement
@@ -6710,7 +6720,7 @@ app.get('/api/drr-tl-vins', async (req, res) => {
       movementsByVin[row.VIN].push({ zone: row.node_nature, time: new Date(row.gmt_create) });
     });
 
-    // 3. Для каждого VIN находим самую раннюю TLADAS в периоде и следующую зону
+    // 3. Определяем OK/NOK
     const okVins = [];
     const nokVins = [];
 
@@ -6719,10 +6729,8 @@ app.get('/api/drr-tl-vins', async (req, res) => {
       const tladMoves = moves.filter(m => m.zone === 'TLADAS' && m.time >= new Date(startTime) && m.time <= new Date(endTime));
       if (tladMoves.length === 0) continue;
 
-      // Самая ранняя TLADAS
       const firstTlad = tladMoves.reduce((min, m) => m.time < min.time ? m : min, tladMoves[0]);
 
-      // Следующая зона после firstTlad
       let nextZone = null;
       for (const m of moves) {
         if (m.time > firstTlad.time) {
@@ -6731,11 +6739,7 @@ app.get('/api/drr-tl-vins', async (req, res) => {
         }
       }
 
-      const item = {
-        vin,
-        tlad_time: firstTlad.time,
-      };
-
+      const item = { vin, tlad_time: firstTlad.time };
       if (nextZone === 'TLTT') {
         okVins.push(item);
       } else {
@@ -6745,6 +6749,26 @@ app.get('/api/drr-tl-vins', async (req, res) => {
 
     const selectedList = status === 'OK' ? okVins : nokVins;
     selectedList.sort((a, b) => a.tlad_time - b.tlad_time);
+
+    // 4. Получаем модели для всех выбранных VIN
+    const selectedVins = selectedList.map(item => item.vin);
+    if (selectedVins.length > 0) {
+      const modelPlaceholders = selectedVins.map(() => '?').join(',');
+      const [modelRows] = await pool.query(`
+        SELECT VIN, MODEL
+        FROM work_order
+        WHERE VIN IN (${modelPlaceholders})
+      `, selectedVins);
+
+      const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
+
+      // Добавляем модель в результат
+      selectedList.forEach(item => {
+        item.model = modelMap.get(item.vin) || '-';
+      });
+    } else {
+      selectedList.forEach(item => { item.model = '-'; });
+    }
 
     res.json(selectedList);
   } catch (err) {
