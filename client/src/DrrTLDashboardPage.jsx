@@ -525,12 +525,15 @@ export default function DrrTLDashboardPage() {
                   <thead>
                     <tr>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>VIN</th>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Время TLADAS</th>
                     </tr>
                   </thead>
                   <tbody>
                     {vinList.map((item, idx) => (
                       <tr key={idx}>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}></td>
+                            {item.tlad_time ? new Date(item.tlad_time).toLocaleString('ru-RU') : ''}
                       </tr>
                     ))}
                   </tbody>

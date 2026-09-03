@@ -6448,7 +6448,7 @@ app.get('/api/drr-tl-vins', async (req, res) => {
       return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
     }
 
-    // 1. VIN, прошедшие TLADAS за период
+    // 1. VIN, прошедшие TLADAS за период (уникальные)
     const [tladRows] = await mesPool.query(`
       SELECT DISTINCT VIN
       FROM tm_vhc_test_line_movement
@@ -6477,18 +6477,19 @@ app.get('/api/drr-tl-vins', async (req, res) => {
       movementsByVin[row.VIN].push({ zone: row.node_nature, time: new Date(row.gmt_create) });
     });
 
-    // 3. Определяем OK/NOK
-    const okVins = new Set();
-    const nokVins = new Set();
+    // 3. Для каждого VIN находим самую раннюю TLADAS в периоде и следующую зону
+    const okVins = [];
+    const nokVins = [];
 
     for (const vin of vins) {
       const moves = movementsByVin[vin] || [];
       const tladMoves = moves.filter(m => m.zone === 'TLADAS' && m.time >= new Date(startTime) && m.time <= new Date(endTime));
       if (tladMoves.length === 0) continue;
 
-      // Берём самую раннюю TLADAS
+      // Самая ранняя TLADAS
       const firstTlad = tladMoves.reduce((min, m) => m.time < min.time ? m : min, tladMoves[0]);
 
+      // Следующая зона после firstTlad
       let nextZone = null;
       for (const m of moves) {
         if (m.time > firstTlad.time) {
@@ -6497,18 +6498,22 @@ app.get('/api/drr-tl-vins', async (req, res) => {
         }
       }
 
+      const item = {
+        vin,
+        tlad_time: firstTlad.time,
+      };
+
       if (nextZone === 'TLTT') {
-        okVins.add(vin);
+        okVins.push(item);
       } else {
-        nokVins.add(vin);
+        nokVins.push(item);
       }
     }
 
-    // 4. Возвращаем нужный список
-    const selectedSet = status === 'OK' ? okVins : nokVins;
-    const result = Array.from(selectedSet).map(vin => ({ vin }));
+    const selectedList = status === 'OK' ? okVins : nokVins;
+    selectedList.sort((a, b) => a.tlad_time - b.tlad_time);
 
-    res.json(result);
+    res.json(selectedList);
   } catch (err) {
     console.error('Ошибка drr-tl-vins:', err.message);
     res.status(500).json({ error: err.message });
