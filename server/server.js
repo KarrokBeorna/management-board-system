@@ -5593,10 +5593,6 @@ app.get('/api/drr-cp7-vins', async (req, res) => {
       return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
     }
 
-    // Расчёт диапазона времени
-    let rangeStart = startTime;
-    let rangeEnd = endTime;
-
     const postLists = {
       all: ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'],
       cp7: ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'],
@@ -5612,23 +5608,23 @@ app.get('/api/drr-cp7-vins', async (req, res) => {
       WHERE WC_NAME = 'CP72'
         AND CREATION_TIME >= ? AND CREATION_TIME <= ?
       GROUP BY VIN
-    `, [rangeStart, rangeEnd]);
+    `, [startTime, endTime]);
 
     if (cp72Rows.length === 0) return res.json([]);
 
     const vins = cp72Rows.map(r => r.VIN);
     const placeholders = vins.map(() => '?').join(',');
 
-    // 2. Дефекты этих VIN ТОЛЬКО в заданном временном окне
+    // 2. Дефекты этих VIN в заданном окне
     const [defectRows] = await pool.query(`
       SELECT d.VIN, d.STATUS
       FROM at_qm_defect_info d
       WHERE d.VIN IN (${placeholders})
         AND d.POST_NAME IN (${postListStr})
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
-    `, [...vins, rangeStart, rangeEnd]);
+    `, [...vins, startTime, endTime]);
 
-    // 3. NOK VIN = те, у кого есть хотя бы один незакрытый дефект
+    // 3. NOK VIN
     const nokSet = new Set();
     defectRows.forEach(row => {
       if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
@@ -5636,7 +5632,15 @@ app.get('/api/drr-cp7-vins', async (req, res) => {
       }
     });
 
-    // 4. Формируем список согласно status
+    // 4. Получаем модели для всех VIN из work_order
+    const [modelRows] = await pool.query(`
+      SELECT VIN, MODEL
+      FROM work_order
+      WHERE VIN IN (${placeholders})
+    `, vins);
+    const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
+
+    // 5. Формируем итоговый список
     const result = cp72Rows
       .filter(row => {
         const isNok = nokSet.has(row.VIN);
@@ -5646,6 +5650,7 @@ app.get('/api/drr-cp7-vins', async (req, res) => {
       })
       .map(row => ({
         vin: row.VIN,
+        model: modelMap.get(row.VIN) || '-',
         cp72_time: row.CP72_TIME,
       }))
       .sort((a, b) => new Date(a.cp72_time) - new Date(b.cp72_time));
