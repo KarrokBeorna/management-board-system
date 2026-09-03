@@ -1003,6 +1003,26 @@ export default function SgpAuditPage() {
     saveAs(new Blob([buf], { type: 'application/octet-stream' }), `${filename}.xlsx`);
   };
 
+  const exportTimePointsToExcel = () => {
+    if (!filteredTimePointsData.length) return;
+    const exportData = filteredTimePointsData.map(row => {
+      const obj = {};
+      timePointColumns.forEach(col => {
+        if (col.isTime) {
+          obj[col.label] = row[col.key] ? formatShortDateTime(row[col.key]) : '';
+        } else {
+          obj[col.label] = row[col.key] || '';
+        }
+      });
+      return obj;
+    });
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Time Points');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `time_points.xlsx`);
+  };
+
   const exportWord = (data, filename) => {
     const htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${tableToHtml(data)}</body></html>`;
     saveAs(new Blob([htmlContent], { type: 'application/msword' }), `${filename}.doc`);
@@ -1121,7 +1141,7 @@ export default function SgpAuditPage() {
               ⏱️ Время прохождения точек
             </h2>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button style={{ ...buttonStyle, background: '#059669' }} onClick={() => exportExcel(filteredTimePointsData, 'time_points')}>
+              <button style={{ ...buttonStyle, background: '#059669' }} onClick={exportTimePointsToExcel}>
                 📊 Excel
               </button>
               <button style={{ ...buttonStyle, background: '#F59E0B' }} onClick={openExportModal}>
