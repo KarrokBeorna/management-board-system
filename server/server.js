@@ -6347,6 +6347,7 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
         next = moves[tladIndex + 1];
       }
 
+      // OK только если следующая зона TLTT, иначе NOK
       if (!(next && next.zone === 'TLTT')) {
         nokVinsSet.add(vin);
       }
@@ -6356,9 +6357,15 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
       return res.json([]);
     }
 
-    // 4. Дефекты для NOK VIN на указанных постах
+    // 4. Дефекты для NOK VIN на указанных постах (только незакрытые)
     const nokPlaceholders = [...nokVinsSet].map(() => '?').join(',');
-    const defectPosts = ['360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA'];
+    const defectPosts = [
+      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+      'REPAIR', 'REPAIR_Final',
+      'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9',
+      'CP8 Touch Up', '360', 'ADAS', 'ADAS+RB',
+      'TEST TRACK', 'TRACK', 'WA'
+    ];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
     const [defectRows] = await pool.query(`
@@ -6367,7 +6374,8 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
         wo.MODEL,
         d.PART_NAME,
         d.PROBLEM_TYPE,
-        d.PROBLEM_GRADE
+        d.PROBLEM_GRADE,
+        d.STATUS
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.VIN IN (${nokPlaceholders})
@@ -6375,9 +6383,12 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
     `, [...nokVinsSet, startTime, endTime]);
 
-    // 5. Группируем по MPP и считаем количество дефектов (строк)
+    // 5. Оставляем только незакрытые дефекты и группируем по MPP
     const defectGroupMap = new Map();
     defectRows.forEach(row => {
+      // Пропускаем закрытые дефекты
+      if (row.STATUS && row.STATUS.toLowerCase() === 'closed') return;
+
       const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
       if (!defectGroupMap.has(mpp)) {
         defectGroupMap.set(mpp, {
