@@ -128,84 +128,60 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
-const getDefaultTimeFilter = () => {
-  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const hours = nowMoscow.getUTCHours();
-  const minutes = nowMoscow.getUTCMinutes();
-  const totalMinutes = hours * 60 + minutes;
+const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
 
-  if (totalMinutes >= 1 * 60 + 31 && totalMinutes < 7 * 60 + 50) {
-    return 'night';
-  }
-  if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 16 * 60 + 41) {
-    return 'day';
-  }
+const getMoscowMinutes = () => {
+  const moscow = getMoscowTime();
+  return moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+};
+
+const getDefaultTimeFilter = () => {
+  const totalMinutes = getMoscowMinutes();
+  if (totalMinutes >= 1 * 60 + 31 && totalMinutes < 7 * 60 + 50) return 'night';
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 16 * 60 + 41) return 'day';
   return 'evening';
 };
 
 const getTimeRange = (timeFilter) => {
-  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const hours = nowMoscow.getUTCHours();
-  const minutes = nowMoscow.getUTCMinutes();
-  const totalMinutes = hours * 60 + minutes;
+  const nowMoscow = getMoscowTime();
+  const year = nowMoscow.getUTCFullYear();
+  const month = String(nowMoscow.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(nowMoscow.getUTCDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`;
 
-  const getDateStr = (date) => {
-    const y = date.getUTCFullYear();
-    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const d = String(date.getUTCDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  };
-
-  const today = new Date(nowMoscow);
-  today.setUTCHours(0,0,0,0);
-  const yesterday = new Date(today);
+  const yesterday = new Date(nowMoscow);
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const todayStr = getDateStr(today);
-  const yesterdayStr = getDateStr(yesterday);
+  const yestYear = yesterday.getUTCFullYear();
+  const yestMonth = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
+  const yestDay = String(yesterday.getUTCDate()).padStart(2, '0');
+  const yesterdayStr = `${yestYear}-${yestMonth}-${yestDay}`;
+
+  const totalMinutes = getMoscowMinutes();
 
   if (timeFilter === 'all') {
-    return {
-      start: `${todayStr} 00:00:00`,
-      end: `${todayStr} 23:59:59`,
-    };
+    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
   }
-
   if (timeFilter === 'day') {
     const dateToUse = totalMinutes >= 7 * 60 + 50 ? todayStr : yesterdayStr;
-    return {
-      start: `${dateToUse} 07:50:00`,
-      end: `${dateToUse} 16:40:00`,
-    };
+    return { start: `${dateToUse} 07:50:00`, end: `${dateToUse} 16:40:00` };
   }
-
   if (timeFilter === 'evening') {
     const dateToUse = totalMinutes >= 16 * 60 + 41 ? todayStr : yesterdayStr;
-    const startDateObj = new Date(dateToUse + 'T00:00:00Z');
+    const startDateObj = new Date(`${dateToUse}T00:00:00Z`);
     const endDateObj = new Date(startDateObj);
     endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
-    const endStr = getDateStr(endDateObj);
-    return {
-      start: `${dateToUse} 16:41:00`,
-      end: `${endStr} 01:30:00`,
-    };
+    const endStr = `${endDateObj.getUTCFullYear()}-${String(endDateObj.getUTCMonth() + 1).padStart(2, '0')}-${String(endDateObj.getUTCDate()).padStart(2, '0')}`;
+    return { start: `${dateToUse} 16:41:00`, end: `${endStr} 01:30:00` };
   }
-
   if (timeFilter === 'night') {
     const dateToUse = totalMinutes >= 1 * 60 + 31 ? todayStr : yesterdayStr;
-    return {
-      start: `${dateToUse} 01:31:00`,
-      end: `${dateToUse} 07:50:00`,
-    };
+    return { start: `${dateToUse} 01:31:00`, end: `${dateToUse} 07:50:00` };
   }
-
-  return {
-    start: `${todayStr} 00:00:00`,
-    end: `${todayStr} 23:59:59`,
-  };
+  return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
 };
 
 const getWeekNumber = (date) => {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
@@ -213,11 +189,8 @@ const getWeekNumber = (date) => {
 };
 
 const getCurrentShiftInfo = () => {
-  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const hours = nowMoscow.getUTCHours();
-  const minutes = nowMoscow.getUTCMinutes();
-  const totalMinutes = hours * 60 + minutes;
-
+  const nowMoscow = getMoscowTime();
+  const totalMinutes = getMoscowMinutes();
   let shiftDate = new Date(nowMoscow);
   let shiftType = 'night';
 
@@ -235,19 +208,14 @@ const getCurrentShiftInfo = () => {
   const weekNumber = getWeekNumber(shiftDate);
   const isEvenWeek = weekNumber % 2 === 0;
   let shiftLetter = 'C';
-
-  if (shiftType === 'night') {
-    shiftLetter = 'C';
-  } else if (shiftType === 'day') {
-    shiftLetter = isEvenWeek ? 'B' : 'A';
-  } else if (shiftType === 'evening') {
-    shiftLetter = isEvenWeek ? 'A' : 'B';
-  }
+  if (shiftType === 'night') shiftLetter = 'C';
+  else if (shiftType === 'day') shiftLetter = isEvenWeek ? 'B' : 'A';
+  else if (shiftType === 'evening') shiftLetter = isEvenWeek ? 'A' : 'B';
 
   return { weekNumber, shiftLetter, shiftType };
 };
 
-export default function DrrCpfinalDashboardPage() {
+export default function DrrCp8DashboardPage() {
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
   const [isManualFilter, setIsManualFilter] = useState(false);
   const [shiftInfo, setShiftInfo] = useState(getCurrentShiftInfo());
@@ -256,26 +224,51 @@ export default function DrrCpfinalDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Состояния для модального окна VIN
+  const [vinList, setVinList] = useState([]);
+  const [vinListStatus, setVinListStatus] = useState('');
+  const [showVinModal, setShowVinModal] = useState(false);
+  const [vinModalLoading, setVinModalLoading] = useState(false);
+
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
       const { start, end } = getTimeRange(timeFilter);
-      const drrParams = new URLSearchParams({ startTime: start, endTime: end });
-      const drrRes = await fetch(`${API_BASE}/api/drr-cp8-dashboard?${drrParams.toString()}`);
+      const params = new URLSearchParams({ startTime: start, endTime: end });
+
+      const drrRes = await fetch(`${API_BASE}/api/drr-cp8-dashboard?${params.toString()}`);
       if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
       const drrJson = await drrRes.json();
       setDrrData(drrJson);
 
-      const defectsParams = new URLSearchParams({ startTime: start, endTime: end });
-      const defectsRes = await fetch(`${API_BASE}/api/drr-cp8-top-defects?${defectsParams.toString()}`);
-      if (!defectsRes.ok) throw new Error('Ошибка загрузки топа дефектов');
+      const defectsRes = await fetch(`${API_BASE}/api/drr-cp8-top-defects?${params.toString()}`);
+      if (!defectsRes.ok) throw new Error('Ошибка загрузки топ дефектов');
       const defectsJson = await defectsRes.json();
       setTopDefects(defectsJson);
     } catch (err) {
       setError(err.message);
+      setTopDefects([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadVinList = async (status) => {
+    setVinModalLoading(true);
+    try {
+      const { start, end } = getTimeRange(timeFilter);
+      const params = new URLSearchParams({ startTime: start, endTime: end, status });
+      const res = await fetch(`${API_BASE}/api/drr-cp8-vins?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки списка VIN');
+      const json = await res.json();
+      setVinList(json);
+      setVinListStatus(status);
+      setShowVinModal(true);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setVinModalLoading(false);
     }
   };
 
@@ -287,13 +280,10 @@ export default function DrrCpfinalDashboardPage() {
     const interval = setInterval(() => {
       const newShiftInfo = getCurrentShiftInfo();
       setShiftInfo(newShiftInfo);
-
       if (!isManualFilter) {
-        const defaultFilter = getDefaultTimeFilter();
-        setTimeFilter(defaultFilter);
+        setTimeFilter(getDefaultTimeFilter());
       }
     }, 60000);
-
     return () => clearInterval(interval);
   }, [isManualFilter]);
 
@@ -316,11 +306,9 @@ export default function DrrCpfinalDashboardPage() {
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>
-        <h1 style={titleStyle}>DRR CPFINAL Dashboard</h1>
+        <h1 style={titleStyle}>DRR CP8 Dashboard</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* УЛУЧШЕННЫЙ БЛОК НЕДЕЛИ И СМЕНЫ */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
-            {/* Капсула с номером недели */}
             <div style={{
               background: '#FFFFFF',
               borderRadius: '20px',
@@ -336,8 +324,6 @@ export default function DrrCpfinalDashboardPage() {
                 {shiftInfo.weekNumber}
               </span>
             </div>
-
-            {/* Буква смены (огромная, тёмный текст) */}
             <div style={{
               width: '80px',
               height: '80px',
@@ -358,6 +344,7 @@ export default function DrrCpfinalDashboardPage() {
           </div>
 
           <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
+
           <div style={filterGroupStyle}>
             <button
               style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')}
@@ -440,50 +427,23 @@ export default function DrrCpfinalDashboardPage() {
             </div>
 
             <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
-              <div style={{ 
-                flex: 1, 
-                backgroundColor: '#1E293B', 
-                borderRadius: '12px', 
-                padding: '16px', 
-                textAlign: 'center', 
-                color: '#FFFFFF', 
-                minHeight: '140px', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                justifyContent: 'center' 
-              }}>
+              <div style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Всего авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalVins}</div>
               </div>
-              <div style={{ 
-                flex: 1, 
-                backgroundColor: '#059669', 
-                borderRadius: '12px', 
-                padding: '16px', 
-                textAlign: 'center', 
-                color: '#FFFFFF', 
-                minHeight: '140px', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                justifyContent: 'center' 
-              }}>
+              <div 
+                style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                onClick={() => loadVinList('OK')}
+              >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.closedVins}</div>
               </div>
-              <div style={{ 
-                flex: 1, 
-                backgroundColor: '#DC2626', 
-                borderRadius: '12px', 
-                padding: '16px', 
-                textAlign: 'center', 
-                color: '#FFFFFF', 
-                minHeight: '140px', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                justifyContent: 'center' 
-              }}>
+              <div 
+                style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                onClick={() => loadVinList('NOK')}
+              >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK Авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{nokVins}</div>
@@ -493,8 +453,7 @@ export default function DrrCpfinalDashboardPage() {
 
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
-              <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CPFINAL</h2>
-              
+              <h2 style={tableTitleStyle}>Топ дефектов CP8</h2>
               <div style={tableScrollStyle}>
                 {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -502,24 +461,18 @@ export default function DrrCpfinalDashboardPage() {
                       <tr>
                         <th style={thStyle}>Описание дефекта (MPP)</th>
                         <th style={thStyle}>Класс</th>
-                        <th style={thStyle}>Кол-во авто</th>
+                        <th style={thStyle}>Кол-во дефектов</th>
                       </tr>
                     </thead>
                     <tbody>
                       {topDefects.map((defect, idx) => (
-                        <tr 
-                          key={idx} 
-                          style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}
-                        >
-                          <td style={{ 
-                            ...tdStyle, 
-                            boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none'
-                          }}>
+                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                          <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none' }}>
                             {defect.mpp}
                           </td>
                           <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
                           <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '2rem', color: idx < 3 ? '#DC2626' : '#1E293B' }}>
-                            {defect.affectedVins}
+                            {defect.defectCount}
                           </td>
                         </tr>
                       ))}
@@ -530,6 +483,63 @@ export default function DrrCpfinalDashboardPage() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showVinModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000,
+        }} onClick={() => setShowVinModal(false)}>
+          <div style={{
+            backgroundColor: '#FFFFFF',
+            borderRadius: 16,
+            padding: 24,
+            width: '90%',
+            maxWidth: 600,
+            maxHeight: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
+                VIN ({vinListStatus})
+              </h3>
+              <button onClick={() => setShowVinModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }}>×</button>
+            </div>
+            {vinModalLoading ? (
+              <p>Загрузка...</p>
+            ) : (
+              <div style={{ overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>VIN</th>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>CP72</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vinList.map((item, idx) => (
+                      <tr key={idx}>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>
+                          {item.cp72_time ? new Date(item.cp72_time).toLocaleString('ru-RU') : ''}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

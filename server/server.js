@@ -6241,6 +6241,75 @@ app.get('/api/drr-cp8-top-defects', async (req, res) => {
   }
 });
 
+app.get('/api/drr-cp8-vins', async (req, res) => {
+  try {
+    const { startTime, endTime, status } = req.query;
+    if (!startTime || !endTime || !status) {
+      return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
+    }
+
+    // 1. VIN, прошедшие CP72 за период (MES)
+    const [cp72Rows] = await mesPool.query(`
+      SELECT vin, MIN(scan_time) AS cp72_time
+      FROM ti_mes_movement
+      WHERE uloc_no = 'CP72'
+        AND scan_time >= ? AND scan_time <= ?
+      GROUP BY vin
+    `, [startTime, endTime]);
+
+    if (cp72Rows.length === 0) return res.json([]);
+
+    const vins = cp72Rows.map(r => r.vin);
+    const placeholders = vins.map(() => '?').join(',');
+
+    // 2. Дефекты на указанных постах для этих VIN
+    const defectPosts = [
+      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+      'REPAIR', 'REPAIR_Final',
+      'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9',
+      'CP8 Touch Up', '360', 'ADAS', 'ADAS+RB',
+      'TEST TRACK', 'TRACK', 'WA'
+    ];
+    const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
+
+    const [defectRows] = await pool.query(`
+      SELECT d.VIN, d.STATUS
+      FROM at_qm_defect_info d
+      WHERE d.VIN IN (${placeholders})
+        AND d.POST_NAME IN (${defectPostsStr})
+    `, vins);
+
+    // 3. Определяем NOK VIN (есть хотя бы один незакрытый дефект)
+    const nokSet = new Set();
+    defectRows.forEach(row => {
+      if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
+        nokSet.add(row.VIN);
+      }
+    });
+
+    // 4. Формируем список в зависимости от status
+    const result = cp72Rows
+      .filter(row => {
+        const isNok = nokSet.has(row.vin);
+        if (status === 'NOK') return isNok;
+        if (status === 'OK') return !isNok;
+        return false;
+      })
+      .map(row => ({
+        vin: row.vin,
+        cp72_time: row.cp72_time,
+      }))
+      .sort((a, b) => new Date(a.cp72_time) - new Date(b.cp72_time));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка drr-cp8-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
 // Эндпоинт для DRR Testline Dashboard
 app.get('/api/drr-tl-dashboard', async (req, res) => {
   try {
