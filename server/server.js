@@ -2426,32 +2426,78 @@ app.get('/api/mpp-defect-trend', async (req, res) => {
       });
       postList = [...new Set(postList)];
     }
-
     if (postList.length === 0) {
       return res.json([]);
     }
-
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    let dateCondition, groupBy, orderBy;
+    // Вспомогательная функция для ISO недели
+    function getISOWeekInfo(date) {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+      return { year: d.getUTCFullYear(), week: weekNo };
+    }
+
+    // Генерация полного списка периодов
+    const generatePeriods = () => {
+      const now = new Date();
+      const periods = [];
+      if (periodType === 'month') {
+        for (let i = 2; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          periods.push(`${y}-${m}`);
+        }
+      } else if (periodType === 'week') {
+        // Последние 4 недели, включая текущую (понедельник-воскресенье)
+        const current = new Date(now);
+        const day = current.getDay(); // 0=вс, 1=пн
+        const mondayOffset = day === 0 ? -6 : 1 - day;
+        const thisMonday = new Date(current);
+        thisMonday.setDate(current.getDate() + mondayOffset);
+        thisMonday.setHours(0, 0, 0, 0);
+        for (let i = 3; i >= 0; i--) {
+          const weekStart = new Date(thisMonday);
+          weekStart.setDate(thisMonday.getDate() - i * 7);
+          const iso = getISOWeekInfo(weekStart);
+          periods.push(`${iso.year}-W${String(iso.week).padStart(2, '0')}`);
+        }
+      } else if (periodType === 'day') {
+        for (let i = 13; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(now.getDate() - i);
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          periods.push(`${y}-${m}-${day}`);
+        }
+      }
+      return periods;
+    };
+
+    const periods = generatePeriods();
+    if (periods.length === 0) return res.json([]);
+
+    // Условие для SQL в зависимости от типа периода
+    let dateCondition = '';
     if (periodType === 'month') {
-      dateCondition = `AND QM_DEF.CREATION_DATE >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)`;
-      groupBy = `DATE_FORMAT(QM_DEF.CREATION_DATE, '%Y-%m')`;
-      orderBy = `ORDER BY period ASC`;
+      dateCondition = `AND DATE_FORMAT(QM_DEF.CREATION_DATE, '%Y-%m') IN (${periods.map(() => '?').join(',')})`;
     } else if (periodType === 'week') {
-      dateCondition = `AND QM_DEF.CREATION_DATE >= DATE_SUB(CURDATE(), INTERVAL 4 WEEK)`;
-      groupBy = `DATE_FORMAT(QM_DEF.CREATION_DATE, '%Y-%u')`;
-      orderBy = `ORDER BY period ASC`;
+      dateCondition = `AND DATE_FORMAT(QM_DEF.CREATION_DATE, '%x-W%v') IN (${periods.map(() => '?').join(',')})`;
     } else if (periodType === 'day') {
-      dateCondition = `AND QM_DEF.CREATION_DATE >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)`;
-      groupBy = `DATE(QM_DEF.CREATION_DATE)`;
-      orderBy = `ORDER BY period ASC`;
-    } else {
-      return res.status(400).json({ error: 'Неверный periodType' });
+      dateCondition = `AND QM_DEF.CREATION_DATE IN (${periods.map(() => '?').join(',')})`;
     }
 
     const sql = `
-      SELECT ${groupBy} AS period, COUNT(*) AS defect_count
+      SELECT 
+        ${periodType === 'month' ? "DATE_FORMAT(QM_DEF.CREATION_DATE, '%Y-%m')" :
+          periodType === 'week' ? "DATE_FORMAT(QM_DEF.CREATION_DATE, '%x-W%v')" :
+          "DATE(QM_DEF.CREATION_DATE)"} AS period,
+        COUNT(*) AS defect_count
       FROM (
         SELECT VIN, DATE(CREATION_TIME) AS CREATION_DATE, POST_NAME,
                (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
@@ -2476,11 +2522,25 @@ app.get('/api/mpp-defect-trend', async (req, res) => {
         AND QM_DEF.POST_NAME IN (${postListStr})
         ${dateCondition}
       GROUP BY period
-      ${orderBy}
+      ORDER BY period
     `;
 
-    const [rows] = await pool.query(sql, [partName, problemType, model]);
-    res.json(rows);
+    const queryParams = [partName, problemType, model, ...periods];
+    const [rows] = await pool.query(sql, queryParams);
+
+    // Заполняем все периоды нулями
+    const resultMap = {};
+    periods.forEach(p => resultMap[p] = 0);
+    rows.forEach(r => {
+      resultMap[r.period] = r.defect_count;
+    });
+
+    const result = periods.map(p => ({
+      period: p,
+      defect_count: resultMap[p] || 0,
+    }));
+
+    res.json(result);
   } catch (err) {
     console.error('Ошибка mpp-defect-trend:', err.message);
     res.status(500).json({ error: err.message });
