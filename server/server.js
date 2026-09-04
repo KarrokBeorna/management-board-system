@@ -6083,6 +6083,76 @@ app.get('/api/drr-cp7-history', async (req, res) => {
   }
 });
 
+
+app.get('/api/drr-cp7-history-top-mpp', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, grades } = req.query;
+
+    // Если даты не переданы, берём последние 14 дней
+    let startDate, endDate;
+    if (dateFrom && dateTo) {
+      startDate = dateFrom;
+      endDate = dateTo;
+    } else {
+      const today = new Date();
+      const start = new Date();
+      start.setDate(today.getDate() - 13);
+      startDate = start.toISOString().split('T')[0];
+      endDate = today.toISOString().split('T')[0];
+    }
+
+    // Посты CP7/CP8, как в daily-dashboard-top5
+    const cp7Posts = [
+      'CP7','CP7 Audit','CP7 Gate','CP7-gate','CP8 Touch Up','REPAIR','REPAIR_Final','EXT1','PIP2','PIP4','PIP9',
+      'REPAIR VERIFICATION','Topcoat preparation'
+    ];
+    const cp8Posts = [
+      'CP8','CP8 Gate','CP8-gate','360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT'
+    ];
+    const allCpPosts = [...cp7Posts, ...cp8Posts];
+    const postListStr = allCpPosts.map(p => `'${p}'`).join(',');
+
+    let where = `WHERE d.POST_NAME IN (${postListStr}) AND d.OFFLINE = 1 AND DATE(d.CREATION_TIME) BETWEEN ? AND ?`;
+    const params = [startDate, endDate];
+
+    if (grades) {
+      const gradesList = grades.split(',').map(g => g.trim()).filter(Boolean);
+      if (gradesList.length > 0) {
+        where += ` AND d.PROBLEM_GRADE IN (${gradesList.map(() => '?').join(',')})`;
+        params.push(...gradesList);
+      }
+    }
+
+    const [rows] = await pool.query(`
+      SELECT CONCAT(wo.MODEL, ' - ', d.PART_NAME, ' - ', d.PROBLEM_TYPE) AS DEFECT, COUNT(*) AS CNT
+      FROM (
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME, PROBLEM_GRADE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS OFFLINE
+        FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME, PROBLEM_GRADE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS OFFLINE
+        FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME, PROBLEM_GRADE,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS OFFLINE
+        FROM at_qm_defect_info
+      ) d
+      JOIN work_order wo ON wo.VIN = d.VIN
+      ${where}
+      GROUP BY DEFECT
+      ORDER BY CNT DESC
+      LIMIT 5
+    `, params);
+
+    res.json(rows.map(r => ({ defect: r.DEFECT, count: r.CNT })));
+  } catch (err) {
+    console.error('Ошибка drr-cp7-history-top-mpp:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 app.get('/api/testpage-data', async (req, res) => {
   try {
     const { filter = 'all', startTime, endTime } = req.query;

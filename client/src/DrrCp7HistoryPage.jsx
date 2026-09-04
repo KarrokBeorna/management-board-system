@@ -76,6 +76,23 @@ const tdStyle = {
   textOverflow: 'ellipsis',
 };
 
+const topThStyle = {
+  padding: '10px 12px',
+  textAlign: 'center',
+  fontWeight: 600,
+  color: '#374151',
+  borderBottom: '2px solid #E5E7EB',
+  background: '#F9FAFB',
+  whiteSpace: 'nowrap',
+};
+
+const topTdStyle = {
+  padding: '8px 12px',
+  textAlign: 'center',
+  borderBottom: '1px solid #F0F0F5',
+  color: '#1F2937',
+};
+
 const typeColors = {
   year: '#065F46',
   month: '#10B981',
@@ -100,6 +117,16 @@ const modelShortNames = {
 
 const allModelKeys = Object.keys(modelShortNames);
 
+const getDateDaysAgo = (days) => {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().split('T')[0];
+};
+
+const getToday = () => {
+  return new Date().toISOString().split('T')[0];
+};
+
 export default function DrrCp7HistoryPage() {
   const [filter, setFilter] = useState('all');
   const [period, setPeriod] = useState('all');
@@ -109,6 +136,18 @@ export default function DrrCp7HistoryPage() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // Состояния для топов A/B и C (диапазон дат)
+  const [abDateFrom, setAbDateFrom] = useState(() => getDateDaysAgo(13));
+  const [abDateTo, setAbDateTo] = useState(getToday);
+  const [cDateFrom, setCDateFrom] = useState(() => getDateDaysAgo(13));
+  const [cDateTo, setCDateTo] = useState(getToday);
+  const [abData, setAbData] = useState([]);
+  const [cData, setCData] = useState([]);
+  const [abLoading, setAbLoading] = useState(false);
+  const [cLoading, setCLoading] = useState(false);
+  const [showAbFilter, setShowAbFilter] = useState(false);
+  const [showCFilter, setShowCFilter] = useState(false);
 
   const handlePeriodChange = (newPeriod) => {
     setPeriod(newPeriod);
@@ -143,9 +182,60 @@ export default function DrrCp7HistoryPage() {
     }
   };
 
+  const loadAbTop = async () => {
+    setAbLoading(true);
+    try {
+      const params = new URLSearchParams({
+        dateFrom: abDateFrom,
+        dateTo: abDateTo,
+        grades: 'A,B,A1,B1'
+      });
+      const res = await fetch(`${API_BASE}/api/drr-cp7-history-top-mpp?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки A/B топа');
+      const json = await res.json();
+      setAbData(json);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAbLoading(false);
+    }
+  };
+
+  const loadCTop = async () => {
+    setCLoading(true);
+    try {
+      const params = new URLSearchParams({
+        dateFrom: cDateFrom,
+        dateTo: cDateTo,
+        grades: 'C'
+      });
+      const res = await fetch(`${API_BASE}/api/drr-cp7-history-top-mpp?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки C топа');
+      const json = await res.json();
+      setCData(json);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadHistory();
   }, [filter, period, count, fromDate, toDate]);
+
+  useEffect(() => {
+    loadAbTop();
+    loadCTop();
+  }, []);
+
+  useEffect(() => {
+    loadAbTop();
+  }, [abDateFrom, abDateTo]);
+
+  useEffect(() => {
+    loadCTop();
+  }, [cDateFrom, cDateTo]);
 
   const chartData = useMemo(() => {
     return data.map(d => ({
@@ -306,6 +396,129 @@ export default function DrrCp7HistoryPage() {
             </div>
           </>
         )}
+      </div>
+
+      {/* Две таблицы с топами дефектов */}
+      <div style={{ display: 'flex', gap: 20, marginTop: 20 }}>
+        {/* Топ A/B */}
+        <div style={{ ...cardStyle, flex: 1, marginBottom: 30 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1F2937' }}>Топ A/B дефектов по MPP</h3>
+            <button
+              onClick={() => setShowAbFilter(!showAbFilter)}
+              style={{
+                background: showAbFilter ? '#2563EB' : '#F3F4F6',
+                color: showAbFilter ? '#FFFFFF' : '#374151',
+                border: 'none',
+                padding: '6px 14px',
+                borderRadius: 8,
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              {showAbFilter ? 'Скрыть фильтр' : 'Фильтр'}
+            </button>
+          </div>
+          {showAbFilter && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+              <span style={{ fontSize: 13 }}>С:</span>
+              <input
+                type="date"
+                value={abDateFrom}
+                onChange={(e) => setAbDateFrom(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }}
+              />
+              <span style={{ fontSize: 13 }}>По:</span>
+              <input
+                type="date"
+                value={abDateTo}
+                onChange={(e) => setAbDateTo(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }}
+              />
+            </div>
+          )}
+          {abLoading ? (
+            <p style={{ color: '#6B7280', textAlign: 'center', padding: 10 }}>Загрузка...</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+              <thead>
+                <tr>
+                  <th style={topThStyle}>DEFECT</th>
+                  <th style={topThStyle}>COUNT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {abData.map((item, idx) => (
+                  <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#F9FAFB' : 'white' }}>
+                    <td style={topTdStyle}>{item.defect}</td>
+                    <td style={topTdStyle}>{item.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Топ C */}
+        <div style={{ ...cardStyle, flex: 1, marginBottom: 30 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1F2937' }}>Топ C дефектов по MPP</h3>
+            <button
+              onClick={() => setShowCFilter(!showCFilter)}
+              style={{
+                background: showCFilter ? '#2563EB' : '#F3F4F6',
+                color: showCFilter ? '#FFFFFF' : '#374151',
+                border: 'none',
+                padding: '6px 14px',
+                borderRadius: 8,
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              {showCFilter ? 'Скрыть фильтр' : 'Фильтр'}
+            </button>
+          </div>
+          {showCFilter && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+              <span style={{ fontSize: 13 }}>С:</span>
+              <input
+                type="date"
+                value={cDateFrom}
+                onChange={(e) => setCDateFrom(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }}
+              />
+              <span style={{ fontSize: 13 }}>По:</span>
+              <input
+                type="date"
+                value={cDateTo}
+                onChange={(e) => setCDateTo(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }}
+              />
+            </div>
+          )}
+          {cLoading ? (
+            <p style={{ color: '#6B7280', textAlign: 'center', padding: 10 }}>Загрузка...</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+              <thead>
+                <tr>
+                  <th style={topThStyle}>DEFECT</th>
+                  <th style={topThStyle}>COUNT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cData.map((item, idx) => (
+                  <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#F9FAFB' : 'white' }}>
+                    <td style={topTdStyle}>{item.defect}</td>
+                    <td style={topTdStyle}>{item.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   );
