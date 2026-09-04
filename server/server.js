@@ -6101,16 +6101,14 @@ app.get('/api/drr-cp7-history-top-mpp', async (req, res) => {
       endDate = today.toISOString().split('T')[0];
     }
 
-    // Посты CP7/CP8, как в daily-dashboard-top5
+    // Только посты CP7 (без CP8)
     const cp7Posts = [
-      'CP7','CP7 Audit','CP7 Gate','CP7-gate','CP8 Touch Up','REPAIR','REPAIR_Final','EXT1','PIP2','PIP4','PIP9',
-      'REPAIR VERIFICATION','Topcoat preparation'
+      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+      'REPAIR', 'REPAIR_Final',
+      'EXT1', 'PIP2', 'PIP4', 'PIP9',
+      'REPAIR VERIFICATION', 'Topcoat preparation'
     ];
-    const cp8Posts = [
-      'CP8','CP8 Gate','CP8-gate','360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT'
-    ];
-    const allCpPosts = [...cp7Posts, ...cp8Posts];
-    const postListStr = allCpPosts.map(p => `'${p}'`).join(',');
+    const postListStr = cp7Posts.map(p => `'${p}'`).join(',');
 
     let where = `WHERE d.POST_NAME IN (${postListStr}) AND d.OFFLINE = 1 AND DATE(d.CREATION_TIME) BETWEEN ? AND ?`;
     const params = [startDate, endDate];

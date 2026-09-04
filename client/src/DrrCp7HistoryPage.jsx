@@ -137,17 +137,10 @@ export default function DrrCp7HistoryPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Состояния для топов A/B и C (диапазон дат)
-  const [abDateFrom, setAbDateFrom] = useState(() => getDateDaysAgo(13));
-  const [abDateTo, setAbDateTo] = useState(getToday);
-  const [cDateFrom, setCDateFrom] = useState(() => getDateDaysAgo(13));
-  const [cDateTo, setCDateTo] = useState(getToday);
   const [abData, setAbData] = useState([]);
   const [cData, setCData] = useState([]);
   const [abLoading, setAbLoading] = useState(false);
   const [cLoading, setCLoading] = useState(false);
-  const [showAbFilter, setShowAbFilter] = useState(false);
-  const [showCFilter, setShowCFilter] = useState(false);
 
   const handlePeriodChange = (newPeriod) => {
     setPeriod(newPeriod);
@@ -158,6 +151,45 @@ export default function DrrCp7HistoryPage() {
       const defaults = { year: 2, month: 3, week: 4, day: 14 };
       setCount(defaults[newPeriod] || 3);
     }
+  };
+
+  // Вычисляем диапазон дат для топов на основе периода
+  const getTopDateRange = () => {
+    const today = new Date();
+    const format = (d) => d.toISOString().split('T')[0];
+    if (period !== 'all') {
+      if (fromDate && toDate) {
+        return { dateFrom: fromDate, dateTo: toDate };
+      }
+      const countNum = parseInt(count, 10) || 1;
+      if (period === 'day') {
+        const start = new Date();
+        start.setDate(today.getDate() - (countNum - 1));
+        return { dateFrom: format(start), dateTo: format(today) };
+      } else if (period === 'week') {
+        const day = today.getDay();
+        const mondayOffset = day === 0 ? -6 : 1 - day;
+        const currentMonday = new Date(today);
+        currentMonday.setDate(today.getDate() + mondayOffset);
+        const start = new Date(currentMonday);
+        start.setDate(currentMonday.getDate() - 7 * (countNum - 1));
+        const end = new Date(currentMonday);
+        end.setDate(currentMonday.getDate() + 6);
+        return { dateFrom: format(start), dateTo: format(end) };
+      } else if (period === 'month') {
+        const start = new Date(today.getFullYear(), today.getMonth() - (countNum - 1), 1);
+        const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        return { dateFrom: format(start), dateTo: format(end) };
+      } else if (period === 'year') {
+        const start = new Date(today.getFullYear() - (countNum - 1), 0, 1);
+        const end = new Date(today.getFullYear(), 11, 31);
+        return { dateFrom: format(start), dateTo: format(end) };
+      }
+    }
+    // period === 'all' или fallback
+    const start = new Date();
+    start.setDate(today.getDate() - 13);
+    return { dateFrom: format(start), dateTo: format(today) };
   };
 
   const loadHistory = async () => {
@@ -182,12 +214,12 @@ export default function DrrCp7HistoryPage() {
     }
   };
 
-  const loadAbTop = async () => {
+  const loadAbTop = async (dateFrom, dateTo) => {
     setAbLoading(true);
     try {
       const params = new URLSearchParams({
-        dateFrom: abDateFrom,
-        dateTo: abDateTo,
+        dateFrom,
+        dateTo,
         grades: 'A,B,A1,B1'
       });
       const res = await fetch(`${API_BASE}/api/drr-cp7-history-top-mpp?${params.toString()}`);
@@ -201,12 +233,12 @@ export default function DrrCp7HistoryPage() {
     }
   };
 
-  const loadCTop = async () => {
+  const loadCTop = async (dateFrom, dateTo) => {
     setCLoading(true);
     try {
       const params = new URLSearchParams({
-        dateFrom: cDateFrom,
-        dateTo: cDateTo,
+        dateFrom,
+        dateTo,
         grades: 'C'
       });
       const res = await fetch(`${API_BASE}/api/drr-cp7-history-top-mpp?${params.toString()}`);
@@ -222,20 +254,10 @@ export default function DrrCp7HistoryPage() {
 
   useEffect(() => {
     loadHistory();
+    const { dateFrom, dateTo } = getTopDateRange();
+    loadAbTop(dateFrom, dateTo);
+    loadCTop(dateFrom, dateTo);
   }, [filter, period, count, fromDate, toDate]);
-
-  useEffect(() => {
-    loadAbTop();
-    loadCTop();
-  }, []);
-
-  useEffect(() => {
-    loadAbTop();
-  }, [abDateFrom, abDateTo]);
-
-  useEffect(() => {
-    loadCTop();
-  }, [cDateFrom, cDateTo]);
 
   const chartData = useMemo(() => {
     return data.map(d => ({
@@ -402,50 +424,15 @@ export default function DrrCp7HistoryPage() {
       <div style={{ display: 'flex', gap: 20, marginTop: 20 }}>
         {/* Топ A/B */}
         <div style={{ ...cardStyle, flex: 1, marginBottom: 30 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1F2937' }}>Топ A/B дефектов по MPP</h3>
-            <button
-              onClick={() => setShowAbFilter(!showAbFilter)}
-              style={{
-                background: showAbFilter ? '#2563EB' : '#F3F4F6',
-                color: showAbFilter ? '#FFFFFF' : '#374151',
-                border: 'none',
-                padding: '6px 14px',
-                borderRadius: 8,
-                fontWeight: 600,
-                fontSize: 13,
-                cursor: 'pointer',
-              }}
-            >
-              {showAbFilter ? 'Скрыть фильтр' : 'Фильтр'}
-            </button>
-          </div>
-          {showAbFilter && (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
-              <span style={{ fontSize: 13 }}>С:</span>
-              <input
-                type="date"
-                value={abDateFrom}
-                onChange={(e) => setAbDateFrom(e.target.value)}
-                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }}
-              />
-              <span style={{ fontSize: 13 }}>По:</span>
-              <input
-                type="date"
-                value={abDateTo}
-                onChange={(e) => setAbDateTo(e.target.value)}
-                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }}
-              />
-            </div>
-          )}
+          <h3 style={{ margin: '0 0 12px 0', fontSize: 16, fontWeight: 700, color: '#1F2937' }}>Топ A/B дефектов</h3>
           {abLoading ? (
             <p style={{ color: '#6B7280', textAlign: 'center', padding: 10 }}>Загрузка...</p>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
                 <tr>
-                  <th style={topThStyle}>DEFECT</th>
-                  <th style={topThStyle}>COUNT</th>
+                  <th style={topThStyle}>Дефекты</th>
+                  <th style={topThStyle}>Количество</th>
                 </tr>
               </thead>
               <tbody>
@@ -462,50 +449,15 @@ export default function DrrCp7HistoryPage() {
 
         {/* Топ C */}
         <div style={{ ...cardStyle, flex: 1, marginBottom: 30 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#1F2937' }}>Топ C дефектов по MPP</h3>
-            <button
-              onClick={() => setShowCFilter(!showCFilter)}
-              style={{
-                background: showCFilter ? '#2563EB' : '#F3F4F6',
-                color: showCFilter ? '#FFFFFF' : '#374151',
-                border: 'none',
-                padding: '6px 14px',
-                borderRadius: 8,
-                fontWeight: 600,
-                fontSize: 13,
-                cursor: 'pointer',
-              }}
-            >
-              {showCFilter ? 'Скрыть фильтр' : 'Фильтр'}
-            </button>
-          </div>
-          {showCFilter && (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
-              <span style={{ fontSize: 13 }}>С:</span>
-              <input
-                type="date"
-                value={cDateFrom}
-                onChange={(e) => setCDateFrom(e.target.value)}
-                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }}
-              />
-              <span style={{ fontSize: 13 }}>По:</span>
-              <input
-                type="date"
-                value={cDateTo}
-                onChange={(e) => setCDateTo(e.target.value)}
-                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }}
-              />
-            </div>
-          )}
+          <h3 style={{ margin: '0 0 12px 0', fontSize: 16, fontWeight: 700, color: '#1F2937' }}>Топ C дефектов</h3>
           {cLoading ? (
             <p style={{ color: '#6B7280', textAlign: 'center', padding: 10 }}>Загрузка...</p>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
                 <tr>
-                  <th style={topThStyle}>DEFECT</th>
-                  <th style={topThStyle}>COUNT</th>
+                  <th style={topThStyle}>Дефекты</th>
+                  <th style={topThStyle}>Количество</th>
                 </tr>
               </thead>
               <tbody>
