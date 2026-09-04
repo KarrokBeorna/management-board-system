@@ -314,7 +314,7 @@ export default function DailyDashboardPage() {
         {/* CP7 - CP8 A/B/C CALLS TOP 5 */}
         <div style={{ ...cardStyle, flex: 1, minWidth: 300 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1F2937', margin: 0 }}>CP7 - CP8 A/B/C CALLS TOP 5</h2>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1F2937', margin: 0 }}>TOP 5 A/B дефектов на CP7 и CP8</h2>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => setShowTop5Filter(!showTop5Filter)} style={{
                 background: showTop5Filter ? '#2563EB' : '#F3F4F6', color: showTop5Filter ? '#FFFFFF' : '#374151',
