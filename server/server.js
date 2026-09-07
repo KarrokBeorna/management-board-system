@@ -7065,6 +7065,17 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
     }
 
+    // Получаем общее количество VIN, прошедших CP72 за период
+    const [cp72Rows] = await mesPool.query(`
+      SELECT COUNT(DISTINCT vin) AS total_vins
+      FROM ti_mes_movement
+      WHERE uloc_no = 'CP72'
+        AND scan_time >= ? AND scan_time <= ?
+        AND is_deleted = 0
+    `, [dateFrom, dateTo]);
+
+    const totalCp72Vins = cp72Rows[0]?.total_vins || 0;
+
     const electronicsPosts = [
       'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
       'PIP2', 'PIP4', 'PIP9',
@@ -7094,29 +7105,33 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
         QM_DEF.PROBLEM_TYPE,
         COUNT(DISTINCT QM_DEF.VIN) AS VIN_COUNT,
         COUNT(*) AS DEFECT_COUNT,
-        ROUND((COUNT(*) * 1000.0) / NULLIF(COUNT(DISTINCT QM_DEF.VIN), 0), 2) AS DPU,
         QM_DEF.POST_NAME
       FROM (
+        -- Обычные дефекты (только оффлайн)
         SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME
         FROM at_biw_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
+          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
         SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME
         FROM at_paint_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
+          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
         SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME
         FROM at_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
+          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
 
         UNION ALL
 
+        -- Роботизированные дефекты (всегда)
         SELECT VIN, CREATION_TIME, 
                CASE 
                  WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
@@ -7187,7 +7202,7 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       PROBLEM_TYPE: r.PROBLEM_TYPE,
       VIN_COUNT: r.VIN_COUNT,
       DEFECT_COUNT: r.DEFECT_COUNT,
-      DPU: r.DPU,
+      DPU: totalCp72Vins > 0 ? ((r.DEFECT_COUNT * 1000) / totalCp72Vins).toFixed(2) : 0,
       POST_NAME: r.POST_NAME,
     }));
 
