@@ -21,6 +21,7 @@ import DrrCp7HistoryPage from './DrrCp7HistoryPage';
 import DrrCp8DashboardPage from './DrrCp8DashboardPage';
 import DrrTLDashboardPage from './DrrTLDashboardPage';
 import DrrPipDashboardPage from './DrrPipDashboardPage';
+import DefectElectronicsTopPage from './DefectElectronicsTopPage';
 
 import TestPage from './testpage'; // тестовая страница
 export default function App() {
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="/drr-cp8-dashboard" element={<DrrCp8DashboardPage />} />
         <Route path="/drr-tl-dashboard" element={<DrrTLDashboardPage />} />
         <Route path="/drr-pip-dashboard" element={<DrrPipDashboardPage />} />
+        <Route path="/defect-electronics-top" element={<DefectElectronicsTopPage />} />
 
         <Route path="/testpage" element={<TestPage />} />
       </Route>
