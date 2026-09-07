@@ -7065,16 +7065,7 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
     }
 
-    // Разбираем фильтр по постам
-    let selectedPosts = [];
-    if (!posts || posts === 'ALL') {
-      selectedPosts = ['ALL'];
-    } else {
-      selectedPosts = posts.split(',').map(p => p.trim()).filter(Boolean);
-    }
-
-    // Готовим условие для постов
-    const electronicsPosts = [
+    const allElectronicsPosts = [
       'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
       'PIP2', 'PIP4', 'PIP9',
       '360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final',
@@ -7082,11 +7073,18 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       'REPAIR VERIFICATION', 'TRACK', 'ROLL'
     ];
 
-    // Если в фильтре только ROBOT, то обычные посты не нужны
-    const includeRobot = selectedPosts.includes('ALL') || selectedPosts.includes('ROBOT');
-    const includeRegular = selectedPosts.includes('ALL') || selectedPosts.some(p => electronicsPosts.includes(p));
+    // Обработка выбранных постов
+    let selectedPosts = [];
+    if (!posts || posts === 'ALL') {
+      selectedPosts = ['ALL'];
+    } else {
+      selectedPosts = posts.split(',').map(p => p.trim()).filter(Boolean);
+    }
 
-    // Блоки запроса
+    const includeRobot = selectedPosts.includes('ALL') || selectedPosts.includes('ROBOT');
+    const includeRegular = selectedPosts.includes('ALL') || selectedPosts.some(p => allElectronicsPosts.includes(p));
+
+    // Блоки SQL
     const robotBlocks = [];
     if (includeRobot) {
       // refuel_log
@@ -7109,7 +7107,7 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
           AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')
       `);
 
-      // electrical_check_info (с объединением CP71/CP72)
+      // electrical_check_info (CP71/CP72 объединены)
       robotBlocks.push(`
         SELECT VIN, CREATION_TIME,
                CASE 
@@ -7149,8 +7147,7 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
 
     const regularBlocks = [];
     if (includeRegular) {
-      const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
-      // Обычные таблицы, только оффлайн
+      const postListStr = allElectronicsPosts.map(p => `'${p}'`).join(',');
       regularBlocks.push(`
         SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME
         FROM at_biw_qm_defect_info
@@ -7177,7 +7174,6 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       `);
     }
 
-    // Если оба списка пусты, возвращаем пустой массив
     if (robotBlocks.length === 0 && regularBlocks.length === 0) {
       return res.json([]);
     }
@@ -7199,14 +7195,12 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       gradeCondition = ` AND QM_DEF.PROBLEM_GRADE IN (${gradeList})`;
     }
 
-    // Получаем общее число VIN, прошедших CP72 (для DPU)
+    // Общее количество VIN, прошедших CP72 (для DPU)
     const cp72Sql = `
       SELECT COUNT(DISTINCT tm.vin) AS total_cp72
       FROM ti_mes_movement tm
-      JOIN work_order wo ON wo.VIN = tm.vin
       WHERE tm.uloc_no = 'CP72'
         AND tm.scan_time >= ? AND tm.scan_time <= ?
-        ${model ? ` AND wo.MODEL IN (${model !== 'ALL' ? model.split(',').map(m => `'${m.trim()}'`).join(',') : "'ALL'"})` : ''}
     `;
     const [cp72Rows] = await mesPool.query(cp72Sql, [dateFrom, dateTo]);
     const totalCp72 = cp72Rows[0]?.total_cp72 || 0;
@@ -7234,7 +7228,7 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
     const [rows] = await pool.query(sql, [dateFrom, dateTo]);
 
     const result = rows.map(r => ({
-      MPP: r.MPP,
+      MPP: r.MPP.trim(),
       MODEL: r.MODEL,
       PART_NAME: r.PART_NAME,
       PROBLEM_TYPE: r.PROBLEM_TYPE,
@@ -7252,29 +7246,26 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
   }
 });
 
-app.get('/api/drr-electronics-vins', async (req, res) => {
+app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
   try {
-    const { partName, problemType, model, dateFrom, dateTo, posts } = req.query;
+    const { partName, problemType, model, dateFrom, dateTo } = req.query;
     if (!partName || !problemType || !model || !dateFrom || !dateTo) {
       return res.status(400).json({ error: 'Недостаточно параметров' });
     }
 
-    // Определяем включённые посты
-    let selectedPosts = [];
-    if (!posts || posts === 'ALL') {
-      selectedPosts = ['ALL'];
-    } else {
-      selectedPosts = posts.split(',').map(p => p.trim()).filter(Boolean);
-    }
+    // Получаем VIN с указанным электронным дефектом
+    const electronicsPosts = [
+      'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
+      'PIP2', 'PIP4', 'PIP9',
+      '360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final',
+      'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up',
+      'REPAIR VERIFICATION', 'TRACK', 'ROLL'
+    ];
+    const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
 
-    const includeRobot = selectedPosts.includes('ALL') || selectedPosts.includes('ROBOT');
-    const includeRegular = selectedPosts.includes('ALL') || selectedPosts.some(p => p !== 'ROBOT');
-
-    // Построим union блоков
-    const blocks = [];
-
-    if (includeRobot) {
-      blocks.push(`
+    const getVinsSql = `
+      SELECT DISTINCT VIN
+      FROM (
         SELECT VIN, 
                CASE 
                  WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
@@ -7287,11 +7278,8 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
                END AS PART_NAME,
                '' AS PROBLEM_TYPE
         FROM at_im_refuel_log
-        WHERE FILL_RESULT IN ('NOK','NG')
-          AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')
-      `);
-
-      blocks.push(`
+        WHERE FILL_RESULT IN ('NOK','NG') AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')
+        UNION ALL
         SELECT VIN,
                CASE 
                  WHEN TYPE = '03' OR TYPE = '18' THEN 'Прошивка EOL - NG'
@@ -7303,11 +7291,8 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
                END AS PART_NAME,
                '' AS PROBLEM_TYPE
         FROM at_im_electrical_check_info
-        WHERE RESULT IN ('NOK','NG')
-          AND TYPE <> '01'
-      `);
-
-      blocks.push(`
+        WHERE RESULT IN ('NOK','NG') AND TYPE <> '01'
+        UNION ALL
         SELECT VIN,
                CASE 
                  WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
@@ -7318,86 +7303,51 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
                END AS PART_NAME,
                '' AS PROBLEM_TYPE
         FROM at_im_execute_result
-        WHERE FINAL_RESULT IN ('NOK','NG')
-          AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
-      `);
-    }
-
-    if (includeRegular) {
-      const postListStr = ['CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
-        'PIP2', 'PIP4', 'PIP9',
-        '360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final',
-        'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up',
-        'REPAIR VERIFICATION', 'TRACK', 'ROLL'].map(p => `'${p}'`).join(',');
-
-      blocks.push(`
-        SELECT VIN, PART_NAME, PROBLEM_TYPE
-        FROM at_biw_qm_defect_info
-        WHERE POST_NAME IN (${postListStr})
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-      `);
-      blocks.push(`
-        SELECT VIN, PART_NAME, PROBLEM_TYPE
-        FROM at_paint_qm_defect_info
-        WHERE POST_NAME IN (${postListStr})
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-      `);
-      blocks.push(`
-        SELECT VIN, PART_NAME, PROBLEM_TYPE
-        FROM at_qm_defect_info
-        WHERE POST_NAME IN (${postListStr})
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-      `);
-    }
-
-    const unionSql = blocks.join(' UNION ALL ');
-
-    const vinsSql = `
-      SELECT DISTINCT QM_DEF.VIN
-      FROM (
-        ${unionSql}
+        WHERE FINAL_RESULT IN ('NOK','NG') AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
       ) QM_DEF
       WHERE QM_DEF.PART_NAME = ? AND QM_DEF.PROBLEM_TYPE = ?
     `;
 
-    const [vinRows] = await pool.query(vinsSql, [partName, problemType]);
+    const [vinRows] = await pool.query(getVinsSql, [partName, problemType]);
     const vins = [...new Set(vinRows.map(r => r.VIN))];
     if (vins.length === 0) return res.json([]);
 
     const placeholders = vins.map(() => '?').join(',');
 
-    const modelSql = `
-      SELECT VIN, MODEL
-      FROM work_order
-      WHERE VIN IN (${placeholders})
-    `;
-    const [modelRows] = await pool.query(modelSql, vins);
-    const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
-
-    const commentSql = `
-      SELECT VIN, MAX(PROBLEM_REPLENISH) AS COMMENT
+    // Получаем топ MPP оффлайн для этих VIN
+    const topMppSql = `
+      SELECT 
+        CONCAT(wo.MODEL, ' ', d.PART_NAME, ' ', d.PROBLEM_TYPE) AS MPP,
+        wo.MODEL,
+        COUNT(*) AS CNT
       FROM (
-        SELECT VIN, PROBLEM_REPLENISH FROM at_biw_qm_defect_info WHERE VIN IN (${placeholders})
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH AS COMMENT
+        FROM at_biw_qm_defect_info WHERE VIN IN (${placeholders}) AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
         UNION ALL
-        SELECT VIN, PROBLEM_REPLENISH FROM at_paint_qm_defect_info WHERE VIN IN (${placeholders})
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH AS COMMENT
+        FROM at_paint_qm_defect_info WHERE VIN IN (${placeholders}) AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
         UNION ALL
-        SELECT VIN, PROBLEM_REPLENISH FROM at_qm_defect_info WHERE VIN IN (${placeholders})
-      ) t
-      WHERE PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> ''
-      GROUP BY VIN
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH AS COMMENT
+        FROM at_qm_defect_info WHERE VIN IN (${placeholders}) AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+      ) d
+      JOIN work_order wo ON wo.VIN = d.VIN
+      GROUP BY wo.MODEL, d.PART_NAME, d.PROBLEM_TYPE
+      ORDER BY CNT DESC
     `;
-    const [commentRows] = await pool.query(commentSql, vins);
-    const commentMap = new Map(commentRows.map(r => [r.VIN, r.COMMENT]));
 
-    const result = vins.map(vin => ({
-      VIN: vin,
-      MODEL: modelMap.get(vin) || '-',
-      COMMENT: commentMap.get(vin) || '',
+    const [topMppRows] = await pool.query(topMppSql, vins);
+
+    // Получаем VIN с комментариями для каждого MPP (можно отдельно, но здесь сгруппируем по MPP)
+    const result = topMppRows.map(r => ({
+      MPP: r.MPP.trim(),
+      MODEL: r.MODEL,
+      DEFECT_COUNT: r.CNT,
+      // VIN с комментариями будут загружены отдельным запросом при раскрытии
     }));
 
     res.json(result);
   } catch (err) {
-    console.error('Ошибка drr-electronics-vins:', err.message);
+    console.error('Ошибка drr-electronics-vins-top-mpp:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
