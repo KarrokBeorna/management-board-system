@@ -51,7 +51,6 @@ const tdStyle = {
   color: '#1F2937',
 };
 
-// ====== МУЛЬТИСЕЛЕКТ ======
 function MultiSelect({ options, selected, onChange, placeholder }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
@@ -132,11 +131,7 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
           overflowY: 'auto',
         }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
-            <input
-              type="checkbox"
-              checked={allSelected}
-              onChange={() => handleToggle('ALL')}
-            />
+            <input type="checkbox" checked={allSelected} onChange={() => handleToggle('ALL')} />
             Все
           </label>
           {nonAllOptions.map(option => (
@@ -165,13 +160,10 @@ export default function DefectElectronicsTopPage() {
   const [expandedMpp, setExpandedMpp] = useState(null);
   const [vinData, setVinData] = useState([]);
   const [vinLoading, setVinLoading] = useState(false);
-  const [hiddenRows, setHiddenRows] = useState({});
-  const hiddenCount = Object.values(hiddenRows).filter(Boolean).length;
 
   const availableModels = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
   const availableGrades = ['A', 'B', 'C'];
 
-  // Установка дат по умолчанию (вчера)
   useEffect(() => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -183,11 +175,8 @@ export default function DefectElectronicsTopPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const allModelsSelected = selectedModels.length === availableModels.length;
-      const modelsParam = (selectedModels.length === 0 || allModelsSelected) ? 'ALL' : selectedModels.join(',');
-
-      const allGradesSelected = selectedGrades.length === availableGrades.length;
-      const gradesParam = (selectedGrades.length === 0 || allGradesSelected) ? 'ALL' : selectedGrades.join(',');
+      const modelsParam = (selectedModels.length === 0 || selectedModels.length === availableModels.length) ? 'ALL' : selectedModels.join(',');
+      const gradesParam = (selectedGrades.length === 0 || selectedGrades.length === availableGrades.length) ? 'ALL' : selectedGrades.join(',');
 
       const params = new URLSearchParams({
         dateFrom,
@@ -195,7 +184,6 @@ export default function DefectElectronicsTopPage() {
         model: modelsParam,
         grades: gradesParam,
       });
-
       const res = await fetch(`${API_BASE}/api/drr-electronics-top-defects?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
@@ -213,9 +201,9 @@ export default function DefectElectronicsTopPage() {
       const params = new URLSearchParams({
         partName: row.PART_NAME,
         problemType: row.PROBLEM_TYPE,
+        model: row.MODEL,
         dateFrom,
         dateTo,
-        model: row.MODEL,
       });
       const res = await fetch(`${API_BASE}/api/drr-electronics-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки VIN');
@@ -243,11 +231,7 @@ export default function DefectElectronicsTopPage() {
     const exportData = vinData.map(v => ({
       VIN: v.VIN,
       Модель: v.MODEL,
-      В_ремзоне: v.IN_REMZONE ? 'Да' : 'Нет',
-      Время_дефекта: v.DEFECT_TIME || '',
-      Зашёл: v.REM_IN || '',
-      Вышел: v.REM_OUT || '',
-      Время_в_ремзоне: v.REM_DURATION || '',
+      Комментарий: v.COMMENT,
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -264,46 +248,12 @@ export default function DefectElectronicsTopPage() {
       const summary = data.map(row => ({
         MPP: row.MPP,
         Модель: row.MODEL,
-        'Кол-во авто': row.VIN_COUNT || 0,
+        'Кол-во авто': row.VIN_COUNT,
         'Кол-во дефектов': row.DEFECT_COUNT,
         'DPU per 1000': row.DPU,
-        'Доля в ремзоне, %': row.REMZONE_PERCENT || '0.00',
       }));
       const wsSummary = XLSX.utils.json_to_sheet(summary);
       XLSX.utils.book_append_sheet(wb, wsSummary, 'Топ MPP');
-
-      for (let row of data) {
-        try {
-          const params = new URLSearchParams({
-            partName: row.PART_NAME,
-            problemType: row.PROBLEM_TYPE,
-            dateFrom,
-            dateTo,
-            model: row.MODEL,
-          });
-          const res = await fetch(`${API_BASE}/api/drr-electronics-vins?${params.toString()}`);
-          if (res.ok) {
-            const vins = await res.json();
-            if (vins.length > 0) {
-              const vinExport = vins.map(v => ({
-                VIN: v.VIN,
-                Модель: v.MODEL,
-                В_ремзоне: v.IN_REMZONE ? 'Да' : 'Нет',
-                Время_дефекта: v.DEFECT_TIME || '',
-                Зашёл: v.REM_IN || '',
-                Вышел: v.REM_OUT || '',
-                Время_в_ремзоне: v.REM_DURATION || '',
-              }));
-              const wsVin = XLSX.utils.json_to_sheet(vinExport);
-              let sheetName = `VIN ${row.MPP}`.substring(0, 31);
-              XLSX.utils.book_append_sheet(wb, wsVin, sheetName);
-            }
-          }
-        } catch (err) {
-          console.warn(`Не удалось загрузить VIN для ${row.MPP}`);
-        }
-      }
-
       const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       saveAs(new Blob([buf], { type: 'application/octet-stream' }), 'Топ_дефектов_электроники.xlsx');
     } catch (err) {
@@ -311,14 +261,6 @@ export default function DefectElectronicsTopPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleToggleRow = (mpp) => {
-    setHiddenRows(prev => ({ ...prev, [mpp]: !prev[mpp] }));
-  };
-
-  const showAllRows = () => {
-    setHiddenRows({});
   };
 
   return (
@@ -353,7 +295,6 @@ export default function DefectElectronicsTopPage() {
               placeholder="Все"
             />
           </label>
-          
           <div style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
             <button onClick={loadData} disabled={loading} style={buttonStyle}>
               {loading ? '⏳ Загрузка...' : '▶ Загрузить'}
@@ -369,133 +310,69 @@ export default function DefectElectronicsTopPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
                 <tr style={{ backgroundColor: '#F9FAFB' }}>
-                  <th style={thStyle}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>MPP</span>
-                      {hiddenCount > 0 && (
-                        <button
-                          onClick={showAllRows}
-                          title="Показать все скрытые строки"
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: '#60A5FA',
-                            cursor: 'pointer',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 4,
-                          }}
-                        >
-                          <span>👁️</span> {hiddenCount}
-                        </button>
-                      )}
-                    </div>
-                  </th>
+                  <th style={thStyle}>MPP</th>
                   <th style={thStyle}>Модель</th>
                   <th style={thStyle}>Кол-во авто</th>
                   <th style={thStyle}>Кол-во дефектов</th>
                   <th style={thStyle}>DPU per 1000</th>
-                  <th style={thStyle}>Доля в ремзоне, %</th>
                   <th style={thStyle}>Пост внесения</th>
                   <th style={thStyle}></th>
                 </tr>
               </thead>
               <tbody>
-                {data.map((row, idx) => {
-                  if (hiddenRows[row.MPP]) return null;
-                  return (
-                    <React.Fragment key={row.MPP}>
-                      <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                        <td style={tdStyle}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleRow(row.MPP);
-                              }}
-                              title="Свернуть строку"
-                              style={{
-                                background: 'transparent',
-                                border: 'none',
-                                color: '#D1D5DB',
-                                cursor: 'pointer',
-                                fontSize: 14,
-                                padding: 0,
-                                lineHeight: 1,
-                                width: 18,
-                                textAlign: 'center',
-                              }}
-                            >
-                              ▾
-                            </button>
-                            <span>{row.MPP}</span>
-                          </div>
-                        </td>
-                        <td style={{ ...tdStyle, fontSize: '10px' }}>{row.MODEL}</td>
-                        <td style={{ ...tdStyle, textAlign: 'center' }}>{row.VIN_COUNT}</td>
-                        <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DEFECT_COUNT}</td>
-                        <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DPU}</td>
-                        <td style={{ ...tdStyle, textAlign: 'center' }}>{row.REMZONE_PERCENT || '0.00'}</td>
-                        <td style={tdStyle}>{row.POST_NAME}</td>
-                        <td style={tdStyle}>
-                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                            <button onClick={() => handleToggleMpp(row)} style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}>
-                              {expandedMpp === row.MPP ? 'Скрыть VIN' : 'VIN'}
-                            </button>
+                {data.map((row, idx) => (
+                  <React.Fragment key={row.MPP}>
+                    <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                      <td style={tdStyle}>{row.MPP}</td>
+                      <td style={{ ...tdStyle, fontSize: '10px' }}>{row.MODEL}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center' }}>{row.VIN_COUNT}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DEFECT_COUNT}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DPU}</td>
+                      <td style={tdStyle}>{row.POST_NAME}</td>
+                      <td style={tdStyle}>
+                        <button onClick={() => handleToggleMpp(row)} style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}>
+                          {expandedMpp === row.MPP ? 'Скрыть VIN' : 'VIN'}
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedMpp === row.MPP && (
+                      <tr>
+                        <td colSpan={7} style={{ padding: 0 }}>
+                          <div style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8, margin: '8px 0' }}>
+                            {vinLoading ? (
+                              <p>Загрузка VIN...</p>
+                            ) : (
+                              <>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                  <span style={{ fontWeight: 600 }}>VIN для "{row.MPP}" ({vinData.length} шт.)</span>
+                                  <button onClick={exportVins} style={{ ...buttonStyle, background: '#059669', padding: '4px 10px', fontSize: 12 }}>📊 Экспорт VIN</button>
+                                </div>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                                  <thead>
+                                    <tr style={{ backgroundColor: '#E5E7EB' }}>
+                                      <th style={thStyle}>VIN</th>
+                                      <th style={thStyle}>Модель</th>
+                                      <th style={thStyle}>Комментарий</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {vinData.map((v, i) => (
+                                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                                        <td style={tdStyle}>{v.VIN}</td>
+                                        <td style={tdStyle}>{v.MODEL}</td>
+                                        <td style={tdStyle}>{v.COMMENT}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
-                      {expandedMpp === row.MPP && (
-                        <tr>
-                          <td colSpan={8} style={{ padding: 0 }}>
-                            <div style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8, margin: '8px 0' }}>
-                              {vinLoading ? (
-                                <p>Загрузка VIN...</p>
-                              ) : (
-                                <>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                    <span style={{ fontWeight: 600 }}>VIN для "{row.MPP}" ({vinData.length} шт.)</span>
-                                    <button onClick={exportVins} style={{ ...buttonStyle, background: '#059669', padding: '4px 10px', fontSize: 12 }}>📊 Экспорт VIN</button>
-                                  </div>
-                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                                    <thead>
-                                      <tr style={{ backgroundColor: '#E5E7EB' }}>
-                                        <th style={thStyle}>VIN</th>
-                                        <th style={thStyle}>Модель</th>
-                                        <th style={thStyle}>В ремзоне</th>
-                                        <th style={thStyle}>Время дефекта</th>
-                                        <th style={thStyle}>Зашёл</th>
-                                        <th style={thStyle}>Вышел</th>
-                                        <th style={thStyle}>Время в ремзоне</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {vinData.map((v, i) => (
-                                        <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                                          <td style={tdStyle}>{v.VIN}</td>
-                                          <td style={tdStyle}>{v.MODEL}</td>
-                                          <td style={{ ...tdStyle, textAlign: 'center', color: v.IN_REMZONE ? '#DC2626' : '#059669', fontWeight: 600 }}>
-                                            {v.IN_REMZONE ? 'Да' : 'Нет'}
-                                          </td>
-                                          <td style={tdStyle}>{v.DEFECT_TIME || '—'}</td>
-                                          <td style={tdStyle}>{v.REM_IN || '—'}</td>
-                                          <td style={tdStyle}>{v.REM_OUT || '—'}</td>
-                                          <td style={tdStyle}>{v.REM_DURATION || '—'}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
+                    )}
+                  </React.Fragment>
+                ))}
               </tbody>
             </table>
           </div>

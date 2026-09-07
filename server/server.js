@@ -7065,7 +7065,6 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
     }
 
-    // Список постов, относящихся к электронике
     const electronicsPosts = [
       'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
       'PIP2', 'PIP4', 'PIP9',
@@ -7075,14 +7074,12 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
     ];
     const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
 
-    // Фильтр по моделям
     let modelCondition = '';
     if (model && model !== 'ALL') {
       const modelList = model.split(',').map(m => `'${m.trim()}'`).join(',');
       modelCondition = ` AND wo.MODEL IN (${modelList})`;
     }
 
-    // Фильтр по классам
     let gradeCondition = '';
     if (grades && grades !== 'ALL') {
       const gradeList = grades.split(',').map(g => `'${g.trim()}'`).join(',');
@@ -7098,13 +7095,8 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
         COUNT(DISTINCT QM_DEF.VIN) AS VIN_COUNT,
         COUNT(*) AS DEFECT_COUNT,
         ROUND((COUNT(*) * 1000.0) / NULLIF(COUNT(DISTINCT QM_DEF.VIN), 0), 2) AS DPU,
-        ROUND(
-          (COUNT(DISTINCT CASE WHEN rem.vin IS NOT NULL THEN QM_DEF.VIN END) * 100.0) 
-          / NULLIF(COUNT(DISTINCT QM_DEF.VIN), 0), 2
-        ) AS REMZONE_PERCENT,
         QM_DEF.POST_NAME
       FROM (
-        -- Обычные дефекты из трёх таблиц
         SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME
         FROM at_biw_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
@@ -7125,7 +7117,6 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
 
         UNION ALL
 
-        -- Роботизированные дефекты: refuel_log
         SELECT VIN, CREATION_TIME, 
                CASE 
                  WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
@@ -7145,7 +7136,6 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
 
         UNION ALL
 
-        -- Роботизированные дефекты: electrical_check_info
         SELECT VIN, CREATION_TIME,
                CASE 
                  WHEN TYPE = '03' THEN 'CP71 - Прошивка EOL - NG'
@@ -7165,7 +7155,6 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
 
         UNION ALL
 
-        -- Роботизированные дефекты: execute_result
         SELECT VIN, CREATION_TIME,
                CASE 
                  WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
@@ -7182,18 +7171,11 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
           AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
       ) QM_DEF
       JOIN work_order wo ON wo.VIN = QM_DEF.VIN
-      LEFT JOIN (
-        SELECT DISTINCT VIN
-        FROM tm_vhc_test_line_movement
-        WHERE node_nature LIKE 'REP%'
-          AND is_deleted = 0
-      ) rem ON rem.VIN = QM_DEF.VIN
       WHERE DATE(QM_DEF.CREATION_TIME) BETWEEN ? AND ?
         ${modelCondition}
         ${gradeCondition}
       GROUP BY wo.MODEL, QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, QM_DEF.POST_NAME
       ORDER BY DEFECT_COUNT DESC
-      LIMIT 20
     `;
 
     const [rows] = await pool.query(sql, [dateFrom, dateTo]);
@@ -7206,7 +7188,6 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       VIN_COUNT: r.VIN_COUNT,
       DEFECT_COUNT: r.DEFECT_COUNT,
       DPU: r.DPU,
-      REMZONE_PERCENT: r.REMZONE_PERCENT || 0,
       POST_NAME: r.POST_NAME,
     }));
 
@@ -7233,32 +7214,23 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
     ];
     const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
 
-    // Получаем список VIN, соответствующих partName и problemType
     const vinsSql = `
-      SELECT DISTINCT QM_DEF.VIN
+      SELECT DISTINCT QM_DEF.VIN, QM_DEF.COMMENT
       FROM (
-        -- Обычные таблицы
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, POST_NAME
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH AS COMMENT
         FROM at_biw_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, POST_NAME
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH AS COMMENT
         FROM at_paint_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, POST_NAME
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH AS COMMENT
         FROM at_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
 
         UNION ALL
 
-        -- Роботизированные источники
         SELECT VIN,
                CASE 
                  WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
@@ -7270,7 +7242,7 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
                  WHEN OIL_TYPE = 'E7' THEN 'Заправка трансмиссионного – NG'
                END AS PART_NAME,
                'A' AS PROBLEM_TYPE,
-               'ROBOT' AS POST_NAME
+               NULL AS COMMENT
         FROM at_im_refuel_log
         WHERE FILL_RESULT IN ('NOK','NG')
           AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')
@@ -7288,7 +7260,7 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
                  WHEN TYPE = '27' THEN 'APK - Блок управления программируемых специальных функций - Запись кода, не в норме'
                END AS PART_NAME,
                'A' AS PROBLEM_TYPE,
-               'ROBOT' AS POST_NAME
+               NULL AS COMMENT
         FROM at_im_electrical_check_info
         WHERE RESULT IN ('NOK','NG')
           AND TYPE <> '01'
@@ -7304,7 +7276,7 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
                  WHEN EQP_NUM = 'AGMWAHA01' THEN 'Проверка WA - NG'
                END AS PART_NAME,
                'A' AS PROBLEM_TYPE,
-               'ROBOT' AS POST_NAME
+               NULL AS COMMENT
         FROM at_im_execute_result
         WHERE FINAL_RESULT IN ('NOK','NG')
           AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
@@ -7313,50 +7285,38 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
     `;
 
     const [vinRows] = await pool.query(vinsSql, [partName, problemType]);
-    const vins = vinRows.map(r => r.VIN);
+    const vins = [...new Set(vinRows.map(r => r.VIN))];
     if (vins.length === 0) return res.json([]);
 
     const placeholders = vins.map(() => '?').join(',');
 
-    // Получаем детали по каждому VIN: модель, ремзону
-    const detailsSql = `
-      SELECT 
-        wo.VIN,
-        wo.MODEL,
-        CASE WHEN rm.vin IS NOT NULL THEN 1 ELSE 0 END AS IN_REMZONE,
-        rm.rem_in,
-        rm.rem_out,
-        TIMESTAMPDIFF(SECOND, rm.rem_in, rm.rem_out) AS rem_duration_sec
-      FROM work_order wo
-      LEFT JOIN (
-        SELECT 
-          t.vin,
-          MAX(CASE WHEN t.node_nature LIKE 'REP%' THEN t.gmt_create END) AS rem_in,
-          (
-            SELECT MIN(t2.gmt_create)
-            FROM tm_vhc_test_line_movement t2
-            WHERE t2.vin = t.vin
-              AND t2.gmt_create > MAX(CASE WHEN t.node_nature LIKE 'REP%' THEN t.gmt_create END)
-              AND t2.node_nature NOT LIKE 'REP%'
-          ) AS rem_out
-        FROM tm_vhc_test_line_movement t
-        WHERE t.vin IN (${placeholders})
-          AND t.is_deleted = 0
-        GROUP BY t.vin
-      ) rm ON rm.vin = wo.VIN
-      WHERE wo.VIN IN (${placeholders})
+    const modelSql = `
+      SELECT VIN, MODEL
+      FROM work_order
+      WHERE VIN IN (${placeholders})
     `;
+    const [modelRows] = await pool.query(modelSql, vins);
+    const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
 
-    const [details] = await pool.query(detailsSql, vins);
+    const commentSql = `
+      SELECT VIN, MAX(PROBLEM_REPLENISH) AS COMMENT
+      FROM (
+        SELECT VIN, PROBLEM_REPLENISH FROM at_biw_qm_defect_info WHERE VIN IN (${placeholders})
+        UNION ALL
+        SELECT VIN, PROBLEM_REPLENISH FROM at_paint_qm_defect_info WHERE VIN IN (${placeholders})
+        UNION ALL
+        SELECT VIN, PROBLEM_REPLENISH FROM at_qm_defect_info WHERE VIN IN (${placeholders})
+      ) t
+      WHERE PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> ''
+      GROUP BY VIN
+    `;
+    const [commentRows] = await pool.query(commentSql, vins);
+    const commentMap = new Map(commentRows.map(r => [r.VIN, r.COMMENT]));
 
-    const result = details.map(d => ({
-      VIN: d.VIN,
-      MODEL: d.MODEL,
-      IN_REMZONE: d.IN_REMZONE,
-      DEFECT_TIME: dateFrom, // можно заменить на фактическое время дефекта при необходимости
-      REM_IN: d.rem_in,
-      REM_OUT: d.rem_out,
-      REM_DURATION: d.rem_duration_sec ? `${Math.floor(d.rem_duration_sec / 3600)}ч ${Math.floor((d.rem_duration_sec % 3600) / 60)}м` : '',
+    const result = vins.map(vin => ({
+      VIN: vin,
+      MODEL: modelMap.get(vin) || '-',
+      COMMENT: commentMap.get(vin) || '',
     }));
 
     res.json(result);
