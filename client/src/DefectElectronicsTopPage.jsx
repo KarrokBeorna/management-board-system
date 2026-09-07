@@ -155,7 +155,7 @@ export default function DefectElectronicsTopPage() {
   const [dateTo, setDateTo] = useState('');
   const [selectedModels, setSelectedModels] = useState([]);
   const [selectedGrades, setSelectedGrades] = useState([]);
-  const [selectedPosts, setSelectedPosts] = useState(['ROBOT']); // по умолчанию ROBOT
+  const [selectedPosts, setSelectedPosts] = useState(['ROBOT']);
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expandedMppKey, setExpandedMppKey] = useState(null);
@@ -200,6 +200,12 @@ export default function DefectElectronicsTopPage() {
     }
   };
 
+  useEffect(() => {
+    if (dateFrom && dateTo) {
+      loadData();
+    }
+  }, [dateFrom, dateTo, selectedModels, selectedGrades, selectedPosts]);
+
   const loadVinsAndTopMpps = async (row, idx) => {
     const key = `${row.MPP}_${row.POST_NAME}_${idx}`;
     setExpandedMppKey(key);
@@ -209,19 +215,17 @@ export default function DefectElectronicsTopPage() {
     try {
       const params = new URLSearchParams({
         partName: row.PART_NAME,
-        problemType: row.PROBLEM_TYPE,
+        problemType: row.PROBLEM_TYPE || '',
         model: row.MODEL,
         dateFrom,
         dateTo,
       });
 
-      // Запрос списка VIN
       const vinsRes = await fetch(`${API_BASE}/api/drr-electronics-vins?${params.toString()}`);
       if (!vinsRes.ok) throw new Error('Ошибка загрузки VIN');
       const vinsJson = await vinsRes.json();
       setVinData(vinsJson);
 
-      // Запрос топа MPP для этих VIN
       const topMppRes = await fetch(`${API_BASE}/api/drr-electronics-vins-top-mpp?${params.toString()}`);
       if (!topMppRes.ok) throw new Error('Ошибка загрузки топ MPP');
       const topMppJson = await topMppRes.json();

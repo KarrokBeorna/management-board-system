@@ -7065,6 +7065,7 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
     }
 
+    // Список постов электроники
     const allElectronicsPosts = [
       'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
       'PIP2', 'PIP4', 'PIP9',
@@ -7084,7 +7085,7 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
     const includeRobot = selectedPosts.includes('ALL') || selectedPosts.includes('ROBOT');
     const includeRegular = selectedPosts.includes('ALL') || selectedPosts.some(p => allElectronicsPosts.includes(p));
 
-    // Блоки SQL
+    // Блоки SQL для роботов
     const robotBlocks = [];
     if (includeRobot) {
       // refuel_log
@@ -7145,6 +7146,7 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       `);
     }
 
+    // Блоки SQL для обычных таблиц (только оффлайн)
     const regularBlocks = [];
     if (includeRegular) {
       const postListStr = allElectronicsPosts.map(p => `'${p}'`).join(',');
@@ -7195,12 +7197,20 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       gradeCondition = ` AND QM_DEF.PROBLEM_GRADE IN (${gradeList})`;
     }
 
-    // Общее количество VIN, прошедших CP72 (для DPU)
+    // Общее количество VIN, прошедших CP72, с учётом модели
+    let cp72ModelCondition = '';
+    if (model && model !== 'ALL') {
+      const modelList = model.split(',').map(m => `'${m.trim()}'`).join(',');
+      cp72ModelCondition = ` AND wo.MODEL IN (${modelList})`;
+    }
+
     const cp72Sql = `
       SELECT COUNT(DISTINCT tm.vin) AS total_cp72
       FROM ti_mes_movement tm
+      JOIN work_order wo ON wo.VIN = tm.vin
       WHERE tm.uloc_no = 'CP72'
         AND tm.scan_time >= ? AND tm.scan_time <= ?
+        ${cp72ModelCondition}
     `;
     const [cp72Rows] = await mesPool.query(cp72Sql, [dateFrom, dateTo]);
     const totalCp72 = cp72Rows[0]?.total_cp72 || 0;
@@ -7355,11 +7365,11 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
 app.get('/api/drr-electronics-vins', async (req, res) => {
   try {
     const { partName, problemType, model, dateFrom, dateTo } = req.query;
-    if (!partName || !problemType || !model || !dateFrom || !dateTo) {
+    // problemType больше не обязателен
+    if (!partName || !model || !dateFrom || !dateTo) {
       return res.status(400).json({ error: 'Недостаточно параметров' });
     }
 
-    // Список постов электроники для обычных таблиц
     const electronicsPosts = [
       'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
       'PIP2', 'PIP4', 'PIP9',
@@ -7369,7 +7379,7 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
     ];
     const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
 
-    // Запрос для роботизированных источников: refuel_log
+    // Роботы: refuel_log
     const refuelSql = `
       SELECT VIN, MODEL, NULL AS COMMENT
       FROM (
@@ -7392,7 +7402,7 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
       WHERE r.part_name = ? AND r.problem_type = ?
     `;
 
-    // Запрос для роботизированных источников: electrical_check_info
+    // Роботы: electrical_check_info
     const electricalSql = `
       SELECT VIN, MODEL, NULL AS COMMENT
       FROM (
@@ -7414,7 +7424,7 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
       WHERE e.part_name = ? AND e.problem_type = ?
     `;
 
-    // Запрос для роботизированных источников: execute_result
+    // Роботы: execute_result
     const executeSql = `
       SELECT VIN, MODEL, NULL AS COMMENT
       FROM (
@@ -7435,7 +7445,7 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
       WHERE ex.part_name = ? AND ex.problem_type = ?
     `;
 
-    // Запрос для обычных таблиц (только оффлайн)
+    // Обычные таблицы (только оффлайн)
     const regularSql = `
       SELECT VIN, MODEL, MAX(PROBLEM_REPLENISH) AS COMMENT
       FROM (
@@ -7459,16 +7469,13 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
       GROUP BY VIN, MODEL
     `;
 
-    // Выполняем все запросы параллельно
     const [refuelRows] = await pool.query(refuelSql, [partName, problemType]);
     const [electricalRows] = await pool.query(electricalSql, [partName, problemType]);
     const [executeRows] = await pool.query(executeSql, [partName, problemType]);
     const [regularRows] = await pool.query(regularSql, [partName, problemType]);
 
-    // Объединяем результаты
     const allRows = [...refuelRows, ...electricalRows, ...executeRows, ...regularRows];
 
-    // Убираем дубликаты по VIN (оставляем первый, комментарий объединяем, если есть)
     const vinMap = new Map();
     allRows.forEach(row => {
       if (!vinMap.has(row.VIN)) {
@@ -7485,8 +7492,7 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
       }
     });
 
-    const result = Array.from(vinMap.values());
-    res.json(result);
+    res.json(Array.from(vinMap.values()));
   } catch (err) {
     console.error('Ошибка drr-electronics-vins:', err.message);
     res.status(500).json({ error: err.message });
