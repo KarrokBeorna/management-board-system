@@ -155,6 +155,7 @@ export default function DefectElectronicsTopPage() {
   const [dateTo, setDateTo] = useState('');
   const [selectedModels, setSelectedModels] = useState([]);
   const [selectedGrades, setSelectedGrades] = useState([]);
+  const [selectedPosts, setSelectedPosts] = useState(['ROBOT']); // по умолчанию только ROBOT
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expandedMppKey, setExpandedMppKey] = useState(null);
@@ -163,6 +164,7 @@ export default function DefectElectronicsTopPage() {
 
   const availableModels = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
   const availableGrades = ['A', 'B', 'C'];
+  const availablePosts = ['ROBOT', 'CP7', 'CP8', 'PIP', 'TL', 'REPAIR', 'TEST TRACK'];
 
   useEffect(() => {
     const yesterday = new Date();
@@ -177,12 +179,14 @@ export default function DefectElectronicsTopPage() {
     try {
       const modelsParam = (selectedModels.length === 0 || selectedModels.length === availableModels.length) ? 'ALL' : selectedModels.join(',');
       const gradesParam = (selectedGrades.length === 0 || selectedGrades.length === availableGrades.length) ? 'ALL' : selectedGrades.join(',');
+      const postsParam = (selectedPosts.length === 0 || selectedPosts.length === availablePosts.length) ? 'ALL' : selectedPosts.join(',');
 
       const params = new URLSearchParams({
         dateFrom,
         dateTo,
         model: modelsParam,
         grades: gradesParam,
+        posts: postsParam,
       });
       const res = await fetch(`${API_BASE}/api/drr-electronics-top-defects?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
@@ -195,7 +199,9 @@ export default function DefectElectronicsTopPage() {
     }
   };
 
-  const loadVins = async (row) => {
+  const loadVins = async (row, idx) => {
+    const key = `${row.MPP}_${row.POST_NAME}_${idx}`;
+    setExpandedMppKey(key);
     setVinLoading(true);
     try {
       const params = new URLSearchParams({
@@ -204,6 +210,7 @@ export default function DefectElectronicsTopPage() {
         model: row.MODEL,
         dateFrom,
         dateTo,
+        posts: selectedPosts.join(','),
       });
       const res = await fetch(`${API_BASE}/api/drr-electronics-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки VIN');
@@ -211,6 +218,7 @@ export default function DefectElectronicsTopPage() {
       setVinData(json);
     } catch (err) {
       alert(err.message);
+      setVinData([]);
     } finally {
       setVinLoading(false);
     }
@@ -222,8 +230,7 @@ export default function DefectElectronicsTopPage() {
       setExpandedMppKey(null);
       setVinData([]);
     } else {
-      setExpandedMppKey(key);
-      loadVins(row);
+      loadVins(row, idx);
     }
   };
 
@@ -296,6 +303,15 @@ export default function DefectElectronicsTopPage() {
               placeholder="Все"
             />
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
+            Посты:
+            <MultiSelect
+              options={['ALL', ...availablePosts]}
+              selected={selectedPosts}
+              onChange={setSelectedPosts}
+              placeholder="Все"
+            />
+          </label>
           <div style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
             <button onClick={loadData} disabled={loading} style={buttonStyle}>
               {loading ? '⏳ Загрузка...' : '▶ Загрузить'}
@@ -321,65 +337,59 @@ export default function DefectElectronicsTopPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.map((row, idx) => {
-                  const key = `${row.MPP}_${row.POST_NAME}_${idx}`;
-                  return (
-                    <React.Fragment key={key}>
-                      <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                        <td style={tdStyle}>{row.MPP}</td>
-                        <td style={{ ...tdStyle, fontSize: '10px' }}>{row.MODEL}</td>
-                        <td style={{ ...tdStyle, textAlign: 'center' }}>{row.VIN_COUNT}</td>
-                        <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DEFECT_COUNT}</td>
-                        <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DPU}</td>
-                        <td style={tdStyle}>{row.POST_NAME}</td>
-                        <td style={tdStyle}>
-                          <button
-                            onClick={() => handleToggleMpp(row, idx)}
-                            style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}
-                          >
-                            {expandedMppKey === key ? 'Скрыть VIN' : 'VIN'}
-                          </button>
+                {data.map((row, idx) => (
+                  <React.Fragment key={`${row.MPP}_${row.POST_NAME}_${idx}`}>
+                    <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                      <td style={tdStyle}>{row.MPP}</td>
+                      <td style={{ ...tdStyle, fontSize: '10px' }}>{row.MODEL}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center' }}>{row.VIN_COUNT}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DEFECT_COUNT}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DPU}</td>
+                      <td style={tdStyle}>{row.POST_NAME}</td>
+                      <td style={tdStyle}>
+                        <button onClick={() => handleToggleMpp(row, idx)} style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}>
+                          {expandedMppKey === `${row.MPP}_${row.POST_NAME}_${idx}` ? 'Скрыть VIN' : 'VIN'}
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedMppKey === `${row.MPP}_${row.POST_NAME}_${idx}` && (
+                      <tr>
+                        <td colSpan={7} style={{ padding: 0 }}>
+                          <div style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8, margin: '8px 0' }}>
+                            {vinLoading ? (
+                              <p>Загрузка VIN...</p>
+                            ) : (
+                              <>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                  <span style={{ fontWeight: 600 }}>VIN для "{row.MPP}" ({vinData.length} шт.)</span>
+                                  <button onClick={exportVins} style={{ ...buttonStyle, background: '#059669', padding: '4px 10px', fontSize: 12 }}>📊 Экспорт VIN</button>
+                                </div>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                                  <thead>
+                                    <tr style={{ backgroundColor: '#E5E7EB' }}>
+                                      <th style={thStyle}>VIN</th>
+                                      <th style={thStyle}>Модель</th>
+                                      <th style={thStyle}>Комментарий</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {vinData.map((v, i) => (
+                                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                                        <td style={tdStyle}>{v.VIN}</td>
+                                        <td style={tdStyle}>{v.MODEL}</td>
+                                        <td style={tdStyle}>{v.COMMENT}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
-                      {expandedMppKey === key && (
-                        <tr>
-                          <td colSpan={7} style={{ padding: 0 }}>
-                            <div style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8, margin: '8px 0' }}>
-                              {vinLoading ? (
-                                <p>Загрузка VIN...</p>
-                              ) : (
-                                <>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                    <span style={{ fontWeight: 600 }}>VIN для "{row.MPP}" ({vinData.length} шт.)</span>
-                                    <button onClick={exportVins} style={{ ...buttonStyle, background: '#059669', padding: '4px 10px', fontSize: 12 }}>📊 Экспорт VIN</button>
-                                  </div>
-                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                                    <thead>
-                                      <tr style={{ backgroundColor: '#E5E7EB' }}>
-                                        <th style={thStyle}>VIN</th>
-                                        <th style={thStyle}>Модель</th>
-                                        <th style={thStyle}>Комментарий</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {vinData.map((v, i) => (
-                                        <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                                          <td style={tdStyle}>{v.VIN}</td>
-                                          <td style={tdStyle}>{v.MODEL}</td>
-                                          <td style={tdStyle}>{v.COMMENT}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
+                    )}
+                  </React.Fragment>
+                ))}
               </tbody>
             </table>
           </div>
