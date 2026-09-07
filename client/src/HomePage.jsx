@@ -19,7 +19,7 @@ import DrrCp7DashboardPage from './assets/cp7drr.png';
 import cp7historyPreview from './assets/cp7hist.png'; 
 import DrrCp8DashboardPage from './assets/cp8drr.png'; 
 import drrTestlinePreview from './assets/tldrr.png';
-import dailyDashboardPreview from './assets/tldrr.png'; // уже есть в файле
+import DrrPIPDashboardPage from './assets/tldrr.png'; // уже есть в файле
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -338,7 +338,7 @@ export default function HomePage() {
     { to: "/drr-cp7-history", imgSrc: cp7historyPreview, caption: "DRR CP7 History", accentColor: "#6366F1" },
     { to: "/drr-cp8-dashboard", imgSrc: DrrCp8DashboardPage, caption: "DRR CP8 Dashboard", accentColor: "#8B5CF6" },
     { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR Testline Dashboard", accentColor: "#0ea5e9" },
-    //{ to: "/drr-pip-dashboard", imgSrc: drrPipPreview, caption: "PIP DRR Dashboard", accentColor: "#0EA5E9" }
+    //{ to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "PIP DRR Dashboard", accentColor: "#0EA5E9" }
   ];
 
   const allServiceCards = [
