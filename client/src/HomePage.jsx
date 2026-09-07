@@ -20,7 +20,7 @@ import cp7historyPreview from './assets/cp7hist.png';
 import DrrCp8DashboardPage from './assets/cp8drr.png'; // замените на реальное имя файла
 import drrTestlinePreview from './assets/tldrr.png';
 import DrrPIPDashboardPage from './assets/drrpip.png'; // уже есть в файле
-import electronicsPreview from './assets/123.png'; // замените на реальное имя файла
+import electronicsPreview from './assets/elec.png'; // замените на реальное имя файла
 
 // ====== СТИЛИ ======
 const sectionStyle = {
