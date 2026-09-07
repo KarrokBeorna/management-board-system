@@ -7352,6 +7352,147 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
   }
 });
 
+app.get('/api/drr-electronics-vins', async (req, res) => {
+  try {
+    const { partName, problemType, model, dateFrom, dateTo } = req.query;
+    if (!partName || !problemType || !model || !dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'Недостаточно параметров' });
+    }
+
+    // Список постов электроники для обычных таблиц
+    const electronicsPosts = [
+      'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
+      'PIP2', 'PIP4', 'PIP9',
+      '360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final',
+      'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up',
+      'REPAIR VERIFICATION', 'TRACK', 'ROLL'
+    ];
+    const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
+
+    // Запрос для роботизированных источников: refuel_log
+    const refuelSql = `
+      SELECT VIN, MODEL, NULL AS COMMENT
+      FROM (
+        SELECT VIN, 
+               CASE 
+                 WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
+                 WHEN OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
+                 WHEN OIL_TYPE = 'CL1' THEN 'Заправка антифриза - NG'
+                 WHEN OIL_TYPE = 'WW' THEN 'Заправка омывайки - NG'
+                 WHEN OIL_TYPE = 'PREAC' THEN 'Тест утечки кондиц. – NG'
+                 WHEN OIL_TYPE = 'PREBK' THEN 'Тест утечки тормозной – NG'
+                 WHEN OIL_TYPE = 'E7' THEN 'Заправка трансмиссионного – NG'
+               END AS part_name,
+               '' AS problem_type
+        FROM at_im_refuel_log
+        WHERE FILL_RESULT IN ('NOK','NG')
+          AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')
+      ) r
+      JOIN work_order wo ON wo.VIN = r.VIN
+      WHERE r.part_name = ? AND r.problem_type = ?
+    `;
+
+    // Запрос для роботизированных источников: electrical_check_info
+    const electricalSql = `
+      SELECT VIN, MODEL, NULL AS COMMENT
+      FROM (
+        SELECT VIN,
+               CASE 
+                 WHEN TYPE = '03' OR TYPE = '18' THEN 'Прошивка EOL - NG'
+                 WHEN TYPE = '05' THEN 'ЭП4К - Проверка TMPS – NG'
+                 WHEN TYPE = '17' THEN 'Запись - Прошивка FLASH – NG'
+                 WHEN TYPE = '21' THEN 'МДВШ - Прошивка TMPS - NG'
+                 WHEN TYPE = '26' THEN 'ERA - Прошивка ERA - NG'
+                 WHEN TYPE = '27' THEN 'APK - Блок управления программируемых специальных функций - Запись кода, не в норме'
+               END AS part_name,
+               '' AS problem_type
+        FROM at_im_electrical_check_info
+        WHERE RESULT IN ('NOK','NG')
+          AND TYPE <> '01'
+      ) e
+      JOIN work_order wo ON wo.VIN = e.VIN
+      WHERE e.part_name = ? AND e.problem_type = ?
+    `;
+
+    // Запрос для роботизированных источников: execute_result
+    const executeSql = `
+      SELECT VIN, MODEL, NULL AS COMMENT
+      FROM (
+        SELECT VIN,
+               CASE 
+                 WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
+                 WHEN EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
+                 WHEN EQP_NUM = 'AGMRB01' THEN 'Проверка R&B - NG'
+                 WHEN EQP_NUM = 'AGMTPMS01' THEN 'Проверка TMPS – NG'
+                 WHEN EQP_NUM = 'AGMWAHA01' THEN 'Проверка WA - NG'
+               END AS part_name,
+               '' AS problem_type
+        FROM at_im_execute_result
+        WHERE FINAL_RESULT IN ('NOK','NG')
+          AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
+      ) ex
+      JOIN work_order wo ON wo.VIN = ex.VIN
+      WHERE ex.part_name = ? AND ex.problem_type = ?
+    `;
+
+    // Запрос для обычных таблиц (только оффлайн)
+    const regularSql = `
+      SELECT VIN, MODEL, MAX(PROBLEM_REPLENISH) AS COMMENT
+      FROM (
+        SELECT VIN, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type, PROBLEM_REPLENISH
+        FROM at_biw_qm_defect_info
+        WHERE POST_NAME IN (${postListStr})
+          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+        UNION ALL
+        SELECT VIN, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type, PROBLEM_REPLENISH
+        FROM at_paint_qm_defect_info
+        WHERE POST_NAME IN (${postListStr})
+          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+        UNION ALL
+        SELECT VIN, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type, PROBLEM_REPLENISH
+        FROM at_qm_defect_info
+        WHERE POST_NAME IN (${postListStr})
+          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+      ) reg
+      JOIN work_order wo ON wo.VIN = reg.VIN
+      WHERE reg.part_name = ? AND reg.problem_type = ?
+      GROUP BY VIN, MODEL
+    `;
+
+    // Выполняем все запросы параллельно
+    const [refuelRows] = await pool.query(refuelSql, [partName, problemType]);
+    const [electricalRows] = await pool.query(electricalSql, [partName, problemType]);
+    const [executeRows] = await pool.query(executeSql, [partName, problemType]);
+    const [regularRows] = await pool.query(regularSql, [partName, problemType]);
+
+    // Объединяем результаты
+    const allRows = [...refuelRows, ...electricalRows, ...executeRows, ...regularRows];
+
+    // Убираем дубликаты по VIN (оставляем первый, комментарий объединяем, если есть)
+    const vinMap = new Map();
+    allRows.forEach(row => {
+      if (!vinMap.has(row.VIN)) {
+        vinMap.set(row.VIN, {
+          VIN: row.VIN,
+          MODEL: row.MODEL,
+          COMMENT: row.COMMENT || '',
+        });
+      } else {
+        const existing = vinMap.get(row.VIN);
+        if (row.COMMENT && !existing.COMMENT.includes(row.COMMENT)) {
+          existing.COMMENT += (existing.COMMENT ? '; ' : '') + row.COMMENT;
+        }
+      }
+    });
+
+    const result = Array.from(vinMap.values());
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка drr-electronics-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок
