@@ -338,8 +338,8 @@ export default function HomePage() {
     { to: "/tl-map", imgSrc: tlMapPreview, caption: "TL Map", accentColor: "#14B8A6" },
     { to: "/drr-cp7-dashboard", imgSrc: DrrCp7DashboardPage, caption: "DRR CP7 Dashboard", accentColor: "#6366F1" },
     { to: "/drr-cp7-history", imgSrc: cp7historyPreview, caption: "DRR CP7 History", accentColor: "#6366F1" },
-    { to: "/drr-cp8-dashboard", imgSrc: DrrCp8DashboardPage, caption: "DRR CP8 Dashboard", accentColor: "#8B5CF6" },
-    { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR Testline Dashboard", accentColor: "#0ea5e9" },
+    { to: "/drr-cp8-dashboard", imgSrc: DrrCp8DashboardPage, caption: "DRR CPFinal Dashboard", accentColor: "#8B5CF6" },
+    { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR ADAS Dashboard", accentColor: "#0ea5e9" },
     { to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "PIP DRR Dashboard", accentColor: "#0EA5E9" },
     { to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Electronics Defects Top", accentColor: "#8B5CF6" },
     
