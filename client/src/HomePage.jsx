@@ -341,7 +341,7 @@ export default function HomePage() {
     { to: "/drr-cp8-dashboard", imgSrc: DrrCp8DashboardPage, caption: "DRR CP8 Dashboard", accentColor: "#8B5CF6" },
     { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR Testline Dashboard", accentColor: "#0ea5e9" },
     { to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "PIP DRR Dashboard", accentColor: "#0EA5E9" },
-    { to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Топ дефектов электроники", accentColor: "#8B5CF6" },
+    { to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Electronics Defects Top", accentColor: "#8B5CF6" },
     
   ];
 
