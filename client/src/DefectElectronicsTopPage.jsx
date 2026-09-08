@@ -163,6 +163,12 @@ export default function DefectElectronicsTopPage() {
   const [vinTopMpps, setVinTopMpps] = useState([]);
   const [vinLoading, setVinLoading] = useState(false);
 
+  // Новые состояния для модального окна дефектов VIN
+  const [showVinDefectsModal, setShowVinDefectsModal] = useState(false);
+  const [vinDefectsData, setVinDefectsData] = useState([]);
+  const [vinDefectsLoading, setVinDefectsLoading] = useState(false);
+  const [selectedVin, setSelectedVin] = useState('');
+
   const availableModels = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
   const availableGrades = ['A', 'B', 'C'];
   const availablePosts = ['ROBOT', 'CP7', 'CP8', 'PIP', 'TL', 'REPAIR', 'TEST TRACK'];
@@ -250,12 +256,30 @@ export default function DefectElectronicsTopPage() {
     }
   };
 
+  // Функция загрузки дефектов конкретного VIN
+  const loadVinDefects = async (vin) => {
+    setSelectedVin(vin);
+    setShowVinDefectsModal(true);
+    setVinDefectsLoading(true);
+    try {
+      const params = new URLSearchParams({ vin, dateFrom, dateTo });
+      const res = await fetch(`${API_BASE}/api/drr-electronics-vin-defects?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки дефектов VIN');
+      const json = await res.json();
+      setVinDefectsData(json);
+    } catch (err) {
+      alert(err.message);
+      setVinDefectsData([]);
+    } finally {
+      setVinDefectsLoading(false);
+    }
+  };
+
   const exportVins = () => {
     if (vinData.length === 0) return;
     const exportData = vinData.map(v => ({
       VIN: v.VIN,
       Модель: v.MODEL,
-      Комментарий: v.COMMENT,
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -385,15 +409,18 @@ export default function DefectElectronicsTopPage() {
                                     <tr style={{ backgroundColor: '#E5E7EB' }}>
                                       <th style={thStyle}>VIN</th>
                                       <th style={thStyle}>Модель</th>
-                                      <th style={thStyle}>Комментарий</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {vinData.map((v, i) => (
                                       <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                                        <td style={tdStyle}>{v.VIN}</td>
+                                        <td
+                                          onClick={() => loadVinDefects(v.VIN)}
+                                          style={{ ...tdStyle, cursor: 'pointer', color: '#2563EB', textDecoration: 'underline' }}
+                                        >
+                                          {v.VIN}
+                                        </td>
                                         <td style={tdStyle}>{v.MODEL}</td>
-                                        <td style={tdStyle}>{v.COMMENT}</td>
                                       </tr>
                                     ))}
                                   </tbody>
@@ -434,6 +461,55 @@ export default function DefectElectronicsTopPage() {
           <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Нет данных</p>
         )}
       </div>
+
+      {/* Модальное окно дефектов VIN */}
+      {showVinDefectsModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 2000,
+        }} onClick={() => setShowVinDefectsModal(false)}>
+          <div style={{
+            backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24,
+            width: '90%', maxWidth: 700, maxHeight: '80vh',
+            display: 'flex', flexDirection: 'column',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+                Дефекты VIN: {selectedVin}
+              </h3>
+              <button onClick={() => setShowVinDefectsModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }}>×</button>
+            </div>
+            {vinDefectsLoading ? (
+              <p>Загрузка...</p>
+            ) : (
+              <div style={{ overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#F9FAFB' }}>
+                      <th style={thStyle}>MPP</th>
+                      <th style={thStyle}>Модель</th>
+                      <th style={thStyle}>Кол-во</th>
+                      <th style={thStyle}>Комментарий</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vinDefectsData.map((d, i) => (
+                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                        <td style={tdStyle}>{d.MPP}</td>
+                        <td style={tdStyle}>{d.MODEL}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center' }}>{d.DEFECT_COUNT}</td>
+                        <td style={tdStyle}>{d.COMMENT}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
