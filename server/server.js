@@ -7277,7 +7277,6 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
 
     const finalProblemType = problemType || '';
 
-    // Список постов электроники (для отбора обычных таблиц по офлайн-дефектам)
     const electronicsPosts = [
       'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
       'PIP2', 'PIP4', 'PIP9',
@@ -7287,13 +7286,13 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
     ];
     const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
 
-    // === Шаг 1: находим VIN с заданным электронным дефектом ===
+    // === Шаг 1: находим VIN с заданным электронным дефектом,
+    // ОБЯЗАТЕЛЬНО с учётом модели и периода дат ===
 
-    // Роботы
     const robotVinsSql = `
-      SELECT VIN
+      SELECT r.VIN AS VIN
       FROM (
-        SELECT VIN,
+        SELECT VIN, CREATION_TIME,
                CASE
                  WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
                  WHEN OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
@@ -7310,7 +7309,7 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
 
         UNION ALL
 
-        SELECT VIN,
+        SELECT VIN, CREATION_TIME,
                CASE
                  WHEN \`TYPE\` = '03' OR \`TYPE\` = '18' THEN 'Прошивка EOL - NG'
                  WHEN \`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
@@ -7326,7 +7325,7 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
 
         UNION ALL
 
-        SELECT VIN,
+        SELECT VIN, CREATION_TIME,
                CASE
                  WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
                  WHEN EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
@@ -7339,47 +7338,52 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
         WHERE FINAL_RESULT IN ('NOK','NG')
           AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
       ) r
+      JOIN work_order wo ON wo.VIN = r.VIN
       WHERE r.part_name = ? AND r.problem_type = ?
+        AND wo.MODEL = ?
+        AND DATE(r.CREATION_TIME) BETWEEN ? AND ?
     `;
 
-    // Обычные таблицы (только оффлайн)
     const regularVinsSql = `
-      SELECT VIN
+      SELECT reg.VIN AS VIN
       FROM (
-        SELECT VIN, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type
+        SELECT VIN, CREATION_TIME, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type
         FROM at_biw_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
           AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
-        SELECT VIN, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type
+        SELECT VIN, CREATION_TIME, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type
         FROM at_paint_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
           AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
-        SELECT VIN, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type
+        SELECT VIN, CREATION_TIME, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type
         FROM at_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
           AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
       ) reg
+      JOIN work_order wo ON wo.VIN = reg.VIN
       WHERE reg.part_name = ? AND reg.problem_type = ?
+        AND wo.MODEL = ?
+        AND DATE(reg.CREATION_TIME) BETWEEN ? AND ?
     `;
 
-    const [robotVinsRows] = await pool.query(robotVinsSql, [partName, finalProblemType]);
-    const [regularVinsRows] = await pool.query(regularVinsSql, [partName, finalProblemType]);
+    const vinParams = [partName, finalProblemType, model, dateFrom, dateTo];
+
+    const [robotVinsRows] = await pool.query(robotVinsSql, vinParams);
+    const [regularVinsRows] = await pool.query(regularVinsSql, vinParams);
 
     const vins = [...new Set([...robotVinsRows, ...regularVinsRows].map(r => r.VIN))];
     if (vins.length === 0) return res.json([]);
 
-    // === Шаг 2: топ MPP оффлайн-дефектов для этих VIN ===
-    // ВАЖНО: фильтр по VIN применяется ОДИН раз, после JOIN,
-    // а не в каждой ветке UNION ALL — иначе placeholders дублируются,
-    // а параметров передаётся только один комплект -> ошибка биндинга -> 500.
+    // === Шаг 2: топ MPP оффлайн-дефектов для этих VIN,
+    // тоже в границах того же периода дат ===
     const placeholders = vins.map(() => '?').join(',');
 
     const topMppSql = `
@@ -7388,19 +7392,19 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
         CONCAT(wo.MODEL, ' ', d.PART_NAME, ' ', d.PROBLEM_TYPE) AS MPP,
         COUNT(*) AS CNT
       FROM (
-        SELECT VIN, PART_NAME, PROBLEM_TYPE
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
         FROM at_biw_qm_defect_info
         WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
         FROM at_paint_qm_defect_info
         WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE
+        SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE
         FROM at_qm_defect_info
         WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
@@ -7408,11 +7412,12 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
       ) d
       JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.VIN IN (${placeholders})
+        AND DATE(d.CREATION_TIME) BETWEEN ? AND ?
       GROUP BY wo.MODEL, d.PART_NAME, d.PROBLEM_TYPE
       ORDER BY CNT DESC
     `;
 
-    const [topMppRows] = await pool.query(topMppSql, vins);
+    const [topMppRows] = await pool.query(topMppSql, [...vins, dateFrom, dateTo]);
 
     const result = topMppRows.map(r => ({
       MPP: r.MPP.trim(),
@@ -7428,10 +7433,10 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
 });
 
 
+
 app.get('/api/drr-electronics-vins', async (req, res) => {
   try {
     const { partName, problemType, model, dateFrom, dateTo } = req.query;
-    // problemType не обязателен — для роботов он всегда пустая строка
     if (!partName || !model || !dateFrom || !dateTo) {
       return res.status(400).json({ error: 'Недостаточно параметров' });
     }
@@ -7447,11 +7452,11 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
     const finalProblemType = problemType || '';
 
     // === 1. Роботы: refuel_log ===
-    // ВАЖНО: r.VIN и wo.MODEL указаны явно, во избежание "Column 'VIN' is ambiguous"
+    // ДОБАВЛЕНО: AND wo.MODEL = ?  и  AND DATE(r.CREATION_TIME) BETWEEN ? AND ?
     const refuelSql = `
       SELECT r.VIN AS VIN, wo.MODEL AS MODEL, NULL AS COMMENT
       FROM (
-        SELECT VIN,
+        SELECT VIN, CREATION_TIME,
                CASE
                  WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
                  WHEN OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
@@ -7468,13 +7473,15 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
       ) r
       JOIN work_order wo ON wo.VIN = r.VIN
       WHERE r.part_name = ? AND r.problem_type = ?
+        AND wo.MODEL = ?
+        AND DATE(r.CREATION_TIME) BETWEEN ? AND ?
     `;
 
     // === 2. Роботы: electrical_check_info ===
     const electricalSql = `
       SELECT e.VIN AS VIN, wo.MODEL AS MODEL, NULL AS COMMENT
       FROM (
-        SELECT VIN,
+        SELECT VIN, CREATION_TIME,
                CASE
                  WHEN \`TYPE\` = '03' OR \`TYPE\` = '18' THEN 'Прошивка EOL - NG'
                  WHEN \`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
@@ -7490,13 +7497,15 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
       ) e
       JOIN work_order wo ON wo.VIN = e.VIN
       WHERE e.part_name = ? AND e.problem_type = ?
+        AND wo.MODEL = ?
+        AND DATE(e.CREATION_TIME) BETWEEN ? AND ?
     `;
 
     // === 3. Роботы: execute_result ===
     const executeSql = `
       SELECT ex.VIN AS VIN, wo.MODEL AS MODEL, NULL AS COMMENT
       FROM (
-        SELECT VIN,
+        SELECT VIN, CREATION_TIME,
                CASE
                  WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
                  WHEN EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
@@ -7511,27 +7520,29 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
       ) ex
       JOIN work_order wo ON wo.VIN = ex.VIN
       WHERE ex.part_name = ? AND ex.problem_type = ?
+        AND wo.MODEL = ?
+        AND DATE(ex.CREATION_TIME) BETWEEN ? AND ?
     `;
 
     // === 4. Обычные таблицы (только оффлайн) ===
     const regularSql = `
       SELECT reg.VIN AS VIN, wo.MODEL AS MODEL, MAX(reg.PROBLEM_REPLENISH) AS COMMENT
       FROM (
-        SELECT VIN, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type, PROBLEM_REPLENISH
+        SELECT VIN, CREATION_TIME, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type, PROBLEM_REPLENISH
         FROM at_biw_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
           AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
-        SELECT VIN, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type, PROBLEM_REPLENISH
+        SELECT VIN, CREATION_TIME, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type, PROBLEM_REPLENISH
         FROM at_paint_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
           AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
-        SELECT VIN, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type, PROBLEM_REPLENISH
+        SELECT VIN, CREATION_TIME, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type, PROBLEM_REPLENISH
         FROM at_qm_defect_info
         WHERE POST_NAME IN (${postListStr})
           AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
@@ -7540,17 +7551,20 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
       ) reg
       JOIN work_order wo ON wo.VIN = reg.VIN
       WHERE reg.part_name = ? AND reg.problem_type = ?
+        AND wo.MODEL = ?
+        AND DATE(reg.CREATION_TIME) BETWEEN ? AND ?
       GROUP BY reg.VIN, wo.MODEL
     `;
 
-    const [refuelRows] = await pool.query(refuelSql, [partName, finalProblemType]);
-    const [electricalRows] = await pool.query(electricalSql, [partName, finalProblemType]);
-    const [executeRows] = await pool.query(executeSql, [partName, finalProblemType]);
-    const [regularRows] = await pool.query(regularSql, [partName, finalProblemType]);
+    const params = [partName, finalProblemType, model, dateFrom, dateTo];
+
+    const [refuelRows] = await pool.query(refuelSql, params);
+    const [electricalRows] = await pool.query(electricalSql, params);
+    const [executeRows] = await pool.query(executeSql, params);
+    const [regularRows] = await pool.query(regularSql, params);
 
     const allRows = [...refuelRows, ...electricalRows, ...executeRows, ...regularRows];
 
-    // Убираем дубликаты по VIN, объединяем комментарии
     const vinMap = new Map();
     allRows.forEach(row => {
       if (!vinMap.has(row.VIN)) {
@@ -7573,6 +7587,7 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 
 // ================== ЗАМЕТКИ ==================
