@@ -7686,27 +7686,56 @@ app.get('/api/brigade-report/brigades', async (req, res) => {
 });
 
 // Получение данных для отчёта (гистограмма + топ дефектов без владельца)
+// ================== БРИГАДНЫЙ ОТЧЁТ – ДАННЫЕ ДЛЯ ГИСТОГРАММЫ ==================
 app.get('/api/brigade-report/data', async (req, res) => {
   try {
-    const { dateFrom, dateTo, checkpoint, metric = 'count' } = req.query;
-    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    const { dateFrom, dateTo, checkpoint, metric = 'count', defectType = 'all' } = req.query;
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    }
 
     // Списки постов (как в MppWeeklyTopPage)
-    const cp7Posts = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
-    const cp8Posts = ['CP8', 'CP8 Gate', 'CP8-gate', '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'];
-    const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-    const tlPosts = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'];
+    const cp7Posts = [
+      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+      'REPAIR', 'REPAIR_Final',
+      'EXT1', 'PIP2', 'PIP4', 'PIP9'
+    ];
+    const cp8Posts = [
+      'CP8', 'CP8 Gate', 'CP8-gate',
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
+    ];
+    const pipPosts = [
+      'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+    ];
+    const tlPosts = [
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
+    ];
 
     let postList = [];
     if (!checkpoint || checkpoint === 'ALL') {
       postList = [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts])];
-    } else if (checkpoint === 'CP7') postList = cp7Posts;
-    else if (checkpoint === 'CP8') postList = cp8Posts;
-    else if (checkpoint === 'PIP') postList = pipPosts;
-    else if (checkpoint === 'TL') postList = tlPosts;
+    } else if (checkpoint === 'CP7') {
+      postList = cp7Posts;
+    } else if (checkpoint === 'CP8') {
+      postList = cp8Posts;
+    } else if (checkpoint === 'PIP') {
+      postList = pipPosts;
+    } else if (checkpoint === 'TL') {
+      postList = tlPosts;
+    } else {
+      return res.status(400).json({ error: 'Неверный checkpoint' });
+    }
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    // Количество авто для DPU (CP72)
+    // Условие для типа дефектов
+    let offlineCondition = '1=1'; // все
+    if (defectType === 'offline') {
+      offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 1';
+    } else if (defectType === 'online') {
+      offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 0';
+    }
+
+    // 1. Количество авто, прошедших CP72 (для DPU)
     const [carsResult] = await pool.query(`
       SELECT COUNT(DISTINCT VIN) AS total
       FROM at_om_wiptrackinghistory
@@ -7715,35 +7744,42 @@ app.get('/api/brigade-report/data', async (req, res) => {
     `, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
     const totalCars = carsResult[0]?.total || 0;
 
-    // Все оффлайн-дефекты за период
+    // 2. Все дефекты за период с учётом фильтра
     const defectsSql = `
-      SELECT d.PART_NAME, d.PROBLEM_TYPE, wo.MODEL
+      SELECT 
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        wo.MODEL
       FROM (
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
         FROM at_biw_qm_defect_info
-        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+        WHERE PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+          AND ${offlineCondition}
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
         FROM at_paint_qm_defect_info
-        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+        WHERE PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+          AND ${offlineCondition}
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
         FROM at_qm_defect_info
-        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+        WHERE PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+          AND ${offlineCondition}
       ) d
       JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.POST_NAME IN (${postListStr})
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
     `;
+
     const [defectRows] = await pool.query(defectsSql, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
 
-    // Справочник владельцев
+    // 3. Загружаем справочник владельцев
     const [owners] = await notesPool.query(`
       SELECT do.model, do.part_name, do.problem_type, b.name AS brigade_name
       FROM defect_owners do
@@ -7752,13 +7788,15 @@ app.get('/api/brigade-report/data', async (req, res) => {
     const ownerMap = new Map();
     owners.forEach(o => ownerMap.set(`${o.model}|${o.part_name}|${o.problem_type}`, o.brigade_name));
 
-    // Группировка по бригадам
+    // 4. Группировка по бригадам
     const brigadeMap = new Map();
-    let unassigned = 0;
+    let unassignedCount = 0;
     defectRows.forEach(r => {
       const key = `${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
       const brigade = ownerMap.get(key) || 'Бригада не найдена';
-      if (brigade === 'Бригада не найдена') unassigned++;
+      if (brigade === 'Бригада не найдена') {
+        unassignedCount++;
+      }
       brigadeMap.set(brigade, (brigadeMap.get(brigade) || 0) + 1);
     });
 
@@ -7768,9 +7806,122 @@ app.get('/api/brigade-report/data', async (req, res) => {
       count: cnt,
     })).sort((a, b) => b.count - a.count);
 
-    res.json({ histogram, totalCars, unassignedCount: unassigned });
+    res.json({
+      histogram,
+      totalCars,
+      unassignedCount,
+    });
   } catch (err) {
     console.error('Ошибка brigade-report/data:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================== БРИГАДНЫЙ ОТЧЁТ – ТОП ДЕФЕКТОВ БЕЗ ВЛАДЕЛЬЦА ==================
+app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, checkpoint, defectType = 'all' } = req.query;
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    }
+
+    // Списки постов
+    const cp7Posts = [
+      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+      'REPAIR', 'REPAIR_Final',
+      'EXT1', 'PIP2', 'PIP4', 'PIP9'
+    ];
+    const cp8Posts = [
+      'CP8', 'CP8 Gate', 'CP8-gate',
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
+    ];
+    const pipPosts = [
+      'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+    ];
+    const tlPosts = [
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
+    ];
+
+    let postList = [];
+    if (!checkpoint || checkpoint === 'ALL') {
+      postList = [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts])];
+    } else if (checkpoint === 'CP7') {
+      postList = cp7Posts;
+    } else if (checkpoint === 'CP8') {
+      postList = cp8Posts;
+    } else if (checkpoint === 'PIP') {
+      postList = pipPosts;
+    } else if (checkpoint === 'TL') {
+      postList = tlPosts;
+    } else {
+      return res.status(400).json({ error: 'Неверный checkpoint' });
+    }
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    let offlineCondition = '1=1';
+    if (defectType === 'offline') {
+      offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 1';
+    } else if (defectType === 'online') {
+      offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 0';
+    }
+
+    const defectsSql = `
+      SELECT 
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        wo.MODEL,
+        COUNT(*) AS CNT
+      FROM (
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_biw_qm_defect_info
+        WHERE ${offlineCondition}
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_paint_qm_defect_info
+        WHERE ${offlineCondition}
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_qm_defect_info
+        WHERE ${offlineCondition}
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+      ) d
+      JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.POST_NAME IN (${postListStr})
+        AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
+      GROUP BY d.PART_NAME, d.PROBLEM_TYPE, wo.MODEL
+      ORDER BY CNT DESC
+    `;
+
+    const [defectGroups] = await pool.query(defectsSql, [
+      `${dateFrom} 00:00:00`,
+      `${dateTo} 23:59:59`
+    ]);
+
+    const unassigned = [];
+    for (const g of defectGroups) {
+      const [ownerRows] = await notesPool.query(
+        `SELECT id FROM defect_owners WHERE model = ? AND part_name = ? AND problem_type = ? LIMIT 1`,
+        [g.MODEL, g.PART_NAME, g.PROBLEM_TYPE]
+      );
+      if (ownerRows.length === 0) {
+        unassigned.push({
+          mpp: `${g.MODEL} ${g.PART_NAME} ${g.PROBLEM_TYPE}`.trim(),
+          model: g.MODEL,
+          part_name: g.PART_NAME,
+          problem_type: g.PROBLEM_TYPE,
+          count: g.CNT,
+        });
+      }
+    }
+
+    res.json(unassigned.slice(0, 50));
+  } catch (err) {
+    console.error('Ошибка unassigned-defects:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -7988,111 +8139,6 @@ app.post('/api/brigade-report/assign-all-models', async (req, res) => {
   }
 });
 
-// ================== ТОП ДЕФЕКТОВ БЕЗ ВЛАДЕЛЬЦА ==================
-app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
-  try {
-    const { dateFrom, dateTo, checkpoint } = req.query;
-    if (!dateFrom || !dateTo) {
-      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
-    }
-
-    // Списки постов (как в других эндпоинтах)
-    const cp7Posts = [
-      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-      'REPAIR', 'REPAIR_Final',
-      'EXT1', 'PIP2', 'PIP4', 'PIP9'
-    ];
-    const cp8Posts = [
-      'CP8', 'CP8 Gate', 'CP8-gate',
-      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
-    ];
-    const pipPosts = [
-      'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
-    ];
-    const tlPosts = [
-      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
-    ];
-
-    let postList = [];
-    if (!checkpoint || checkpoint === 'ALL') {
-      postList = [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts])];
-    } else if (checkpoint === 'CP7') {
-      postList = cp7Posts;
-    } else if (checkpoint === 'CP8') {
-      postList = cp8Posts;
-    } else if (checkpoint === 'PIP') {
-      postList = pipPosts;
-    } else if (checkpoint === 'TL') {
-      postList = tlPosts;
-    } else {
-      return res.status(400).json({ error: 'Неверный checkpoint' });
-    }
-
-    const postListStr = postList.map(p => `'${p}'`).join(',');
-
-    // Получаем дефекты с группировкой по модели, детали и проблеме
-    const defectsSql = `
-      SELECT 
-        d.PART_NAME,
-        d.PROBLEM_TYPE,
-        wo.MODEL,
-        COUNT(*) AS CNT
-      FROM (
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
-        FROM at_biw_qm_defect_info
-        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-        UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
-        FROM at_paint_qm_defect_info
-        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-        UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
-        FROM at_qm_defect_info
-        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-      ) d
-      JOIN work_order wo ON wo.VIN = d.VIN
-      WHERE d.POST_NAME IN (${postListStr})
-        AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
-      GROUP BY d.PART_NAME, d.PROBLEM_TYPE, wo.MODEL
-      ORDER BY CNT DESC
-    `;
-
-    const [defectGroups] = await pool.query(defectsSql, [
-      `${dateFrom} 00:00:00`,
-      `${dateTo} 23:59:59`
-    ]);
-
-    // Фильтруем: оставляем только те, у которых нет записи в defect_owners
-    const unassigned = [];
-    for (const g of defectGroups) {
-      const [ownerRows] = await notesPool.query(
-        `SELECT id FROM defect_owners WHERE model = ? AND part_name = ? AND problem_type = ? LIMIT 1`,
-        [g.MODEL, g.PART_NAME, g.PROBLEM_TYPE]
-      );
-      if (ownerRows.length === 0) {
-        unassigned.push({
-          mpp: `${g.MODEL} ${g.PART_NAME} ${g.PROBLEM_TYPE}`.trim(),
-          model: g.MODEL,
-          part_name: g.PART_NAME,
-          problem_type: g.PROBLEM_TYPE,
-          count: g.CNT,
-        });
-      }
-    }
-
-    // Возвращаем топ-50 (или можно ограничить по желанию)
-    res.json(unassigned.slice(0, 50));
-  } catch (err) {
-    console.error('Ошибка unassigned-defects:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 
 

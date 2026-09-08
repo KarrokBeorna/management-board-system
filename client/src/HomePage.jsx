@@ -340,9 +340,9 @@ export default function HomePage() {
     { to: "/drr-cp7-history", imgSrc: cp7historyPreview, caption: "DRR CP7 History", accentColor: "#6366F1" },
     { to: "/drr-cp8-dashboard", imgSrc: DrrCp8DashboardPage, caption: "DRR CP8 Dashboard", accentColor: "#8B5CF6" },
     { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR Testline Dashboard", accentColor: "#0ea5e9" },
-    //{ to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "PIP DRR Dashboard", accentColor: "#0EA5E9" }
-    //{ to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Топ дефектов электроники", accentColor: "#8B5CF6" }
-    //{ to: "/brigade-report", imgSrc: brigPreview, caption: "Бригадный отчет", accentColor: "#3B82F6" }
+    { to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "PIP DRR Dashboard", accentColor: "#0EA5E9" },
+    { to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Топ дефектов электроники", accentColor: "#8B5CF6" },
+    
   ];
 
   const allServiceCards = [
@@ -353,6 +353,7 @@ export default function HomePage() {
     { to: "/warranty", imgSrc: warrantyPreview, caption: "Warranty", accentColor: "#10B981" },
     { to: "/holds-sgp", imgSrc: HoldsSgpPage, caption: "Holds СГП", accentColor: "#EF4444" },
     { to: "http://10.27.195.16/reports/024", imgSrc: externalReportPreview, caption: "DRR по заводу", accentColor: "#EF4444" },
+    //{ to: "/brigade-report", imgSrc: brigPreview, caption: "Бригадный отчет", accentColor: "#3B82F6" }
   ];
 
   const filterCards = (cards) => {

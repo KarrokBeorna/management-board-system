@@ -3,12 +3,13 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, LabelList
 } from 'recharts';
+import * as XLSX from 'xlsx';
 
 const API_BASE = '';
 
 /* ===================== БРЕНДБУК ===================== */
 const BRAND = {
-  bg: '#FFFFFF', // фон страницы белый
+  bg: '#FFFFFF',
   cardBg: '#FFFFFF',
   primary: '#2563EB',
   accent: '#F59E0B',
@@ -21,7 +22,7 @@ const BRAND = {
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
 };
 
-/* ============ ВСПОМОГАТЕЛЬНЫЕ СТИЛИ ============ */
+/* ===================== ОБЩИЕ СТИЛИ ===================== */
 const containerStyle = {
   padding: '20px',
   fontFamily: BRAND.fontFamily,
@@ -73,10 +74,22 @@ const tabStyle = (active) => ({
   transition: 'all 0.2s',
 });
 
+const subTabStyle = (active) => ({
+  padding: '8px 20px',
+  borderRadius: 8,
+  border: 'none',
+  fontWeight: 600,
+  fontSize: '1.2rem',
+  background: active ? BRAND.primary : '#E2E8F0',
+  color: active ? '#FFFFFF' : BRAND.textSecondary,
+  cursor: 'pointer',
+  transition: 'all 0.2s',
+});
+
 const cardStyle = {
   backgroundColor: BRAND.cardBg,
   borderRadius: BRAND.radius,
-  padding: 28,
+  padding: 20,
   boxShadow: BRAND.shadow,
   border: `1px solid ${BRAND.border}`,
   flex: 1,
@@ -91,6 +104,7 @@ const inputStyle = {
   border: `1px solid ${BRAND.border}`,
   fontSize: 14,
   background: '#F9FAFB',
+  outline: 'none',
 };
 
 const buttonStyle = {
@@ -104,24 +118,30 @@ const buttonStyle = {
   cursor: 'pointer',
 };
 
+const secondaryButtonStyle = {
+  ...buttonStyle,
+  background: '#10B981',
+};
+
 const thStyle = {
-  padding: '18px 24px',
+  padding: '14px 16px',
   textAlign: 'left',
-  fontWeight: 800,
+  fontWeight: 700,
   color: '#FFFFFF',
   background: BRAND.primary,
-  fontSize: '1.6rem',
+  fontSize: '1.1rem',
   textTransform: 'uppercase',
   position: 'sticky',
   top: 0,
   zIndex: 10,
+  whiteSpace: 'nowrap',
 };
 
 const tdStyle = {
-  padding: '14px 24px',
+  padding: '10px 16px',
   borderBottom: `1px solid ${BRAND.border}`,
   color: BRAND.text,
-  fontSize: '1.6rem',
+  fontSize: '1rem',
 };
 
 const modalOverlayStyle = {
@@ -154,7 +174,12 @@ const modalStyle = {
   border: '1px solid rgba(255,255,255,0.5)',
 };
 
-/* ============ МУЛЬТИСЕЛЕКТ ============ */
+const wideModalStyle = {
+  ...modalStyle,
+  maxWidth: '720px',
+};
+
+/* ===================== МУЛЬТИСЕЛЕКТ ===================== */
 function MultiSelect({ options, selected, onChange, placeholder }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
@@ -258,13 +283,117 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
   );
 }
 
-/* ============ КОМПОНЕНТ ВКЛАДКИ "ОТЧЕТ ПО БРИГАДАМ" ============ */
+/* ===================== МОДАЛЬНОЕ ОКНО ПАРОЛЯ ===================== */
+function PasswordModal({ isOpen, onClose, onSubmit, error, title = 'Введите пароль', subtitle = '' }) {
+  const [passwordInput, setPasswordInput] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = () => {
+    onSubmit(passwordInput);
+    setPasswordInput('');
+  };
+
+  return (
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
+        <div style={{
+          width: '48px',
+          height: '48px',
+          backgroundColor: '#EFF6FF',
+          borderRadius: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '24px',
+          marginBottom: '16px',
+          color: BRAND.primary,
+        }}>
+          🔒
+        </div>
+        <h3 style={{ margin: '0 0 8px 0', fontWeight: 700, fontSize: '1.5rem' }}>{title}</h3>
+        <p style={{ margin: '0 0 20px 0', color: BRAND.textSecondary, fontSize: '0.9rem' }}>{subtitle}</p>
+
+        {error && <p style={{ color: '#EF4444', marginBottom: 10, fontSize: '0.9rem' }}>{error}</p>}
+        <input
+          type="password"
+          value={passwordInput}
+          onChange={(e) => setPasswordInput(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && handleSubmit()}
+          placeholder="Пароль"
+          style={{
+            width: '100%',
+            padding: '12px 16px',
+            borderRadius: '10px',
+            border: `1px solid ${BRAND.border}`,
+            fontSize: '0.95rem',
+            fontFamily: BRAND.fontFamily,
+            color: BRAND.text,
+            backgroundColor: '#F8FAFC',
+            outline: 'none',
+            transition: 'all 0.2s',
+            boxSizing: 'border-box',
+            marginBottom: '16px',
+          }}
+          autoFocus
+        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '12px 24px',
+              borderRadius: '10px',
+              border: `1px solid ${BRAND.border}`,
+              background: '#FFFFFF',
+              color: BRAND.text,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontSize: '0.95rem',
+            }}
+          >
+            Отмена
+          </button>
+          <button
+            onClick={handleSubmit}
+            style={{
+              padding: '12px 24px',
+              borderRadius: '10px',
+              border: 'none',
+              background: BRAND.primary,
+              color: '#FFFFFF',
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontSize: '0.95rem',
+              boxShadow: '0 4px 12px rgba(37,99,235,0.2)',
+            }}
+          >
+            Войти
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== ОТЧЕТ ПО БРИГАДАМ ===================== */
 function BrigadeReport({ brigades, password, executeWithPassword }) {
   const today = new Date();
   const [dateFrom, setDateFrom] = useState(today.toISOString().split('T')[0]);
   const [dateTo, setDateTo] = useState(today.toISOString().split('T')[0]);
   const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
-  const [metric, setMetric] = useState('count'); // 'count' | 'dpu'
+  const [defectType, setDefectType] = useState('all');
+  const [metric, setMetric] = useState('count');
   const [histogramData, setHistogramData] = useState([]);
   const [totalCars, setTotalCars] = useState(0);
   const [unassignedCount, setUnassignedCount] = useState(0);
@@ -282,6 +411,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
         dateTo,
         checkpoint: checkpointParam,
         metric,
+        defectType,
       });
       const res = await fetch(`${API_BASE}/api/brigade-report/data?${params}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
@@ -298,29 +428,29 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
 
   useEffect(() => {
     loadData();
-  }, [dateFrom, dateTo, selectedCheckpoints, metric]);
+  }, [dateFrom, dateTo, selectedCheckpoints, metric, defectType]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
       {/* Фильтры */}
       <div style={{
         display: 'flex',
         flexWrap: 'wrap',
-        gap: 14,
+        gap: 12,
         alignItems: 'center',
-        padding: '20px',
+        padding: '15px',
         backgroundColor: '#F8FAFC',
         borderRadius: BRAND.radius,
       }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Начало:
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
         </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Конец:
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
         </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Чекпоинты:
           <MultiSelect
             options={['ALL', ...availableCheckpoints]}
@@ -328,6 +458,14 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
             onChange={setSelectedCheckpoints}
             placeholder="Все"
           />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Тип дефекта:
+          <select value={defectType} onChange={(e) => setDefectType(e.target.value)} style={inputStyle}>
+            <option value="all">Все</option>
+            <option value="offline">Offline</option>
+            <option value="online">Online</option>
+          </select>
         </label>
         <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
           <button
@@ -355,31 +493,37 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
 
       {/* Гистограмма */}
       <div style={cardStyle}>
-        <h2 style={{ fontSize: '1.8rem', fontWeight: 700, color: BRAND.text, marginBottom: '16px' }}>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
           Дефекты по бригадам {metric === 'dpu' ? '(DPU per 1000)' : '(шт)'}
         </h2>
-        <div style={{ flex: 1, minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '40px', fontSize: '1.8rem' }}>Загрузка...</div>
+            <div style={{ textAlign: 'center', padding: '30px', fontSize: '1.5rem' }}>Загрузка...</div>
+          ) : histogramData.length > 0 ? (
+            <div style={{ height: Math.max(400, histogramData.length * 45) }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={histogramData}
+                  layout="vertical"
+                  margin={{ top: 20, right: 70, left: 40, bottom: 20 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis type="number" domain={[0, metric === 'dpu' ? 10 : 'dataMax']} tick={{ fontSize: 13 }} />
+                  <YAxis type="category" dataKey="category" tick={{ fontSize: 13 }} width={160} />
+                  <Tooltip contentStyle={{ fontSize: '1.2rem' }} />
+                  <Bar dataKey="value" fill={BRAND.primary} barSize={32}>
+                    <LabelList dataKey="value" position="right" style={{ fontSize: '1.1rem', fontWeight: 700, fill: BRAND.text }} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={histogramData}
-                layout="vertical"
-                margin={{ top: 20, right: 60, left: 40, bottom: 20 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis type="number" domain={[0, metric === 'dpu' ? 10 : 'dataMax']} tick={{ fontSize: 14 }} />
-                <YAxis type="category" dataKey="category" tick={{ fontSize: 16 }} width={180} />
-                <Tooltip contentStyle={{ fontSize: '1.5rem' }} />
-                <Bar dataKey="value" fill={BRAND.primary} barSize={40}>
-                  <LabelList dataKey="value" position="right" style={{ fontSize: '1.4rem', fontWeight: 700, fill: BRAND.text }} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <p style={{ textAlign: 'center', padding: '30px', color: BRAND.textSecondary, fontSize: '1.3rem' }}>
+              Нет данных
+            </p>
           )}
         </div>
-        <div style={{ display: 'flex', gap: '20px', marginTop: '16px', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', gap: '20px', marginTop: '10px', justifyContent: 'center', fontSize: '1.1rem' }}>
           <div>Всего авто: <b>{totalCars}</b></div>
           <div>Без владельца: <b>{unassignedCount}</b></div>
         </div>
@@ -388,8 +532,194 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
   );
 }
 
-/* ============ КОМПОНЕНТ ВКЛАДКИ "ВЛАДЕЛЬЦЫ ДЕФЕКТОВ" ============ */
-function DefectOwnersManager({ brigades, password, executeWithPassword }) {
+/* ===================== НАЗНАЧЕНИЕ БРИГАД (основная вкладка владельцев) ===================== */
+function AssignBrigadesPanel({ brigades, password, executeWithPassword, refreshTrigger }) {
+  const today = new Date();
+  const [dateFrom, setDateFrom] = useState(today.toISOString().split('T')[0]);
+  const [dateTo, setDateTo] = useState(today.toISOString().split('T')[0]);
+  const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
+  const [defectType, setDefectType] = useState('all');
+  const [unassignedDefects, setUnassignedDefects] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [rowBrigades, setRowBrigades] = useState({});
+
+  const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
+
+  const loadUnassigned = async () => {
+    setLoading(true);
+    try {
+      const allSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
+      const checkpointParam = allSelected ? 'ALL' : selectedCheckpoints.join(',');
+      const params = new URLSearchParams({
+        dateFrom,
+        dateTo,
+        checkpoint: checkpointParam,
+        defectType,
+      });
+      const res = await fetch(`${API_BASE}/api/brigade-report/unassigned-defects?${params}`);
+      if (!res.ok) throw new Error('Ошибка загрузки данных');
+      const data = await res.json();
+      setUnassignedDefects(data);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadUnassigned();
+  }, [dateFrom, dateTo, selectedCheckpoints, defectType, refreshTrigger]);
+
+  const handleAssign = (defect) => {
+    const key = `${defect.model}|${defect.part_name}|${defect.problem_type}`;
+    const brigadeName = rowBrigades[key] || '';
+    if (!brigadeName) {
+      alert('Выберите бригаду из списка');
+      return;
+    }
+    executeWithPassword(async (pwd) => {
+      try {
+        const res = await fetch(`${API_BASE}/api/brigade-report/assign-owner`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: defect.model,
+            part_name: defect.part_name,
+            problem_type: defect.problem_type,
+            brigadeName,
+            password: pwd,
+          }),
+        });
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Ошибка назначения');
+        }
+        // после успешного назначения перезагружаем список
+        loadUnassigned();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 12,
+        alignItems: 'center',
+        padding: '15px',
+        backgroundColor: '#F8FAFC',
+        borderRadius: BRAND.radius,
+      }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Начало:
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Конец:
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Чекпоинты:
+          <MultiSelect
+            options={['ALL', ...availableCheckpoints]}
+            selected={selectedCheckpoints}
+            onChange={setSelectedCheckpoints}
+            placeholder="Все"
+          />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Тип дефекта:
+          <select value={defectType} onChange={(e) => setDefectType(e.target.value)} style={inputStyle}>
+            <option value="all">Все</option>
+            <option value="offline">Offline</option>
+            <option value="online">Online</option>
+          </select>
+        </label>
+      </div>
+
+      <div style={cardStyle}>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
+          Дефекты без владельца
+        </h2>
+        <p style={{ fontSize: '0.9rem', color: BRAND.textSecondary, marginTop: 0, marginBottom: 10 }}>
+          Выберите бригаду для каждого дефекта и нажмите «Назначить».
+        </p>
+        <div style={{ flex: 1, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
+          {loading ? (
+            <p style={{ textAlign: 'center', padding: '20px', fontSize: '1.2rem' }}>Загрузка...</p>
+          ) : unassignedDefects.length > 0 ? (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Модель</th>
+                  <th style={thStyle}>Деталь</th>
+                  <th style={thStyle}>Дефект</th>
+                  <th style={thStyle}>Кол-во</th>
+                  <th style={thStyle}>Бригада</th>
+                  <th style={thStyle}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {unassignedDefects.map((defect, idx) => {
+                  const key = `${defect.model}|${defect.part_name}|${defect.problem_type}`;
+                  const selectedBrigade = rowBrigades[key] || '';
+                  return (
+                    <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                      <td style={tdStyle}>{defect.model}</td>
+                      <td style={tdStyle}>{defect.part_name}</td>
+                      <td style={tdStyle}>{defect.problem_type}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700 }}>{defect.count}</td>
+                      <td style={tdStyle}>
+                        <select
+                          value={selectedBrigade}
+                          onChange={(e) => setRowBrigades(prev => ({ ...prev, [key]: e.target.value }))}
+                          style={{ width: '100%', maxWidth: '200px', padding: '6px', fontSize: '0.9rem', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
+                        >
+                          <option value="">Выберите...</option>
+                          {brigades.filter(b => b.name !== 'Бригада не найдена').map(b => (
+                            <option key={b.id} value={b.name}>{b.name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td style={tdStyle}>
+                        <button
+                          onClick={() => handleAssign(defect)}
+                          style={{
+                            padding: '8px 16px',
+                            fontSize: '0.9rem',
+                            background: '#10B981',
+                            color: '#FFFFFF',
+                            border: 'none',
+                            borderRadius: BRAND.radiusSmall,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Назначить
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <p style={{ textAlign: 'center', padding: '30px', color: BRAND.textSecondary, fontSize: '1.2rem' }}>
+              Все дефекты имеют владельца 🎉
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== СПРАВОЧНИК (дополнительная вкладка) ===================== */
+function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigger }) {
   const [dictionaryData, setDictionaryData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState([]);
@@ -398,14 +728,11 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
   const [newEntry, setNewEntry] = useState({ model: '', part_name: '', problem_type: '', brigadeName: '' });
   const [editEntry, setEditEntry] = useState(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [importMethod, setImportMethod] = useState('text');
   const [importText, setImportText] = useState('');
-  const [unassignedDefects, setUnassignedDefects] = useState([]);
-  const [unassignedLoading, setUnassignedLoading] = useState(false);
-  const [dateFrom, setDateFrom] = useState(new Date().toISOString().split('T')[0]);
-  const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
-  const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
-  const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
-  const [rowBrigades, setRowBrigades] = useState({});
+  const [importFile, setImportFile] = useState(null);
+  const [importPasswordModal, setImportPasswordModal] = useState(false);
+  const [importError, setImportError] = useState('');
 
   const loadDictionary = async () => {
     setLoading(true);
@@ -432,35 +759,14 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
     }
   };
 
-  const loadUnassigned = async () => {
-    setUnassignedLoading(true);
-    try {
-      const allSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
-      const checkpointParam = allSelected ? 'ALL' : selectedCheckpoints.join(',');
-      const params = new URLSearchParams({
-        dateFrom,
-        dateTo,
-        checkpoint: checkpointParam,
-      });
-      const res = await fetch(`${API_BASE}/api/brigade-report/unassigned-defects?${params}`);
-      if (!res.ok) throw new Error('Ошибка загрузки дефектов без владельца');
-      const data = await res.json();
-      setUnassignedDefects(data);
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setUnassignedLoading(false);
-    }
-  };
-
   useEffect(() => {
     loadDictionary();
     loadModels();
   }, []);
 
   useEffect(() => {
-    loadUnassigned();
-  }, [dateFrom, dateTo, selectedCheckpoints]);
+    if (refreshTrigger) loadDictionary();
+  }, [refreshTrigger]);
 
   const handleSaveEntry = (entry) => {
     executeWithPassword(async (pwd) => {
@@ -483,7 +789,6 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
         loadDictionary();
         setNewEntry({ model: '', part_name: '', problem_type: '', brigadeName: '' });
         setEditEntry(null);
-        loadUnassigned(); // обновляем таблицу без владельца
       } catch (err) {
         alert(err.message);
       }
@@ -503,7 +808,6 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
           throw new Error(errData.error || 'Ошибка удаления');
         }
         loadDictionary();
-        loadUnassigned();
       } catch (err) {
         alert(err.message);
       }
@@ -533,14 +837,38 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
         }
         alert('Назначено на все модели');
         loadDictionary();
-        loadUnassigned();
       } catch (err) {
         alert(err.message);
       }
     });
   };
 
-  const handleImport = () => {
+  const executeImport = (entries) => {
+    if (entries.length === 0) {
+      alert('Нет данных для импорта');
+      return;
+    }
+    // пароль для импорта передаём 4002
+    fetch(`${API_BASE}/api/brigade-report/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries, password: '4002' }),
+    })
+      .then(res => {
+        if (!res.ok) return res.json().then(err => { throw new Error(err.error || 'Ошибка импорта'); });
+        return res.json();
+      })
+      .then(() => {
+        alert(`Импортировано ${entries.length} записей`);
+        setShowImportModal(false);
+        setImportText('');
+        setImportFile(null);
+        loadDictionary();
+      })
+      .catch(err => alert(err.message));
+  };
+
+  const handleImportFromText = () => {
     const lines = importText.split('\n').filter(line => line.trim());
     const entries = lines.map(line => {
       const parts = line.split('\t');
@@ -553,68 +881,34 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
         };
       }
       return null;
-    }).filter(Boolean);
-
-    if (entries.length === 0) {
-      alert('Нет корректных строк');
-      return;
-    }
-
-    executeWithPassword(async (pwd) => {
-      try {
-        const res = await fetch(`${API_BASE}/api/brigade-report/import`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entries, password: pwd }),
-        });
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Ошибка импорта');
-        }
-        alert(`Импортировано ${entries.length} записей`);
-        setShowImportModal(false);
-        setImportText('');
-        loadDictionary();
-        loadUnassigned();
-      } catch (err) {
-        alert(err.message);
-      }
-    });
+    }).filter(e => e && e.model && e.part_name && e.problem_type && e.brigadeName);
+    executeImport(entries);
   };
 
-  const handleAssignFromUnassigned = (defect) => {
-    const key = `${defect.model}|${defect.part_name}|${defect.problem_type}`;
-    const brigadeName = rowBrigades[key] || '';
-    if (!brigadeName) {
-      alert('Выберите бригаду');
-      return;
-    }
-    executeWithPassword(async (pwd) => {
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
       try {
-        const res = await fetch(`${API_BASE}/api/brigade-report/assign-owner`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: defect.model,
-            part_name: defect.part_name,
-            problem_type: defect.problem_type,
-            brigadeName,
-            password: pwd,
-          }),
-        });
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Ошибка назначения');
-        }
-        loadUnassigned();
-        loadDictionary();
+        const data = new Uint8Array(ev.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        const entries = json.slice(1).map(row => ({
+          model: row[0]?.trim(),
+          part_name: row[1]?.trim(),
+          problem_type: row[2]?.trim(),
+          brigadeName: row[3]?.trim(),
+        })).filter(e => e.model && e.part_name && e.problem_type && e.brigadeName);
+        executeImport(entries);
       } catch (err) {
-        alert(err.message);
+        alert('Ошибка чтения файла');
       }
-    });
+    };
+    reader.readAsArrayBuffer(file);
   };
 
-  // Фильтрация справочника
   const filteredDictionary = dictionaryData.filter(entry => {
     const matchModel = filterModel === 'ALL' || entry.model === filterModel;
     const searchLower = search.toLowerCase();
@@ -623,178 +917,106 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
   });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 20 }}>
-      {/* Фильтры для дефектов без владельца */}
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
+      {/* Фильтры и кнопки */}
       <div style={{
-        backgroundColor: '#F8FAFC',
-        borderRadius: BRAND.radius,
-        padding: '20px',
         display: 'flex',
         flexWrap: 'wrap',
-        gap: 14,
+        gap: 12,
         alignItems: 'center',
+        padding: '15px',
+        backgroundColor: '#F8FAFC',
+        borderRadius: BRAND.radius,
       }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
-          Начало:
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
-          Конец:
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
-          Чекпоинты:
-          <MultiSelect
-            options={['ALL', ...availableCheckpoints]}
-            selected={selectedCheckpoints}
-            onChange={setSelectedCheckpoints}
-            placeholder="Все"
-          />
-        </label>
+        <select
+          value={filterModel}
+          onChange={(e) => setFilterModel(e.target.value)}
+          style={{ ...inputStyle, minWidth: '150px' }}
+        >
+          <option value="ALL">Все модели</option>
+          {models.map(model => <option key={model} value={model}>{model}</option>)}
+        </select>
+        <input
+          type="text"
+          placeholder="Поиск по детали, дефекту, модели"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: '200px', ...inputStyle }}
+        />
+        <button
+          onClick={() => setImportPasswordModal(true)}
+          style={{ ...buttonStyle, background: '#8B5CF6' }}
+        >
+          📥 Импорт
+        </button>
       </div>
 
-      {/* Таблица дефектов без владельца */}
+      {/* Форма добавления */}
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 10,
+        alignItems: 'center',
+        padding: '15px',
+        backgroundColor: '#FFFFFF',
+        borderRadius: BRAND.radius,
+        border: `1px solid ${BRAND.border}`,
+      }}>
+        <select
+          value={newEntry.model}
+          onChange={(e) => setNewEntry({ ...newEntry, model: e.target.value })}
+          style={{ ...inputStyle, minWidth: '150px' }}
+        >
+          <option value="">Модель</option>
+          {models.map(model => <option key={model} value={model}>{model}</option>)}
+        </select>
+        <input
+          type="text"
+          placeholder="Деталь"
+          value={newEntry.part_name}
+          onChange={(e) => setNewEntry({ ...newEntry, part_name: e.target.value })}
+          style={{ ...inputStyle, flex: 1, minWidth: '150px' }}
+        />
+        <input
+          type="text"
+          placeholder="Дефект"
+          value={newEntry.problem_type}
+          onChange={(e) => setNewEntry({ ...newEntry, problem_type: e.target.value })}
+          style={{ ...inputStyle, flex: 1, minWidth: '150px' }}
+        />
+        <select
+          value={newEntry.brigadeName}
+          onChange={(e) => setNewEntry({ ...newEntry, brigadeName: e.target.value })}
+          style={{ ...inputStyle, minWidth: '150px' }}
+        >
+          <option value="">Бригада</option>
+          {brigades.filter(b => b.name !== 'Бригада не найдена').map(b => (
+            <option key={b.id} value={b.name}>{b.name}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => handleSaveEntry(newEntry)}
+          style={{ ...buttonStyle, background: BRAND.primary }}
+        >
+          Добавить
+        </button>
+        <button
+          onClick={handleAssignAllModels}
+          style={{ ...buttonStyle, background: '#F59E0B' }}
+        >
+          На все модели
+        </button>
+      </div>
+
+      {/* Таблица справочника */}
       <div style={cardStyle}>
-        <h2 style={{ fontSize: '1.8rem', fontWeight: 700, color: BRAND.text, marginBottom: '16px' }}>
-          Дефекты без владельца
+        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
+          Справочник дефектов и бригад
         </h2>
         <div style={{ flex: 1, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
-          {unassignedLoading ? (
-            <p style={{ textAlign: 'center', padding: '20px', fontSize: '1.6rem' }}>Загрузка...</p>
-          ) : unassignedDefects.length > 0 ? (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={thStyle}>Дефект</th>
-                  <th style={thStyle}>К-во</th>
-                  <th style={thStyle}>Бригада</th>
-                </tr>
-              </thead>
-              <tbody>
-                {unassignedDefects.map((defect, idx) => {
-                  const key = `${defect.model}|${defect.part_name}|${defect.problem_type}`;
-                  const selectedBrigade = rowBrigades[key] || '';
-                  return (
-                    <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
-                      <td style={tdStyle}>{defect.mpp}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '2rem' }}>{defect.count}</td>
-                      <td style={tdStyle}>
-                        <select
-                          value={selectedBrigade}
-                          onChange={(e) => setRowBrigades(prev => ({ ...prev, [key]: e.target.value }))}
-                          style={{ fontSize: '1.4rem', padding: '8px', borderRadius: BRAND.radiusSmall, maxWidth: '200px' }}
-                        >
-                          <option value="">Выбрать</option>
-                          {brigades.map(b => (
-                            <option key={b.id} value={b.name}>{b.name}</option>
-                          ))}
-                        </select>
-                        <button
-                          onClick={() => handleAssignFromUnassigned(defect)}
-                          style={{
-                            marginLeft: '10px',
-                            padding: '8px 16px',
-                            fontSize: '1.2rem',
-                            background: '#10B981',
-                            color: '#FFFFFF',
-                            border: 'none',
-                            borderRadius: BRAND.radiusSmall,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          OK
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <p style={{ textAlign: 'center', padding: '40px', color: BRAND.textSecondary, fontSize: '2rem' }}>
-              Все дефекты имеют владельца
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Справочник */}
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10 }}>
-        <div style={{ display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <select
-            value={filterModel}
-            onChange={(e) => setFilterModel(e.target.value)}
-            style={{ fontSize: '1.4rem', padding: '10px', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
-          >
-            <option value="ALL">Все модели</option>
-            {models.map(model => <option key={model} value={model}>{model}</option>)}
-          </select>
-          <input
-            type="text"
-            placeholder="Поиск по детали, дефекту, модели"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ flex: 1, minWidth: '200px', fontSize: '1.4rem', padding: '10px', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
-          />
-          <button
-            onClick={() => setShowImportModal(true)}
-            style={{ padding: '10px 20px', fontSize: '1.4rem', background: '#8B5CF6', color: '#FFF', border: 'none', borderRadius: BRAND.radiusSmall, cursor: 'pointer' }}
-          >
-            Импорт
-          </button>
-        </div>
-
-        {/* Форма добавления */}
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <select
-            value={newEntry.model}
-            onChange={(e) => setNewEntry({ ...newEntry, model: e.target.value })}
-            style={{ flex: 1, minWidth: '150px', padding: '10px', fontSize: '1.4rem', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
-          >
-            <option value="">Модель</option>
-            {models.map(model => <option key={model} value={model}>{model}</option>)}
-          </select>
-          <input
-            type="text"
-            placeholder="Деталь"
-            value={newEntry.part_name}
-            onChange={(e) => setNewEntry({ ...newEntry, part_name: e.target.value })}
-            style={{ flex: 1, minWidth: '150px', padding: '10px', fontSize: '1.4rem', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
-          />
-          <input
-            type="text"
-            placeholder="Дефект"
-            value={newEntry.problem_type}
-            onChange={(e) => setNewEntry({ ...newEntry, problem_type: e.target.value })}
-            style={{ flex: 1, minWidth: '150px', padding: '10px', fontSize: '1.4rem', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
-          />
-          <select
-            value={newEntry.brigadeName}
-            onChange={(e) => setNewEntry({ ...newEntry, brigadeName: e.target.value })}
-            style={{ flex: 1, minWidth: '150px', padding: '10px', fontSize: '1.4rem', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
-          >
-            <option value="">Бригада</option>
-            {brigades.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
-          </select>
-          <button
-            onClick={() => handleSaveEntry(newEntry)}
-            style={{ padding: '10px 20px', fontSize: '1.4rem', background: BRAND.primary, color: '#FFF', border: 'none', borderRadius: BRAND.radiusSmall, cursor: 'pointer' }}
-          >
-            Добавить
-          </button>
-          <button
-            onClick={handleAssignAllModels}
-            style={{ padding: '10px 20px', fontSize: '1.4rem', background: '#F59E0B', color: '#FFF', border: 'none', borderRadius: BRAND.radiusSmall, cursor: 'pointer' }}
-          >
-            На все модели
-          </button>
-        </div>
-
-        {/* Таблица справочника */}
-        <div style={{ flex: 1, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
           {loading ? (
-            <p style={{ textAlign: 'center', padding: '20px', fontSize: '1.6rem' }}>Загрузка...</p>
-          ) : (
+            <p style={{ textAlign: 'center', padding: '20px', fontSize: '1.2rem' }}>Загрузка...</p>
+          ) : filteredDictionary.length > 0 ? (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
@@ -816,7 +1038,7 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
                         <select
                           value={editEntry.brigadeName}
                           onChange={(e) => setEditEntry({ ...editEntry, brigadeName: e.target.value })}
-                          style={{ fontSize: '1.4rem', padding: '5px' }}
+                          style={{ padding: '5px', fontSize: '0.9rem', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
                         >
                           {brigades.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
                         </select>
@@ -827,13 +1049,33 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
                     <td style={tdStyle}>
                       {editEntry && editEntry.id === entry.id ? (
                         <>
-                          <button onClick={() => handleSaveEntry(editEntry)} style={{ marginRight: 5, padding: '5px 10px', background: '#10B981', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer' }}>Сохранить</button>
-                          <button onClick={() => setEditEntry(null)} style={{ padding: '5px 10px', background: '#6B7280', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer' }}>Отмена</button>
+                          <button
+                            onClick={() => handleSaveEntry(editEntry)}
+                            style={{ marginRight: 5, padding: '5px 10px', background: '#10B981', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
+                          >
+                            Сохранить
+                          </button>
+                          <button
+                            onClick={() => setEditEntry(null)}
+                            style={{ padding: '5px 10px', background: '#6B7280', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
+                          >
+                            Отмена
+                          </button>
                         </>
                       ) : (
                         <>
-                          <button onClick={() => setEditEntry({ id: entry.id, model: entry.model, part_name: entry.part_name, problem_type: entry.problem_type, brigadeName: entry.brigade_name })} style={{ marginRight: 5, padding: '5px 10px', background: '#F59E0B', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer' }}>Изменить</button>
-                          <button onClick={() => handleDeleteEntry(entry.id)} style={{ padding: '5px 10px', background: '#EF4444', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer' }}>Удалить</button>
+                          <button
+                            onClick={() => setEditEntry({ id: entry.id, model: entry.model, part_name: entry.part_name, problem_type: entry.problem_type, brigadeName: entry.brigade_name })}
+                            style={{ marginRight: 5, padding: '5px 10px', background: '#F59E0B', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
+                          >
+                            Изменить
+                          </button>
+                          <button
+                            onClick={() => handleDeleteEntry(entry.id)}
+                            style={{ padding: '5px 10px', background: '#EF4444', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
+                          >
+                            Удалить
+                          </button>
                         </>
                       )}
                     </td>
@@ -841,28 +1083,89 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
                 ))}
               </tbody>
             </table>
+          ) : (
+            <p style={{ textAlign: 'center', padding: '30px', color: BRAND.textSecondary, fontSize: '1.2rem' }}>
+              Нет записей
+            </p>
           )}
         </div>
       </div>
 
       {/* Модальное окно импорта */}
+      {importPasswordModal && (
+        <PasswordModal
+          isOpen={importPasswordModal}
+          onClose={() => setImportPasswordModal(false)}
+          onSubmit={(pwd) => {
+            if (pwd === '4002') {
+              setImportPasswordModal(false);
+              setShowImportModal(true);
+              setImportError('');
+            } else {
+              setImportError('Неверный пароль');
+            }
+          }}
+          error={importError}
+          title="Пароль для импорта"
+          subtitle="Введите специальный пароль для импорта справочника"
+        />
+      )}
+
       {showImportModal && (
         <div style={modalOverlayStyle} onClick={() => setShowImportModal(false)}>
-          <div style={{ ...modalStyle, maxWidth: '720px' }} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ margin: '0 0 16px', fontSize: '2rem' }}>Импорт справочника</h2>
-            <p style={{ fontSize: '1.4rem', color: BRAND.textSecondary }}>
-              Вставьте строки в формате: <b>Модель [Tab] Деталь [Tab] Дефект [Tab] Бригада</b>
+          <div style={wideModalStyle} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ margin: '0 0 16px', fontSize: '1.8rem', fontWeight: 700 }}>Импорт справочника</h2>
+            <p style={{ fontSize: '0.9rem', color: BRAND.textSecondary, marginBottom: 15 }}>
+              Выберите способ импорта: загрузите файл Excel или вставьте текст.
             </p>
-            <textarea
-              value={importText}
-              onChange={(e) => setImportText(e.target.value)}
-              style={{ width: '100%', height: '300px', fontSize: '1.3rem', padding: '10px', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
-              placeholder={'JELAND J6\tБампер\tПовреждение\tEG/SUB\nJELAND J7\tДверь\tВмятина\tBS Final Line'}
-            />
-            <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowImportModal(false)} style={{ padding: '10px 20px', fontSize: '1.4rem', background: '#6B7280', color: '#FFF', border: 'none', borderRadius: BRAND.radiusSmall, cursor: 'pointer' }}>Отмена</button>
-              <button onClick={handleImport} style={{ padding: '10px 20px', fontSize: '1.4rem', background: BRAND.primary, color: '#FFF', border: 'none', borderRadius: BRAND.radiusSmall, cursor: 'pointer' }}>Импортировать</button>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 15 }}>
+              <button
+                onClick={() => setImportMethod('text')}
+                style={{ ...buttonStyle, background: importMethod === 'text' ? BRAND.primary : '#E2E8F0', color: importMethod === 'text' ? '#FFF' : '#374151' }}
+              >
+                Вставить текст
+              </button>
+              <button
+                onClick={() => setImportMethod('file')}
+                style={{ ...buttonStyle, background: importMethod === 'file' ? BRAND.primary : '#E2E8F0', color: importMethod === 'file' ? '#FFF' : '#374151' }}
+              >
+                Загрузить файл
+              </button>
             </div>
+
+            {importMethod === 'text' ? (
+              <>
+                <p style={{ fontSize: '0.85rem', color: BRAND.textSecondary }}>
+                  Каждая строка: <b>Модель[Tab]Деталь[Tab]Дефект[Tab]Бригада</b><br/>
+                  Пример: <code>JELAND J6[Tab]Бампер[Tab]Повреждение[Tab]EG/SUB</code>
+                </p>
+                <textarea
+                  value={importText}
+                  onChange={(e) => setImportText(e.target.value)}
+                  style={{ width: '100%', height: '250px', fontSize: '0.9rem', padding: '10px', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}`, fontFamily: 'monospace' }}
+                  placeholder={'JELAND J6\tБампер\tПовреждение\tEG/SUB\nJELAND J7\tДверь\tВмятина\tBS Final Line'}
+                />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 15, gap: 10 }}>
+                  <button onClick={() => setShowImportModal(false)} style={{ ...buttonStyle, background: '#6B7280' }}>Отмена</button>
+                  <button onClick={handleImportFromText} style={{ ...buttonStyle, background: '#8B5CF6' }}>Импортировать</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: '0.85rem', color: BRAND.textSecondary }}>
+                  Файл Excel должен иметь столбцы: <b>Модель, Деталь, Дефект, Бригада</b> (первая строка — заголовки).
+                </p>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  onChange={handleFileUpload}
+                  style={{ fontSize: '0.9rem', marginBottom: 15 }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                  <button onClick={() => setShowImportModal(false)} style={{ ...buttonStyle, background: '#6B7280' }}>Отмена</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -870,13 +1173,55 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
   );
 }
 
-/* ============ ГЛАВНЫЙ КОМПОНЕНТ СТРАНИЦЫ ============ */
+/* ===================== ВКЛАДКА ВЛАДЕЛЬЦЫ ДЕФЕКТОВ ===================== */
+function DefectOwnersManager({ brigades, password, executeWithPassword }) {
+  const [subTab, setSubTab] = useState('assign'); // 'assign' | 'dictionary'
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  const handleRefresh = () => setRefreshTrigger(prev => prev + 1);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 15 }}>
+        <button
+          onClick={() => setSubTab('assign')}
+          style={subTabStyle(subTab === 'assign')}
+        >
+          🎯 Назначение бригад
+        </button>
+        <button
+          onClick={() => setSubTab('dictionary')}
+          style={subTabStyle(subTab === 'dictionary')}
+        >
+          📚 Справочник
+        </button>
+      </div>
+
+      {subTab === 'assign' ? (
+        <AssignBrigadesPanel
+          brigades={brigades}
+          password={password}
+          executeWithPassword={executeWithPassword}
+          refreshTrigger={refreshTrigger}
+        />
+      ) : (
+        <DictionaryPanel
+          brigades={brigades}
+          password={password}
+          executeWithPassword={executeWithPassword}
+          refreshTrigger={refreshTrigger}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ===================== ГЛАВНЫЙ КОМПОНЕНТ СТРАНИЦЫ ===================== */
 export default function BrigadeReportPage() {
   const [activeTab, setActiveTab] = useState('report');
   const [brigades, setBrigades] = useState([]);
   const [password, setPassword] = useState(sessionStorage.getItem('brigade_password') || '');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [pendingAction, setPendingAction] = useState(null);
   const [passwordVerified, setPasswordVerified] = useState(!!password);
@@ -905,17 +1250,16 @@ export default function BrigadeReportPage() {
     }
   };
 
-  const handlePasswordSubmit = () => {
-    if (passwordInput === '1234561') {
-      sessionStorage.setItem('brigade_password', passwordInput);
-      setPassword(passwordInput);
+  const handlePasswordSubmit = (pwd) => {
+    if (pwd === '1234561') {
+      sessionStorage.setItem('brigade_password', pwd);
+      setPassword(pwd);
       setPasswordVerified(true);
       setShowPasswordModal(false);
       if (pendingAction) {
-        pendingAction(passwordInput);
+        pendingAction(pwd);
         setPendingAction(null);
       }
-      setPasswordInput('');
       setPasswordError('');
     } else {
       setPasswordError('Неверный пароль');
@@ -924,7 +1268,6 @@ export default function BrigadeReportPage() {
 
   const handleTabChange = (tab) => {
     if (tab === 'owners' && !password) {
-      // Требуется пароль
       setPendingAction(() => (pwd) => {
         setPassword(pwd);
         setPasswordVerified(true);
@@ -957,91 +1300,29 @@ export default function BrigadeReportPage() {
       </div>
 
       {activeTab === 'report' ? (
-        <BrigadeReport brigades={brigades} password={password} executeWithPassword={executeWithPassword} />
+        <BrigadeReport
+          brigades={brigades}
+          password={password}
+          executeWithPassword={executeWithPassword}
+        />
       ) : (
-        <DefectOwnersManager brigades={brigades} password={password} executeWithPassword={executeWithPassword} />
+        <DefectOwnersManager
+          brigades={brigades}
+          password={password}
+          executeWithPassword={executeWithPassword}
+        />
       )}
 
-      {/* Модальное окно пароля */}
+      {/* Модальное окно пароля для доступа к вкладке */}
       {showPasswordModal && (
-        <div style={modalOverlayStyle} onClick={() => setShowPasswordModal(false)}>
-          <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
-            <div style={{
-              width: '48px',
-              height: '48px',
-              backgroundColor: '#EFF6FF',
-              borderRadius: '12px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '24px',
-              marginBottom: '16px',
-              color: BRAND.primary,
-            }}>
-              🔒
-            </div>
-            <h3 style={{ margin: '0 0 8px 0', fontWeight: 700, fontSize: '1.5rem' }}>Введите пароль</h3>
-            <p style={{ margin: '0 0 20px 0', color: BRAND.textSecondary, fontSize: '0.9rem' }}>
-              Для доступа к вкладке владельцев дефектов
-            </p>
-            {passwordError && <p style={{ color: '#EF4444', marginBottom: 10, fontSize: '0.9rem' }}>{passwordError}</p>}
-            <input
-              type="password"
-              value={passwordInput}
-              onChange={(e) => setPasswordInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handlePasswordSubmit()}
-              placeholder="Пароль"
-              style={{
-                width: '100%',
-                padding: '12px 16px',
-                borderRadius: '10px',
-                border: `1px solid ${BRAND.border}`,
-                fontSize: '0.95rem',
-                fontFamily: BRAND.fontFamily,
-                color: BRAND.text,
-                backgroundColor: '#F8FAFC',
-                outline: 'none',
-                transition: 'all 0.2s',
-                boxSizing: 'border-box',
-                marginBottom: '16px',
-              }}
-              autoFocus
-            />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button
-                onClick={() => setShowPasswordModal(false)}
-                style={{
-                  padding: '12px 24px',
-                  borderRadius: '10px',
-                  border: `1px solid ${BRAND.border}`,
-                  background: '#FFFFFF',
-                  color: BRAND.text,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  fontSize: '0.95rem',
-                }}
-              >
-                Отмена
-              </button>
-              <button
-                onClick={handlePasswordSubmit}
-                style={{
-                  padding: '12px 24px',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: BRAND.primary,
-                  color: '#FFFFFF',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  fontSize: '0.95rem',
-                  boxShadow: '0 4px 12px rgba(37,99,235,0.2)',
-                }}
-              >
-                Войти
-              </button>
-            </div>
-          </div>
-        </div>
+        <PasswordModal
+          isOpen={showPasswordModal}
+          onClose={() => setShowPasswordModal(false)}
+          onSubmit={handlePasswordSubmit}
+          error={passwordError}
+          title="Введите пароль"
+          subtitle="Для доступа к вкладке «Владельцы дефектов»"
+        />
       )}
     </div>
   );
