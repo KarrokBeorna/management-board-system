@@ -7061,149 +7061,188 @@ app.get('/api/drr-pip-vins', async (req, res) => {
 app.get('/api/drr-electronics-top-defects', async (req, res) => {
   try {
     const { dateFrom, dateTo, model, grades, posts } = req.query;
-    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    }
 
-    // Список постов (обычные)
+    // Функция для преобразования строки даты в объект Date
+    const start = new Date(`${dateFrom}T00:00:00`);
+    const end = new Date(`${dateTo}T23:59:59`);
+
+    const allRows = [];
+
+    // ─── РОБОТЫ ───
+    // 1. at_im_refuel_log
+    const [refuelRows] = await pool.query(
+      `SELECT VIN, CREATION_TIME,
+        CASE
+          WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
+          WHEN OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
+          WHEN OIL_TYPE = 'CL1' THEN 'Заправка антифриза - NG'
+          WHEN OIL_TYPE = 'WW' THEN 'Заправка омывайки - NG'
+          WHEN OIL_TYPE = 'PREAC' THEN 'Тест утечки кондиц. – NG'
+          WHEN OIL_TYPE = 'PREBK' THEN 'Тест утечки тормозной – NG'
+          WHEN OIL_TYPE = 'E7' THEN 'Заправка трансмиссионного – NG'
+        END AS PART_NAME,
+        '' AS PROBLEM_TYPE,
+        'A' AS PROBLEM_GRADE,
+        'ROBOT' AS POST_NAME
+      FROM at_im_refuel_log
+      WHERE FILL_RESULT IN ('NOK','NG')
+        AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')`
+    );
+    allRows.push(...refuelRows);
+
+    // 2. at_im_electrical_check_info (экранируем TYPE обратными кавычками)
+    const [electricalRows] = await pool.query(
+      `SELECT VIN, CREATION_TIME,
+        CASE
+          WHEN \`TYPE\` = '03' OR \`TYPE\` = '18' THEN 'Прошивка EOL - NG'
+          WHEN \`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
+          WHEN \`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
+          WHEN \`TYPE\` = '21' THEN 'МДВШ - Прошивка TMPS - NG'
+          WHEN \`TYPE\` = '26' THEN 'ERA - Прошивка ERA - NG'
+          WHEN \`TYPE\` = '27' THEN 'APK - Блок управления программируемых специальных функций - Запись кода, не в норме'
+        END AS PART_NAME,
+        '' AS PROBLEM_TYPE,
+        'A' AS PROBLEM_GRADE,
+        'ROBOT' AS POST_NAME
+      FROM at_im_electrical_check_info
+      WHERE RESULT IN ('NOK','NG')
+        AND \`TYPE\` <> '01'`
+    );
+    allRows.push(...electricalRows);
+
+    // 3. at_im_execute_result
+    const [executeRows] = await pool.query(
+      `SELECT VIN, CREATION_TIME,
+        CASE
+          WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
+          WHEN EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
+          WHEN EQP_NUM = 'AGMRB01' THEN 'Проверка R&B - NG'
+          WHEN EQP_NUM = 'AGMTPMS01' THEN 'Проверка TMPS – NG'
+          WHEN EQP_NUM = 'AGMWAHA01' THEN 'Проверка WA - NG'
+        END AS PART_NAME,
+        '' AS PROBLEM_TYPE,
+        'A' AS PROBLEM_GRADE,
+        'ROBOT' AS POST_NAME
+      FROM at_im_execute_result
+      WHERE FINAL_RESULT IN ('NOK','NG')
+        AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')`
+    );
+    allRows.push(...executeRows);
+
+    // ─── ОБЫЧНЫЕ ДЕФЕКТЫ (только оффлайн) ───
     const electronicsPosts = [
       'CP7','CP7 Gate','CP78','CP79','EXT1','PIP2','PIP4','PIP9',
       '360','ADAS+RB','CP8','CP8 Gate','REPAIR','REPAIR_Final',
       'TEST TRACK','T-UP','WA','WT','CP8 Touch Up','REPAIR VERIFICATION','TRACK','ROLL'
     ];
+    const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
 
-    // Какие источники включены
-    const selected = (!posts || posts === 'ALL') ? ['ALL'] : posts.split(',').map(s => s.trim());
-    const useRobot = selected.includes('ALL') || selected.includes('ROBOT');
-    const useRegular = selected.includes('ALL') || selected.some(p => electronicsPosts.includes(p));
+    const [regularRows] = await pool.query(
+      `SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME
+       FROM (
+         SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME
+         FROM at_biw_qm_defect_info
+         WHERE POST_NAME IN (${postListStr})
+           AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+         UNION ALL
+         SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME
+         FROM at_paint_qm_defect_info
+         WHERE POST_NAME IN (${postListStr})
+           AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+         UNION ALL
+         SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME
+         FROM at_qm_defect_info
+         WHERE POST_NAME IN (${postListStr})
+           AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+       ) t`
+    );
+    allRows.push(...regularRows);
 
-    const rows = [];
-
-    // === Роботы ===
-    if (useRobot) {
-      // refuel_log
-      const [r1] = await pool.query(
-        "SELECT VIN, CREATION_TIME, " +
-        "CASE WHEN OIL_TYPE='BK' THEN 'Заправка тормозов – NG' " +
-        "WHEN OIL_TYPE='AC' THEN 'Заправка кондиционера – NG' " +
-        "WHEN OIL_TYPE='CL1' THEN 'Заправка антифриза - NG' " +
-        "WHEN OIL_TYPE='WW' THEN 'Заправка омывайки - NG' " +
-        "WHEN OIL_TYPE='PREAC' THEN 'Тест утечки кондиц. – NG' " +
-        "WHEN OIL_TYPE='PREBK' THEN 'Тест утечки тормозной – NG' " +
-        "WHEN OIL_TYPE='E7' THEN 'Заправка трансмиссионного – NG' END AS PART_NAME, " +
-        "'' AS PROBLEM_TYPE, 'A' AS PROBLEM_GRADE, 'ROBOT' AS POST_NAME " +
-        "FROM at_im_refuel_log WHERE FILL_RESULT IN ('NOK','NG') " +
-        "AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')"
-      );
-      rows.push(...r1);
-
-      // electrical_check_info
-      const [r2] = await pool.query(
-        "SELECT VIN, CREATION_TIME, " +
-        "CASE WHEN `TYPE`='03' OR `TYPE`='18' THEN 'Прошивка EOL - NG' " +
-        "WHEN `TYPE`='05' THEN 'ЭП4К - Проверка TMPS – NG' " +
-        "WHEN `TYPE`='17' THEN 'Запись - Прошивка FLASH – NG' " +
-        "WHEN `TYPE`='21' THEN 'МДВШ - Прошивка TMPS - NG' " +
-        "WHEN `TYPE`='26' THEN 'ERA - Прошивка ERA - NG' " +
-        "WHEN `TYPE`='27' THEN 'APK - Блок управления программируемых специальных функций - Запись кода, не в норме' END AS PART_NAME, " +
-        "'' AS PROBLEM_TYPE, 'A' AS PROBLEM_GRADE, 'ROBOT' AS POST_NAME " +
-        "FROM at_im_electrical_check_info WHERE RESULT IN ('NOK','NG') AND `TYPE` <> '01'"
-      );
-      rows.push(...r2);
-
-      // execute_result
-      const [r3] = await pool.query(
-        "SELECT VIN, CREATION_TIME, " +
-        "CASE WHEN EQP_NUM='AGMADAS01' THEN 'Проверка ADAS - NG' " +
-        "WHEN EQP_NUM='AGMFL01' THEN 'Тест утечки бензобак - NG' " +
-        "WHEN EQP_NUM='AGMRB01' THEN 'Проверка R&B - NG' " +
-        "WHEN EQP_NUM='AGMTPMS01' THEN 'Проверка TMPS – NG' " +
-        "WHEN EQP_NUM='AGMWAHA01' THEN 'Проверка WA - NG' END AS PART_NAME, " +
-        "'' AS PROBLEM_TYPE, 'A' AS PROBLEM_GRADE, 'ROBOT' AS POST_NAME " +
-        "FROM at_im_execute_result WHERE FINAL_RESULT IN ('NOK','NG') " +
-        "AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')"
-      );
-      rows.push(...r3);
-    }
-
-    // === Обычные дефекты (оффлайн) ===
-    if (useRegular) {
-      const postList = electronicsPosts.map(p => `'${p}'`).join(',');
-      const [r4] = await pool.query(
-        "SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME FROM (" +
-        "SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME FROM at_biw_qm_defect_info " +
-        "WHERE POST_NAME IN (" + postList + ") AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 " +
-        "AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> '' AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> '' " +
-        "UNION ALL SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME FROM at_paint_qm_defect_info " +
-        "WHERE POST_NAME IN (" + postList + ") AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 " +
-        "AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> '' AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> '' " +
-        "UNION ALL SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, POST_NAME FROM at_qm_defect_info " +
-        "WHERE POST_NAME IN (" + postList + ") AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 " +
-        "AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> '' AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''" +
-        ") t"
-      );
-      rows.push(...r4);
-    }
-
-    // Фильтр по дате
-    const start = new Date(dateFrom + 'T00:00:00');
-    const end = new Date(dateTo + 'T23:59:59');
-    let filtered = rows.filter(r => {
+    // Фильтрация по дате
+    let filteredRows = allRows.filter(r => {
       const t = new Date(r.CREATION_TIME);
       return t >= start && t <= end;
     });
 
-    // Модели
-    const vins = [...new Set(filtered.map(r => r.VIN))];
+    // Получение моделей для VIN
+    const vins = [...new Set(filteredRows.map(r => r.VIN))];
     const modelMap = {};
     if (vins.length) {
-      const ph = vins.map(() => '?').join(',');
-      const [mRows] = await pool.query("SELECT VIN, MODEL FROM work_order WHERE VIN IN (" + ph + ")", vins);
-      mRows.forEach(r => modelMap[r.VIN] = r.MODEL);
+      const placeholders = vins.map(() => '?').join(',');
+      const [modelRows] = await pool.query(
+        `SELECT VIN, MODEL FROM work_order WHERE VIN IN (${placeholders})`,
+        vins
+      );
+      modelRows.forEach(r => { modelMap[r.VIN] = r.MODEL; });
     }
 
     // Фильтр по модели
     if (model && model !== 'ALL') {
-      const list = model.split(',').map(m => m.trim());
-      filtered = filtered.filter(r => list.includes(modelMap[r.VIN]));
+      const modelList = model.split(',').map(m => m.trim());
+      filteredRows = filteredRows.filter(r => modelList.includes(modelMap[r.VIN]));
     }
 
-    // Фильтр по классу
+    // Фильтр по классам
     if (grades && grades !== 'ALL') {
-      const list = grades.split(',').map(g => g.trim());
-      filtered = filtered.filter(r => list.includes(r.PROBLEM_GRADE));
+      const gradeList = grades.split(',').map(g => g.trim());
+      filteredRows = filteredRows.filter(r => gradeList.includes(r.PROBLEM_GRADE));
     }
 
     // Группировка
-    const group = new Map();
-    filtered.forEach(r => {
-      const key = (modelMap[r.VIN] || '-') + '|' + r.PART_NAME + '|' + r.PROBLEM_TYPE + '|' + r.POST_NAME;
-      if (!group.has(key)) group.set(key, { model: modelMap[r.VIN] || '-', part_name: r.PART_NAME, problem_type: r.PROBLEM_TYPE, post_name: r.POST_NAME, vins: new Set(), defects: 0 });
-      const g = group.get(key);
-      g.vins.add(r.VIN);
-      g.defects++;
+    const groupMap = new Map();
+    filteredRows.forEach(r => {
+      const key = `${modelMap[r.VIN] || '-'}|${r.PART_NAME}|${r.PROBLEM_TYPE}|${r.POST_NAME}`;
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          model: modelMap[r.VIN] || '-',
+          part_name: r.PART_NAME,
+          problem_type: r.PROBLEM_TYPE,
+          post_name: r.POST_NAME,
+          vins: new Set(),
+          defects: 0,
+        });
+      }
+      const item = groupMap.get(key);
+      item.vins.add(r.VIN);
+      item.defects += 1;
     });
 
-    // Общее CP72
-    let cp72Cond = '';
+    // Общее количество VIN, прошедших CP72, с учётом фильтра модели
+    let cp72ModelCondition = '';
     if (model && model !== 'ALL') {
-      const list = model.split(',').map(m => `'${m.trim()}'`).join(',');
-      cp72Cond = " AND wo.MODEL IN (" + list + ")";
+      const modelList = model.split(',').map(m => `'${m.trim()}'`).join(',');
+      cp72ModelCondition = ` AND wo.MODEL IN (${modelList})`;
     }
-    const [cp72] = await mesPool.query(
-      "SELECT COUNT(DISTINCT tm.vin) AS total FROM ti_mes_movement tm JOIN work_order wo ON wo.VIN = tm.vin " +
-      "WHERE tm.uloc_no = 'CP72' AND tm.scan_time >= ? AND tm.scan_time <= ?" + cp72Cond,
+    const [cp72Rows] = await mesPool.query(
+      `SELECT COUNT(DISTINCT tm.vin) AS total
+       FROM ti_mes_movement tm
+       JOIN work_order wo ON wo.VIN = tm.vin
+       WHERE tm.uloc_no = 'CP72'
+         AND tm.scan_time >= ? AND tm.scan_time <= ?
+         ${cp72ModelCondition}`,
       [dateFrom + ' 00:00:00', dateTo + ' 23:59:59']
     );
-    const totalCp72 = cp72[0]?.total || 0;
+    const totalCp72 = cp72Rows[0]?.total || 0;
 
-    const result = Array.from(group.values()).map(g => ({
-      MPP: (g.model + ' ' + g.part_name + ' ' + g.problem_type).trim(),
-      MODEL: g.model,
-      PART_NAME: g.part_name,
-      PROBLEM_TYPE: g.problem_type,
-      VIN_COUNT: g.vins.size,
-      DEFECT_COUNT: g.defects,
-      DPU: totalCp72 > 0 ? Number((g.defects * 1000 / totalCp72).toFixed(2)) : 0,
-      POST_NAME: g.post_name,
+    // Формирование результата
+    const result = Array.from(groupMap.values()).map(item => ({
+      MPP: `${item.model} ${item.part_name} ${item.problem_type}`.trim(),
+      MODEL: item.model,
+      PART_NAME: item.part_name,
+      PROBLEM_TYPE: item.problem_type,
+      VIN_COUNT: item.vins.size,
+      DEFECT_COUNT: item.defects,
+      DPU: totalCp72 > 0 ? Number((item.defects * 1000 / totalCp72).toFixed(2)) : 0,
+      POST_NAME: item.post_name,
       TOTAL_CP72_VINS: totalCp72,
     }));
 
