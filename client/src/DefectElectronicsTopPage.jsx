@@ -442,7 +442,7 @@ export default function DefectElectronicsTopPage() {
                                 {/* ПРАВАЯ КОЛОНКА: Топ MPP */}
                                 <div style={{ flex: '0 0 50%', maxWidth: '50%' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                                    <span style={{ fontWeight: 600 }}>Топ MPP оффлайн для этих VIN</span>
+                                    <span style={{ fontWeight: 600 }}>Топ MPP для этих VIN</span>
                                     <select
                                       value={topMppFilter}
                                       onChange={(e) => setTopMppFilter(e.target.value)}
