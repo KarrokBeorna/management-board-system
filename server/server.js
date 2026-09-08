@@ -7426,12 +7426,11 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
 app.get('/api/drr-electronics-vins', async (req, res) => {
   try {
     const { partName, problemType, model, dateFrom, dateTo } = req.query;
-    // problemType не обязателен (для роботов пустая строка)
+    // problemType не обязателен — для роботов он всегда пустая строка
     if (!partName || !model || !dateFrom || !dateTo) {
       return res.status(400).json({ error: 'Недостаточно параметров' });
     }
 
-    // Список постов электроники для обычных таблиц
     const electronicsPosts = [
       'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
       'PIP2', 'PIP4', 'PIP9',
@@ -7440,13 +7439,15 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
       'REPAIR VERIFICATION', 'TRACK', 'ROLL'
     ];
     const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
+    const finalProblemType = problemType || '';
 
     // === 1. Роботы: refuel_log ===
+    // ВАЖНО: r.VIN и wo.MODEL указаны явно, во избежание "Column 'VIN' is ambiguous"
     const refuelSql = `
-      SELECT VIN, MODEL, NULL AS COMMENT
+      SELECT r.VIN AS VIN, wo.MODEL AS MODEL, NULL AS COMMENT
       FROM (
-        SELECT VIN, 
-               CASE 
+        SELECT VIN,
+               CASE
                  WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
                  WHEN OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
                  WHEN OIL_TYPE = 'CL1' THEN 'Заправка антифриза - NG'
@@ -7466,10 +7467,10 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
 
     // === 2. Роботы: electrical_check_info ===
     const electricalSql = `
-      SELECT VIN, MODEL, NULL AS COMMENT
+      SELECT e.VIN AS VIN, wo.MODEL AS MODEL, NULL AS COMMENT
       FROM (
         SELECT VIN,
-               CASE 
+               CASE
                  WHEN \`TYPE\` = '03' OR \`TYPE\` = '18' THEN 'Прошивка EOL - NG'
                  WHEN \`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
                  WHEN \`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
@@ -7488,10 +7489,10 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
 
     // === 3. Роботы: execute_result ===
     const executeSql = `
-      SELECT VIN, MODEL, NULL AS COMMENT
+      SELECT ex.VIN AS VIN, wo.MODEL AS MODEL, NULL AS COMMENT
       FROM (
         SELECT VIN,
-               CASE 
+               CASE
                  WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
                  WHEN EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
                  WHEN EQP_NUM = 'AGMRB01' THEN 'Проверка R&B - NG'
@@ -7509,7 +7510,7 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
 
     // === 4. Обычные таблицы (только оффлайн) ===
     const regularSql = `
-      SELECT VIN, MODEL, MAX(PROBLEM_REPLENISH) AS COMMENT
+      SELECT reg.VIN AS VIN, wo.MODEL AS MODEL, MAX(reg.PROBLEM_REPLENISH) AS COMMENT
       FROM (
         SELECT VIN, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type, PROBLEM_REPLENISH
         FROM at_biw_qm_defect_info
@@ -7534,17 +7535,14 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
       ) reg
       JOIN work_order wo ON wo.VIN = reg.VIN
       WHERE reg.part_name = ? AND reg.problem_type = ?
-      GROUP BY VIN, MODEL
+      GROUP BY reg.VIN, wo.MODEL
     `;
-
-    const finalProblemType = problemType || '';
 
     const [refuelRows] = await pool.query(refuelSql, [partName, finalProblemType]);
     const [electricalRows] = await pool.query(electricalSql, [partName, finalProblemType]);
     const [executeRows] = await pool.query(executeSql, [partName, finalProblemType]);
     const [regularRows] = await pool.query(regularSql, [partName, finalProblemType]);
 
-    // Объединяем результаты
     const allRows = [...refuelRows, ...electricalRows, ...executeRows, ...regularRows];
 
     // Убираем дубликаты по VIN, объединяем комментарии
@@ -7566,10 +7564,11 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
 
     res.json(Array.from(vinMap.values()));
   } catch (err) {
-    console.error('Ошибка drr-electronics-vins:', err.message);
+    console.error('Ошибка drr-electronics-vins:', err);
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // ================== ЗАМЕТКИ ==================
 
