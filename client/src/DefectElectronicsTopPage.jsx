@@ -51,6 +51,7 @@ const tdStyle = {
   color: '#1F2937',
 };
 
+// ====== МУЛЬТИСЕЛЕКТ ======
 function MultiSelect({ options, selected, onChange, placeholder }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
@@ -163,7 +164,7 @@ export default function DefectElectronicsTopPage() {
   const [vinTopMpps, setVinTopMpps] = useState([]);
   const [vinLoading, setVinLoading] = useState(false);
 
-  // Новые состояния для модального окна дефектов VIN
+  // Состояния для модального окна дефектов VIN
   const [showVinDefectsModal, setShowVinDefectsModal] = useState(false);
   const [vinDefectsData, setVinDefectsData] = useState([]);
   const [vinDefectsLoading, setVinDefectsLoading] = useState(false);
@@ -173,6 +174,7 @@ export default function DefectElectronicsTopPage() {
   const availableGrades = ['A', 'B', 'C'];
   const availablePosts = ['ROBOT', 'CP7', 'CP8', 'PIP', 'TL', 'REPAIR', 'TEST TRACK'];
 
+  // Установка дат по умолчанию (вчера)
   useEffect(() => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -180,6 +182,13 @@ export default function DefectElectronicsTopPage() {
     setDateFrom(yStr);
     setDateTo(yStr);
   }, []);
+
+  // Загрузка данных при изменении фильтров
+  useEffect(() => {
+    if (dateFrom && dateTo) {
+      loadData();
+    }
+  }, [dateFrom, dateTo, selectedModels, selectedGrades, selectedPosts]);
 
   const loadData = async () => {
     setLoading(true);
@@ -205,12 +214,6 @@ export default function DefectElectronicsTopPage() {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (dateFrom && dateTo) {
-      loadData();
-    }
-  }, [dateFrom, dateTo, selectedModels, selectedGrades, selectedPosts]);
 
   const loadVinsAndTopMpps = async (row, idx) => {
     const key = `${row.MPP}_${row.POST_NAME}_${idx}`;
@@ -399,53 +402,63 @@ export default function DefectElectronicsTopPage() {
                             {vinLoading ? (
                               <p>Загрузка VIN...</p>
                             ) : (
-                              <>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                  <span style={{ fontWeight: 600 }}>VIN для "{row.MPP}" ({vinData.length} шт.)</span>
-                                  <button onClick={exportVins} style={{ ...buttonStyle, background: '#059669', padding: '4px 10px', fontSize: 12 }}>📊 Экспорт VIN</button>
+                              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                                {/* ЛЕВАЯ КОЛОНКА: VIN */}
+                                <div style={{ flex: '0 0 50%', maxWidth: '50%' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <span style={{ fontWeight: 600 }}>VIN для "{row.MPP}" ({vinData.length} шт.)</span>
+                                    <button onClick={exportVins} style={{ ...buttonStyle, background: '#059669', padding: '4px 10px', fontSize: 12 }}>📊 Экспорт VIN</button>
+                                  </div>
+                                  <div style={{ overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, margin: '0 auto' }}>
+                                      <thead>
+                                        <tr style={{ backgroundColor: '#E5E7EB' }}>
+                                          <th style={thStyle}>VIN</th>
+                                          <th style={thStyle}>Модель</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {vinData.map((v, i) => (
+                                          <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                                            <td
+                                              onClick={() => loadVinDefects(v.VIN)}
+                                              style={{ ...tdStyle, cursor: 'pointer', color: '#2563EB', textDecoration: 'underline' }}
+                                            >
+                                              {v.VIN}
+                                            </td>
+                                            <td style={tdStyle}>{v.MODEL}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
                                 </div>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 12 }}>
-                                  <thead>
-                                    <tr style={{ backgroundColor: '#E5E7EB' }}>
-                                      <th style={thStyle}>VIN</th>
-                                      <th style={thStyle}>Модель</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {vinData.map((v, i) => (
-                                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                                        <td
-                                          onClick={() => loadVinDefects(v.VIN)}
-                                          style={{ ...tdStyle, cursor: 'pointer', color: '#2563EB', textDecoration: 'underline' }}
-                                        >
-                                          {v.VIN}
-                                        </td>
-                                        <td style={tdStyle}>{v.MODEL}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
 
-                                <div style={{ fontWeight: 600, marginBottom: 8 }}>Топ MPP оффлайн для этих VIN</div>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                                  <thead>
-                                    <tr style={{ backgroundColor: '#E5E7EB' }}>
-                                      <th style={thStyle}>MPP</th>
-                                      <th style={thStyle}>Модель</th>
-                                      <th style={thStyle}>Кол-во</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {vinTopMpps.map((mpp, i) => (
-                                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                                        <td style={tdStyle}>{mpp.MPP}</td>
-                                        <td style={tdStyle}>{mpp.MODEL}</td>
-                                        <td style={{ ...tdStyle, textAlign: 'center' }}>{mpp.DEFECT_COUNT}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </>
+                                {/* ПРАВАЯ КОЛОНКА: Топ MPP */}
+                                <div style={{ flex: '0 0 50%', maxWidth: '50%' }}>
+                                  <div style={{ fontWeight: 600, marginBottom: 8 }}>Топ MPP оффлайн для этих VIN</div>
+                                  <div style={{ overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, margin: '0 auto' }}>
+                                      <thead>
+                                        <tr style={{ backgroundColor: '#E5E7EB' }}>
+                                          <th style={thStyle}>MPP</th>
+                                          <th style={thStyle}>Модель</th>
+                                          <th style={thStyle}>Кол-во</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {vinTopMpps.map((mpp, i) => (
+                                          <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                                            <td style={tdStyle}>{mpp.MPP}</td>
+                                            <td style={tdStyle}>{mpp.MODEL}</td>
+                                            <td style={{ ...tdStyle, textAlign: 'center' }}>{mpp.DEFECT_COUNT}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </div>
                             )}
                           </div>
                         </td>
@@ -477,7 +490,7 @@ export default function DefectElectronicsTopPage() {
           }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
-                Дефекты VIN: {selectedVin}
+                Оффлайн дефекты VIN: {selectedVin}
               </h3>
               <button onClick={() => setShowVinDefectsModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }}>×</button>
             </div>
