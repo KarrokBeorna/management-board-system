@@ -7275,7 +7275,9 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
       return res.status(400).json({ error: 'Недостаточно параметров' });
     }
 
-    // Список постов электроники для обычных таблиц
+    const finalProblemType = problemType || '';
+
+    // Список постов электроники (для отбора обычных таблиц по офлайн-дефектам)
     const electronicsPosts = [
       'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
       'PIP2', 'PIP4', 'PIP9',
@@ -7285,12 +7287,14 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
     ];
     const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
 
-    // SQL для получения VIN с указанным электронным дефектом из роботизированных источников
+    // === Шаг 1: находим VIN с заданным электронным дефектом ===
+
+    // Роботы
     const robotVinsSql = `
       SELECT VIN
       FROM (
-        SELECT VIN, 
-               CASE 
+        SELECT VIN,
+               CASE
                  WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
                  WHEN OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
                  WHEN OIL_TYPE = 'CL1' THEN 'Заправка антифриза - NG'
@@ -7307,7 +7311,7 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
         UNION ALL
 
         SELECT VIN,
-               CASE 
+               CASE
                  WHEN \`TYPE\` = '03' OR \`TYPE\` = '18' THEN 'Прошивка EOL - NG'
                  WHEN \`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
                  WHEN \`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
@@ -7323,7 +7327,7 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
         UNION ALL
 
         SELECT VIN,
-               CASE 
+               CASE
                  WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
                  WHEN EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
                  WHEN EQP_NUM = 'AGMRB01' THEN 'Проверка R&B - NG'
@@ -7338,7 +7342,7 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
       WHERE r.part_name = ? AND r.problem_type = ?
     `;
 
-    // SQL для получения VIN из обычных таблиц (только оффлайн)
+    // Обычные таблицы (только оффлайн)
     const regularVinsSql = `
       SELECT VIN
       FROM (
@@ -7366,44 +7370,44 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
       WHERE reg.part_name = ? AND reg.problem_type = ?
     `;
 
-    // Выполняем оба запроса, объединяем VIN
-    const [robotVinsRows] = await pool.query(robotVinsSql, [partName, problemType || '']);
-    const [regularVinsRows] = await pool.query(regularVinsSql, [partName, problemType || '']);
+    const [robotVinsRows] = await pool.query(robotVinsSql, [partName, finalProblemType]);
+    const [regularVinsRows] = await pool.query(regularVinsSql, [partName, finalProblemType]);
 
     const vins = [...new Set([...robotVinsRows, ...regularVinsRows].map(r => r.VIN))];
     if (vins.length === 0) return res.json([]);
 
+    // === Шаг 2: топ MPP оффлайн-дефектов для этих VIN ===
+    // ВАЖНО: фильтр по VIN применяется ОДИН раз, после JOIN,
+    // а не в каждой ветке UNION ALL — иначе placeholders дублируются,
+    // а параметров передаётся только один комплект -> ошибка биндинга -> 500.
     const placeholders = vins.map(() => '?').join(',');
 
-    // Топ MPP оффлайн дефектов для этих VIN
     const topMppSql = `
-      SELECT 
-        wo.MODEL,
+      SELECT
+        wo.MODEL AS MODEL,
         CONCAT(wo.MODEL, ' ', d.PART_NAME, ' ', d.PROBLEM_TYPE) AS MPP,
         COUNT(*) AS CNT
       FROM (
         SELECT VIN, PART_NAME, PROBLEM_TYPE
         FROM at_biw_qm_defect_info
-        WHERE VIN IN (${placeholders})
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
         SELECT VIN, PART_NAME, PROBLEM_TYPE
         FROM at_paint_qm_defect_info
-        WHERE VIN IN (${placeholders})
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
         UNION ALL
         SELECT VIN, PART_NAME, PROBLEM_TYPE
         FROM at_qm_defect_info
-        WHERE VIN IN (${placeholders})
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
       ) d
       JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.VIN IN (${placeholders})
       GROUP BY wo.MODEL, d.PART_NAME, d.PROBLEM_TYPE
       ORDER BY CNT DESC
     `;
@@ -7418,10 +7422,11 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    console.error('Ошибка drr-electronics-vins-top-mpp:', err.message);
+    console.error('Ошибка drr-electronics-vins-top-mpp:', err);
     res.status(500).json({ error: err.message });
   }
 });
+
 
 app.get('/api/drr-electronics-vins', async (req, res) => {
   try {
