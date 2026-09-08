@@ -7600,7 +7600,6 @@ app.get('/api/drr-electronics-vin-defects', async (req, res) => {
     }
     const model = modelRows[0].MODEL;
 
-    // Оффлайн дефекты этого VIN из обычных таблиц
     const defectSql = `
       SELECT 
         wo.MODEL,
@@ -7608,28 +7607,29 @@ app.get('/api/drr-electronics-vin-defects', async (req, res) => {
         d.PART_NAME,
         d.PROBLEM_TYPE,
         COUNT(*) AS CNT,
-        MAX(d.PROBLEM_REPLENISH) AS COMMENT
+        MAX(d.PROBLEM_REPLENISH) AS COMMENT,
+        MAX(d.is_offline) AS IS_OFFLINE
       FROM (
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS is_offline
         FROM at_biw_qm_defect_info
         WHERE VIN = ?
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
           AND DATE(CREATION_TIME) BETWEEN ? AND ?
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS is_offline
         FROM at_paint_qm_defect_info
         WHERE VIN = ?
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
           AND DATE(CREATION_TIME) BETWEEN ? AND ?
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS is_offline
         FROM at_qm_defect_info
         WHERE VIN = ?
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
           AND DATE(CREATION_TIME) BETWEEN ? AND ?
@@ -7640,7 +7640,6 @@ app.get('/api/drr-electronics-vin-defects', async (req, res) => {
     `;
 
     const params = [];
-    // Передаём vin и даты для каждой ветки UNION
     for (let i = 0; i < 3; i++) {
       params.push(vin, dateFrom, dateTo);
     }
@@ -7652,6 +7651,7 @@ app.get('/api/drr-electronics-vin-defects', async (req, res) => {
       MODEL: r.MODEL,
       DEFECT_COUNT: r.CNT,
       COMMENT: r.COMMENT || '',
+      IS_OFFLINE: r.IS_OFFLINE ? 'Оффлайн' : 'Онлайн',
     }));
 
     res.json(result);

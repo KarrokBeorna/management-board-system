@@ -438,25 +438,25 @@ export default function DefectElectronicsTopPage() {
                                 <div style={{ flex: '0 0 50%', maxWidth: '50%' }}>
                                   <div style={{ fontWeight: 600, marginBottom: 8 }}>Топ MPP оффлайн для этих VIN</div>
                                   <div style={{ overflowX: 'auto' }}>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, margin: '0 auto' }}>
-                                      <thead>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, margin: '0 auto', tableLayout: 'fixed' }}>
+                                        <thead>
                                         <tr style={{ backgroundColor: '#E5E7EB' }}>
-                                          <th style={thStyle}>MPP</th>
-                                          <th style={thStyle}>Модель</th>
-                                          <th style={thStyle}>Кол-во</th>
+                                            <th style={{ ...thStyle, width: '40%', overflow: 'hidden', textOverflow: 'ellipsis' }}>MPP</th>
+                                            <th style={{ ...thStyle, width: '35%' }}>Модель</th>
+                                            <th style={{ ...thStyle, width: '25%' }}>Кол-во</th>
                                         </tr>
-                                      </thead>
-                                      <tbody>
+                                        </thead>
+                                        <tbody>
                                         {vinTopMpps.map((mpp, i) => (
-                                          <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                                            <td style={tdStyle}>{mpp.MPP}</td>
-                                            <td style={tdStyle}>{mpp.MODEL}</td>
-                                            <td style={{ ...tdStyle, textAlign: 'center' }}>{mpp.DEFECT_COUNT}</td>
-                                          </tr>
+                                            <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                                            <td style={{ ...tdStyle, width: '40%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mpp.MPP}</td>
+                                            <td style={{ ...tdStyle, width: '35%' }}>{mpp.MODEL}</td>
+                                            <td style={{ ...tdStyle, width: '25%', textAlign: 'center' }}>{mpp.DEFECT_COUNT}</td>
+                                            </tr>
                                         ))}
-                                      </tbody>
+                                        </tbody>
                                     </table>
-                                  </div>
+                                    </div>
                                 </div>
                               </div>
                             )}
@@ -490,7 +490,7 @@ export default function DefectElectronicsTopPage() {
           }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
-                Оффлайн дефекты VIN: {selectedVin}
+                Дефекты VIN: {selectedVin}
               </h3>
               <button onClick={() => setShowVinDefectsModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }}>×</button>
             </div>
@@ -504,6 +504,7 @@ export default function DefectElectronicsTopPage() {
                       <th style={thStyle}>MPP</th>
                       <th style={thStyle}>Модель</th>
                       <th style={thStyle}>Кол-во</th>
+                      <th style={thStyle}>Онлайн/Оффлайн</th>
                       <th style={thStyle}>Комментарий</th>
                     </tr>
                   </thead>
@@ -513,6 +514,7 @@ export default function DefectElectronicsTopPage() {
                         <td style={tdStyle}>{d.MPP}</td>
                         <td style={tdStyle}>{d.MODEL}</td>
                         <td style={{ ...tdStyle, textAlign: 'center' }}>{d.DEFECT_COUNT}</td>
+                        <td style={tdStyle}>{d.IS_OFFLINE}</td>
                         <td style={tdStyle}>{d.COMMENT}</td>
                       </tr>
                     ))}
