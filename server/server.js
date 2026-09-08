@@ -7277,7 +7277,7 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
 
     const finalProblemType = problemType || '';
 
-    // Список постов электроники
+    // Список постов электроники (обычные таблицы)
     const electronicsPosts = [
       'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
       'PIP2', 'PIP4', 'PIP9',
@@ -7287,65 +7287,60 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
     ];
     const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
 
-    // Шаг 1: получаем VIN с заданным электронным дефектом
+    // Шаг 1: получить VIN с заданным электронным дефектом (роботы и обычные оффлайн)
+    // Роботы (все три таблицы, фильтр по part_name, problem_type, model, датам)
     const robotVinsSql = `
       SELECT VIN
       FROM (
-        SELECT VIN, part_name, problem_type, CREATION_TIME
-        FROM (
-          SELECT VIN, CREATION_TIME,
-                 CASE
-                   WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
-                   WHEN OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
-                   WHEN OIL_TYPE = 'CL1' THEN 'Заправка антифриза - NG'
-                   WHEN OIL_TYPE = 'WW' THEN 'Заправка омывайки - NG'
-                   WHEN OIL_TYPE = 'PREAC' THEN 'Тест утечки кондиц. – NG'
-                   WHEN OIL_TYPE = 'PREBK' THEN 'Тест утечки тормозной – NG'
-                   WHEN OIL_TYPE = 'E7' THEN 'Заправка трансмиссионного – NG'
-                 END AS part_name,
-                 '' AS problem_type
-          FROM at_im_refuel_log
-          WHERE FILL_RESULT IN ('NOK','NG')
-            AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')
-
-          UNION ALL
-
-          SELECT VIN, CREATION_TIME,
-                 CASE
-                   WHEN \`TYPE\` = '03' OR \`TYPE\` = '18' THEN 'Прошивка EOL - NG'
-                   WHEN \`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
-                   WHEN \`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
-                   WHEN \`TYPE\` = '21' THEN 'МДВШ - Прошивка TMPS - NG'
-                   WHEN \`TYPE\` = '26' THEN 'ERA - Прошивка ERA - NG'
-                   WHEN \`TYPE\` = '27' THEN 'APK - Блок управления программируемых специальных функций - Запись кода, не в норме'
-                 END AS part_name,
-                 '' AS problem_type
-          FROM at_im_electrical_check_info
-          WHERE RESULT IN ('NOK','NG')
-            AND \`TYPE\` <> '01'
-
-          UNION ALL
-
-          SELECT VIN, CREATION_TIME,
-                 CASE
-                   WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
-                   WHEN EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
-                   WHEN EQP_NUM = 'AGMRB01' THEN 'Проверка R&B - NG'
-                   WHEN EQP_NUM = 'AGMTPMS01' THEN 'Проверка TMPS – NG'
-                   WHEN EQP_NUM = 'AGMWAHA01' THEN 'Проверка WA - NG'
-                 END AS part_name,
-                 '' AS problem_type
-          FROM at_im_execute_result
-          WHERE FINAL_RESULT IN ('NOK','NG')
-            AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
-        ) r
-        WHERE r.part_name = ? AND r.problem_type = ?
-          AND DATE(r.CREATION_TIME) BETWEEN ? AND ?
+        SELECT VIN, CREATION_TIME,
+               CASE
+                 WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
+                 WHEN OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
+                 WHEN OIL_TYPE = 'CL1' THEN 'Заправка антифриза - NG'
+                 WHEN OIL_TYPE = 'WW' THEN 'Заправка омывайки - NG'
+                 WHEN OIL_TYPE = 'PREAC' THEN 'Тест утечки кондиц. – NG'
+                 WHEN OIL_TYPE = 'PREBK' THEN 'Тест утечки тормозной – NG'
+                 WHEN OIL_TYPE = 'E7' THEN 'Заправка трансмиссионного – NG'
+               END AS part_name,
+               '' AS problem_type
+        FROM at_im_refuel_log
+        WHERE FILL_RESULT IN ('NOK','NG')
+          AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')
+        UNION ALL
+        SELECT VIN, CREATION_TIME,
+               CASE
+                 WHEN \`TYPE\` = '03' OR \`TYPE\` = '18' THEN 'Прошивка EOL - NG'
+                 WHEN \`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
+                 WHEN \`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
+                 WHEN \`TYPE\` = '21' THEN 'МДВШ - Прошивка TMPS - NG'
+                 WHEN \`TYPE\` = '26' THEN 'ERA - Прошивка ERA - NG'
+                 WHEN \`TYPE\` = '27' THEN 'APK - Блок управления программируемых специальных функций - Запись кода, не в норме'
+               END AS part_name,
+               '' AS problem_type
+        FROM at_im_electrical_check_info
+        WHERE RESULT IN ('NOK','NG')
+          AND \`TYPE\` <> '01'
+        UNION ALL
+        SELECT VIN, CREATION_TIME,
+               CASE
+                 WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
+                 WHEN EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
+                 WHEN EQP_NUM = 'AGMRB01' THEN 'Проверка R&B - NG'
+                 WHEN EQP_NUM = 'AGMTPMS01' THEN 'Проверка TMPS – NG'
+                 WHEN EQP_NUM = 'AGMWAHA01' THEN 'Проверка WA - NG'
+               END AS part_name,
+               '' AS problem_type
+        FROM at_im_execute_result
+        WHERE FINAL_RESULT IN ('NOK','NG')
+          AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
       ) robot
       JOIN work_order wo ON wo.VIN = robot.VIN
-      WHERE wo.MODEL = ?
+      WHERE robot.part_name = ? AND robot.problem_type = ?
+        AND wo.MODEL = ?
+        AND DATE(robot.CREATION_TIME) BETWEEN ? AND ?
     `;
 
+    // Обычные таблицы (только оффлайн)
     const regularVinsSql = `
       SELECT reg.VIN
       FROM (
@@ -7370,22 +7365,25 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
       ) reg
+      JOIN work_order wo ON wo.VIN = reg.VIN
       WHERE reg.part_name = ? AND reg.problem_type = ?
+        AND wo.MODEL = ?
         AND DATE(reg.CREATION_TIME) BETWEEN ? AND ?
     `;
 
-    const vinParams = [partName, finalProblemType, dateFrom, dateTo, model];
-    const regVinParams = [partName, finalProblemType, dateFrom, dateTo];
+    // Параметры для каждого запроса
+    const robotParams = [partName, finalProblemType, model, dateFrom, dateTo];
+    const regularParams = [partName, finalProblemType, model, dateFrom, dateTo];
 
-    const [robotVinsRows] = await pool.query(robotVinsSql, vinParams);
-    const [regularVinsRows] = await pool.query(regularVinsSql, regVinParams);
+    const [robotVinsRows] = await pool.query(robotVinsSql, robotParams);
+    const [regularVinsRows] = await pool.query(regularVinsSql, regularParams);
 
     const vins = [...new Set([...robotVinsRows, ...regularVinsRows].map(r => r.VIN))];
     if (vins.length === 0) return res.json([]);
 
     const placeholders = vins.map(() => '?').join(',');
 
-    // Шаг 2: топ MPP всех дефектов (онлайн/оффлайн) для этих VIN
+    // Шаг 2: топ MPP всех дефектов (онлайн и оффлайн) для этих VIN за период
     const topMppSql = `
       SELECT
         wo.MODEL AS MODEL,
@@ -7419,7 +7417,14 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
       ORDER BY CNT DESC
     `;
 
-    const topMppParams = [...vins, dateFrom, dateTo, ...vins, dateFrom, dateTo, ...vins, dateFrom, dateTo];
+    // Формируем параметры: сначала все VIN, потом даты для каждого UNION
+    const topMppParams = [];
+    // для каждой из 3 частей UNION добавляем все VIN и даты
+    for (let i = 0; i < 3; i++) {
+      topMppParams.push(...vins);
+      topMppParams.push(dateFrom, dateTo);
+    }
+
     const [topMppRows] = await pool.query(topMppSql, topMppParams);
 
     const result = topMppRows.map(r => ({
