@@ -7668,6 +7668,356 @@ app.get('/api/drr-electronics-vin-defects', async (req, res) => {
   }
 });
 
+
+
+
+
+// ================== БРИГАДНЫЙ ОТЧЁТ ==================
+
+// Получение списка бригад
+app.get('/api/brigade-report/brigades', async (req, res) => {
+  try {
+    const [rows] = await notesPool.query('SELECT id, name FROM brigades ORDER BY name');
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка получения списка бригад:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Получение данных для отчёта (гистограмма + топ дефектов без владельца)
+app.get('/api/brigade-report/data', async (req, res) => {
+  try {
+    const { timeFilter = 'all', metric = 'count' } = req.query;
+    const { start, end } = getTimeRangeForBrigade(timeFilter);
+
+    // Общий список постов
+    const cp7Posts = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
+    const cp8Posts = ['CP8', 'CP8 Gate', 'CP8-gate', '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'];
+    const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
+    const allPosts = [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts])];
+    const postListStr = allPosts.map(p => `'${p}'`).join(',');
+
+    // 1. Количество автомобилей, прошедших CP72 (для DPU)
+    const [carsResult] = await pool.query(`
+      SELECT COUNT(DISTINCT VIN) AS total
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
+    `, [start, end]);
+    const totalCars = carsResult[0]?.total || 0;
+
+    // 2. Все оффлайн-дефекты за период
+    const defectsSql = `
+      SELECT 
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        wo.MODEL
+      FROM (
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_biw_qm_defect_info
+        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_paint_qm_defect_info
+        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_qm_defect_info
+        WHERE (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+      ) d
+      JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.POST_NAME IN (${postListStr})
+        AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
+    `;
+
+    const [defectRows] = await pool.query(defectsSql, [start, end]);
+
+    // Группировка по модели, детали, дефекту
+    const defectMap = new Map();
+    defectRows.forEach(r => {
+      const model = r.MODEL || 'Unknown';
+      const key = `${model}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
+      if (!defectMap.has(key)) {
+        defectMap.set(key, {
+          model,
+          part_name: r.PART_NAME,
+          problem_type: r.PROBLEM_TYPE,
+          count: 0
+        });
+      }
+      defectMap.get(key).count += 1;
+    });
+
+    // 3. Оставляем только те, у которых нет владельца в defect_owners
+    const allDefects = Array.from(defectMap.values());
+    const withoutOwner = [];
+    for (const defect of allDefects) {
+      const [ownerRows] = await notesPool.query(
+        `SELECT id FROM defect_owners WHERE model = ? AND part_name = ? AND problem_type = ? LIMIT 1`,
+        [defect.model, defect.part_name, defect.problem_type]
+      );
+      if (ownerRows.length === 0) {
+        withoutOwner.push(defect);
+      }
+    }
+
+    // Сортировка по убыванию количества
+    withoutOwner.sort((a, b) => b.count - a.count);
+    const top15 = withoutOwner.slice(0, 15);
+
+    // Гистограмма: те же 15 дефектов
+    const histogramData = top15.map(d => ({
+      category: `${d.model} ${d.part_name} ${d.problem_type}`.trim(),
+      value: metric === 'dpu' && totalCars > 0 ? Number((d.count / totalCars * 1000).toFixed(2)) : d.count,
+      count: d.count,
+      dpu: totalCars > 0 ? Number((d.count / totalCars * 1000).toFixed(2)) : 0,
+      model: d.model,
+      part_name: d.part_name,
+      problem_type: d.problem_type,
+    }));
+
+    res.json({
+      histogram: histogramData,
+      topDefectsWithoutOwner: top15.map(d => ({
+        mpp: `${d.model} ${d.part_name} ${d.problem_type}`.trim(),
+        model: d.model,
+        part_name: d.part_name,
+        problem_type: d.problem_type,
+        count: d.count,
+      })),
+      totalCars,
+    });
+  } catch (err) {
+    console.error('Ошибка получения данных бригадного отчёта:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Назначение владельца дефекту (бригаде)
+app.post('/api/brigade-report/assign-owner', async (req, res) => {
+  try {
+    const { model, part_name, problem_type, brigadeName, password } = req.body;
+    if (!model || !part_name || !problem_type || !brigadeName || !password) {
+      return res.status(400).json({ error: 'Не все обязательные поля заполнены' });
+    }
+
+    // Проверка пароля
+    const correctPassword = '1234561'; // можно вынести в env
+    if (password !== correctPassword) {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
+    // Находим id бригады
+    const [brigadeRows] = await notesPool.query('SELECT id FROM brigades WHERE name = ?', [brigadeName]);
+    if (brigadeRows.length === 0) {
+      return res.status(404).json({ error: 'Бригада не найдена' });
+    }
+    const brigadeId = brigadeRows[0].id;
+
+    // Вставляем или обновляем запись о владельце
+    await notesPool.query(`
+      INSERT INTO defect_owners (model, part_name, problem_type, brigade_id)
+      VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE brigade_id = VALUES(brigade_id)
+    `, [model, part_name, problem_type, brigadeId]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Ошибка назначения владельца:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Получение всего справочника
+app.get('/api/brigade-report/dictionary', async (req, res) => {
+  try {
+    const [rows] = await notesPool.query(`
+      SELECT do.id, do.model, do.part_name, do.problem_type, b.name AS brigade_name
+      FROM defect_owners do
+      LEFT JOIN brigades b ON do.brigade_id = b.id
+      ORDER BY do.model, do.part_name, do.problem_type
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка получения справочника:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Добавление/обновление записи в справочнике
+app.post('/api/brigade-report/dictionary', async (req, res) => {
+  try {
+    const { model, part_name, problem_type, brigadeName, password } = req.body;
+    if (!model || !part_name || !problem_type || !brigadeName || !password) {
+      return res.status(400).json({ error: 'Не все обязательные поля заполнены' });
+    }
+    if (password !== '1234561') {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
+    const [brigadeRows] = await notesPool.query('SELECT id FROM brigades WHERE name = ?', [brigadeName]);
+    if (brigadeRows.length === 0) {
+      return res.status(404).json({ error: 'Бригада не найдена' });
+    }
+    const brigadeId = brigadeRows[0].id;
+
+    await notesPool.query(`
+      INSERT INTO defect_owners (model, part_name, problem_type, brigade_id)
+      VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE brigade_id = VALUES(brigade_id)
+    `, [model, part_name, problem_type, brigadeId]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Ошибка сохранения записи справочника:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Удаление записи из справочника
+app.delete('/api/brigade-report/dictionary/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'Пароль обязателен' });
+    if (password !== '1234561') return res.status(403).json({ error: 'Неверный пароль' });
+
+    await notesPool.query('DELETE FROM defect_owners WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Ошибка удаления записи справочника:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Вспомогательная функция временного диапазона
+function getTimeRangeForBrigade(timeFilter) {
+  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const totalMinutes = nowMoscow.getUTCHours() * 60 + nowMoscow.getUTCMinutes();
+  const todayStr = nowMoscow.toISOString().slice(0, 10);
+  const yesterday = new Date(nowMoscow);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+  if (timeFilter === 'all') {
+    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+  }
+  if (timeFilter === 'day') {
+    const dateToUse = totalMinutes >= 7 * 60 + 50 ? todayStr : yesterdayStr;
+    return { start: `${dateToUse} 07:50:00`, end: `${dateToUse} 16:40:00` };
+  }
+  if (timeFilter === 'evening') {
+    const dateToUse = totalMinutes >= 16 * 60 + 41 ? todayStr : yesterdayStr;
+    const startDate = new Date(`${dateToUse}T16:41:00Z`);
+    const endDate = new Date(startDate);
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
+    const endStr = endDate.toISOString().slice(0, 10);
+    return { start: `${dateToUse} 16:41:00`, end: `${endStr} 01:30:00` };
+  }
+  if (timeFilter === 'night') {
+    const dateToUse = totalMinutes >= 1 * 60 + 31 ? todayStr : yesterdayStr;
+    return { start: `${dateToUse} 01:31:00`, end: `${dateToUse} 07:50:00` };
+  }
+  return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+}
+
+app.get('/api/brigade-report/models', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT DISTINCT MODEL
+      FROM work_order
+      WHERE MODEL IS NOT NULL AND TRIM(MODEL) <> ''
+      ORDER BY MODEL
+    `);
+    res.json(rows.map(r => r.MODEL));
+  } catch (err) {
+    console.error('Ошибка получения списка моделей:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/brigade-report/import', async (req, res) => {
+  try {
+    const { entries, password } = req.body;
+    if (!entries || !Array.isArray(entries) || entries.length === 0 || !password) {
+      return res.status(400).json({ error: 'Не переданы данные или пароль' });
+    }
+    if (password !== '1234561') {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
+    // Кэш id бригад
+    const brigadeCache = new Map();
+    for (const entry of entries) {
+      const { model, part_name, problem_type, brigadeName } = entry;
+      if (!model || !part_name || !problem_type || !brigadeName) {
+        continue;
+      }
+      let brigadeId = brigadeCache.get(brigadeName);
+      if (!brigadeId) {
+        const [rows] = await notesPool.query('SELECT id FROM brigades WHERE name = ?', [brigadeName]);
+        if (rows.length === 0) continue;
+        brigadeId = rows[0].id;
+        brigadeCache.set(brigadeName, brigadeId);
+      }
+      await notesPool.query(`
+        INSERT INTO defect_owners (model, part_name, problem_type, brigade_id)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE brigade_id = VALUES(brigade_id)
+      `, [model, part_name, problem_type, brigadeId]);
+    }
+    res.json({ success: true, imported: entries.length });
+  } catch (err) {
+    console.error('Ошибка импорта справочника:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/brigade-report/assign-all-models', async (req, res) => {
+  try {
+    const { part_name, problem_type, brigadeName, password } = req.body;
+    if (!part_name || !problem_type || !brigadeName || !password) {
+      return res.status(400).json({ error: 'Не все обязательные поля заполнены' });
+    }
+    if (password !== '1234561') {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
+    const [brigadeRows] = await notesPool.query('SELECT id FROM brigades WHERE name = ?', [brigadeName]);
+    if (brigadeRows.length === 0) {
+      return res.status(404).json({ error: 'Бригада не найдена' });
+    }
+    const brigadeId = brigadeRows[0].id;
+
+    // Получаем все модели
+    const [models] = await pool.query(`SELECT DISTINCT MODEL FROM work_order WHERE MODEL IS NOT NULL AND TRIM(MODEL) <> ''`);
+    for (const { MODEL } of models) {
+      await notesPool.query(`
+        INSERT INTO defect_owners (model, part_name, problem_type, brigade_id)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE brigade_id = VALUES(brigade_id)
+      `, [MODEL, part_name, problem_type, brigadeId]);
+    }
+
+    res.json({ success: true, models: models.length });
+  } catch (err) {
+    console.error('Ошибка назначения на все модели:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
+
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок

@@ -22,6 +22,7 @@ import DrrCp8DashboardPage from './DrrCp8DashboardPage';
 import DrrTLDashboardPage from './DrrTLDashboardPage';
 import DrrPipDashboardPage from './DrrPipDashboardPage';
 import DefectElectronicsTopPage from './DefectElectronicsTopPage';
+import BrigadeReportPage from './BrigadeReportPage';
 
 import TestPage from './testpage'; // тестовая страница
 export default function App() {
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="/drr-tl-dashboard" element={<DrrTLDashboardPage />} />
         <Route path="/drr-pip-dashboard" element={<DrrPipDashboardPage />} />
         <Route path="/defect-electronics-top" element={<DefectElectronicsTopPage />} />
+        <Route path="/brigade-report" element={<BrigadeReportPage />} />
 
         <Route path="/testpage" element={<TestPage />} />
       </Route>

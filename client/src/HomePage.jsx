@@ -17,10 +17,11 @@ import HoldsSgpPage from './assets/hold.png';
 import sgpManagementPreview from './assets/cp8.png';
 import DrrCp7DashboardPage from './assets/cp7drr.png'; 
 import cp7historyPreview from './assets/cp7hist.png'; 
-import DrrCp8DashboardPage from './assets/cp8drr.png'; // замените на реальное имя файла
+import DrrCp8DashboardPage from './assets/cp8drr.png'; // 
 import drrTestlinePreview from './assets/tldrr.png';
-import DrrPIPDashboardPage from './assets/drrpip.png'; // уже есть в файле
-import electronicsPreview from './assets/elec.png'; // замените на реальное имя файла
+import DrrPIPDashboardPage from './assets/drrpip.png'; //
+import electronicsPreview from './assets/elec.png'; // 
+import tablePreview from './assets/123.png'; // замените на реальное имя файла
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -341,6 +342,7 @@ export default function HomePage() {
     { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR Testline Dashboard", accentColor: "#0ea5e9" },
     //{ to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "PIP DRR Dashboard", accentColor: "#0EA5E9" }
     //{ to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Топ дефектов электроники", accentColor: "#8B5CF6" }
+    //{ to: "/brigade-report", imgSrc: tablePreview, caption: "Бригадный отчет", accentColor: "#3B82F6" }
   ];
 
   const allServiceCards = [
