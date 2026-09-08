@@ -21,7 +21,7 @@ import DrrCp8DashboardPage from './assets/cp8drr.png'; //
 import drrTestlinePreview from './assets/tldrr.png';
 import DrrPIPDashboardPage from './assets/drrpip.png'; //
 import electronicsPreview from './assets/elec.png'; // 
-import tablePreview from './assets/123.png'; // замените на реальное имя файла
+import brigPreview from './assets/123.png'; // замените на реальное имя файла
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -342,7 +342,7 @@ export default function HomePage() {
     { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR Testline Dashboard", accentColor: "#0ea5e9" },
     //{ to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "PIP DRR Dashboard", accentColor: "#0EA5E9" }
     //{ to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Топ дефектов электроники", accentColor: "#8B5CF6" }
-    //{ to: "/brigade-report", imgSrc: tablePreview, caption: "Бригадный отчет", accentColor: "#3B82F6" }
+    //{ to: "/brigade-report", imgSrc: brigPreview, caption: "Бригадный отчет", accentColor: "#3B82F6" }
   ];
 
   const allServiceCards = [
