@@ -51,7 +51,6 @@ const tdStyle = {
   color: '#1F2937',
 };
 
-// ====== МУЛЬТИСЕЛЕКТ ======
 function MultiSelect({ options, selected, onChange, placeholder }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
@@ -164,17 +163,19 @@ export default function DefectElectronicsTopPage() {
   const [vinTopMpps, setVinTopMpps] = useState([]);
   const [vinLoading, setVinLoading] = useState(false);
 
-  // Состояния для модального окна дефектов VIN
+  // Модалка VIN
   const [showVinDefectsModal, setShowVinDefectsModal] = useState(false);
   const [vinDefectsData, setVinDefectsData] = useState([]);
   const [vinDefectsLoading, setVinDefectsLoading] = useState(false);
   const [selectedVin, setSelectedVin] = useState('');
 
+  // Фильтр топ MPP по типу
+  const [topMppFilter, setTopMppFilter] = useState('all');
+
   const availableModels = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
   const availableGrades = ['A', 'B', 'C'];
   const availablePosts = ['ROBOT', 'CP7', 'CP8', 'PIP', 'TL', 'REPAIR', 'TEST TRACK'];
 
-  // Установка дат по умолчанию (вчера)
   useEffect(() => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -183,7 +184,6 @@ export default function DefectElectronicsTopPage() {
     setDateTo(yStr);
   }, []);
 
-  // Загрузка данных при изменении фильтров
   useEffect(() => {
     if (dateFrom && dateTo) {
       loadData();
@@ -259,7 +259,6 @@ export default function DefectElectronicsTopPage() {
     }
   };
 
-  // Функция загрузки дефектов конкретного VIN
   const loadVinDefects = async (vin) => {
     setSelectedVin(vin);
     setShowVinDefectsModal(true);
@@ -313,6 +312,12 @@ export default function DefectElectronicsTopPage() {
       setLoading(false);
     }
   };
+
+  const filteredTopMpps = vinTopMpps.filter(mpp => {
+    if (topMppFilter === 'offline') return mpp.IS_OFFLINE === 'Оффлайн';
+    if (topMppFilter === 'online') return mpp.IS_OFFLINE === 'Онлайн';
+    return true;
+  });
 
   return (
     <div style={{ padding: 30, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
@@ -436,27 +441,40 @@ export default function DefectElectronicsTopPage() {
 
                                 {/* ПРАВАЯ КОЛОНКА: Топ MPP */}
                                 <div style={{ flex: '0 0 50%', maxWidth: '50%' }}>
-                                  <div style={{ fontWeight: 600, marginBottom: 8 }}>Топ MPP оффлайн для этих VIN</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                    <span style={{ fontWeight: 600 }}>Топ MPP оффлайн для этих VIN</span>
+                                    <select
+                                      value={topMppFilter}
+                                      onChange={(e) => setTopMppFilter(e.target.value)}
+                                      style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 12 }}
+                                    >
+                                      <option value="all">Все</option>
+                                      <option value="offline">Оффлайн</option>
+                                      <option value="online">Онлайн</option>
+                                    </select>
+                                  </div>
                                   <div style={{ overflowX: 'auto' }}>
                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, margin: '0 auto', tableLayout: 'fixed' }}>
-                                        <thead>
+                                      <thead>
                                         <tr style={{ backgroundColor: '#E5E7EB' }}>
-                                            <th style={{ ...thStyle, width: '40%', overflow: 'hidden', textOverflow: 'ellipsis' }}>MPP</th>
-                                            <th style={{ ...thStyle, width: '35%' }}>Модель</th>
-                                            <th style={{ ...thStyle, width: '25%' }}>Кол-во</th>
+                                          <th style={{ ...thStyle, width: '55%', whiteSpace: 'normal', wordBreak: 'break-word' }}>MPP</th>
+                                          <th style={{ ...thStyle, width: '20%' }}>Модель</th>
+                                          <th style={{ ...thStyle, width: '10%' }}>Кол-во</th>
+                                          <th style={{ ...thStyle, width: '15%' }}>Тип</th>
                                         </tr>
-                                        </thead>
-                                        <tbody>
-                                        {vinTopMpps.map((mpp, i) => (
-                                            <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                                            <td style={{ ...tdStyle, width: '40%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mpp.MPP}</td>
-                                            <td style={{ ...tdStyle, width: '35%' }}>{mpp.MODEL}</td>
-                                            <td style={{ ...tdStyle, width: '25%', textAlign: 'center' }}>{mpp.DEFECT_COUNT}</td>
-                                            </tr>
+                                      </thead>
+                                      <tbody>
+                                        {filteredTopMpps.map((mpp, i) => (
+                                          <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                                            <td style={{ ...tdStyle, whiteSpace: 'normal', wordBreak: 'break-word' }}>{mpp.MPP}</td>
+                                            <td style={tdStyle}>{mpp.MODEL}</td>
+                                            <td style={{ ...tdStyle, textAlign: 'center' }}>{mpp.DEFECT_COUNT}</td>
+                                            <td style={tdStyle}>{mpp.IS_OFFLINE}</td>
+                                          </tr>
                                         ))}
-                                        </tbody>
+                                      </tbody>
                                     </table>
-                                    </div>
+                                  </div>
                                 </div>
                               </div>
                             )}
