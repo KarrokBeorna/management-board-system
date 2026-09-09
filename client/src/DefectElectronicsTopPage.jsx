@@ -290,28 +290,69 @@ export default function DefectElectronicsTopPage() {
     saveAs(new Blob([buf], { type: 'application/octet-stream' }), `VIN_${expandedMppKey}.xlsx`);
   };
 
-  const exportFullReport = async () => {
-    if (data.length === 0) return;
-    setLoading(true);
-    try {
-      const wb = XLSX.utils.book_new();
-      const summary = data.map(row => ({
-        MPP: row.MPP,
-        Модель: row.MODEL,
-        'Кол-во авто': row.VIN_COUNT,
-        'Кол-во дефектов': row.DEFECT_COUNT,
-        'DPU per 1000': row.DPU,
-      }));
-      const wsSummary = XLSX.utils.json_to_sheet(summary);
-      XLSX.utils.book_append_sheet(wb, wsSummary, 'Топ MPP');
-      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      saveAs(new Blob([buf], { type: 'application/octet-stream' }), 'Топ_дефектов_электроники.xlsx');
-    } catch (err) {
-      alert('Ошибка при экспорте: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const exportFullReport = async () => {
+        if (data.length === 0) return;
+        setLoading(true);
+        try {
+            const wb = XLSX.utils.book_new();
+
+            // Лист 1: общая таблица топ MPP
+            const summary = data.map(row => ({
+            MPP: row.MPP,
+            Модель: row.MODEL,
+            'Кол-во авто': row.VIN_COUNT,
+            'Кол-во дефектов': row.DEFECT_COUNT,
+            'DPU per 1000': row.DPU,
+            }));
+            const wsSummary = XLSX.utils.json_to_sheet(summary);
+            XLSX.utils.book_append_sheet(wb, wsSummary, 'Топ MPP');
+
+            // Для каждого MPP
+            for (let i = 0; i < data.length; i++) {
+            const row = data[i];
+            const params = new URLSearchParams({
+                partName: row.PART_NAME,
+                problemType: row.PROBLEM_TYPE || '',
+                model: row.MODEL,
+                dateFrom,
+                dateTo,
+            });
+
+            // Получаем VIN
+            const vinsRes = await fetch(`${API_BASE}/api/drr-electronics-vins?${params.toString()}`);
+            if (vinsRes.ok) {
+                const vins = await vinsRes.json();
+                if (vins.length > 0) {
+                const wsVins = XLSX.utils.json_to_sheet(vins.map(v => ({ VIN: v.VIN, Модель: v.MODEL })));
+                // Имя листа: VIN_1_<MPP сокращённо>
+                XLSX.utils.book_append_sheet(wb, wsVins, `VIN_${i+1}_${row.MPP.substring(0, 20)}`);
+                }
+            }
+
+            // Получаем топ MPP оффлайн для этих VIN
+            const topMppRes = await fetch(`${API_BASE}/api/drr-electronics-vins-top-mpp?${params.toString()}`);
+            if (topMppRes.ok) {
+                const topMpps = await topMppRes.json();
+                if (topMpps.length > 0) {
+                const wsTop = XLSX.utils.json_to_sheet(topMpps.map(m => ({
+                    MPP: m.MPP,
+                    Модель: m.MODEL,
+                    'Кол-во': m.DEFECT_COUNT,
+                    'Онлайн/Оффлайн': m.IS_OFFLINE,
+                })));
+                XLSX.utils.book_append_sheet(wb, wsTop, `TopMPP_${i+1}_${row.MPP.substring(0, 15)}`);
+                }
+            }
+            }
+
+            const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+            saveAs(new Blob([buf], { type: 'application/octet-stream' }), 'Топ_дефектов_электроники_полный.xlsx');
+        } catch (err) {
+            alert('Ошибка при экспорте: ' + err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
 
   const filteredTopMpps = vinTopMpps.filter(mpp => {
     if (topMppFilter === 'offline') return mpp.IS_OFFLINE === 'Оффлайн';

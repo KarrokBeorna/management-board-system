@@ -390,6 +390,17 @@ function PasswordModal({ isOpen, onClose, onSubmit, error, title = 'Введит
 function HelpModal({ isOpen, onClose }) {
   const [activeSection, setActiveSection] = useState('assign');
 
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
@@ -477,6 +488,8 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
   const [histogramData, setHistogramData] = useState([]);
   const [totalCars, setTotalCars] = useState(0);
   const [unassignedCount, setUnassignedCount] = useState(0);
+  const [totalDefects, setTotalDefects] = useState(0);
+  const [topBrigades, setTopBrigades] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
@@ -499,6 +512,8 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
       setHistogramData(data.histogram);
       setTotalCars(data.totalCars);
       setUnassignedCount(data.unassignedCount);
+      setTotalDefects(data.totalDefects);
+      setTopBrigades(data.topBrigades || []);
     } catch (err) {
       alert(err.message);
     } finally {
@@ -509,6 +524,27 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
   useEffect(() => {
     loadData();
   }, [dateFrom, dateTo, selectedCheckpoints, metric, defectType]);
+
+  // Топ 3 бригады по выбранной метрике
+  const top3Brigades = useMemo(() => {
+    if (!topBrigades.length) return [];
+    const sorted = [...topBrigades].sort((a, b) => {
+      const valA = metric === 'dpu' ? a.dpu : a.count;
+      const valB = metric === 'dpu' ? b.dpu : b.count;
+      return valB - valA;
+    });
+    return sorted.slice(0, 3);
+  }, [topBrigades, metric]);
+
+  // Для каждой бригады отбираем топ 5 MPP по метрике
+  const topMppsByBrigade = (brigade) => {
+    const mpps = [...brigade.mpps].sort((a, b) => {
+      const valA = metric === 'dpu' ? a.dpu : a.count;
+      const valB = metric === 'dpu' ? b.dpu : b.count;
+      return valB - valA;
+    });
+    return mpps.slice(0, 5);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
@@ -571,41 +607,98 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
         </div>
       </div>
 
-      {/* Гистограмма */}
-      <div style={cardStyle}>
-        <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
-          Дефекты по бригадам {metric === 'dpu' ? '(DPU per 1000)' : '(шт)'}
-        </h2>
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      {/* Контейнер для гистограммы и таблицы */}
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
+        {/* Гистограмма */}
+        <div style={{ ...cardStyle, flex: 7 }}>
+          <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
+            Дефекты по бригадам {metric === 'dpu' ? '(DPU per 1000)' : '(шт)'}
+          </h2>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '30px', fontSize: '1.5rem' }}>Загрузка...</div>
+            ) : histogramData.length > 0 ? (
+              <div style={{ height: Math.max(400, histogramData.length * 45) }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={histogramData}
+                    layout="vertical"
+                    margin={{ top: 20, right: 70, left: 40, bottom: 20 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type="number" domain={[0, metric === 'dpu' ? 10 : 'dataMax']} tick={{ fontSize: 13 }} />
+                    <YAxis type="category" dataKey="category" tick={{ fontSize: 13 }} width={160} />
+                    <Tooltip contentStyle={{ fontSize: '1.2rem' }} />
+                    <Bar dataKey="value" fill={BRAND.primary} barSize={32}>
+                      <LabelList dataKey="value" position="right" style={{ fontSize: '1.1rem', fontWeight: 700, fill: BRAND.text }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <p style={{ textAlign: 'center', padding: '30px', color: BRAND.textSecondary, fontSize: '1.3rem' }}>
+                Нет данных
+              </p>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '20px', marginTop: '10px', justifyContent: 'center', fontSize: '1.1rem' }}>
+            <div>Всего авто: <b>{totalCars}</b></div>
+            <div>Всего дефектов: <b>{totalDefects}</b></div>
+            <div>Дефектов без владельца: <b>{unassignedCount}</b></div>
+          </div>
+        </div>
+
+        {/* Таблица топ бригад */}
+        <div style={{ ...cardStyle, flex: 3, overflowY: 'auto' }}>
+          <h2 style={{ fontSize: '1.3rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
+            Топ 3 бригады по {metric === 'dpu' ? 'DPU' : 'количеству'}
+          </h2>
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '30px', fontSize: '1.5rem' }}>Загрузка...</div>
-          ) : histogramData.length > 0 ? (
-            <div style={{ height: Math.max(400, histogramData.length * 45) }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={histogramData}
-                  layout="vertical"
-                  margin={{ top: 20, right: 70, left: 40, bottom: 20 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis type="number" domain={[0, metric === 'dpu' ? 10 : 'dataMax']} tick={{ fontSize: 13 }} />
-                  <YAxis type="category" dataKey="category" tick={{ fontSize: 13 }} width={160} />
-                  <Tooltip contentStyle={{ fontSize: '1.2rem' }} />
-                  <Bar dataKey="value" fill={BRAND.primary} barSize={32}>
-                    <LabelList dataKey="value" position="right" style={{ fontSize: '1.1rem', fontWeight: 700, fill: BRAND.text }} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            <p style={{ textAlign: 'center', padding: '10px' }}>Загрузка...</p>
+          ) : top3Brigades.length > 0 ? (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thStyle, textAlign: 'left' }}>Бригада / Дефект (MPP)</th>
+                  <th style={{ ...thStyle, textAlign: 'center' }}>{metric === 'dpu' ? 'DPU' : 'Шт'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {top3Brigades.map((brigade) => {
+                  const totalValue = metric === 'dpu' ? brigade.dpu : brigade.count;
+                  const mpps = topMppsByBrigade(brigade);
+                  return (
+                    <React.Fragment key={brigade.brigade}>
+                      {/* Строка бригады */}
+                      <tr style={{ backgroundColor: '#F0F5FF', fontWeight: 700 }}>
+                        <td style={{ ...tdStyle, fontWeight: 700, color: BRAND.primary }}>
+                          {brigade.brigade}
+                        </td>
+                        <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'center', color: BRAND.primary }}>
+                          {totalValue}
+                        </td>
+                      </tr>
+                      {/* Строки MPP */}
+                      {mpps.map((mpp, idx) => (
+                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                          <td style={{ ...tdStyle, paddingLeft: '30px' }}>
+                            {mpp.model} {mpp.part_name} {mpp.problem_type}
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'center' }}>
+                            {metric === 'dpu' ? mpp.dpu : mpp.count}
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
           ) : (
-            <p style={{ textAlign: 'center', padding: '30px', color: BRAND.textSecondary, fontSize: '1.3rem' }}>
+            <p style={{ textAlign: 'center', padding: '10px', color: BRAND.textSecondary }}>
               Нет данных
             </p>
           )}
-        </div>
-        <div style={{ display: 'flex', gap: '20px', marginTop: '10px', justifyContent: 'center', fontSize: '1.1rem' }}>
-          <div>Всего авто: <b>{totalCars}</b></div>
-          <div>Без владельца: <b>{unassignedCount}</b></div>
         </div>
       </div>
     </div>

@@ -7191,23 +7191,29 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       modelRows.forEach(r => { modelMap[r.VIN] = r.MODEL; });
     }
 
+    // ─── Фильтр по модели (если выбран конкретный) ───
     if (model && model !== 'ALL') {
       const modelList = model.split(',').map(m => m.trim());
       filteredRows = filteredRows.filter(r => modelList.includes(modelMap[r.VIN]));
     }
 
+    // ─── Фильтр по классам ───
     if (grades && grades !== 'ALL') {
       const gradeList = grades.split(',').map(g => g.trim());
       filteredRows = filteredRows.filter(r => gradeList.includes(r.PROBLEM_GRADE));
     }
 
+    // ─── ВАЖНО: убираем записи без модели (VIN не найден в work_order) ───
+    filteredRows = filteredRows.filter(r => modelMap[r.VIN] && modelMap[r.VIN] !== '-');
+
     // ─── Группировка ───
     const groupMap = new Map();
     filteredRows.forEach(r => {
-      const key = `${modelMap[r.VIN] || '-'}|${r.PART_NAME}|${r.PROBLEM_TYPE}|${r.POST_NAME}`;
+      // key без знака '-' для модели
+      const key = `${modelMap[r.VIN]}|${r.PART_NAME}|${r.PROBLEM_TYPE}|${r.POST_NAME}`;
       if (!groupMap.has(key)) {
         groupMap.set(key, {
-          model: modelMap[r.VIN] || '-',
+          model: modelMap[r.VIN],
           part_name: r.PART_NAME,
           problem_type: r.PROBLEM_TYPE,
           post_name: r.POST_NAME,
@@ -7221,7 +7227,6 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
     });
 
     // ─── DPU: VIN, прошедшие CP72 (БЕЗ JOIN между разными пулами) ───
-    // Шаг 1: список VIN из mesPool, без join к work_order
     const [cp72VinRows] = await mesPool.query(
       `SELECT DISTINCT tm.vin AS VIN
        FROM ti_mes_movement tm
@@ -7231,7 +7236,6 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
     );
     let cp72Vins = cp72VinRows.map(r => r.VIN);
 
-    // Шаг 2: фильтрация по модели (если нужна) через pool, где лежит work_order
     let totalCp72 = cp72Vins.length;
     if (model && model !== 'ALL' && cp72Vins.length > 0) {
       const modelList = model.split(',').map(m => m.trim());
@@ -7674,7 +7678,7 @@ app.get('/api/brigade-report/brigades', async (req, res) => {
 });
 
 // Получение данных для отчёта (гистограмма + топ дефектов без владельца)
-// ================== БРИГАДНЫЙ ОТЧЁТ – ДАННЫЕ ДЛЯ ГИСТОГРАММЫ ==================
+// ================== БРИГАДНЫЙ ОТЧЁТ – ДАННЫЕ ДЛЯ ГИСТОГРАММЫ И ТАБЛИЦЫ ==================
 app.get('/api/brigade-report/data', async (req, res) => {
   try {
     const { dateFrom, dateTo, checkpoint, metric = 'count', defectType = 'all' } = req.query;
@@ -7716,7 +7720,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
     // Условие для типа дефектов
-    let offlineCondition = '1=1'; // все
+    let offlineCondition = '1=1';
     if (defectType === 'offline') {
       offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 1';
     } else if (defectType === 'online') {
@@ -7776,28 +7780,84 @@ app.get('/api/brigade-report/data', async (req, res) => {
     const ownerMap = new Map();
     owners.forEach(o => ownerMap.set(`${o.model}|${o.part_name}|${o.problem_type}`, o.brigade_name));
 
-    // 4. Группировка по бригадам
-    const brigadeMap = new Map();
-    let unassignedCount = 0;
+    // 4. Группировка по бригадам и MPP
+    const brigadeDataMap = new Map(); // key: brigade name, value: { brigade, count, dpu, mppsMap: Map, mpps: [] }
+    let totalDefects = 0;
+
     defectRows.forEach(r => {
+      totalDefects++;
       const key = `${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
       const brigade = ownerMap.get(key) || 'Бригада не найдена';
-      if (brigade === 'Бригада не найдена') {
-        unassignedCount++;
+
+      if (!brigadeDataMap.has(brigade)) {
+        brigadeDataMap.set(brigade, {
+          brigade,
+          count: 0,
+          dpu: 0,
+          mppsMap: new Map(),
+          mpps: []
+        });
       }
-      brigadeMap.set(brigade, (brigadeMap.get(brigade) || 0) + 1);
+      const brigadeData = brigadeDataMap.get(brigade);
+      brigadeData.count++;
+
+      // учёт MPP
+      const mppKey = `${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
+      if (!brigadeData.mppsMap.has(mppKey)) {
+        brigadeData.mppsMap.set(mppKey, {
+          model: r.MODEL,
+          part_name: r.PART_NAME,
+          problem_type: r.PROBLEM_TYPE,
+          count: 0,
+          dpu: 0
+        });
+      }
+      const mppData = brigadeData.mppsMap.get(mppKey);
+      mppData.count++;
     });
 
-    const histogram = Array.from(brigadeMap.entries()).map(([name, cnt]) => ({
+    // 5. Вычисляем dpu для бригад и MPP
+    const calculateDpu = (count) => totalCars > 0 ? Number((count / totalCars * 1000).toFixed(2)) : 0;
+
+    for (const [brigadeName, brigadeData] of brigadeDataMap.entries()) {
+      brigadeData.dpu = calculateDpu(brigadeData.count);
+      brigadeData.mpps = Array.from(brigadeData.mppsMap.values()).map(mpp => ({
+        ...mpp,
+        dpu: calculateDpu(mpp.count)
+      }));
+      // сортируем MPP по count по убыванию (фронт при необходимости пересортирует по dpu)
+      brigadeData.mpps.sort((a, b) => b.count - a.count);
+      // можно ограничить количество, но фронт сам возьмёт топ5, поэтому не обрезаем
+    }
+
+    // 6. Готовим ответ
+    const histogram = Array.from(brigadeDataMap.entries()).map(([name, data]) => ({
       category: name,
-      value: metric === 'dpu' ? (totalCars > 0 ? +(cnt / totalCars * 1000).toFixed(2) : 0) : cnt,
-      count: cnt,
+      value: metric === 'dpu' ? data.dpu : data.count,
+      count: data.count,
+      dpu: data.dpu
     })).sort((a, b) => b.count - a.count);
+
+    const unassignedData = brigadeDataMap.get('Бригада не найдена');
+    const unassignedCount = unassignedData ? unassignedData.count : 0;
+
+    // topBrigades: все бригады, кроме "Бригада не найдена"
+    const topBrigades = Array.from(brigadeDataMap.entries())
+      .filter(([name]) => name !== 'Бригада не найдена')
+      .map(([name, data]) => ({
+        brigade: name,
+        count: data.count,
+        dpu: data.dpu,
+        mpps: data.mpps
+      }))
+      .sort((a, b) => b.count - a.count);
 
     res.json({
       histogram,
       totalCars,
       unassignedCount,
+      totalDefects,
+      topBrigades,
     });
   } catch (err) {
     console.error('Ошибка brigade-report/data:', err.message);
