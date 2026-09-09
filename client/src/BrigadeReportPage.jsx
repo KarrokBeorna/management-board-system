@@ -682,7 +682,6 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
                     const mpps = topMppsByBrigade(brigade);
                     return (
                       <React.Fragment key={brigade.brigade}>
-                        {/* Строка бригады */}
                         <tr style={{ backgroundColor: '#F0F5FF', fontWeight: 700 }}>
                           <td style={{ ...tdStyle, fontWeight: 700, color: BRAND.primary }}>
                             {brigade.brigade}
@@ -691,7 +690,6 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
                             {totalValue}
                           </td>
                         </tr>
-                        {/* Строки MPP */}
                         {mpps.map((mpp, idx) => (
                           <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
                             <td style={{ ...tdStyle, paddingLeft: '30px' }}>
@@ -905,7 +903,16 @@ function AssignBrigadesPanel({ brigades, password, executeWithPassword, refreshT
 }
 
 /* ===================== СПРАВОЧНИК (ОБНОВЛЁННЫЙ) ===================== */
-function DictionaryPanel({ dictionaryData, models, brigades, password, executeWithPassword, onDataChanged, manageUnlocked }) {
+function DictionaryPanel({ 
+  dictionaryData, 
+  models, 
+  brigades, 
+  password, 
+  executeWithPassword, 
+  onDataChanged, 
+  manageUnlocked,
+  onRequestBrigadePassword 
+}) {
   const [filterModel, setFilterModel] = useState('ALL');
   const [filterBrigade, setFilterBrigade] = useState('ALL');
   const [search, setSearch] = useState('');
@@ -919,21 +926,36 @@ function DictionaryPanel({ dictionaryData, models, brigades, password, executeWi
   const [importError, setImportError] = useState('');
   const [activeSection, setActiveSection] = useState('defects'); // 'defects' | 'brigades'
   const [newBrigadeName, setNewBrigadeName] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 100;
 
-  // Фильтрация словаря
-  const filteredDictionary = dictionaryData.filter(entry => {
-    const matchModel = filterModel === 'ALL' || entry.model === filterModel;
-    const matchBrigade = filterBrigade === 'ALL' || entry.brigade_name === filterBrigade;
-    const searchLower = search.toLowerCase();
-    const matchSearch = !search || entry.part_name.toLowerCase().includes(searchLower) || entry.problem_type.toLowerCase().includes(searchLower) || entry.model.toLowerCase().includes(searchLower);
-    return matchModel && matchBrigade && matchSearch;
-  });
+  // Фильтрация с мемоизацией
+  const filteredDictionary = useMemo(() => {
+    return dictionaryData.filter(entry => {
+      const matchModel = filterModel === 'ALL' || entry.model === filterModel;
+      const matchBrigade = filterBrigade === 'ALL' || entry.brigade_name === filterBrigade;
+      const searchLower = search.toLowerCase();
+      const matchSearch = !search || entry.part_name.toLowerCase().includes(searchLower) || entry.problem_type.toLowerCase().includes(searchLower) || entry.model.toLowerCase().includes(searchLower);
+      return matchModel && matchBrigade && matchSearch;
+    });
+  }, [dictionaryData, filterModel, filterBrigade, search]);
 
   // Список бригад для фильтра
   const brigadeOptions = useMemo(() => {
     const set = new Set(dictionaryData.map(e => e.brigade_name).filter(Boolean));
     return Array.from(set).sort();
   }, [dictionaryData]);
+
+  // Сброс страницы при изменении фильтров
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterModel, filterBrigade, search]);
+
+  // Данные для текущей страницы
+  const pageCount = Math.ceil(filteredDictionary.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const visibleEntries = filteredDictionary.slice(startIndex, endIndex);
 
   const handleSaveEntry = (entry) => {
     executeWithPassword(async (pwd) => {
@@ -1028,7 +1050,6 @@ function DictionaryPanel({ dictionaryData, models, brigades, password, executeWi
     });
   };
 
-  // Импорт
   const executeImport = (entries) => {
     if (entries.length === 0) {
       alert('Нет данных для импорта');
@@ -1094,7 +1115,6 @@ function DictionaryPanel({ dictionaryData, models, brigades, password, executeWi
     reader.readAsArrayBuffer(file);
   };
 
-  // Экспорт Excel
   const handleExportExcel = () => {
     if (filteredDictionary.length === 0) {
       alert('Нет данных для экспорта');
@@ -1123,7 +1143,13 @@ function DictionaryPanel({ dictionaryData, models, brigades, password, executeWi
           🔧 Дефекты
         </button>
         <button
-          onClick={() => setActiveSection('brigades')}
+          onClick={() => {
+            if (!manageUnlocked) {
+              onRequestBrigadePassword();
+            } else {
+              setActiveSection('brigades');
+            }
+          }}
           style={subTabStyle(activeSection === 'brigades')}
         >
           👷 Управление бригадами
@@ -1132,7 +1158,7 @@ function DictionaryPanel({ dictionaryData, models, brigades, password, executeWi
 
       {activeSection === 'defects' ? (
         <>
-          {/* Блок фильтрации и поиска (новый дизайн) */}
+          {/* Блок фильтрации и поиска */}
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -1239,7 +1265,7 @@ function DictionaryPanel({ dictionaryData, models, brigades, password, executeWi
               Справочник дефектов и бригад
             </h2>
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
-              {filteredDictionary.length > 0 ? (
+              {visibleEntries.length > 0 ? (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
@@ -1251,7 +1277,7 @@ function DictionaryPanel({ dictionaryData, models, brigades, password, executeWi
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredDictionary.map(entry => (
+                    {visibleEntries.map(entry => (
                       <tr key={entry.id} style={{ borderBottom: `1px solid ${BRAND.border}` }}>
                         <td style={tdStyle}>{entry.model}</td>
                         <td style={tdStyle}>{entry.part_name}</td>
@@ -1319,12 +1345,34 @@ function DictionaryPanel({ dictionaryData, models, brigades, password, executeWi
                 </p>
               )}
             </div>
+
+            {/* Пагинация */}
+            {pageCount > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 10 }}>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  style={{ ...buttonStyle, background: currentPage === 1 ? '#CBD5E1' : BRAND.primary }}
+                >
+                  ←
+                </button>
+                <span style={{ fontSize: '1rem' }}>
+                  Страница {currentPage} из {pageCount}
+                </span>
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(pageCount, prev + 1))}
+                  disabled={currentPage === pageCount}
+                  style={{ ...buttonStyle, background: currentPage === pageCount ? '#CBD5E1' : BRAND.primary }}
+                >
+                  →
+                </button>
+              </div>
+            )}
           </div>
         </>
       ) : (
         /* Вкладка управления бригадами */
         <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
-          {/* Добавить бригаду (новый дизайн) */}
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -1351,7 +1399,6 @@ function DictionaryPanel({ dictionaryData, models, brigades, password, executeWi
             </button>
           </div>
 
-          {/* Список бригад */}
           <div style={cardStyle}>
             <h2 style={{ fontSize: '1.3rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>Список бригад</h2>
             <div style={{ flex: 1, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
@@ -1475,7 +1522,6 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
 
-  // Состояния для справочника, чтобы не перезагружать при переключении
   const [dictionaryData, setDictionaryData] = useState([]);
   const [models, setModels] = useState([]);
   const [brigadeList, setBrigadeList] = useState(brigades);
@@ -1521,14 +1567,12 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
     }
   };
 
-  // Загружаем все данные один раз
   useEffect(() => {
     loadDictionary();
     loadModels();
     loadBrigades();
   }, []);
 
-  // При изменении пропса brigades обновляем список
   useEffect(() => {
     setBrigadeList(brigades);
   }, [brigades]);
@@ -1540,21 +1584,12 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
     setRefreshTrigger(prev => prev + 1);
   };
 
-  const handleBrigadeTabClick = () => {
-    if (!brigadeManageUnlocked) {
-      setShowBrigadePasswordModal(true);
-    } else {
-      setSubTab('dictionary');
-    }
-  };
-
   const handleBrigadePasswordSubmit = (pwd) => {
     if (pwd === '4002') {
       sessionStorage.setItem('brigade_manage_unlocked', 'true');
       setBrigadeManageUnlocked(true);
       setShowBrigadePasswordModal(false);
       setBrigadePasswordError('');
-      setSubTab('dictionary');
     } else {
       setBrigadePasswordError('Неверный пароль');
     }
@@ -1570,7 +1605,7 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
           🎯 Назначение бригад
         </button>
         <button
-          onClick={handleBrigadeTabClick}
+          onClick={() => setSubTab('dictionary')}
           style={subTabStyle(subTab === 'dictionary')}
         >
           📚 Справочник
@@ -1613,12 +1648,12 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
           executeWithPassword={executeWithPassword}
           onDataChanged={handleRefresh}
           manageUnlocked={brigadeManageUnlocked}
+          onRequestBrigadePassword={() => setShowBrigadePasswordModal(true)}
         />
       )}
 
       {showHelp && <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />}
 
-      {/* Модальное окно пароля для вкладки управления бригадами */}
       {showBrigadePasswordModal && (
         <PasswordModal
           isOpen={showBrigadePasswordModal}
@@ -1730,7 +1765,6 @@ export default function BrigadeReportPage() {
         />
       )}
 
-      {/* Модальное окно пароля для доступа к вкладке */}
       {showPasswordModal && (
         <PasswordModal
           isOpen={showPasswordModal}
