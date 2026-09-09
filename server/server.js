@@ -7971,7 +7971,7 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
       }
     }
 
-    res.json(unassigned.slice(0, 50));
+    res.json(unassigned);
   } catch (err) {
     console.error('Ошибка unassigned-defects:', err.message);
     res.status(500).json({ error: err.message });
