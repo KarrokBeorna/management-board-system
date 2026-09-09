@@ -7877,7 +7877,7 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
       return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
     }
 
-    // Списки постов
+    // Списки постов (как в других эндпоинтах)
     const cp7Posts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
       'REPAIR', 'REPAIR_Final',
@@ -7917,7 +7917,14 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
       offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 0';
     }
 
-    const sql = `
+    // 1. Получаем все ключи владельцев из локальной БД
+    const [ownerRows] = await notesPool.query(`
+      SELECT model, part_name, problem_type FROM defect_owners
+    `);
+    const ownerKeys = new Set(ownerRows.map(r => `${r.model}|${r.part_name}|${r.problem_type}`));
+
+    // 2. Получаем все группы дефектов за период
+    const defectsSql = `
       SELECT 
         d.PART_NAME,
         d.PROBLEM_TYPE,
@@ -7943,31 +7950,34 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
       ) d
       JOIN work_order wo ON wo.VIN = d.VIN
-      LEFT JOIN defect_owners do ON do.model = wo.MODEL
-        AND do.part_name = d.PART_NAME
-        AND do.problem_type = d.PROBLEM_TYPE
       WHERE d.POST_NAME IN (${postListStr})
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
-        AND do.id IS NULL
       GROUP BY d.PART_NAME, d.PROBLEM_TYPE, wo.MODEL
       ORDER BY CNT DESC
     `;
 
-    const [rows] = await pool.query(sql, [
+    const [defectGroups] = await pool.query(defectsSql, [
       `${dateFrom} 00:00:00`,
       `${dateTo} 23:59:59`
     ]);
 
-    const result = rows.map(r => ({
-      mpp: `${r.MODEL} ${r.PART_NAME} ${r.PROBLEM_TYPE}`.trim(),
-      model: r.MODEL,
-      part_name: r.PART_NAME,
-      problem_type: r.PROBLEM_TYPE,
-      count: r.CNT,
-    }));
+    // 3. Фильтруем дефекты без владельца
+    const unassigned = [];
+    for (const g of defectGroups) {
+      const key = `${g.MODEL}|${g.PART_NAME}|${g.PROBLEM_TYPE}`;
+      if (!ownerKeys.has(key)) {
+        unassigned.push({
+          mpp: `${g.MODEL} ${g.PART_NAME} ${g.PROBLEM_TYPE}`.trim(),
+          model: g.MODEL,
+          part_name: g.PART_NAME,
+          problem_type: g.PROBLEM_TYPE,
+          count: g.CNT,
+        });
+      }
+    }
 
-    console.log('Unassigned groups count:', result.length); // для отладки
-    res.json(result);
+    console.log('Unassigned groups:', unassigned.length);
+    res.json(unassigned);
   } catch (err) {
     console.error('Ошибка unassigned-defects:', err.message);
     res.status(500).json({ error: err.message });
