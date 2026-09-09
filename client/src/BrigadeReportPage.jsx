@@ -608,7 +608,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
       </div>
 
       {/* Контейнер для гистограммы и таблицы */}
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
+      <div style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0, gap: 15 }}>
         {/* Гистограмма */}
         <div style={{ ...cardStyle, flex: 7 }}>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
