@@ -626,7 +626,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
                     margin={{ top: 20, right: 70, left: 40, bottom: 20 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" domain={[0, metric === 'dpu' ? 10 : 'dataMax']} tick={{ fontSize: 13 }} />
+                    <XAxis type="number" domain={[0, 'dataMax']} tick={{ fontSize: 13 }} />
                     <YAxis type="category" dataKey="category" tick={{ fontSize: 13 }} width={160} />
                     <Tooltip contentStyle={{ fontSize: '1.2rem' }} />
                     <Bar dataKey="value" fill={BRAND.primary} barSize={32}>
@@ -648,57 +648,59 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
           </div>
         </div>
 
-        {/* Таблица топ бригад */}
-        <div style={{ ...cardStyle, flex: 3, overflowY: 'auto' }}>
-          <h2 style={{ fontSize: '1.3rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
+        {/* Правая колонка: таблица топ бригад */}
+        <div style={{ ...cardStyle, flex: 3, display: 'flex', flexDirection: 'column' }}>
+          <h2 style={{ fontSize: '1.3rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px', flexShrink: 0 }}>
             Топ 3 бригады по {metric === 'dpu' ? 'DPU' : 'количеству'}
           </h2>
-          {loading ? (
-            <p style={{ textAlign: 'center', padding: '10px' }}>Загрузка...</p>
-          ) : top3Brigades.length > 0 ? (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={{ ...thStyle, textAlign: 'left' }}>Бригада / Дефект (MPP)</th>
-                  <th style={{ ...thStyle, textAlign: 'center' }}>{metric === 'dpu' ? 'DPU' : 'Шт'}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {top3Brigades.map((brigade) => {
-                  const totalValue = metric === 'dpu' ? brigade.dpu : brigade.count;
-                  const mpps = topMppsByBrigade(brigade);
-                  return (
-                    <React.Fragment key={brigade.brigade}>
-                      {/* Строка бригады */}
-                      <tr style={{ backgroundColor: '#F0F5FF', fontWeight: 700 }}>
-                        <td style={{ ...tdStyle, fontWeight: 700, color: BRAND.primary }}>
-                          {brigade.brigade}
-                        </td>
-                        <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'center', color: BRAND.primary }}>
-                          {totalValue}
-                        </td>
-                      </tr>
-                      {/* Строки MPP */}
-                      {mpps.map((mpp, idx) => (
-                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
-                          <td style={{ ...tdStyle, paddingLeft: '30px' }}>
-                            {mpp.model} {mpp.part_name} {mpp.problem_type}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            {loading ? (
+              <p style={{ textAlign: 'center', padding: '10px' }}>Загрузка...</p>
+            ) : top3Brigades.length > 0 ? (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...thStyle, textAlign: 'left' }}>Бригада / Дефект (MPP)</th>
+                    <th style={{ ...thStyle, textAlign: 'center' }}>{metric === 'dpu' ? 'DPU' : 'Шт'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {top3Brigades.map((brigade) => {
+                    const totalValue = metric === 'dpu' ? brigade.dpu : brigade.count;
+                    const mpps = topMppsByBrigade(brigade);
+                    return (
+                      <React.Fragment key={brigade.brigade}>
+                        {/* Строка бригады */}
+                        <tr style={{ backgroundColor: '#F0F5FF', fontWeight: 700 }}>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: BRAND.primary }}>
+                            {brigade.brigade}
                           </td>
-                          <td style={{ ...tdStyle, textAlign: 'center' }}>
-                            {metric === 'dpu' ? mpp.dpu : mpp.count}
+                          <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'center', color: BRAND.primary }}>
+                            {totalValue}
                           </td>
                         </tr>
-                      ))}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <p style={{ textAlign: 'center', padding: '10px', color: BRAND.textSecondary }}>
-              Нет данных
-            </p>
-          )}
+                        {/* Строки MPP */}
+                        {mpps.map((mpp, idx) => (
+                          <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                            <td style={{ ...tdStyle, paddingLeft: '30px' }}>
+                              {mpp.model} {mpp.part_name} {mpp.problem_type}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'center' }}>
+                              {metric === 'dpu' ? mpp.dpu : mpp.count}
+                            </td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <p style={{ textAlign: 'center', padding: '10px', color: BRAND.textSecondary }}>
+                Нет данных
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -1163,10 +1165,10 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
 
       {/* Таблица справочника */}
       <div style={cardStyle}>
-        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
+        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px', flexShrink: 0 }}>
           Справочник дефектов и бригад
         </h2>
-        <div style={{ flex: 1, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
           {loading ? (
             <p style={{ textAlign: 'center', padding: '20px', fontSize: '1.2rem' }}>Загрузка...</p>
           ) : filteredDictionary.length > 0 ? (

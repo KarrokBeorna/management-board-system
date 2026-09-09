@@ -7679,6 +7679,7 @@ app.get('/api/brigade-report/brigades', async (req, res) => {
 
 // Получение данных для отчёта (гистограмма + топ дефектов без владельца)
 // ================== БРИГАДНЫЙ ОТЧЁТ – ДАННЫЕ ДЛЯ ГИСТОГРАММЫ И ТАБЛИЦЫ ==================
+// ================== БРИГАДНЫЙ ОТЧЁТ – ДАННЫЕ ДЛЯ ГИСТОГРАММЫ И ТАБЛИЦЫ ==================
 app.get('/api/brigade-report/data', async (req, res) => {
   try {
     const { dateFrom, dateTo, checkpoint, metric = 'count', defectType = 'all' } = req.query;
@@ -7816,8 +7817,12 @@ app.get('/api/brigade-report/data', async (req, res) => {
       mppData.count++;
     });
 
-    // 5. Вычисляем dpu для бригад и MPP
-    const calculateDpu = (count) => totalCars > 0 ? Number((count / totalCars * 1000).toFixed(2)) : 0;
+    // 5. Вычисляем dpu для бригад и MPP (с ограничением 1000)
+    const calculateDpu = (count) => {
+      if (totalCars === 0) return 0;
+      const raw = count / totalCars * 1000;
+      return Number(Math.min(raw, 1000).toFixed(2));
+    };
 
     for (const [brigadeName, brigadeData] of brigadeDataMap.entries()) {
       brigadeData.dpu = calculateDpu(brigadeData.count);
@@ -7827,7 +7832,6 @@ app.get('/api/brigade-report/data', async (req, res) => {
       }));
       // сортируем MPP по count по убыванию (фронт при необходимости пересортирует по dpu)
       brigadeData.mpps.sort((a, b) => b.count - a.count);
-      // можно ограничить количество, но фронт сам возьмёт топ5, поэтому не обрезаем
     }
 
     // 6. Готовим ответ
