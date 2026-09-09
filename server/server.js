@@ -7978,6 +7978,7 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
   }
 });
 
+
 // Назначение владельца дефекту (бригаде)
 app.post('/api/brigade-report/assign-owner', async (req, res) => {
   try {
