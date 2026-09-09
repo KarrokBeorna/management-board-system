@@ -386,6 +386,86 @@ function PasswordModal({ isOpen, onClose, onSubmit, error, title = 'Введит
   );
 }
 
+/* ===================== ОБУЧЕНИЕ (МОДАЛЬНОЕ ОКНО С ИНСТРУКЦИЯМИ) ===================== */
+function HelpModal({ isOpen, onClose }) {
+  const [activeSection, setActiveSection] = useState('assign');
+
+  if (!isOpen) return null;
+
+  return (
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <div style={{ ...wideModalStyle, maxWidth: '800px' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={{ margin: 0, fontSize: '1.8rem', fontWeight: 700, color: BRAND.text }}>❓ Как пользоваться</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 28, cursor: 'pointer', color: BRAND.textSecondary, lineHeight: 1 }}>×</button>
+        </div>
+
+        {/* Переключатель разделов */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+          <button
+            onClick={() => setActiveSection('assign')}
+            style={{ ...subTabStyle(activeSection === 'assign'), flex: 1 }}
+          >
+            🎯 Назначение бригад
+          </button>
+          <button
+            onClick={() => setActiveSection('dictionary')}
+            style={{ ...subTabStyle(activeSection === 'dictionary'), flex: 1 }}
+          >
+            📚 Справочник
+          </button>
+        </div>
+
+        {/* Содержимое */}
+        {activeSection === 'assign' ? (
+          <div style={{ fontSize: '1.1rem', lineHeight: 1.6, color: BRAND.text }}>
+            <p style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: 10 }}>Что это?</p>
+            <p>Здесь показаны <b>дефекты без владельца</b> за выбранный период. Это дефекты, у которых ещё не назначена ответственная бригада.</p>
+            <p style={{ marginTop: 10 }}>Этот раздел нужно регулярно проверять и назначать бригады, чтобы каждый дефект имел ответственного.</p>
+
+            <div style={{ backgroundColor: '#F8FAFC', borderRadius: 12, padding: 16, marginTop: 16 }}>
+              <p style={{ fontWeight: 700, marginBottom: 8 }}>Пошагово:</p>
+              <ol style={{ paddingLeft: 20, margin: 0 }}>
+                <li>Выберите даты и чекпоинты (если нужно).</li>
+                <li>В таблице найдите дефект.</li>
+                <li>В колонке «Бригада» выберите нужную бригаду из списка.</li>
+                <li>Нажмите кнопку «Назначить».</li>
+                <li>После назначения дефект исчезнет из этого списка.</li>
+              </ol>
+            </div>
+            <p style={{ marginTop: 16, color: BRAND.textSecondary }}>💡 Если дефектов много, можно сначала импортировать справочник во вкладке «Справочник», тогда большинство дефектов автоматически получат владельца.</p>
+          </div>
+        ) : (
+          <div style={{ fontSize: '1.1rem', lineHeight: 1.6, color: BRAND.text }}>
+            <p style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: 10 }}>Что это?</p>
+            <p>Здесь вы можете <b>добавлять, редактировать и удалять</b> записи, которые связывают дефект (модель + деталь + дефект) с ответственной бригадой.</p>
+            <p style={{ marginTop: 10 }}>Это нужно для того, чтобы при построении отчёта каждый дефект автоматически попадал в нужную бригаду.</p>
+
+            <div style={{ backgroundColor: '#F8FAFC', borderRadius: 12, padding: 16, marginTop: 16 }}>
+              <p style={{ fontWeight: 700, marginBottom: 8 }}>Как добавить вручную:</p>
+              <ol style={{ paddingLeft: 20, margin: 0 }}>
+                <li>Выберите модель.</li>
+                <li>Введите деталь (например, «Бампер»).</li>
+                <li>Введите дефект (например, «Повреждение»).</li>
+                <li>Выберите бригаду.</li>
+                <li>Нажмите «Добавить».</li>
+              </ol>
+              <p style={{ fontWeight: 700, marginTop: 16, marginBottom: 8 }}>Как импортировать из Excel:</p>
+              <ol style={{ paddingLeft: 20, margin: 0 }}>
+                <li>Нажмите кнопку «Импорт».</li>
+                <li>Выберите способ: загрузить файл или вставить текст.</li>
+                <li>Файл должен содержать столбцы: <b>Модель, Деталь, Дефект, Бригада</b>.</li>
+                <li>Для текста: каждая строка вида <code>Модель[TAB]Деталь[TAB]Дефект[TAB]Бригада</code>.</li>
+              </ol>
+            </div>
+            <p style={{ marginTop: 16, color: BRAND.textSecondary }}>💡 После импорта или добавления записей они сразу начнут применяться в отчёте.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ===================== ОТЧЕТ ПО БРИГАДАМ ===================== */
 function BrigadeReport({ brigades, password, executeWithPassword }) {
   const today = new Date();
@@ -532,7 +612,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
   );
 }
 
-/* ===================== НАЗНАЧЕНИЕ БРИГАД (основная вкладка владельцев) ===================== */
+/* ===================== НАЗНАЧЕНИЕ БРИГАД ===================== */
 function AssignBrigadesPanel({ brigades, password, executeWithPassword, refreshTrigger }) {
   const today = new Date();
   const [dateFrom, setDateFrom] = useState(today.toISOString().split('T')[0]);
@@ -595,7 +675,6 @@ function AssignBrigadesPanel({ brigades, password, executeWithPassword, refreshT
           const errData = await res.json();
           throw new Error(errData.error || 'Ошибка назначения');
         }
-        // после успешного назначения перезагружаем список
         loadUnassigned();
       } catch (err) {
         alert(err.message);
@@ -718,12 +797,13 @@ function AssignBrigadesPanel({ brigades, password, executeWithPassword, refreshT
   );
 }
 
-/* ===================== СПРАВОЧНИК (дополнительная вкладка) ===================== */
+/* ===================== СПРАВОЧНИК ===================== */
 function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigger }) {
   const [dictionaryData, setDictionaryData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState([]);
   const [filterModel, setFilterModel] = useState('ALL');
+  const [filterBrigade, setFilterBrigade] = useState('ALL');
   const [search, setSearch] = useState('');
   const [newEntry, setNewEntry] = useState({ model: '', part_name: '', problem_type: '', brigadeName: '' });
   const [editEntry, setEditEntry] = useState(null);
@@ -814,41 +894,11 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
     });
   };
 
-  const handleAssignAllModels = () => {
-    if (!newEntry.part_name || !newEntry.problem_type || !newEntry.brigadeName) {
-      alert('Заполните деталь, дефект и бригаду');
-      return;
-    }
-    executeWithPassword(async (pwd) => {
-      try {
-        const res = await fetch(`${API_BASE}/api/brigade-report/assign-all-models`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            part_name: newEntry.part_name,
-            problem_type: newEntry.problem_type,
-            brigadeName: newEntry.brigadeName,
-            password: pwd,
-          }),
-        });
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Ошибка назначения');
-        }
-        alert('Назначено на все модели');
-        loadDictionary();
-      } catch (err) {
-        alert(err.message);
-      }
-    });
-  };
-
   const executeImport = (entries) => {
     if (entries.length === 0) {
       alert('Нет данных для импорта');
       return;
     }
-    // пароль для импорта передаём 4002
     fetch(`${API_BASE}/api/brigade-report/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -909,12 +959,20 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
     reader.readAsArrayBuffer(file);
   };
 
+  // Фильтрация справочника
   const filteredDictionary = dictionaryData.filter(entry => {
     const matchModel = filterModel === 'ALL' || entry.model === filterModel;
+    const matchBrigade = filterBrigade === 'ALL' || entry.brigade_name === filterBrigade;
     const searchLower = search.toLowerCase();
     const matchSearch = !search || entry.part_name.toLowerCase().includes(searchLower) || entry.problem_type.toLowerCase().includes(searchLower) || entry.model.toLowerCase().includes(searchLower);
-    return matchModel && matchSearch;
+    return matchModel && matchBrigade && matchSearch;
   });
+
+  // Список бригад, встречающихся в справочнике
+  const brigadeOptions = useMemo(() => {
+    const set = new Set(dictionaryData.map(e => e.brigade_name).filter(Boolean));
+    return Array.from(set).sort();
+  }, [dictionaryData]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
@@ -936,6 +994,14 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
           <option value="ALL">Все модели</option>
           {models.map(model => <option key={model} value={model}>{model}</option>)}
         </select>
+        <select
+          value={filterBrigade}
+          onChange={(e) => setFilterBrigade(e.target.value)}
+          style={{ ...inputStyle, minWidth: '180px' }}
+        >
+          <option value="ALL">Все бригады</option>
+          {brigadeOptions.map(brigade => <option key={brigade} value={brigade}>{brigade}</option>)}
+        </select>
         <input
           type="text"
           placeholder="Поиск по детали, дефекту, модели"
@@ -951,7 +1017,7 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
         </button>
       </div>
 
-      {/* Форма добавления */}
+      {/* Форма добавления вручную */}
       <div style={{
         display: 'flex',
         flexWrap: 'wrap',
@@ -999,12 +1065,6 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
           style={{ ...buttonStyle, background: BRAND.primary }}
         >
           Добавить
-        </button>
-        <button
-          onClick={handleAssignAllModels}
-          style={{ ...buttonStyle, background: '#F59E0B' }}
-        >
-          На все модели
         </button>
       </div>
 
@@ -1175,14 +1235,15 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
 
 /* ===================== ВКЛАДКА ВЛАДЕЛЬЦЫ ДЕФЕКТОВ ===================== */
 function DefectOwnersManager({ brigades, password, executeWithPassword }) {
-  const [subTab, setSubTab] = useState('assign'); // 'assign' | 'dictionary'
+  const [subTab, setSubTab] = useState('assign');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [showHelp, setShowHelp] = useState(false);
 
   const handleRefresh = () => setRefreshTrigger(prev => prev + 1);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 15 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 15, alignItems: 'center' }}>
         <button
           onClick={() => setSubTab('assign')}
           style={subTabStyle(subTab === 'assign')}
@@ -1194,6 +1255,26 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
           style={subTabStyle(subTab === 'dictionary')}
         >
           📚 Справочник
+        </button>
+        <button
+          onClick={() => setShowHelp(true)}
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: '50%',
+            border: `2px solid ${BRAND.primary}`,
+            background: '#FFFFFF',
+            color: BRAND.primary,
+            fontSize: '1.2rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          title="Помощь"
+        >
+          ?
         </button>
       </div>
 
@@ -1212,6 +1293,8 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
           refreshTrigger={refreshTrigger}
         />
       )}
+
+      {showHelp && <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

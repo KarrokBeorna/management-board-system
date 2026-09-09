@@ -7450,7 +7450,7 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
 
     const electronicsPosts = [
       'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
-      'PIP2', 'PIP4', 'PIP9',
+      'PIP1', 'PIP2', 'PIP3','PIP4', 'PIP5', 'PIP6','PIP7', 'PIP8', 'PIP9','CP7 Audit',
       '360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final',
       'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up',
       'REPAIR VERIFICATION', 'TRACK', 'ROLL'
@@ -7592,21 +7592,17 @@ app.get('/api/drr-electronics-vins', async (req, res) => {
 
 app.get('/api/drr-electronics-vin-defects', async (req, res) => {
   try {
-    const { vin, dateFrom, dateTo } = req.query;
-    if (!vin || !dateFrom || !dateTo) {
-      return res.status(400).json({ error: 'vin, dateFrom и dateTo обязательны' });
-    }
+    const { vin } = req.query; // только VIN, без дат
+    if (!vin) return res.status(400).json({ error: 'vin обязателен' });
 
     // Получаем модель VIN
     const [modelRows] = await pool.query(
       `SELECT MODEL FROM work_order WHERE VIN = ?`,
       [vin]
     );
-    if (modelRows.length === 0) {
-      return res.json([]);
-    }
-    const model = modelRows[0].MODEL;
+    if (modelRows.length === 0) return res.json([]);
 
+    // Все дефекты из трёх обычных таблиц (без фильтра по дате и статусу)
     const defectSql = `
       SELECT 
         wo.MODEL,
@@ -7623,7 +7619,6 @@ app.get('/api/drr-electronics-vin-defects', async (req, res) => {
         WHERE VIN = ?
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-          AND DATE(CREATION_TIME) BETWEEN ? AND ?
         UNION ALL
         SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH,
                (OFFLINE OR OFFLINE1 OR OFFLINE2) AS is_offline
@@ -7631,7 +7626,6 @@ app.get('/api/drr-electronics-vin-defects', async (req, res) => {
         WHERE VIN = ?
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-          AND DATE(CREATION_TIME) BETWEEN ? AND ?
         UNION ALL
         SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_REPLENISH,
                (OFFLINE OR OFFLINE1 OR OFFLINE2) AS is_offline
@@ -7639,19 +7633,13 @@ app.get('/api/drr-electronics-vin-defects', async (req, res) => {
         WHERE VIN = ?
           AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-          AND DATE(CREATION_TIME) BETWEEN ? AND ?
       ) d
       JOIN work_order wo ON wo.VIN = d.VIN
       GROUP BY wo.MODEL, d.PART_NAME, d.PROBLEM_TYPE
       ORDER BY CNT DESC
     `;
 
-    const params = [];
-    for (let i = 0; i < 3; i++) {
-      params.push(vin, dateFrom, dateTo);
-    }
-
-    const [rows] = await pool.query(defectSql, params);
+    const [rows] = await pool.query(defectSql, [vin, vin, vin]);
 
     const result = rows.map(r => ({
       MPP: r.MPP.trim(),

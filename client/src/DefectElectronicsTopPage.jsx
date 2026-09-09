@@ -264,7 +264,7 @@ export default function DefectElectronicsTopPage() {
     setShowVinDefectsModal(true);
     setVinDefectsLoading(true);
     try {
-      const params = new URLSearchParams({ vin, dateFrom, dateTo });
+      const params = new URLSearchParams({ vin });
       const res = await fetch(`${API_BASE}/api/drr-electronics-vin-defects?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки дефектов VIN');
       const json = await res.json();
@@ -408,7 +408,6 @@ export default function DefectElectronicsTopPage() {
                               <p>Загрузка VIN...</p>
                             ) : (
                               <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-                                {/* ЛЕВАЯ КОЛОНКА: VIN */}
                                 <div style={{ flex: '0 0 50%', maxWidth: '50%' }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                                     <span style={{ fontWeight: 600 }}>VIN для "{row.MPP}" ({vinData.length} шт.)</span>
@@ -439,7 +438,6 @@ export default function DefectElectronicsTopPage() {
                                   </div>
                                 </div>
 
-                                {/* ПРАВАЯ КОЛОНКА: Топ MPP */}
                                 <div style={{ flex: '0 0 50%', maxWidth: '50%' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                                     <span style={{ fontWeight: 600 }}>Топ MPP для этих VIN</span>
