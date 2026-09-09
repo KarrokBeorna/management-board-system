@@ -7917,7 +7917,7 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
       offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 0';
     }
 
-    const defectsSql = `
+    const sql = `
       SELECT 
         d.PART_NAME,
         d.PROBLEM_TYPE,
@@ -7943,35 +7943,31 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
           AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
       ) d
       JOIN work_order wo ON wo.VIN = d.VIN
+      LEFT JOIN defect_owners do ON do.model = wo.MODEL
+        AND do.part_name = d.PART_NAME
+        AND do.problem_type = d.PROBLEM_TYPE
       WHERE d.POST_NAME IN (${postListStr})
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
+        AND do.id IS NULL
       GROUP BY d.PART_NAME, d.PROBLEM_TYPE, wo.MODEL
       ORDER BY CNT DESC
     `;
 
-    const [defectGroups] = await pool.query(defectsSql, [
+    const [rows] = await pool.query(sql, [
       `${dateFrom} 00:00:00`,
       `${dateTo} 23:59:59`
     ]);
 
-    const unassigned = [];
-    for (const g of defectGroups) {
-      const [ownerRows] = await notesPool.query(
-        `SELECT id FROM defect_owners WHERE model = ? AND part_name = ? AND problem_type = ? LIMIT 1`,
-        [g.MODEL, g.PART_NAME, g.PROBLEM_TYPE]
-      );
-      if (ownerRows.length === 0) {
-        unassigned.push({
-          mpp: `${g.MODEL} ${g.PART_NAME} ${g.PROBLEM_TYPE}`.trim(),
-          model: g.MODEL,
-          part_name: g.PART_NAME,
-          problem_type: g.PROBLEM_TYPE,
-          count: g.CNT,
-        });
-      }
-    }
+    const result = rows.map(r => ({
+      mpp: `${r.MODEL} ${r.PART_NAME} ${r.PROBLEM_TYPE}`.trim(),
+      model: r.MODEL,
+      part_name: r.PART_NAME,
+      problem_type: r.PROBLEM_TYPE,
+      count: r.CNT,
+    }));
 
-    res.json(unassigned);
+    console.log('Unassigned groups count:', result.length); // для отладки
+    res.json(result);
   } catch (err) {
     console.error('Ошибка unassigned-defects:', err.message);
     res.status(500).json({ error: err.message });
