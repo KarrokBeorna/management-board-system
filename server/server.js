@@ -7679,15 +7679,24 @@ app.get('/api/brigade-report/brigades', async (req, res) => {
 
 // Получение данных для отчёта (гистограмма + топ дефектов без владельца)
 // ================== БРИГАДНЫЙ ОТЧЁТ – ДАННЫЕ ДЛЯ ГИСТОГРАММЫ И ТАБЛИЦЫ ==================
-// ================== БРИГАДНЫЙ ОТЧЁТ – ДАННЫЕ ДЛЯ ГИСТОГРАММЫ И ТАБЛИЦЫ ==================
 app.get('/api/brigade-report/data', async (req, res) => {
   try {
-    const { dateFrom, dateTo, checkpoint, metric = 'count', defectType = 'all' } = req.query;
-    if (!dateFrom || !dateTo) {
-      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    const { dateFrom, dateTo, startTime, endTime, checkpoint, metric = 'count', defectType = 'all' } = req.query;
+
+    // Определяем точное начало и конец периода
+    let sqlStart, sqlEnd;
+    if (startTime && endTime) {
+      sqlStart = startTime;
+      sqlEnd = endTime;
+    } else {
+      if (!dateFrom || !dateTo) {
+        return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+      }
+      sqlStart = `${dateFrom} 00:00:00`;
+      sqlEnd = `${dateTo} 23:59:59`;
     }
 
-    // Списки постов (как в MppWeeklyTopPage)
+    // Списки постов (как раньше)
     const cp7Posts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
       'REPAIR', 'REPAIR_Final',
@@ -7728,16 +7737,16 @@ app.get('/api/brigade-report/data', async (req, res) => {
       offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 0';
     }
 
-    // 1. Количество авто, прошедших CP72 (для DPU)
+    // 1. Количество авто, прошедших CP72
     const [carsResult] = await pool.query(`
       SELECT COUNT(DISTINCT VIN) AS total
       FROM at_om_wiptrackinghistory
       WHERE WC_NAME = 'CP72'
         AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-    `, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
+    `, [sqlStart, sqlEnd]);
     const totalCars = carsResult[0]?.total || 0;
 
-    // 2. Все дефекты за период с учётом фильтра
+    // 2. Все дефекты за период
     const defectsSql = `
       SELECT 
         d.PART_NAME,
@@ -7770,7 +7779,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
     `;
 
-    const [defectRows] = await pool.query(defectsSql, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
+    const [defectRows] = await pool.query(defectsSql, [sqlStart, sqlEnd]);
 
     // 3. Загружаем справочник владельцев
     const [owners] = await notesPool.query(`
@@ -7782,7 +7791,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
     owners.forEach(o => ownerMap.set(`${o.model}|${o.part_name}|${o.problem_type}`, o.brigade_name));
 
     // 4. Группировка по бригадам и MPP
-    const brigadeDataMap = new Map(); // key: brigade name, value: { brigade, count, dpu, mppsMap: Map, mpps: [] }
+    const brigadeDataMap = new Map();
     let totalDefects = 0;
 
     defectRows.forEach(r => {
@@ -7802,7 +7811,6 @@ app.get('/api/brigade-report/data', async (req, res) => {
       const brigadeData = brigadeDataMap.get(brigade);
       brigadeData.count++;
 
-      // учёт MPP
       const mppKey = `${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
       if (!brigadeData.mppsMap.has(mppKey)) {
         brigadeData.mppsMap.set(mppKey, {
@@ -7817,7 +7825,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
       mppData.count++;
     });
 
-    // 5. Вычисляем dpu для бригад и MPP (с ограничением 1000)
+    // 5. Вычисляем dpu
     const calculateDpu = (count) => {
       if (totalCars === 0) return 0;
       const raw = count / totalCars * 1000;
@@ -7830,7 +7838,6 @@ app.get('/api/brigade-report/data', async (req, res) => {
         ...mpp,
         dpu: calculateDpu(mpp.count)
       }));
-      // сортируем MPP по count по убыванию (фронт при необходимости пересортирует по dpu)
       brigadeData.mpps.sort((a, b) => b.count - a.count);
     }
 
@@ -7845,7 +7852,6 @@ app.get('/api/brigade-report/data', async (req, res) => {
     const unassignedData = brigadeDataMap.get('Бригада не найдена');
     const unassignedCount = unassignedData ? unassignedData.count : 0;
 
-    // topBrigades: все бригады, кроме "Бригада не найдена"
     const topBrigades = Array.from(brigadeDataMap.entries())
       .filter(([name]) => name !== 'Бригада не найдена')
       .map(([name, data]) => ({
@@ -7870,25 +7876,32 @@ app.get('/api/brigade-report/data', async (req, res) => {
 });
 
 // ================== БРИГАДНЫЙ ОТЧЁТ – ТОП ДЕФЕКТОВ БЕЗ ВЛАДЕЛЬЦА ==================
+// ================== БРИГАДНЫЙ ОТЧЁТ – ТОП ДЕФЕКТОВ БЕЗ ВЛАДЕЛЬЦА ==================
 app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
   try {
     const {
       dateFrom,
       dateTo,
+      startTime,
+      endTime,
       checkpoint,
       defectType = 'all'
     } = req.query;
 
-    if (!dateFrom || !dateTo) {
-      return res.status(400).json({
-        error: 'dateFrom и dateTo обязательны'
-      });
+    // Определяем точное начало и конец периода
+    let sqlStart, sqlEnd;
+    if (startTime && endTime) {
+      sqlStart = startTime;
+      sqlEnd = endTime;
+    } else {
+      if (!dateFrom || !dateTo) {
+        return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+      }
+      sqlStart = `${dateFrom} 00:00:00`;
+      sqlEnd = `${dateTo} 23:59:59`;
     }
 
-    // =========================================================
-    // 1. СПИСКИ ПОСТОВ — ТОЧНО КАК В /api/brigade-report/data
-    // =========================================================
-
+    // Списки постов (как в data)
     const cp7Posts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
       'REPAIR', 'REPAIR_Final',
@@ -7939,10 +7952,7 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
       .map(p => `'${p.replace(/'/g, "''")}'`)
       .join(',');
 
-    // =========================================================
-    // 2. ФИЛЬТР ТИПА ДЕФЕКТА
-    // =========================================================
-
+    // Фильтр типа дефекта
     let offlineCondition = '1=1';
 
     if (defectType === 'offline') {
@@ -7951,11 +7961,7 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
       offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 0';
     }
 
-    // =========================================================
-    // 3. ПОЛУЧАЕМ ТЕ ЖЕ САМЫЕ ДЕФЕКТЫ,
-    //    ЧТО И /api/brigade-report/data
-    // =========================================================
-
+    // Получаем все дефекты (те же, что и в data)
     const defectsSql = `
       SELECT
         d.VIN,
@@ -8017,17 +8023,10 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
 
     const [defectRows] = await pool.query(
       defectsSql,
-      [
-        `${dateFrom} 00:00:00`,
-        `${dateTo} 23:59:59`
-      ]
+      [sqlStart, sqlEnd]
     );
 
-    // =========================================================
-    // 4. ЗАГРУЖАЕМ ВЕСЬ СПРАВОЧНИК ВЛАДЕЛЬЦЕВ
-    //    ТОЧНО КАК В /api/brigade-report/data
-    // =========================================================
-
+    // Загружаем справочник владельцев
     const [owners] = await notesPool.query(`
       SELECT
         do.model,
@@ -8042,25 +8041,15 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
     const ownerMap = new Map();
 
     owners.forEach(o => {
-      const key =
-        `${o.model}|${o.part_name}|${o.problem_type}`;
-
-      // ВАЖНО:
-      // Повторяем поведение /api/brigade-report/data:
-      // последняя запись имеет приоритет.
+      const key = `${o.model}|${o.part_name}|${o.problem_type}`;
       ownerMap.set(key, o.brigade_name);
     });
 
-    // =========================================================
-    // 5. СНАЧАЛА ОПРЕДЕЛЯЕМ КАЖДЫЙ НЕРАСПРЕДЕЛЁННЫЙ ДЕФЕКТ
-    // =========================================================
-
+    // Определяем нераспределённые дефекты
     const unassignedRows = [];
 
     for (const r of defectRows) {
-      const key =
-        `${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
-
+      const key = `${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
       const brigade = ownerMap.get(key) || 'Бригада не найдена';
 
       if (brigade === 'Бригада не найдена') {
@@ -8068,16 +8057,11 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
       }
     }
 
-    // =========================================================
-    // 6. ПОСЛЕ ОПРЕДЕЛЕНИЯ НЕРАСПРЕДЕЛЁННЫХ
-    //    ГРУППИРУЕМ ИХ ПО MPP
-    // =========================================================
-
+    // Группируем по MPP
     const groups = new Map();
 
     for (const r of unassignedRows) {
-      const key =
-        `${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
+      const key = `${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
 
       if (!groups.has(key)) {
         groups.set(key, {
@@ -8092,16 +8076,9 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
       groups.get(key).count++;
     }
 
-    // =========================================================
-    // 7. ОТВЕТ
-    // =========================================================
-
     const unassigned = Array.from(groups.values())
       .sort((a, b) => b.count - a.count);
 
-    // Контрольная сумма.
-    // Она ДОЛЖНА совпадать с unassignedCount
-    // в /api/brigade-report/data.
     const totalUnassigned = unassignedRows.length;
 
     console.log(
@@ -8111,14 +8088,8 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
     res.json(unassigned);
 
   } catch (err) {
-    console.error(
-      'Ошибка unassigned-defects:',
-      err
-    );
-
-    res.status(500).json({
-      error: err.message
-    });
+    console.error('Ошибка unassigned-defects:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -8405,11 +8376,14 @@ app.delete('/api/brigade-report/brigades/:id', async (req, res) => {
 
 
 // ================== БРИГАДНЫЙ ОТЧЁТ – ТРЕНДЫ (МЕСЯЦЫ/НЕДЕЛИ/ДНИ) ==================
+// ================== БРИГАДНЫЙ ОТЧЁТ – ТРЕНДЫ (МЕСЯЦЫ/НЕДЕЛИ/ДНИ) ==================
 app.get('/api/brigade-report/trend', async (req, res) => {
   try {
     const {
       dateFrom,
       dateTo,
+      startTime,
+      endTime,
       checkpoint,
       defectType = 'all',
       brigades,
@@ -8419,7 +8393,12 @@ app.get('/api/brigade-report/trend', async (req, res) => {
     // ---------- 1. Определяем диапазон дат ----------
     let startDate, endDate;
     const now = new Date();
-    if (dateFrom && dateTo) {
+
+    if (startTime && endTime) {
+      // Если переданы точные времена, используем их
+      startDate = new Date(startTime.replace(' ', 'T'));
+      endDate = new Date(endTime.replace(' ', 'T'));
+    } else if (dateFrom && dateTo) {
       startDate = new Date(`${dateFrom}T00:00:00`);
       endDate = new Date(`${dateTo}T23:59:59`);
     } else {
@@ -8515,7 +8494,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       endDate.toISOString().slice(0, 19).replace('T', ' ')
     ]);
 
-    // ---------- 5. Загружаем CP72 прохождения (для totalCars) ----------
+    // ---------- 5. Загружаем CP72 прохождения ----------
     const [cp72Rows] = await pool.query(`
       SELECT VIN, CREATION_TIME
       FROM at_om_wiptrackinghistory
@@ -8539,7 +8518,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
     ));
 
     // ---------- 7. Определяем выбранные бригады ----------
-    let selectedBrigadesSet = null; // null означает все бригады
+    let selectedBrigadesSet = null;
     if (brigades && brigades !== 'ALL') {
       selectedBrigadesSet = new Set(
         brigades.split(',').map(b => b.trim()).filter(Boolean)

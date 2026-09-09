@@ -477,6 +477,69 @@ function HelpModal({ isOpen, onClose }) {
   );
 }
 
+/* ===================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ СМЕН ===================== */
+const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
+const getMoscowMinutes = () => {
+  const moscow = getMoscowTime();
+  return moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+};
+const getWeekNumber = (date) => {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+};
+
+const getShiftTimeRange = (shiftFilter) => {
+  const nowMoscow = getMoscowTime();
+  const totalMinutes = getMoscowMinutes();
+  const year = nowMoscow.getUTCFullYear();
+  const month = String(nowMoscow.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(nowMoscow.getUTCDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`;
+
+  const yesterday = new Date(nowMoscow);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const yestYear = yesterday.getUTCFullYear();
+  const yestMonth = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
+  const yestDay = String(yesterday.getUTCDate()).padStart(2, '0');
+  const yesterdayStr = `${yestYear}-${yestMonth}-${yestDay}`;
+
+  if (shiftFilter === 'all') {
+    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+  }
+
+  const isEvenWeek = getWeekNumber(nowMoscow) % 2 === 0;
+  let shiftType;
+
+  if (shiftFilter === 'C') {
+    shiftType = 'night';
+  } else if (shiftFilter === 'A') {
+    shiftType = isEvenWeek ? 'evening' : 'day';
+  } else if (shiftFilter === 'B') {
+    shiftType = isEvenWeek ? 'day' : 'evening';
+  } else {
+    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+  }
+
+  if (shiftType === 'night') {
+    const dateToUse = totalMinutes >= 1 * 60 + 31 ? todayStr : yesterdayStr;
+    return { start: `${dateToUse} 01:31:00`, end: `${dateToUse} 07:50:00` };
+  } else if (shiftType === 'day') {
+    const dateToUse = totalMinutes >= 7 * 60 + 50 ? todayStr : yesterdayStr;
+    return { start: `${dateToUse} 07:50:00`, end: `${dateToUse} 16:40:00` };
+  } else if (shiftType === 'evening') {
+    const dateToUse = totalMinutes >= 16 * 60 + 41 ? todayStr : yesterdayStr;
+    const endDateObj = new Date(`${dateToUse}T00:00:00Z`);
+    endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
+    const endStr = `${endDateObj.getUTCFullYear()}-${String(endDateObj.getUTCMonth() + 1).padStart(2, '0')}-${String(endDateObj.getUTCDate()).padStart(2, '0')}`;
+    return { start: `${dateToUse} 16:41:00`, end: `${endStr} 01:30:00` };
+  }
+
+  return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+};
+
 /* ===================== ОБЩИЙ ОТЧЕТ (ГИСТОГРАММА) ===================== */
 function BrigadeReport({ brigades, password, executeWithPassword }) {
   const today = new Date();
@@ -485,6 +548,9 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
   const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
   const [defectType, setDefectType] = useState('all');
   const [metric, setMetric] = useState('count');
+  const [shiftFilter, setShiftFilter] = useState('all');
+  const [shiftStart, setShiftStart] = useState('');
+  const [shiftEnd, setShiftEnd] = useState('');
   const [histogramData, setHistogramData] = useState([]);
   const [totalCars, setTotalCars] = useState(0);
   const [unassignedCount, setUnassignedCount] = useState(0);
@@ -493,6 +559,19 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
   const [loading, setLoading] = useState(false);
 
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
+
+  useEffect(() => {
+    if (shiftFilter !== 'all') {
+      const { start, end } = getShiftTimeRange(shiftFilter);
+      setShiftStart(start);
+      setShiftEnd(end);
+      setDateFrom(start.slice(0, 10));
+      setDateTo(end.slice(0, 10));
+    } else {
+      setShiftStart('');
+      setShiftEnd('');
+    }
+  }, [shiftFilter]);
 
   const loadData = async () => {
     setLoading(true);
@@ -506,6 +585,15 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
         metric,
         defectType,
       });
+
+      // если выбрана конкретная смена, передаём точное время
+      if (shiftFilter !== 'all' && shiftStart && shiftEnd) {
+        params.delete('dateFrom');
+        params.delete('dateTo');
+        params.append('startTime', shiftStart);
+        params.append('endTime', shiftEnd);
+      }
+
       const res = await fetch(`${API_BASE}/api/brigade-report/data?${params}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const data = await res.json();
@@ -523,7 +611,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
 
   useEffect(() => {
     loadData();
-  }, [dateFrom, dateTo, selectedCheckpoints, metric, defectType]);
+  }, [dateFrom, dateTo, selectedCheckpoints, metric, defectType, shiftFilter, shiftStart, shiftEnd]);
 
   // Топ 3 бригады по выбранной метрике
   const top3Brigades = useMemo(() => {
@@ -536,7 +624,6 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
     return sorted.slice(0, 3);
   }, [topBrigades, metric]);
 
-  // Для каждой бригады отбираем топ 5 MPP по метрике
   const topMppsByBrigade = (brigade) => {
     const mpps = [...brigade.mpps].sort((a, b) => {
       const valA = metric === 'dpu' ? a.dpu : a.count;
@@ -546,10 +633,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
     return mpps.slice(0, 5);
   };
 
-  // Форматирование DPU с двумя знаками после запятой
-  const formatDpu = (value) => {
-    return Number(value).toFixed(2);
-  };
+  const formatDpu = (value) => Number(value).toFixed(2);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
@@ -565,11 +649,20 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
       }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Начало:
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} disabled={shiftFilter !== 'all'} style={inputStyle} />
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Конец:
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} disabled={shiftFilter !== 'all'} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Смена:
+          <select value={shiftFilter} onChange={(e) => setShiftFilter(e.target.value)} style={inputStyle}>
+            <option value="all">Сутки</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+          </select>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Чекпоинты:
@@ -722,19 +815,16 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
   const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
   const [defectType, setDefectType] = useState('all');
   const [selectedBrigades, setSelectedBrigades] = useState([]);
-  const [metric, setMetric] = useState('count'); // 'count' | 'dpu'
-  const [trendsByBrigade, setTrendsByBrigade] = useState({}); // ключ – имя бригады
+  const [metric, setMetric] = useState('count');
+  const [shiftFilter, setShiftFilter] = useState('all');
+  const [trendsByBrigade, setTrendsByBrigade] = useState({});
   const [loading, setLoading] = useState(false);
 
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
   const brigadesOptions = brigades.map(b => b.name).filter(name => name !== 'Бригада не найдена');
 
-  // Функция форматирования DPU
-  const formatValue = (value) => {
-    return metric === 'dpu' ? Number(value).toFixed(2) : value;
-  };
+  const formatValue = (value) => metric === 'dpu' ? Number(value).toFixed(2) : value;
 
-  // Загрузка данных для одной бригады
   const fetchTrendForBrigade = async (brigadeName) => {
     const allCheckpointsSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
     const checkpointParam = allCheckpointsSelected ? 'ALL' : selectedCheckpoints.join(',');
@@ -746,12 +836,17 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
       metric,
     });
 
+    if (shiftFilter !== 'all') {
+      const { start, end } = getShiftTimeRange(shiftFilter);
+      params.append('startTime', start);
+      params.append('endTime', end);
+    }
+
     const res = await fetch(`${API_BASE}/api/brigade-report/trend?${params}`);
     if (!res.ok) throw new Error(`Ошибка загрузки трендов для бригады ${brigadeName}`);
     return await res.json();
   };
 
-  // Загрузка данных для всех выбранных бригад
   const loadAllTrends = async () => {
     if (selectedBrigades.length === 0) {
       setTrendsByBrigade({});
@@ -781,9 +876,8 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
 
   useEffect(() => {
     loadAllTrends();
-  }, [selectedCheckpoints, selectedBrigades, defectType, metric]);
+  }, [selectedCheckpoints, selectedBrigades, defectType, metric, shiftFilter]);
 
-  // Отрисовка карточек бригад
   const renderBrigadeCard = (brigadeName, data) => {
     if (!data) return null;
 
@@ -804,7 +898,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
           👷 {brigadeName}
         </h2>
 
-        {/* Три графика: месяцы, недели, дни */}
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
           {/* Месяцы */}
           <div style={{ flex: '1 1 300px', minWidth: 250 }}>
@@ -886,7 +979,7 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
-      {/* Фильтры (без дат) */}
+      {/* Фильтры */}
       <div style={{
         display: 'flex',
         flexWrap: 'wrap',
@@ -896,6 +989,15 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
         backgroundColor: '#F8FAFC',
         borderRadius: BRAND.radius,
       }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Смена:
+          <select value={shiftFilter} onChange={(e) => setShiftFilter(e.target.value)} style={inputStyle}>
+            <option value="all">Сутки</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+          </select>
+        </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Чекпоинты:
           <MultiSelect
@@ -946,7 +1048,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
         </div>
       </div>
 
-      {/* Контент */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: '30px', fontSize: '1.5rem' }}>Загрузка...</div>
       ) : selectedBrigades.length === 0 ? (
@@ -1174,7 +1275,6 @@ function DictionaryPanel({
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 100;
 
-  // Фильтрация с мемоизацией
   const filteredDictionary = useMemo(() => {
     return dictionaryData.filter(entry => {
       const matchModel = filterModel === 'ALL' || entry.model === filterModel;
@@ -1376,7 +1476,6 @@ function DictionaryPanel({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
-      {/* Вложенные вкладки */}
       <div style={{ display: 'flex', gap: 10 }}>
         <button
           onClick={() => setActiveSection('defects')}
@@ -1400,7 +1499,6 @@ function DictionaryPanel({
 
       {activeSection === 'defects' ? (
         <>
-          {/* Блок фильтрации и поиска */}
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -1449,7 +1547,6 @@ function DictionaryPanel({
             </button>
           </div>
 
-          {/* Блок добавления новой записи */}
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -1501,7 +1598,6 @@ function DictionaryPanel({
             </button>
           </div>
 
-          {/* Таблица словаря */}
           <div style={cardStyle}>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px', flexShrink: 0 }}>
               Справочник дефектов и бригад
@@ -1588,7 +1684,6 @@ function DictionaryPanel({
               )}
             </div>
 
-            {/* Пагинация */}
             {pageCount > 1 && (
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 10 }}>
                 <button
@@ -1613,7 +1708,6 @@ function DictionaryPanel({
           </div>
         </>
       ) : (
-        /* Вкладка управления бригадами */
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
           <div style={{
             display: 'flex',
@@ -1676,7 +1770,6 @@ function DictionaryPanel({
         </div>
       )}
 
-      {/* Модальные окна импорта и пароля для импорта */}
       {importPasswordModal && (
         <PasswordModal
           isOpen={importPasswordModal}
@@ -1982,7 +2075,7 @@ export default function BrigadeReportPage() {
             style={tabStyle(activeTab === 'general')}
             onClick={() => handleTabChange('general')}
           >
-            📊 Общий отчет
+            Общий отчет
           </button>
           <button
             style={tabStyle(activeTab === 'brigade')}
