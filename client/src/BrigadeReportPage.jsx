@@ -546,6 +546,11 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
     return mpps.slice(0, 5);
   };
 
+  // Форматирование DPU с двумя знаками после запятой
+  const formatDpu = (value) => {
+    return Number(value).toFixed(2);
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
       {/* Фильтры */}
@@ -628,9 +633,16 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis type="number" domain={[0, 'dataMax']} tick={{ fontSize: 13 }} />
                     <YAxis type="category" dataKey="category" tick={{ fontSize: 13 }} width={160} />
-                    <Tooltip contentStyle={{ fontSize: '1.2rem' }} />
+                    <Tooltip contentStyle={{ fontSize: '1.2rem' }}
+                      formatter={(value) => metric === 'dpu' ? formatDpu(value) : value}
+                    />
                     <Bar dataKey="value" fill={BRAND.primary} barSize={32}>
-                      <LabelList dataKey="value" position="right" style={{ fontSize: '1.1rem', fontWeight: 700, fill: BRAND.text }} />
+                      <LabelList
+                        dataKey="value"
+                        position="right"
+                        formatter={(value) => metric === 'dpu' ? formatDpu(value) : value}
+                        style={{ fontSize: '1.1rem', fontWeight: 700, fill: BRAND.text }}
+                      />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
@@ -666,7 +678,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
                 </thead>
                 <tbody>
                   {top3Brigades.map((brigade) => {
-                    const totalValue = metric === 'dpu' ? brigade.dpu : brigade.count;
+                    const totalValue = metric === 'dpu' ? formatDpu(brigade.dpu) : brigade.count;
                     const mpps = topMppsByBrigade(brigade);
                     return (
                       <React.Fragment key={brigade.brigade}>
@@ -686,7 +698,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
                               {mpp.model} {mpp.part_name} {mpp.problem_type}
                             </td>
                             <td style={{ ...tdStyle, textAlign: 'center' }}>
-                              {metric === 'dpu' ? mpp.dpu : mpp.count}
+                              {metric === 'dpu' ? formatDpu(mpp.dpu) : mpp.count}
                             </td>
                           </tr>
                         ))}
@@ -892,7 +904,7 @@ function AssignBrigadesPanel({ brigades, password, executeWithPassword, refreshT
   );
 }
 
-/* ===================== СПРАВОЧНИК ===================== */
+/* ===================== СПРАВОЧНИК (ОБНОВЛЁННЫЙ) ===================== */
 function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigger }) {
   const [dictionaryData, setDictionaryData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -908,6 +920,9 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
   const [importFile, setImportFile] = useState(null);
   const [importPasswordModal, setImportPasswordModal] = useState(false);
   const [importError, setImportError] = useState('');
+  const [activeSection, setActiveSection] = useState('defects'); // 'defects' | 'brigades'
+  const [newBrigadeName, setNewBrigadeName] = useState('');
+  const [brigadeList, setBrigadeList] = useState(brigades);
 
   const loadDictionary = async () => {
     setLoading(true);
@@ -942,6 +957,10 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
   useEffect(() => {
     if (refreshTrigger) loadDictionary();
   }, [refreshTrigger]);
+
+  useEffect(() => {
+    setBrigadeList(brigades);
+  }, [brigades]);
 
   const handleSaveEntry = (entry) => {
     executeWithPassword(async (pwd) => {
@@ -989,6 +1008,66 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
     });
   };
 
+  // ---- Управление бригадами ----
+  const handleAddBrigade = () => {
+    const name = newBrigadeName.trim();
+    if (!name) {
+      alert('Введите название бригады');
+      return;
+    }
+    executeWithPassword(async (pwd) => {
+      try {
+        const res = await fetch(`${API_BASE}/api/brigade-report/brigades`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, password: pwd }),
+        });
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Ошибка добавления');
+        }
+        // Обновляем список бригад
+        const brigadesRes = await fetch(`${API_BASE}/api/brigade-report/brigades`);
+        if (brigadesRes.ok) {
+          const updatedBrigades = await brigadesRes.json();
+          setBrigadeList(updatedBrigades);
+          setNewBrigadeName('');
+        }
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  };
+
+  const handleDeleteBrigade = (id, name) => {
+    if (!window.confirm(`Удалить бригаду "${name}"? Все связанные дефекты будут назначены "Бригада не найдена".`)) {
+      return;
+    }
+    executeWithPassword(async (pwd) => {
+      try {
+        const res = await fetch(`${API_BASE}/api/brigade-report/brigades/${id}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd }),
+        });
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Ошибка удаления');
+        }
+        // Обновляем список бригад
+        const brigadesRes = await fetch(`${API_BASE}/api/brigade-report/brigades`);
+        if (brigadesRes.ok) {
+          const updatedBrigades = await brigadesRes.json();
+          setBrigadeList(updatedBrigades);
+        }
+        loadDictionary();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  };
+
+  // ---- Импорт ----
   const executeImport = (entries) => {
     if (entries.length === 0) {
       alert('Нет данных для импорта');
@@ -1054,6 +1133,24 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
     reader.readAsArrayBuffer(file);
   };
 
+  // ---- Экспорт в Excel ----
+  const handleExportExcel = () => {
+    if (filteredDictionary.length === 0) {
+      alert('Нет данных для экспорта');
+      return;
+    }
+    const exportData = filteredDictionary.map(entry => ({
+      'Модель': entry.model,
+      'Деталь': entry.part_name,
+      'Дефект': entry.problem_type,
+      'Бригада': entry.brigade_name || '—',
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Справочник');
+    XLSX.writeFile(wb, `Справочник_дефектов_${new Date().toISOString().slice(0,10)}.xlsx`);
+  };
+
   // Фильтрация справочника
   const filteredDictionary = dictionaryData.filter(entry => {
     const matchModel = filterModel === 'ALL' || entry.model === filterModel;
@@ -1063,7 +1160,7 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
     return matchModel && matchBrigade && matchSearch;
   });
 
-  // Список бригад, встречающихся в справочнике
+  // Список бригад для фильтра
   const brigadeOptions = useMemo(() => {
     const set = new Set(dictionaryData.map(e => e.brigade_name).filter(Boolean));
     return Array.from(set).sort();
@@ -1071,180 +1168,276 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
-      {/* Фильтры и кнопки */}
-      <div style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 12,
-        alignItems: 'center',
-        padding: '15px',
-        backgroundColor: '#F8FAFC',
-        borderRadius: BRAND.radius,
-      }}>
-        <select
-          value={filterModel}
-          onChange={(e) => setFilterModel(e.target.value)}
-          style={{ ...inputStyle, minWidth: '150px' }}
-        >
-          <option value="ALL">Все модели</option>
-          {models.map(model => <option key={model} value={model}>{model}</option>)}
-        </select>
-        <select
-          value={filterBrigade}
-          onChange={(e) => setFilterBrigade(e.target.value)}
-          style={{ ...inputStyle, minWidth: '180px' }}
-        >
-          <option value="ALL">Все бригады</option>
-          {brigadeOptions.map(brigade => <option key={brigade} value={brigade}>{brigade}</option>)}
-        </select>
-        <input
-          type="text"
-          placeholder="Поиск по детали, дефекту, модели"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ flex: 1, minWidth: '200px', ...inputStyle }}
-        />
+      {/* Вложенные вкладки справочника */}
+      <div style={{ display: 'flex', gap: 10 }}>
         <button
-          onClick={() => setImportPasswordModal(true)}
-          style={{ ...buttonStyle, background: '#8B5CF6' }}
+          onClick={() => setActiveSection('defects')}
+          style={subTabStyle(activeSection === 'defects')}
         >
-          📥 Импорт
+          🔧 Дефекты
+        </button>
+        <button
+          onClick={() => setActiveSection('brigades')}
+          style={subTabStyle(activeSection === 'brigades')}
+        >
+          👷 Бригады
         </button>
       </div>
 
-      {/* Форма добавления вручную */}
-      <div style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 10,
-        alignItems: 'center',
-        padding: '15px',
-        backgroundColor: '#FFFFFF',
-        borderRadius: BRAND.radius,
-        border: `1px solid ${BRAND.border}`,
-      }}>
-        <select
-          value={newEntry.model}
-          onChange={(e) => setNewEntry({ ...newEntry, model: e.target.value })}
-          style={{ ...inputStyle, minWidth: '150px' }}
-        >
-          <option value="">Модель</option>
-          {models.map(model => <option key={model} value={model}>{model}</option>)}
-        </select>
-        <input
-          type="text"
-          placeholder="Деталь"
-          value={newEntry.part_name}
-          onChange={(e) => setNewEntry({ ...newEntry, part_name: e.target.value })}
-          style={{ ...inputStyle, flex: 1, minWidth: '150px' }}
-        />
-        <input
-          type="text"
-          placeholder="Дефект"
-          value={newEntry.problem_type}
-          onChange={(e) => setNewEntry({ ...newEntry, problem_type: e.target.value })}
-          style={{ ...inputStyle, flex: 1, minWidth: '150px' }}
-        />
-        <select
-          value={newEntry.brigadeName}
-          onChange={(e) => setNewEntry({ ...newEntry, brigadeName: e.target.value })}
-          style={{ ...inputStyle, minWidth: '150px' }}
-        >
-          <option value="">Бригада</option>
-          {brigades.filter(b => b.name !== 'Бригада не найдена').map(b => (
-            <option key={b.id} value={b.name}>{b.name}</option>
-          ))}
-        </select>
-        <button
-          onClick={() => handleSaveEntry(newEntry)}
-          style={{ ...buttonStyle, background: BRAND.primary }}
-        >
-          Добавить
-        </button>
-      </div>
+      {activeSection === 'defects' ? (
+        <>
+          {/* Блок фильтрации и поиска */}
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 12,
+            alignItems: 'center',
+            padding: '15px',
+            backgroundColor: '#F8FAFC',
+            borderRadius: BRAND.radius,
+          }}>
+            <span style={{ fontWeight: 600, color: BRAND.textSecondary, fontSize: '1rem' }}>Фильтры и поиск:</span>
+            <select
+              value={filterModel}
+              onChange={(e) => setFilterModel(e.target.value)}
+              style={{ ...inputStyle, minWidth: '150px' }}
+            >
+              <option value="ALL">Все модели</option>
+              {models.map(model => <option key={model} value={model}>{model}</option>)}
+            </select>
+            <select
+              value={filterBrigade}
+              onChange={(e) => setFilterBrigade(e.target.value)}
+              style={{ ...inputStyle, minWidth: '180px' }}
+            >
+              <option value="ALL">Все бригады</option>
+              {brigadeOptions.map(brigade => <option key={brigade} value={brigade}>{brigade}</option>)}
+            </select>
+            <input
+              type="text"
+              placeholder="Поиск по детали, дефекту, модели"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ flex: 1, minWidth: '200px', ...inputStyle }}
+            />
+            <button
+              onClick={() => setImportPasswordModal(true)}
+              style={{ ...buttonStyle, background: '#8B5CF6' }}
+            >
+              📥 Импорт
+            </button>
+            <button
+              onClick={handleExportExcel}
+              style={{ ...buttonStyle, background: '#059669' }}
+            >
+              📊 Экспорт
+            </button>
+          </div>
 
-      {/* Таблица справочника */}
-      <div style={cardStyle}>
-        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px', flexShrink: 0 }}>
-          Справочник дефектов и бригад
-        </h2>
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
-          {loading ? (
-            <p style={{ textAlign: 'center', padding: '20px', fontSize: '1.2rem' }}>Загрузка...</p>
-          ) : filteredDictionary.length > 0 ? (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={thStyle}>Модель</th>
-                  <th style={thStyle}>Деталь</th>
-                  <th style={thStyle}>Дефект</th>
-                  <th style={thStyle}>Бригада</th>
-                  <th style={thStyle}>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredDictionary.map(entry => (
-                  <tr key={entry.id} style={{ borderBottom: `1px solid ${BRAND.border}` }}>
-                    <td style={tdStyle}>{entry.model}</td>
-                    <td style={tdStyle}>{entry.part_name}</td>
-                    <td style={tdStyle}>{entry.problem_type}</td>
-                    <td style={tdStyle}>
-                      {editEntry && editEntry.id === entry.id ? (
-                        <select
-                          value={editEntry.brigadeName}
-                          onChange={(e) => setEditEntry({ ...editEntry, brigadeName: e.target.value })}
-                          style={{ padding: '5px', fontSize: '0.9rem', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
-                        >
-                          {brigades.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
-                        </select>
-                      ) : (
-                        entry.brigade_name || '—'
-                      )}
-                    </td>
-                    <td style={tdStyle}>
-                      {editEntry && editEntry.id === entry.id ? (
-                        <>
+          {/* Блок добавления новой записи */}
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 10,
+            alignItems: 'center',
+            padding: '15px',
+            backgroundColor: '#FFFFFF',
+            borderRadius: BRAND.radius,
+            border: `1px solid ${BRAND.border}`,
+          }}>
+            <span style={{ fontWeight: 600, color: BRAND.textSecondary, fontSize: '1rem' }}>Новая связка дефект-бригада:</span>
+            <select
+              value={newEntry.model}
+              onChange={(e) => setNewEntry({ ...newEntry, model: e.target.value })}
+              style={{ ...inputStyle, minWidth: '150px' }}
+            >
+              <option value="">Модель</option>
+              {models.map(model => <option key={model} value={model}>{model}</option>)}
+            </select>
+            <input
+              type="text"
+              placeholder="Деталь"
+              value={newEntry.part_name}
+              onChange={(e) => setNewEntry({ ...newEntry, part_name: e.target.value })}
+              style={{ ...inputStyle, flex: 1, minWidth: '150px' }}
+            />
+            <input
+              type="text"
+              placeholder="Дефект"
+              value={newEntry.problem_type}
+              onChange={(e) => setNewEntry({ ...newEntry, problem_type: e.target.value })}
+              style={{ ...inputStyle, flex: 1, minWidth: '150px' }}
+            />
+            <select
+              value={newEntry.brigadeName}
+              onChange={(e) => setNewEntry({ ...newEntry, brigadeName: e.target.value })}
+              style={{ ...inputStyle, minWidth: '150px' }}
+            >
+              <option value="">Бригада</option>
+              {brigadeList.filter(b => b.name !== 'Бригада не найдена').map(b => (
+                <option key={b.id} value={b.name}>{b.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => handleSaveEntry(newEntry)}
+              style={{ ...buttonStyle, background: BRAND.primary }}
+            >
+              Добавить
+            </button>
+          </div>
+
+          {/* Таблица справочника */}
+          <div style={cardStyle}>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px', flexShrink: 0 }}>
+              Справочник дефектов и бригад
+            </h2>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
+              {loading ? (
+                <p style={{ textAlign: 'center', padding: '20px', fontSize: '1.2rem' }}>Загрузка...</p>
+              ) : filteredDictionary.length > 0 ? (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>Модель</th>
+                      <th style={thStyle}>Деталь</th>
+                      <th style={thStyle}>Дефект</th>
+                      <th style={thStyle}>Бригада</th>
+                      <th style={thStyle}>Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDictionary.map(entry => (
+                      <tr key={entry.id} style={{ borderBottom: `1px solid ${BRAND.border}` }}>
+                        <td style={tdStyle}>{entry.model}</td>
+                        <td style={tdStyle}>{entry.part_name}</td>
+                        <td style={tdStyle}>{entry.problem_type}</td>
+                        <td style={tdStyle}>
+                          {editEntry && editEntry.id === entry.id ? (
+                            <select
+                              value={editEntry.brigadeName}
+                              onChange={(e) => setEditEntry({ ...editEntry, brigadeName: e.target.value })}
+                              style={{ padding: '5px', fontSize: '0.9rem', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
+                            >
+                              {brigadeList.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+                            </select>
+                          ) : (
+                            entry.brigade_name || '—'
+                          )}
+                        </td>
+                        <td style={tdStyle}>
+                          {editEntry && editEntry.id === entry.id ? (
+                            <>
+                              <button
+                                onClick={() => handleSaveEntry(editEntry)}
+                                style={{ marginRight: 5, padding: '5px 10px', background: '#10B981', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
+                              >
+                                Сохранить
+                              </button>
+                              <button
+                                onClick={() => setEditEntry(null)}
+                                style={{ padding: '5px 10px', background: '#6B7280', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
+                              >
+                                Отмена
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => setEditEntry({ id: entry.id, model: entry.model, part_name: entry.part_name, problem_type: entry.problem_type, brigadeName: entry.brigade_name })}
+                                style={{ marginRight: 5, padding: '5px 10px', background: '#F59E0B', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
+                              >
+                                Изменить
+                              </button>
+                              <button
+                                onClick={() => handleDeleteEntry(entry.id)}
+                                style={{ padding: '5px 10px', background: '#EF4444', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
+                              >
+                                Удалить
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ backgroundColor: '#F0F5FF', fontWeight: 700 }}>
+                      <td style={{ ...tdStyle, fontWeight: 700 }}>Итого:</td>
+                      <td style={{ ...tdStyle }} colSpan={3}></td>
+                      <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'center' }}>{filteredDictionary.length}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              ) : (
+                <p style={{ textAlign: 'center', padding: '30px', color: BRAND.textSecondary, fontSize: '1.2rem' }}>
+                  Нет записей
+                </p>
+              )}
+            </div>
+          </div>
+        </>
+      ) : (
+        /* Вкладка бригады */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 10,
+            alignItems: 'center',
+            padding: '15px',
+            backgroundColor: '#F8FAFC',
+            borderRadius: BRAND.radius,
+          }}>
+            <span style={{ fontWeight: 600, color: BRAND.textSecondary }}>Добавить бригаду:</span>
+            <input
+              type="text"
+              placeholder="Название бригады"
+              value={newBrigadeName}
+              onChange={(e) => setNewBrigadeName(e.target.value)}
+              style={{ ...inputStyle, flex: 1, minWidth: '200px' }}
+            />
+            <button
+              onClick={handleAddBrigade}
+              style={{ ...buttonStyle, background: '#10B981' }}
+            >
+              Добавить
+            </button>
+          </div>
+
+          <div style={cardStyle}>
+            <h2 style={{ fontSize: '1.3rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>Список бригад</h2>
+            <div style={{ flex: 1, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>ID</th>
+                    <th style={thStyle}>Название</th>
+                    <th style={thStyle}>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {brigadeList.map(brigade => (
+                    <tr key={brigade.id} style={{ borderBottom: `1px solid ${BRAND.border}` }}>
+                      <td style={tdStyle}>{brigade.id}</td>
+                      <td style={tdStyle}>{brigade.name}</td>
+                      <td style={tdStyle}>
+                        {brigade.name !== 'Бригада не найдена' && (
                           <button
-                            onClick={() => handleSaveEntry(editEntry)}
-                            style={{ marginRight: 5, padding: '5px 10px', background: '#10B981', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
-                          >
-                            Сохранить
-                          </button>
-                          <button
-                            onClick={() => setEditEntry(null)}
-                            style={{ padding: '5px 10px', background: '#6B7280', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
-                          >
-                            Отмена
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => setEditEntry({ id: entry.id, model: entry.model, part_name: entry.part_name, problem_type: entry.problem_type, brigadeName: entry.brigade_name })}
-                            style={{ marginRight: 5, padding: '5px 10px', background: '#F59E0B', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
-                          >
-                            Изменить
-                          </button>
-                          <button
-                            onClick={() => handleDeleteEntry(entry.id)}
+                            onClick={() => handleDeleteBrigade(brigade.id, brigade.name)}
                             style={{ padding: '5px 10px', background: '#EF4444', color: '#FFF', border: 'none', borderRadius: 5, cursor: 'pointer', fontSize: '0.9rem' }}
                           >
                             Удалить
                           </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <p style={{ textAlign: 'center', padding: '30px', color: BRAND.textSecondary, fontSize: '1.2rem' }}>
-              Нет записей
-            </p>
-          )}
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Модальное окно импорта */}
       {importPasswordModal && (

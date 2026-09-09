@@ -8343,7 +8343,65 @@ app.post('/api/brigade-report/assign-all-models', async (req, res) => {
   }
 });
 
+// ================== УПРАВЛЕНИЕ БРИГАДАМИ ==================
 
+// Добавление новой бригады
+app.post('/api/brigade-report/brigades', async (req, res) => {
+  try {
+    const { name, password } = req.body;
+    if (!name || !password) {
+      return res.status(400).json({ error: 'name и password обязательны' });
+    }
+    if (password !== '1234561') {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      return res.status(400).json({ error: 'Название не может быть пустым' });
+    }
+
+    // Проверяем на дубликат
+    const [existing] = await notesPool.query('SELECT id FROM brigades WHERE name = ?', [trimmedName]);
+    if (existing.length > 0) {
+      return res.status(409).json({ error: 'Бригада с таким названием уже существует' });
+    }
+
+    await notesPool.query('INSERT INTO brigades (name) VALUES (?)', [trimmedName]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Ошибка добавления бригады:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Удаление бригады (дефекты автоматически перейдут к "Бригада не найдена" через триггер)
+app.delete('/api/brigade-report/brigades/:id', async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password) {
+      return res.status(400).json({ error: 'password обязателен' });
+    }
+    if (password !== '1234561') {
+      return res.status(403).json({ error: 'Неверный пароль' });
+    }
+
+    // Запрещаем удалять специальную бригаду
+    const [brigade] = await notesPool.query('SELECT name FROM brigades WHERE id = ?', [req.params.id]);
+    if (brigade.length === 0) {
+      return res.status(404).json({ error: 'Бригада не найдена' });
+    }
+    if (brigade[0].name === 'Бригада не найдена') {
+      return res.status(400).json({ error: 'Нельзя удалить системную бригаду "Бригада не найдена"' });
+    }
+
+    await notesPool.query('DELETE FROM brigades WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Ошибка удаления бригады:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 
