@@ -905,10 +905,7 @@ function AssignBrigadesPanel({ brigades, password, executeWithPassword, refreshT
 }
 
 /* ===================== СПРАВОЧНИК (ОБНОВЛЁННЫЙ) ===================== */
-function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigger }) {
-  const [dictionaryData, setDictionaryData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [models, setModels] = useState([]);
+function DictionaryPanel({ dictionaryData, models, brigades, password, executeWithPassword, onDataChanged, manageUnlocked }) {
   const [filterModel, setFilterModel] = useState('ALL');
   const [filterBrigade, setFilterBrigade] = useState('ALL');
   const [search, setSearch] = useState('');
@@ -922,45 +919,21 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
   const [importError, setImportError] = useState('');
   const [activeSection, setActiveSection] = useState('defects'); // 'defects' | 'brigades'
   const [newBrigadeName, setNewBrigadeName] = useState('');
-  const [brigadeList, setBrigadeList] = useState(brigades);
 
-  const loadDictionary = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/brigade-report/dictionary`);
-      if (!res.ok) throw new Error('Ошибка загрузки справочника');
-      const data = await res.json();
-      setDictionaryData(data);
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Фильтрация словаря
+  const filteredDictionary = dictionaryData.filter(entry => {
+    const matchModel = filterModel === 'ALL' || entry.model === filterModel;
+    const matchBrigade = filterBrigade === 'ALL' || entry.brigade_name === filterBrigade;
+    const searchLower = search.toLowerCase();
+    const matchSearch = !search || entry.part_name.toLowerCase().includes(searchLower) || entry.problem_type.toLowerCase().includes(searchLower) || entry.model.toLowerCase().includes(searchLower);
+    return matchModel && matchBrigade && matchSearch;
+  });
 
-  const loadModels = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/brigade-report/models`);
-      if (!res.ok) throw new Error('Ошибка загрузки моделей');
-      const data = await res.json();
-      setModels(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  useEffect(() => {
-    loadDictionary();
-    loadModels();
-  }, []);
-
-  useEffect(() => {
-    if (refreshTrigger) loadDictionary();
-  }, [refreshTrigger]);
-
-  useEffect(() => {
-    setBrigadeList(brigades);
-  }, [brigades]);
+  // Список бригад для фильтра
+  const brigadeOptions = useMemo(() => {
+    const set = new Set(dictionaryData.map(e => e.brigade_name).filter(Boolean));
+    return Array.from(set).sort();
+  }, [dictionaryData]);
 
   const handleSaveEntry = (entry) => {
     executeWithPassword(async (pwd) => {
@@ -980,7 +953,7 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
           const errData = await res.json();
           throw new Error(errData.error || 'Ошибка сохранения');
         }
-        loadDictionary();
+        onDataChanged();
         setNewEntry({ model: '', part_name: '', problem_type: '', brigadeName: '' });
         setEditEntry(null);
       } catch (err) {
@@ -1001,14 +974,13 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
           const errData = await res.json();
           throw new Error(errData.error || 'Ошибка удаления');
         }
-        loadDictionary();
+        onDataChanged();
       } catch (err) {
         alert(err.message);
       }
     });
   };
 
-  // ---- Управление бригадами ----
   const handleAddBrigade = () => {
     const name = newBrigadeName.trim();
     if (!name) {
@@ -1026,13 +998,8 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
           const errData = await res.json();
           throw new Error(errData.error || 'Ошибка добавления');
         }
-        // Обновляем список бригад
-        const brigadesRes = await fetch(`${API_BASE}/api/brigade-report/brigades`);
-        if (brigadesRes.ok) {
-          const updatedBrigades = await brigadesRes.json();
-          setBrigadeList(updatedBrigades);
-          setNewBrigadeName('');
-        }
+        setNewBrigadeName('');
+        onDataChanged();
       } catch (err) {
         alert(err.message);
       }
@@ -1054,20 +1021,14 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
           const errData = await res.json();
           throw new Error(errData.error || 'Ошибка удаления');
         }
-        // Обновляем список бригад
-        const brigadesRes = await fetch(`${API_BASE}/api/brigade-report/brigades`);
-        if (brigadesRes.ok) {
-          const updatedBrigades = await brigadesRes.json();
-          setBrigadeList(updatedBrigades);
-        }
-        loadDictionary();
+        onDataChanged();
       } catch (err) {
         alert(err.message);
       }
     });
   };
 
-  // ---- Импорт ----
+  // Импорт
   const executeImport = (entries) => {
     if (entries.length === 0) {
       alert('Нет данных для импорта');
@@ -1087,7 +1048,7 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
         setShowImportModal(false);
         setImportText('');
         setImportFile(null);
-        loadDictionary();
+        onDataChanged();
       })
       .catch(err => alert(err.message));
   };
@@ -1133,7 +1094,7 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
     reader.readAsArrayBuffer(file);
   };
 
-  // ---- Экспорт в Excel ----
+  // Экспорт Excel
   const handleExportExcel = () => {
     if (filteredDictionary.length === 0) {
       alert('Нет данных для экспорта');
@@ -1151,24 +1112,9 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
     XLSX.writeFile(wb, `Справочник_дефектов_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
-  // Фильтрация справочника
-  const filteredDictionary = dictionaryData.filter(entry => {
-    const matchModel = filterModel === 'ALL' || entry.model === filterModel;
-    const matchBrigade = filterBrigade === 'ALL' || entry.brigade_name === filterBrigade;
-    const searchLower = search.toLowerCase();
-    const matchSearch = !search || entry.part_name.toLowerCase().includes(searchLower) || entry.problem_type.toLowerCase().includes(searchLower) || entry.model.toLowerCase().includes(searchLower);
-    return matchModel && matchBrigade && matchSearch;
-  });
-
-  // Список бригад для фильтра
-  const brigadeOptions = useMemo(() => {
-    const set = new Set(dictionaryData.map(e => e.brigade_name).filter(Boolean));
-    return Array.from(set).sort();
-  }, [dictionaryData]);
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
-      {/* Вложенные вкладки справочника */}
+      {/* Вложенные вкладки */}
       <div style={{ display: 'flex', gap: 10 }}>
         <button
           onClick={() => setActiveSection('defects')}
@@ -1180,21 +1126,22 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
           onClick={() => setActiveSection('brigades')}
           style={subTabStyle(activeSection === 'brigades')}
         >
-          👷 Бригады
+          👷 Управление бригадами
         </button>
       </div>
 
       {activeSection === 'defects' ? (
         <>
-          {/* Блок фильтрации и поиска */}
+          {/* Блок фильтрации и поиска (новый дизайн) */}
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
             gap: 12,
             alignItems: 'center',
             padding: '15px',
-            backgroundColor: '#F8FAFC',
+            backgroundColor: '#FFFFFF',
             borderRadius: BRAND.radius,
+            border: `1px solid ${BRAND.border}`,
           }}>
             <span style={{ fontWeight: 600, color: BRAND.textSecondary, fontSize: '1rem' }}>Фильтры и поиск:</span>
             <select
@@ -1274,7 +1221,7 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
               style={{ ...inputStyle, minWidth: '150px' }}
             >
               <option value="">Бригада</option>
-              {brigadeList.filter(b => b.name !== 'Бригада не найдена').map(b => (
+              {brigades.filter(b => b.name !== 'Бригада не найдена').map(b => (
                 <option key={b.id} value={b.name}>{b.name}</option>
               ))}
             </select>
@@ -1286,15 +1233,13 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
             </button>
           </div>
 
-          {/* Таблица справочника */}
+          {/* Таблица словаря */}
           <div style={cardStyle}>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px', flexShrink: 0 }}>
               Справочник дефектов и бригад
             </h2>
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
-              {loading ? (
-                <p style={{ textAlign: 'center', padding: '20px', fontSize: '1.2rem' }}>Загрузка...</p>
-              ) : filteredDictionary.length > 0 ? (
+              {filteredDictionary.length > 0 ? (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
@@ -1318,7 +1263,7 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
                               onChange={(e) => setEditEntry({ ...editEntry, brigadeName: e.target.value })}
                               style={{ padding: '5px', fontSize: '0.9rem', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}
                             >
-                              {brigadeList.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+                              {brigades.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
                             </select>
                           ) : (
                             entry.brigade_name || '—'
@@ -1377,18 +1322,20 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
           </div>
         </>
       ) : (
-        /* Вкладка бригады */
+        /* Вкладка управления бригадами */
         <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
+          {/* Добавить бригаду (новый дизайн) */}
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
             gap: 10,
             alignItems: 'center',
             padding: '15px',
-            backgroundColor: '#F8FAFC',
+            backgroundColor: '#FFFFFF',
             borderRadius: BRAND.radius,
+            border: `1px solid ${BRAND.border}`,
           }}>
-            <span style={{ fontWeight: 600, color: BRAND.textSecondary }}>Добавить бригаду:</span>
+            <span style={{ fontWeight: 600, color: BRAND.textSecondary, fontSize: '1rem' }}>Добавить бригаду:</span>
             <input
               type="text"
               placeholder="Название бригады"
@@ -1404,6 +1351,7 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
             </button>
           </div>
 
+          {/* Список бригад */}
           <div style={cardStyle}>
             <h2 style={{ fontSize: '1.3rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>Список бригад</h2>
             <div style={{ flex: 1, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
@@ -1416,7 +1364,7 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
                   </tr>
                 </thead>
                 <tbody>
-                  {brigadeList.map(brigade => (
+                  {brigades.map(brigade => (
                     <tr key={brigade.id} style={{ borderBottom: `1px solid ${BRAND.border}` }}>
                       <td style={tdStyle}>{brigade.id}</td>
                       <td style={tdStyle}>{brigade.name}</td>
@@ -1439,7 +1387,7 @@ function DictionaryPanel({ brigades, password, executeWithPassword, refreshTrigg
         </div>
       )}
 
-      {/* Модальное окно импорта */}
+      {/* Модальные окна импорта и пароля для импорта */}
       {importPasswordModal && (
         <PasswordModal
           isOpen={importPasswordModal}
@@ -1527,7 +1475,90 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
 
-  const handleRefresh = () => setRefreshTrigger(prev => prev + 1);
+  // Состояния для справочника, чтобы не перезагружать при переключении
+  const [dictionaryData, setDictionaryData] = useState([]);
+  const [models, setModels] = useState([]);
+  const [brigadeList, setBrigadeList] = useState(brigades);
+  const [brigadeManageUnlocked, setBrigadeManageUnlocked] = useState(
+    sessionStorage.getItem('brigade_manage_unlocked') === 'true'
+  );
+  const [showBrigadePasswordModal, setShowBrigadePasswordModal] = useState(false);
+  const [brigadePasswordError, setBrigadePasswordError] = useState('');
+
+  const loadDictionary = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/brigade-report/dictionary`);
+      if (res.ok) {
+        const data = await res.json();
+        setDictionaryData(data);
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки словаря', err);
+    }
+  };
+
+  const loadModels = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/brigade-report/models`);
+      if (res.ok) {
+        const data = await res.json();
+        setModels(data);
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки моделей', err);
+    }
+  };
+
+  const loadBrigades = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/brigade-report/brigades`);
+      if (res.ok) {
+        const data = await res.json();
+        setBrigadeList(data);
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки бригад', err);
+    }
+  };
+
+  // Загружаем все данные один раз
+  useEffect(() => {
+    loadDictionary();
+    loadModels();
+    loadBrigades();
+  }, []);
+
+  // При изменении пропса brigades обновляем список
+  useEffect(() => {
+    setBrigadeList(brigades);
+  }, [brigades]);
+
+  const handleRefresh = () => {
+    loadDictionary();
+    loadModels();
+    loadBrigades();
+    setRefreshTrigger(prev => prev + 1);
+  };
+
+  const handleBrigadeTabClick = () => {
+    if (!brigadeManageUnlocked) {
+      setShowBrigadePasswordModal(true);
+    } else {
+      setSubTab('dictionary');
+    }
+  };
+
+  const handleBrigadePasswordSubmit = (pwd) => {
+    if (pwd === '4002') {
+      sessionStorage.setItem('brigade_manage_unlocked', 'true');
+      setBrigadeManageUnlocked(true);
+      setShowBrigadePasswordModal(false);
+      setBrigadePasswordError('');
+      setSubTab('dictionary');
+    } else {
+      setBrigadePasswordError('Неверный пароль');
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -1539,7 +1570,7 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
           🎯 Назначение бригад
         </button>
         <button
-          onClick={() => setSubTab('dictionary')}
+          onClick={handleBrigadeTabClick}
           style={subTabStyle(subTab === 'dictionary')}
         >
           📚 Справочник
@@ -1568,21 +1599,36 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
 
       {subTab === 'assign' ? (
         <AssignBrigadesPanel
-          brigades={brigades}
+          brigades={brigadeList}
           password={password}
           executeWithPassword={executeWithPassword}
           refreshTrigger={refreshTrigger}
         />
       ) : (
         <DictionaryPanel
-          brigades={brigades}
+          dictionaryData={dictionaryData}
+          models={models}
+          brigades={brigadeList}
           password={password}
           executeWithPassword={executeWithPassword}
-          refreshTrigger={refreshTrigger}
+          onDataChanged={handleRefresh}
+          manageUnlocked={brigadeManageUnlocked}
         />
       )}
 
       {showHelp && <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />}
+
+      {/* Модальное окно пароля для вкладки управления бригадами */}
+      {showBrigadePasswordModal && (
+        <PasswordModal
+          isOpen={showBrigadePasswordModal}
+          onClose={() => setShowBrigadePasswordModal(false)}
+          onSubmit={handleBrigadePasswordSubmit}
+          error={brigadePasswordError}
+          title="Введите пароль"
+          subtitle="Для доступа к управлению бригадами"
+        />
+      )}
     </div>
   );
 }
