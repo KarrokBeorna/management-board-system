@@ -8069,23 +8069,24 @@ app.get('/api/brigade-report/models', async (req, res) => {
   }
 });
 
+// ================== ИМПОРТ СПРАВОЧНИКА ==================
 app.post('/api/brigade-report/import', async (req, res) => {
   try {
     const { entries, password } = req.body;
     if (!entries || !Array.isArray(entries) || entries.length === 0 || !password) {
       return res.status(400).json({ error: 'Не переданы данные или пароль' });
     }
-    if (password !== '1234561') {
-      return res.status(403).json({ error: 'Неверный пароль' });
+    // Пароль для импорта — 4002 (отдельный от основного)
+    if (password !== '4002') {
+      return res.status(403).json({ error: 'Неверный пароль для импорта' });
     }
 
-    // Кэш id бригад
     const brigadeCache = new Map();
+    let imported = 0;
     for (const entry of entries) {
       const { model, part_name, problem_type, brigadeName } = entry;
-      if (!model || !part_name || !problem_type || !brigadeName) {
-        continue;
-      }
+      if (!model || !part_name || !problem_type || !brigadeName) continue;
+
       let brigadeId = brigadeCache.get(brigadeName);
       if (!brigadeId) {
         const [rows] = await notesPool.query('SELECT id FROM brigades WHERE name = ?', [brigadeName]);
@@ -8093,13 +8094,17 @@ app.post('/api/brigade-report/import', async (req, res) => {
         brigadeId = rows[0].id;
         brigadeCache.set(brigadeName, brigadeId);
       }
+
       await notesPool.query(`
         INSERT INTO defect_owners (model, part_name, problem_type, brigade_id)
         VALUES (?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE brigade_id = VALUES(brigade_id)
       `, [model, part_name, problem_type, brigadeId]);
+
+      imported++;
     }
-    res.json({ success: true, imported: entries.length });
+
+    res.json({ success: true, imported });
   } catch (err) {
     console.error('Ошибка импорта справочника:', err.message);
     res.status(500).json({ error: err.message });
