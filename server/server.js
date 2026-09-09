@@ -8376,14 +8376,12 @@ app.delete('/api/brigade-report/brigades/:id', async (req, res) => {
 
 
 // ================== БРИГАДНЫЙ ОТЧЁТ – ТРЕНДЫ (МЕСЯЦЫ/НЕДЕЛИ/ДНИ) ==================
-// ================== БРИГАДНЫЙ ОТЧЁТ – ТРЕНДЫ (МЕСЯЦЫ/НЕДЕЛИ/ДНИ) ==================
 app.get('/api/brigade-report/trend', async (req, res) => {
   try {
     const {
       dateFrom,
       dateTo,
-      startTime,
-      endTime,
+      shift,          // новый параметр: 'A', 'B', 'C' или отсутствует/'all'
       checkpoint,
       defectType = 'all',
       brigades,
@@ -8393,12 +8391,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
     // ---------- 1. Определяем диапазон дат ----------
     let startDate, endDate;
     const now = new Date();
-
-    if (startTime && endTime) {
-      // Если переданы точные времена, используем их
-      startDate = new Date(startTime.replace(' ', 'T'));
-      endDate = new Date(endTime.replace(' ', 'T'));
-    } else if (dateFrom && dateTo) {
+    if (dateFrom && dateTo) {
       startDate = new Date(`${dateFrom}T00:00:00`);
       endDate = new Date(`${dateTo}T23:59:59`);
     } else {
@@ -8411,7 +8404,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       startDate.setHours(0, 0, 0, 0);
     }
 
-    // ---------- 2. Списки постов ----------
+    // ---------- 2. Списки постов (как раньше) ----------
     const cp7Posts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
       'REPAIR', 'REPAIR_Final',
@@ -8489,13 +8482,13 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       WHERE d.POST_NAME IN (${postListStr})
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
     `;
-    const [defectRows] = await pool.query(defectsSql, [
+    let [defectRows] = await pool.query(defectsSql, [
       startDate.toISOString().slice(0, 19).replace('T', ' '),
       endDate.toISOString().slice(0, 19).replace('T', ' ')
     ]);
 
     // ---------- 5. Загружаем CP72 прохождения ----------
-    const [cp72Rows] = await pool.query(`
+    let [cp72Rows] = await pool.query(`
       SELECT VIN, CREATION_TIME
       FROM at_om_wiptrackinghistory
       WHERE WC_NAME = 'CP72'
@@ -8505,7 +8498,53 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       endDate.toISOString().slice(0, 19).replace('T', ' ')
     ]);
 
-    // ---------- 6. Загружаем справочник владельцев ----------
+    // ---------- 6. ФИЛЬТРАЦИЯ ПО СМЕНЕ (если задана) ----------
+    if (shift && shift !== 'all') {
+      const shiftLetters = ['A', 'B', 'C'];
+      if (!shiftLetters.includes(shift)) {
+        return res.status(400).json({ error: 'Неверное значение shift' });
+      }
+
+      // Функция определения буквы смены по дате и времени
+      const getShiftLetter = (dateUTC) => {
+        // Переводим в московское время
+        const moscow = new Date(dateUTC.getTime() + 3 * 60 * 60 * 1000);
+        const totalMinutes = moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+        const year = moscow.getUTCFullYear();
+        const month = moscow.getUTCMonth();
+        const day = moscow.getUTCDate();
+
+        // Вычисляем номер недели (ISO)
+        const dateObj = new Date(Date.UTC(year, month, day));
+        const dayNum = dateObj.getUTCDay() || 7;
+        dateObj.setUTCDate(dateObj.getUTCDate() + 4 - dayNum);
+        const yearStart = new Date(Date.UTC(dateObj.getUTCFullYear(), 0, 1));
+        const weekNumber = Math.ceil((((dateObj - yearStart) / 86400000) + 1) / 7);
+        const isEvenWeek = weekNumber % 2 === 0;
+
+        // Определяем тип смены
+        let shiftType;
+        if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
+          shiftType = 'day';
+        } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
+          shiftType = 'evening';
+        } else {
+          shiftType = 'night';
+        }
+
+        // Возвращаем букву
+        if (shiftType === 'night') return 'C';
+        if (shiftType === 'day') return isEvenWeek ? 'B' : 'A';
+        return isEvenWeek ? 'A' : 'B'; // evening
+      };
+
+      // Применяем фильтр к дефектам
+      defectRows = defectRows.filter(d => getShiftLetter(new Date(d.CREATION_TIME)) === shift);
+      // Применяем фильтр к CP72
+      cp72Rows = cp72Rows.filter(c => getShiftLetter(new Date(c.CREATION_TIME)) === shift);
+    }
+
+    // ---------- 7. Загружаем справочник владельцев ----------
     const [owners] = await notesPool.query(`
       SELECT do.model, do.part_name, do.problem_type, b.name AS brigade_name
       FROM defect_owners do
@@ -8517,7 +8556,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       o.brigade_name
     ));
 
-    // ---------- 7. Определяем выбранные бригады ----------
+    // ---------- 8. Определяем выбранные бригады ----------
     let selectedBrigadesSet = null;
     if (brigades && brigades !== 'ALL') {
       selectedBrigadesSet = new Set(
@@ -8525,7 +8564,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       );
     }
 
-    // ---------- 8. Функции для работы с периодами ----------
+    // ---------- 9. Функции периодов и агрегация (как раньше) ----------
     function getPeriodKey(date, type) {
       const d = new Date(date);
       if (type === 'month') {
@@ -8569,7 +8608,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
     const weekPeriods = generatePeriods('week', 4, endDate);
     const dayPeriods = generatePeriods('day', 14, endDate);
 
-    // ---------- 9. Инициализация счётчиков ----------
+    // ---------- 10. Инициализация счётчиков ----------
     const monthCounts = new Map(monthPeriods.map(p => [p, 0]));
     const weekCounts = new Map(weekPeriods.map(p => [p, 0]));
     const dayCounts = new Map(dayPeriods.map(p => [p, 0]));
@@ -8578,7 +8617,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
     const weekCars = new Map(weekPeriods.map(p => [p, new Set()]));
     const dayCars = new Map(dayPeriods.map(p => [p, new Set()]));
 
-    // ---------- 10. Обработка дефектов ----------
+    // ---------- 11. Обработка дефектов ----------
     for (const defect of defectRows) {
       const brigade = ownerMap.get(`${defect.MODEL}|${defect.PART_NAME}|${defect.PROBLEM_TYPE}`) || 'Бригада не найдена';
       if (selectedBrigadesSet && !selectedBrigadesSet.has(brigade)) continue;
@@ -8595,7 +8634,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       if (dayCounts.has(dKey)) dayCounts.set(dKey, dayCounts.get(dKey) + 1);
     }
 
-    // ---------- 11. Обработка CP72 (автомобили) ----------
+    // ---------- 12. Обработка CP72 (автомобили) ----------
     for (const car of cp72Rows) {
       const carDate = new Date(car.CREATION_TIME);
 
@@ -8609,7 +8648,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       if (dayCars.has(dKey)) dayCars.get(dKey).add(car.VIN);
     }
 
-    // ---------- 12. Формирование результата ----------
+    // ---------- 13. Формирование результата ----------
     function buildResult(countsMap, carsMap) {
       const result = [];
       for (const period of countsMap.keys()) {

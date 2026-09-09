@@ -825,27 +825,26 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
 
   const formatValue = (value) => metric === 'dpu' ? Number(value).toFixed(2) : value;
 
-  const fetchTrendForBrigade = async (brigadeName) => {
-    const allCheckpointsSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
-    const checkpointParam = allCheckpointsSelected ? 'ALL' : selectedCheckpoints.join(',');
+    const fetchTrendForBrigade = async (brigadeName) => {
+        const allCheckpointsSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
+        const checkpointParam = allCheckpointsSelected ? 'ALL' : selectedCheckpoints.join(',');
 
-    const params = new URLSearchParams({
-      checkpoint: checkpointParam,
-      defectType,
-      brigades: brigadeName,
-      metric,
-    });
+        const params = new URLSearchParams({
+            checkpoint: checkpointParam,
+            defectType,
+            brigades: brigadeName,
+            metric,
+        });
 
-    if (shiftFilter !== 'all') {
-      const { start, end } = getShiftTimeRange(shiftFilter);
-      params.append('startTime', start);
-      params.append('endTime', end);
-    }
+        // Если выбрана конкретная смена, добавляем shift
+        if (shiftFilter !== 'all') {
+            params.append('shift', shiftFilter);
+        }
 
-    const res = await fetch(`${API_BASE}/api/brigade-report/trend?${params}`);
-    if (!res.ok) throw new Error(`Ошибка загрузки трендов для бригады ${brigadeName}`);
-    return await res.json();
-  };
+        const res = await fetch(`${API_BASE}/api/brigade-report/trend?${params}`);
+        if (!res.ok) throw new Error(`Ошибка загрузки трендов для бригады ${brigadeName}`);
+        return await res.json();
+    };
 
   const loadAllTrends = async () => {
     if (selectedBrigades.length === 0) {
