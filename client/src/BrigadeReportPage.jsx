@@ -719,40 +719,59 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
 
 /* ===================== ОТЧЕТ ПО БРИГАДАМ (ТРЕНДЫ) ===================== */
 function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
-  const today = new Date();
-  const [dateFrom, setDateFrom] = useState(today.toISOString().split('T')[0]);
-  const [dateTo, setDateTo] = useState(today.toISOString().split('T')[0]);
   const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
   const [defectType, setDefectType] = useState('all');
   const [selectedBrigades, setSelectedBrigades] = useState([]);
   const [metric, setMetric] = useState('count'); // 'count' | 'dpu'
-  const [trendData, setTrendData] = useState({ month: [], week: [], day: [] });
+  const [trendsByBrigade, setTrendsByBrigade] = useState({}); // ключ – имя бригады
   const [loading, setLoading] = useState(false);
 
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
+  const brigadesOptions = brigades.map(b => b.name).filter(name => name !== 'Бригада не найдена');
 
-  const loadTrend = async () => {
+  // Функция форматирования DPU
+  const formatValue = (value) => {
+    return metric === 'dpu' ? Number(value).toFixed(2) : value;
+  };
+
+  // Загрузка данных для одной бригады
+  const fetchTrendForBrigade = async (brigadeName) => {
+    const allCheckpointsSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
+    const checkpointParam = allCheckpointsSelected ? 'ALL' : selectedCheckpoints.join(',');
+
+    const params = new URLSearchParams({
+      checkpoint: checkpointParam,
+      defectType,
+      brigades: brigadeName,
+      metric,
+    });
+
+    const res = await fetch(`${API_BASE}/api/brigade-report/trend?${params}`);
+    if (!res.ok) throw new Error(`Ошибка загрузки трендов для бригады ${brigadeName}`);
+    return await res.json();
+  };
+
+  // Загрузка данных для всех выбранных бригад
+  const loadAllTrends = async () => {
+    if (selectedBrigades.length === 0) {
+      setTrendsByBrigade({});
+      return;
+    }
+
     setLoading(true);
     try {
-      const allCheckpointsSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
-      const checkpointParam = allCheckpointsSelected ? 'ALL' : selectedCheckpoints.join(',');
-
-      const allBrigadesSelected = selectedBrigades.length === 0 || selectedBrigades.length === brigades.length;
-      const brigadesParam = allBrigadesSelected ? 'ALL' : selectedBrigades.join(',');
-
-      const params = new URLSearchParams({
-        dateFrom,
-        dateTo,
-        checkpoint: checkpointParam,
-        defectType,
-        brigades: brigadesParam,
-        metric,
-      });
-
-      const res = await fetch(`${API_BASE}/api/brigade-report/trend?${params}`);
-      if (!res.ok) throw new Error('Ошибка загрузки трендов');
-      const data = await res.json();
-      setTrendData(data);
+      const newTrends = {};
+      await Promise.all(
+        selectedBrigades.map(async (brigadeName) => {
+          try {
+            const data = await fetchTrendForBrigade(brigadeName);
+            newTrends[brigadeName] = data;
+          } catch (err) {
+            console.error(err);
+          }
+        })
+      );
+      setTrendsByBrigade(newTrends);
     } catch (err) {
       alert(err.message);
     } finally {
@@ -761,19 +780,87 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
   };
 
   useEffect(() => {
-    if (dateFrom && dateTo) {
-      loadTrend();
-    }
-  }, [dateFrom, dateTo, selectedCheckpoints, selectedBrigades, defectType, metric]);
+    loadAllTrends();
+  }, [selectedCheckpoints, selectedBrigades, defectType, metric]);
 
-  // Функция для отображения значения с учётом метрики
-  const formatValue = (value) => {
-    return metric === 'dpu' ? Number(value).toFixed(2) : value;
+  // Отрисовка карточек бригад
+  const renderBrigadeCard = (brigadeName, data) => {
+    if (!data) return null;
+
+    const monthData = data.month || [];
+    const weekData = data.week || [];
+    const dayData = data.day || [];
+
+    return (
+      <div key={brigadeName} style={{
+        backgroundColor: '#FFFFFF',
+        borderRadius: BRAND.radius,
+        padding: 24,
+        marginBottom: 20,
+        boxShadow: BRAND.shadow,
+        border: `1px solid ${BRAND.border}`,
+      }}>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: BRAND.text, marginBottom: 16 }}>
+          {brigadeName}
+        </h2>
+
+        {/* Три графика: месяцы, недели, дни */}
+        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+          {/* Месяцы */}
+          <div style={{ flex: '1 1 300px', minWidth: 250 }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8 }}>Последние 3 месяца</h3>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={monthData} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                <Tooltip formatter={(value) => formatValue(value)} />
+                <Bar dataKey="value" fill="#3B82F6" radius={[6,6,0,0]}>
+                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Недели */}
+          <div style={{ flex: '1 1 300px', minWidth: 250 }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8 }}>Последние 4 недели</h3>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={weekData} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                <Tooltip formatter={(value) => formatValue(value)} />
+                <Bar dataKey="value" fill="#F59E0B" radius={[6,6,0,0]}>
+                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Дни */}
+          <div style={{ flex: '2 1 350px', minWidth: 300 }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8 }}>Последние 14 дней</h3>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={dayData} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                <XAxis dataKey="period" tick={{ fontSize: 11 }} interval={0} />
+                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                <Tooltip formatter={(value) => formatValue(value)} />
+                <Bar dataKey="value" fill="#10B981" radius={[6,6,0,0]}>
+                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
-      {/* Фильтры */}
+      {/* Фильтры (без дат) */}
       <div style={{
         display: 'flex',
         flexWrap: 'wrap',
@@ -783,14 +870,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
         backgroundColor: '#F8FAFC',
         borderRadius: BRAND.radius,
       }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
-          Начало:
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
-          Конец:
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
-        </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Чекпоинты:
           <MultiSelect
@@ -811,10 +890,10 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Бригады:
           <MultiSelect
-            options={['ALL', ...brigades.map(b => b.name)]}
+            options={['ALL', ...brigadesOptions]}
             selected={selectedBrigades}
             onChange={setSelectedBrigades}
-            placeholder="Все"
+            placeholder="Выберите..."
           />
         </label>
         <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
@@ -841,58 +920,16 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
         </div>
       </div>
 
-      {/* Графики */}
+      {/* Контент */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: '30px', fontSize: '1.5rem' }}>Загрузка...</div>
+      ) : selectedBrigades.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '30px', color: BRAND.textSecondary, fontSize: '1.3rem' }}>
+          Выберите бригады для отображения графиков
+        </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0, gap: 20, flexWrap: 'wrap' }}>
-          {/* Месяцы */}
-          <div style={{ flex: '1 1 300px', backgroundColor: '#FFFFFF', borderRadius: BRAND.radius, padding: 20, boxShadow: BRAND.shadow }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: 10 }}>Последние 3 месяца</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={trendData.month || []} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                <Tooltip formatter={(value) => formatValue(value)} />
-                <Bar dataKey="value" fill="#3B82F6" radius={[4,4,0,0]}>
-                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Недели */}
-          <div style={{ flex: '1 1 300px', backgroundColor: '#FFFFFF', borderRadius: BRAND.radius, padding: 20, boxShadow: BRAND.shadow }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: 10 }}>Последние 4 недели</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={trendData.week || []} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                <Tooltip formatter={(value) => formatValue(value)} />
-                <Bar dataKey="value" fill="#F59E0B" radius={[4,4,0,0]}>
-                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Дни */}
-          <div style={{ flex: '2 1 400px', backgroundColor: '#FFFFFF', borderRadius: BRAND.radius, padding: 20, boxShadow: BRAND.shadow }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: 10 }}>Последние 14 дней</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={trendData.day || []} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="period" tick={{ fontSize: 11 }} interval={0} />
-                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                <Tooltip formatter={(value) => formatValue(value)} />
-                <Bar dataKey="value" fill="#10B981" radius={[4,4,0,0]}>
-                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+        <div style={{ flex: 1, overflowY: 'auto', paddingRight: '4px' }}>
+          {selectedBrigades.map(brigadeName => renderBrigadeCard(brigadeName, trendsByBrigade[brigadeName]))}
         </div>
       )}
     </div>
