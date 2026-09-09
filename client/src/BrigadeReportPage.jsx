@@ -924,7 +924,7 @@ function DictionaryPanel({
   const [importFile, setImportFile] = useState(null);
   const [importPasswordModal, setImportPasswordModal] = useState(false);
   const [importError, setImportError] = useState('');
-  const [activeSection, setActiveSection] = useState('defects'); // 'defects' | 'brigades'
+  const [activeSection, setActiveSection] = useState('defects');
   const [newBrigadeName, setNewBrigadeName] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 100;
@@ -940,18 +940,15 @@ function DictionaryPanel({
     });
   }, [dictionaryData, filterModel, filterBrigade, search]);
 
-  // Список бригад для фильтра
   const brigadeOptions = useMemo(() => {
     const set = new Set(dictionaryData.map(e => e.brigade_name).filter(Boolean));
     return Array.from(set).sort();
   }, [dictionaryData]);
 
-  // Сброс страницы при изменении фильтров
   useEffect(() => {
     setCurrentPage(1);
   }, [filterModel, filterBrigade, search]);
 
-  // Данные для текущей страницы
   const pageCount = Math.ceil(filteredDictionary.length / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
   const endIndex = startIndex + pageSize;
@@ -1158,7 +1155,7 @@ function DictionaryPanel({
 
       {activeSection === 'defects' ? (
         <>
-          {/* Блок фильтрации и поиска */}
+          {/* Фильтры и поиск */}
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -1207,7 +1204,7 @@ function DictionaryPanel({
             </button>
           </div>
 
-          {/* Блок добавления новой записи */}
+          {/* Новая связка дефект-бригада */}
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -1372,7 +1369,7 @@ function DictionaryPanel({
         </>
       ) : (
         /* Вкладка управления бригадами */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -1399,9 +1396,9 @@ function DictionaryPanel({
             </button>
           </div>
 
-          <div style={cardStyle}>
+          <div style={{ ...cardStyle, flex: 1 }}>
             <h2 style={{ fontSize: '1.3rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>Список бригад</h2>
-            <div style={{ flex: 1, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
