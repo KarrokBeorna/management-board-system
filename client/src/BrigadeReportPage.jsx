@@ -800,23 +800,33 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
         boxShadow: BRAND.shadow,
         border: `1px solid ${BRAND.border}`,
       }}>
-        <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: BRAND.text, marginBottom: 16 }}>
-          {brigadeName}
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: BRAND.primary, marginBottom: 16 }}>
+          👷 {brigadeName}
         </h2>
 
         {/* Три графика: месяцы, недели, дни */}
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
           {/* Месяцы */}
           <div style={{ flex: '1 1 300px', minWidth: 250 }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8 }}>Последние 3 месяца</h3>
-            <ResponsiveContainer width="100%" height={220}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8, color: '#3B82F6' }}>
+              📅 Последние 3 месяца
+            </h3>
+            <ResponsiveContainer width="100%" height={240}>
               <BarChart data={monthData} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                <XAxis 
+                  dataKey="period" 
+                  tick={{ fontSize: 12 }} 
+                  tickFormatter={(val) => {
+                    const [y, m] = val.split('-');
+                    const monthNames = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+                    return monthNames[parseInt(m,10)-1];
+                  }}
+                />
                 <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
                 <Tooltip formatter={(value) => formatValue(value)} />
                 <Bar dataKey="value" fill="#3B82F6" radius={[6,6,0,0]}>
-                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
+                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 14, fontWeight: 700, fill: BRAND.text }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -824,15 +834,21 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
 
           {/* Недели */}
           <div style={{ flex: '1 1 300px', minWidth: 250 }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8 }}>Последние 4 недели</h3>
-            <ResponsiveContainer width="100%" height={220}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8, color: '#F59E0B' }}>
+              📆 Последние 4 недели
+            </h3>
+            <ResponsiveContainer width="100%" height={240}>
               <BarChart data={weekData} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                <XAxis 
+                  dataKey="period" 
+                  tick={{ fontSize: 12 }} 
+                  tickFormatter={(val) => val.split('-W')[1] ? `W${val.split('-W')[1]}` : val}
+                />
                 <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
                 <Tooltip formatter={(value) => formatValue(value)} />
                 <Bar dataKey="value" fill="#F59E0B" radius={[6,6,0,0]}>
-                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
+                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 14, fontWeight: 700, fill: BRAND.text }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -840,15 +856,25 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
 
           {/* Дни */}
           <div style={{ flex: '2 1 350px', minWidth: 300 }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8 }}>Последние 14 дней</h3>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={dayData} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8, color: '#10B981' }}>
+              📊 Последние 14 дней
+            </h3>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={dayData} margin={{ top: 20, right: 20, left: 0, bottom: 30 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="period" tick={{ fontSize: 11 }} interval={0} />
+                <XAxis 
+                  dataKey="period" 
+                  interval={0} 
+                  tick={{ fontSize: 11 }} 
+                  tickFormatter={(val) => {
+                    const [, m, d] = val.split('-');
+                    return `${d}.${m}`;
+                  }}
+                />
                 <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
                 <Tooltip formatter={(value) => formatValue(value)} />
                 <Bar dataKey="value" fill="#10B981" radius={[6,6,0,0]}>
-                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
+                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 13, fontWeight: 700, fill: BRAND.text }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
