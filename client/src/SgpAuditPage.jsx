@@ -1005,17 +1005,30 @@ export default function SgpAuditPage() {
 
   const exportTimePointsToExcel = () => {
     if (!filteredTimePointsData.length) return;
+
     const exportData = filteredTimePointsData.map(row => {
       const obj = {};
       timePointColumns.forEach(col => {
         if (col.isTime) {
-          obj[col.label] = row[col.key] ? formatShortDateTime(row[col.key]) : '';
+          const dateTime = row[col.key] ? new Date(row[col.key]) : null;
+          if (dateTime && !isNaN(dateTime.getTime())) {
+            const dd = String(dateTime.getDate()).padStart(2, '0');
+            const mm = String(dateTime.getMonth() + 1).padStart(2, '0');
+            const hh = String(dateTime.getHours()).padStart(2, '0');
+            const min = String(dateTime.getMinutes()).padStart(2, '0');
+            obj[`${col.label} Дата`] = `${dd}.${mm}`;
+            obj[`${col.label} Время`] = `${hh}:${min}`;
+          } else {
+            obj[`${col.label} Дата`] = '';
+            obj[`${col.label} Время`] = '';
+          }
         } else {
           obj[col.label] = row[col.key] || '';
         }
       });
       return obj;
     });
+
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Time Points');
