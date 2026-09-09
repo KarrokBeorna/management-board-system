@@ -8403,6 +8403,260 @@ app.delete('/api/brigade-report/brigades/:id', async (req, res) => {
   }
 });
 
+// ================== БРИГАДНЫЙ ОТЧЁТ – ТРЕНДЫ (МЕСЯЦЫ/НЕДЕЛИ/ДНИ) ==================
+app.get('/api/brigade-report/trend', async (req, res) => {
+  try {
+    const {
+      dateFrom,
+      dateTo,
+      checkpoint,
+      defectType = 'all',
+      brigades,
+      metric = 'count'
+    } = req.query;
+
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    }
+
+    // ---------- 1. Списки постов ----------
+    const cp7Posts = [
+      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+      'REPAIR', 'REPAIR_Final',
+      'EXT1', 'PIP2', 'PIP4', 'PIP9'
+    ];
+    const cp8Posts = [
+      'CP8', 'CP8 Gate', 'CP8-gate',
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
+    ];
+    const pipPosts = [
+      'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+    ];
+    const tlPosts = [
+      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
+    ];
+
+    let postList = [];
+    if (!checkpoint || checkpoint === 'ALL') {
+      postList = [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts, ...tlPosts])];
+    } else {
+      const checkpoints = checkpoint.split(',').map(cp => cp.trim()).filter(Boolean);
+      for (const cp of checkpoints) {
+        if (cp === 'CP7') postList.push(...cp7Posts);
+        else if (cp === 'CP8') postList.push(...cp8Posts);
+        else if (cp === 'PIP') postList.push(...pipPosts);
+        else if (cp === 'TL') postList.push(...tlPosts);
+        else if (cp !== 'ALL') {
+          return res.status(400).json({ error: `Неверный checkpoint: ${cp}` });
+        }
+      }
+      postList = [...new Set(postList)];
+    }
+    if (postList.length === 0) return res.json({ month: [], week: [], day: [] });
+    const postListStr = postList.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
+
+    // ---------- 2. Условие online/offline ----------
+    let offlineCondition = '1=1';
+    if (defectType === 'offline') {
+      offlineCondition = '(COALESCE(OFFLINE,0)=1 OR COALESCE(OFFLINE1,0)=1 OR COALESCE(OFFLINE2,0)=1)';
+    } else if (defectType === 'online') {
+      offlineCondition = '(COALESCE(OFFLINE,0)=0 AND COALESCE(OFFLINE1,0)=0 AND COALESCE(OFFLINE2,0)=0)';
+    }
+
+    // ---------- 3. Загружаем все дефекты за период ----------
+    const defectsSql = `
+      SELECT
+        d.VIN,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.CREATION_TIME,
+        d.POST_NAME,
+        wo.MODEL
+      FROM (
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_biw_qm_defect_info
+        WHERE ${offlineCondition}
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_paint_qm_defect_info
+        WHERE ${offlineCondition}
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_qm_defect_info
+        WHERE ${offlineCondition}
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+      ) d
+      JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.POST_NAME IN (${postListStr})
+        AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
+    `;
+    const [defectRows] = await pool.query(defectsSql, [
+      `${dateFrom} 00:00:00`,
+      `${dateTo} 23:59:59`
+    ]);
+
+    // ---------- 4. Загружаем CP72 прохождения (для totalCars) ----------
+    const [cp72Rows] = await pool.query(`
+      SELECT VIN, CREATION_TIME
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
+    `, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
+
+    // ---------- 5. Загружаем справочник владельцев ----------
+    const [owners] = await notesPool.query(`
+      SELECT do.model, do.part_name, do.problem_type, b.name AS brigade_name
+      FROM defect_owners do
+      LEFT JOIN brigades b ON do.brigade_id = b.id
+    `);
+    const ownerMap = new Map();
+    owners.forEach(o => ownerMap.set(
+      `${o.model}|${o.part_name}|${o.problem_type}`,
+      o.brigade_name
+    ));
+
+    // ---------- 6. Определяем выбранные бригады ----------
+    let selectedBrigadesSet = null; // null означает все бригады
+    if (brigades && brigades !== 'ALL') {
+      selectedBrigadesSet = new Set(brigades.split(',').map(b => b.trim()).filter(Boolean));
+    }
+
+    // ---------- 7. Генерация периодов ----------
+    const endDate = new Date(`${dateTo}T23:59:59`);
+    const startDate = new Date(`${dateFrom}T00:00:00`);
+
+    // Функция для получения ключа периода
+    function getPeriodKey(date, type) {
+      const d = new Date(date);
+      if (type === 'month') {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        return `${y}-${m}`;
+      } else if (type === 'week') {
+        // ISO week
+        const dayNum = d.getDay() || 7;
+        d.setDate(d.getDate() + 4 - dayNum);
+        const yearStart = new Date(d.getFullYear(), 0, 1);
+        const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+        return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+      } else { // day
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
+    }
+
+    // Генерация списков периодов
+    function generatePeriods(type, count) {
+      const periods = [];
+      const current = new Date(endDate);
+      // Начинаем с периода, содержащего endDate
+      while (periods.length < count) {
+        const key = getPeriodKey(current, type);
+        if (!periods.includes(key)) {
+          periods.push(key);
+        }
+        // Сдвигаемся назад на один период
+        if (type === 'month') {
+          current.setMonth(current.getMonth() - 1);
+        } else if (type === 'week') {
+          current.setDate(current.getDate() - 7);
+        } else { // day
+          current.setDate(current.getDate() - 1);
+        }
+        // Останавливаемся, если ушли раньше startDate
+        if (current < startDate && type !== 'day') { // для дня всё равно генерируем 14, но данные будут нулевые
+          // Не обязательно останавливаться, можно продолжать, но данные вне диапазона не будут учтены
+          // Поэтому просто выходим, если current раньше startDate
+          // Для простоты не выходим, а генерируем все запрошенные периоды
+        }
+      }
+      return periods;
+    }
+
+    const monthPeriods = generatePeriods('month', 3);
+    const weekPeriods = generatePeriods('week', 4);
+    const dayPeriods = generatePeriods('day', 14);
+
+    // ---------- 8. Инициализация счётчиков ----------
+    const monthCounts = new Map(monthPeriods.map(p => [p, 0]));
+    const weekCounts = new Map(weekPeriods.map(p => [p, 0]));
+    const dayCounts = new Map(dayPeriods.map(p => [p, 0]));
+
+    const monthCars = new Map(monthPeriods.map(p => [p, new Set()]));
+    const weekCars = new Map(weekPeriods.map(p => [p, new Set()]));
+    const dayCars = new Map(dayPeriods.map(p => [p, new Set()]));
+
+    // ---------- 9. Обработка дефектов ----------
+    for (const defect of defectRows) {
+      const brigade = ownerMap.get(`${defect.MODEL}|${defect.PART_NAME}|${defect.PROBLEM_TYPE}`) || 'Бригада не найдена';
+      if (selectedBrigadesSet && !selectedBrigadesSet.has(brigade)) continue;
+
+      const defDate = new Date(defect.CREATION_TIME);
+
+      const mKey = getPeriodKey(defDate, 'month');
+      if (monthCounts.has(mKey)) monthCounts.set(mKey, monthCounts.get(mKey) + 1);
+
+      const wKey = getPeriodKey(defDate, 'week');
+      if (weekCounts.has(wKey)) weekCounts.set(wKey, weekCounts.get(wKey) + 1);
+
+      const dKey = getPeriodKey(defDate, 'day');
+      if (dayCounts.has(dKey)) dayCounts.set(dKey, dayCounts.get(dKey) + 1);
+    }
+
+    // ---------- 10. Обработка CP72 (автомобили) ----------
+    for (const car of cp72Rows) {
+      const carDate = new Date(car.CREATION_TIME);
+
+      const mKey = getPeriodKey(carDate, 'month');
+      if (monthCars.has(mKey)) monthCars.get(mKey).add(car.VIN);
+
+      const wKey = getPeriodKey(carDate, 'week');
+      if (weekCars.has(wKey)) weekCars.get(wKey).add(car.VIN);
+
+      const dKey = getPeriodKey(carDate, 'day');
+      if (dayCars.has(dKey)) dayCars.get(dKey).add(car.VIN);
+    }
+
+    // ---------- 11. Формирование результата ----------
+    function buildResult(countsMap, carsMap, type) {
+      const result = [];
+      for (const period of countsMap.keys()) {
+        const defects = countsMap.get(period);
+        const totalCars = carsMap.get(period).size;
+        let value;
+        if (metric === 'dpu') {
+          value = totalCars > 0 ? Math.min(defects / totalCars * 1000, 1000) : 0;
+          value = Number(value.toFixed(2));
+        } else {
+          value = defects;
+        }
+        result.push({ period, value });
+      }
+      // Сортируем по возрастанию периода
+      return result.sort((a, b) => a.period.localeCompare(b.period));
+    }
+
+    const monthResult = buildResult(monthCounts, monthCars, 'month');
+    const weekResult = buildResult(weekCounts, weekCars, 'week');
+    const dayResult = buildResult(dayCounts, dayCars, 'day');
+
+    res.json({
+      month: monthResult,
+      week: weekResult,
+      day: dayResult
+    });
+  } catch (err) {
+    console.error('Ошибка /api/brigade-report/trend:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 // ================== ЗАМЕТКИ ==================

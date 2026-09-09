@@ -477,7 +477,7 @@ function HelpModal({ isOpen, onClose }) {
   );
 }
 
-/* ===================== ОТЧЕТ ПО БРИГАДАМ ===================== */
+/* ===================== ОБЩИЙ ОТЧЕТ (ГИСТОГРАММА) ===================== */
 function BrigadeReport({ brigades, password, executeWithPassword }) {
   const today = new Date();
   const [dateFrom, setDateFrom] = useState(today.toISOString().split('T')[0]);
@@ -717,6 +717,188 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
   );
 }
 
+/* ===================== ОТЧЕТ ПО БРИГАДАМ (ТРЕНДЫ) ===================== */
+function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
+  const today = new Date();
+  const [dateFrom, setDateFrom] = useState(today.toISOString().split('T')[0]);
+  const [dateTo, setDateTo] = useState(today.toISOString().split('T')[0]);
+  const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
+  const [defectType, setDefectType] = useState('all');
+  const [selectedBrigades, setSelectedBrigades] = useState([]);
+  const [metric, setMetric] = useState('count'); // 'count' | 'dpu'
+  const [trendData, setTrendData] = useState({ month: [], week: [], day: [] });
+  const [loading, setLoading] = useState(false);
+
+  const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
+
+  const loadTrend = async () => {
+    setLoading(true);
+    try {
+      const allCheckpointsSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
+      const checkpointParam = allCheckpointsSelected ? 'ALL' : selectedCheckpoints.join(',');
+
+      const allBrigadesSelected = selectedBrigades.length === 0 || selectedBrigades.length === brigades.length;
+      const brigadesParam = allBrigadesSelected ? 'ALL' : selectedBrigades.join(',');
+
+      const params = new URLSearchParams({
+        dateFrom,
+        dateTo,
+        checkpoint: checkpointParam,
+        defectType,
+        brigades: brigadesParam,
+        metric,
+      });
+
+      const res = await fetch(`${API_BASE}/api/brigade-report/trend?${params}`);
+      if (!res.ok) throw new Error('Ошибка загрузки трендов');
+      const data = await res.json();
+      setTrendData(data);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (dateFrom && dateTo) {
+      loadTrend();
+    }
+  }, [dateFrom, dateTo, selectedCheckpoints, selectedBrigades, defectType, metric]);
+
+  // Функция для отображения значения с учётом метрики
+  const formatValue = (value) => {
+    return metric === 'dpu' ? Number(value).toFixed(2) : value;
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
+      {/* Фильтры */}
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 12,
+        alignItems: 'center',
+        padding: '15px',
+        backgroundColor: '#F8FAFC',
+        borderRadius: BRAND.radius,
+      }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Начало:
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Конец:
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Чекпоинты:
+          <MultiSelect
+            options={['ALL', ...availableCheckpoints]}
+            selected={selectedCheckpoints}
+            onChange={setSelectedCheckpoints}
+            placeholder="Все"
+          />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Тип дефекта:
+          <select value={defectType} onChange={(e) => setDefectType(e.target.value)} style={inputStyle}>
+            <option value="all">Все</option>
+            <option value="offline">Offline</option>
+            <option value="online">Online</option>
+          </select>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Бригады:
+          <MultiSelect
+            options={['ALL', ...brigades.map(b => b.name)]}
+            selected={selectedBrigades}
+            onChange={setSelectedBrigades}
+            placeholder="Все"
+          />
+        </label>
+        <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+          <button
+            onClick={() => setMetric('count')}
+            style={{
+              ...buttonStyle,
+              background: metric === 'count' ? BRAND.primary : '#E5E7EB',
+              color: metric === 'count' ? '#FFFFFF' : '#374151',
+            }}
+          >
+            Шт
+          </button>
+          <button
+            onClick={() => setMetric('dpu')}
+            style={{
+              ...buttonStyle,
+              background: metric === 'dpu' ? BRAND.primary : '#E5E7EB',
+              color: metric === 'dpu' ? '#FFFFFF' : '#374151',
+            }}
+          >
+            DPU per 1000
+          </button>
+        </div>
+      </div>
+
+      {/* Графики */}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '30px', fontSize: '1.5rem' }}>Загрузка...</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0, gap: 20, flexWrap: 'wrap' }}>
+          {/* Месяцы */}
+          <div style={{ flex: '1 1 300px', backgroundColor: '#FFFFFF', borderRadius: BRAND.radius, padding: 20, boxShadow: BRAND.shadow }}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: 10 }}>Последние 3 месяца</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={trendData.month || []} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                <Tooltip formatter={(value) => formatValue(value)} />
+                <Bar dataKey="value" fill="#3B82F6" radius={[4,4,0,0]}>
+                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Недели */}
+          <div style={{ flex: '1 1 300px', backgroundColor: '#FFFFFF', borderRadius: BRAND.radius, padding: 20, boxShadow: BRAND.shadow }}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: 10 }}>Последние 4 недели</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={trendData.week || []} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                <Tooltip formatter={(value) => formatValue(value)} />
+                <Bar dataKey="value" fill="#F59E0B" radius={[4,4,0,0]}>
+                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Дни */}
+          <div style={{ flex: '2 1 400px', backgroundColor: '#FFFFFF', borderRadius: BRAND.radius, padding: 20, boxShadow: BRAND.shadow }}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: 10 }}>Последние 14 дней</h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={trendData.day || []} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                <XAxis dataKey="period" tick={{ fontSize: 11 }} interval={0} />
+                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                <Tooltip formatter={(value) => formatValue(value)} />
+                <Bar dataKey="value" fill="#10B981" radius={[4,4,0,0]}>
+                  <LabelList dataKey="value" position="top" formatter={(value) => formatValue(value)} style={{ fontSize: 12, fill: BRAND.text }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ===================== НАЗНАЧЕНИЕ БРИГАД ===================== */
 function AssignBrigadesPanel({ brigades, password, executeWithPassword, refreshTrigger }) {
   const today = new Date();
@@ -902,7 +1084,7 @@ function AssignBrigadesPanel({ brigades, password, executeWithPassword, refreshT
   );
 }
 
-/* ===================== СПРАВОЧНИК (ОБНОВЛЁННЫЙ) ===================== */
+/* ===================== СПРАВОЧНИК ===================== */
 function DictionaryPanel({ 
   dictionaryData, 
   models, 
@@ -1155,7 +1337,7 @@ function DictionaryPanel({
 
       {activeSection === 'defects' ? (
         <>
-          {/* Фильтры и поиск */}
+          {/* Блок фильтрации и поиска */}
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -1204,7 +1386,7 @@ function DictionaryPanel({
             </button>
           </div>
 
-          {/* Новая связка дефект-бригада */}
+          {/* Блок добавления новой записи */}
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -1667,7 +1849,7 @@ function DefectOwnersManager({ brigades, password, executeWithPassword }) {
 
 /* ===================== ГЛАВНЫЙ КОМПОНЕНТ СТРАНИЦЫ ===================== */
 export default function BrigadeReportPage() {
-  const [activeTab, setActiveTab] = useState('report');
+  const [activeTab, setActiveTab] = useState('general');
   const [brigades, setBrigades] = useState([]);
   const [password, setPassword] = useState(sessionStorage.getItem('brigade_password') || '');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -1734,8 +1916,14 @@ export default function BrigadeReportPage() {
         <h1 style={titleStyle}>Бригадный отчет</h1>
         <div style={tabBarStyle}>
           <button
-            style={tabStyle(activeTab === 'report')}
-            onClick={() => handleTabChange('report')}
+            style={tabStyle(activeTab === 'general')}
+            onClick={() => handleTabChange('general')}
+          >
+            📊 Общий отчет
+          </button>
+          <button
+            style={tabStyle(activeTab === 'brigade')}
+            onClick={() => handleTabChange('brigade')}
           >
             📊 Отчет по бригадам
           </button>
@@ -1748,8 +1936,14 @@ export default function BrigadeReportPage() {
         </div>
       </div>
 
-      {activeTab === 'report' ? (
+      {activeTab === 'general' ? (
         <BrigadeReport
+          brigades={brigades}
+          password={password}
+          executeWithPassword={executeWithPassword}
+        />
+      ) : activeTab === 'brigade' ? (
+        <BrigadeTrendReport
           brigades={brigades}
           password={password}
           executeWithPassword={executeWithPassword}
