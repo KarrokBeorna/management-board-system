@@ -7877,7 +7877,7 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
       return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
     }
 
-    // Списки постов (как в других эндпоинтах)
+    // ========== 1. Списки постов ==========
     const cp7Posts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
       'REPAIR', 'REPAIR_Final',
@@ -7894,42 +7894,68 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
       '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
     ];
 
+    // ========== 2. Определяем postList ==========
     let postList = [];
     if (!checkpoint || checkpoint === 'ALL') {
-      postList = [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts])];
-    } else if (checkpoint === 'CP7') {
-      postList = cp7Posts;
-    } else if (checkpoint === 'CP8') {
-      postList = cp8Posts;
-    } else if (checkpoint === 'PIP') {
-      postList = pipPosts;
-    } else if (checkpoint === 'TL') {
-      postList = tlPosts;
+      // ВАЖНО: теперь ALL включает TL
+      postList = [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts, ...tlPosts])];
     } else {
-      return res.status(400).json({ error: 'Неверный checkpoint' });
+      const checkpoints = checkpoint.split(',').map(cp => cp.trim()).filter(Boolean);
+      for (const cp of checkpoints) {
+        if (cp === 'CP7') postList.push(...cp7Posts);
+        else if (cp === 'CP8') postList.push(...cp8Posts);
+        else if (cp === 'PIP') postList.push(...pipPosts);
+        else if (cp === 'TL') postList.push(...tlPosts);
+        else if (cp !== 'ALL') {
+          return res.status(400).json({ error: `Неверный checkpoint: ${cp}` });
+        }
+      }
+      postList = [...new Set(postList)];
     }
-    const postListStr = postList.map(p => `'${p}'`).join(',');
 
+    if (postList.length === 0) return res.json([]);
+    const postListStr = postList.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
+
+    // ========== 3. Условие online/offline ==========
     let offlineCondition = '1=1';
     if (defectType === 'offline') {
-      offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 1';
+      offlineCondition = '(COALESCE(OFFLINE,0)=1 OR COALESCE(OFFLINE1,0)=1 OR COALESCE(OFFLINE2,0)=1)';
     } else if (defectType === 'online') {
-      offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 0';
+      offlineCondition = '(COALESCE(OFFLINE,0)=0 AND COALESCE(OFFLINE1,0)=0 AND COALESCE(OFFLINE2,0)=0)';
     }
 
-    // 1. Получаем все ключи владельцев из локальной БД
-    const [ownerRows] = await notesPool.query(`
-      SELECT model, part_name, problem_type FROM defect_owners
-    `);
-    const ownerKeys = new Set(ownerRows.map(r => `${r.model}|${r.part_name}|${r.problem_type}`));
+    // ========== 4. Нормализация ключа ==========
+    const normalize = (value) => {
+      if (value === null || value === undefined) return '';
+      return String(value)
+        .replace(/\u00A0/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
+    };
+    const makeOwnerKey = (model, partName, problemType) =>
+      [normalize(model), normalize(partName), normalize(problemType)].join('|');
 
-    // 2. Получаем все группы дефектов за период
+    // ========== 5. Загружаем всех назначенных владельцев из notesPool ==========
+    const [ownerRows] = await notesPool.query(`
+      SELECT model, part_name, problem_type
+      FROM defect_owners
+      WHERE model IS NOT NULL AND part_name IS NOT NULL AND problem_type IS NOT NULL
+    `);
+    const ownerKeys = new Set();
+    for (const owner of ownerRows) {
+      ownerKeys.add(makeOwnerKey(owner.model, owner.part_name, owner.problem_type));
+    }
+
+    // ========== 6. Получаем каждый дефект отдельно (как в гистограмме) ==========
     const defectsSql = `
-      SELECT 
+      SELECT
+        d.VIN,
         d.PART_NAME,
         d.PROBLEM_TYPE,
-        wo.MODEL,
-        COUNT(*) AS CNT
+        d.CREATION_TIME,
+        d.POST_NAME,
+        wo.MODEL
       FROM (
         SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
         FROM at_biw_qm_defect_info
@@ -7952,34 +7978,54 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
       JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.POST_NAME IN (${postListStr})
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
-      GROUP BY d.PART_NAME, d.PROBLEM_TYPE, wo.MODEL
-      ORDER BY CNT DESC
     `;
 
-    const [defectGroups] = await pool.query(defectsSql, [
+    const [defectRows] = await pool.query(defectsSql, [
       `${dateFrom} 00:00:00`,
       `${dateTo} 23:59:59`
     ]);
 
-    // 3. Фильтруем дефекты без владельца
-    const unassigned = [];
-    for (const g of defectGroups) {
-      const key = `${g.MODEL}|${g.PART_NAME}|${g.PROBLEM_TYPE}`;
+    // ========== 7. Оставляем только дефекты без владельца ==========
+    const unassignedRows = [];
+    for (const defect of defectRows) {
+      const key = makeOwnerKey(defect.MODEL, defect.PART_NAME, defect.PROBLEM_TYPE);
       if (!ownerKeys.has(key)) {
-        unassigned.push({
-          mpp: `${g.MODEL} ${g.PART_NAME} ${g.PROBLEM_TYPE}`.trim(),
-          model: g.MODEL,
-          part_name: g.PART_NAME,
-          problem_type: g.PROBLEM_TYPE,
-          count: g.CNT,
-        });
+        unassignedRows.push(defect);
       }
     }
 
-    console.log('Unassigned groups:', unassigned.length);
-    res.json(unassigned);
+    // ========== 8. Группируем уже после фильтрации ==========
+    const groups = new Map();
+    for (const defect of unassignedRows) {
+      const key = makeOwnerKey(defect.MODEL, defect.PART_NAME, defect.PROBLEM_TYPE);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          mpp: `${defect.MODEL} ${defect.PART_NAME} ${defect.PROBLEM_TYPE}`.trim(),
+          model: defect.MODEL,
+          part_name: defect.PART_NAME,
+          problem_type: defect.PROBLEM_TYPE,
+          count: 0
+        });
+      }
+      groups.get(key).count += 1;
+    }
+
+    const result = Array.from(groups.values()).sort((a, b) => b.count - a.count);
+
+    // ========== 9. Диагностика ==========
+    const tableDefectCount = result.reduce((sum, row) => sum + Number(row.count || 0), 0);
+    console.log('=== BRIGADE REPORT / UNASSIGNED DEFECTS ===');
+    console.log('dateFrom:', dateFrom, 'dateTo:', dateTo, 'checkpoint:', checkpoint, 'defectType:', defectType);
+    console.log('owner mappings:', ownerRows.length);
+    console.log('all defects:', defectRows.length);
+    console.log('unassigned defects:', unassignedRows.length);
+    console.log('table groups:', result.length);
+    console.log('table count SUM:', tableDefectCount);
+    console.log('==========================================');
+
+    res.json(result);
   } catch (err) {
-    console.error('Ошибка unassigned-defects:', err.message);
+    console.error('Ошибка /api/brigade-report/unassigned-defects:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
