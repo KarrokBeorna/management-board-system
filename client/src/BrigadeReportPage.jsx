@@ -188,6 +188,14 @@ function getDefectColor(value) {
   return '#FF0000';
 }
 
+function getDPUColor(value) {
+  if (value === 0) return '#00B050';
+  if (value <= 100) return '#92D050';
+  if (value <= 200) return '#FFFF00';
+  if (value <= 300) return '#FFC000';
+  return '#FF0000';
+}
+
 function getWeekNumber(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
@@ -676,7 +684,15 @@ function VINModal({ defect, vins, loading, onClose }) {
 }
 
 /* ===================== ТАБЛИЦА ТОП MPP ПО БРИГАДЕ (14 ДНЕЙ, как в ReportPage) ===================== */
-function BrigadeMPPTable({ allMpps, onCellClick }) {
+function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
+  const [sortDay, setSortDay] = useState(null); // { week: 'prev'|'curr', index: N }
+  const [sortCW, setSortCW] = useState(null);   // 'prev' | 'curr'
+  const [carsCounts, setCarsCounts] = useState({});
+
+  const isDPU = metric === 'dpu';
+  const colorFunc = isDPU ? getDPUColor : getDefectColor;
+  const formatDPU = (v) => Number(v).toFixed(1);
+
   const { prevWeekDays, currWeekDays, prevWeekNum, currWeekNum } = useMemo(() => {
     const today = new Date();
     const mondayThisWeek = getMonday(today);
@@ -698,6 +714,25 @@ function BrigadeMPPTable({ allMpps, onCellClick }) {
     };
   }, []);
 
+  // Загрузка количества машин по каждому из 14 дней (для расчёта DPU)
+  useEffect(() => {
+    const allDays = [...prevWeekDays, ...currWeekDays];
+    const fetches = allDays.map(date => {
+      const ds = date.toISOString().split('T')[0];
+      return fetch(`${API_BASE}/api/cars-count?date=${ds}`)
+        .then(res => res.json())
+        .catch(() => ({ CARS_COUNT: 0 }));
+    });
+    Promise.all(fetches).then(results => {
+      const counts = {};
+      allDays.forEach((date, i) => {
+        const ds = date.toISOString().split('T')[0];
+        counts[ds] = results[i]?.CARS_COUNT || 0;
+      });
+      setCarsCounts(counts);
+    }).catch(() => {});
+  }, [prevWeekDays, currWeekDays]);
+
   const rows = useMemo(() => {
     const grouped = {};
     (allMpps || []).forEach(item => {
@@ -715,32 +750,122 @@ function BrigadeMPPTable({ allMpps, onCellClick }) {
     });
 
     const rowsArr = Object.values(grouped).map(g => {
-      const cellsPrev = prevWeekDays.map(d => {
+      const countsPrev = prevWeekDays.map(d => {
         const ds = d.toISOString().split('T')[0];
         return g.days[ds] || 0;
       });
-      const cellsCurr = currWeekDays.map(d => {
+      const countsCurr = currWeekDays.map(d => {
         const ds = d.toISOString().split('T')[0];
         return g.days[ds] || 0;
       });
+
+      const totalPrevCount = countsPrev.reduce((s, v) => s + v, 0);
+      const totalCurrCount = countsCurr.reduce((s, v) => s + v, 0);
+
+      const carsPrevSum = prevWeekDays.reduce((s, d) => {
+        const ds = d.toISOString().split('T')[0];
+        return s + (carsCounts[ds] || 0);
+      }, 0);
+      const carsCurrSum = currWeekDays.reduce((s, d) => {
+        const ds = d.toISOString().split('T')[0];
+        return s + (carsCounts[ds] || 0);
+      }, 0);
+
+      const dpuPrev = carsPrevSum > 0 ? (totalPrevCount * 1000) / carsPrevSum : 0;
+      const dpuCurr = carsCurrSum > 0 ? (totalCurrCount * 1000) / carsCurrSum : 0;
+
+      const cellsPrev = countsPrev.map((count, i) => {
+        if (!isDPU) return count;
+        const ds = prevWeekDays[i].toISOString().split('T')[0];
+        const cars = carsCounts[ds] || 0;
+        if (cars === 0) return 0;
+        let v = (count * 1000) / cars;
+        if (v > 1000) v = 980;
+        return v;
+      });
+      const cellsCurr = countsCurr.map((count, i) => {
+        if (!isDPU) return count;
+        const ds = currWeekDays[i].toISOString().split('T')[0];
+        const cars = carsCounts[ds] || 0;
+        if (cars === 0) return 0;
+        let v = (count * 1000) / cars;
+        if (v > 1000) v = 980;
+        return v;
+      });
+
       return {
-        ...g,
+        mpp: g.mpp,
+        model: g.model,
+        part_name: g.part_name,
+        problem_type: g.problem_type,
+        days: g.days,
+        countsPrev,
+        countsCurr,
         cellsPrev,
         cellsCurr,
-        totalPrev: cellsPrev.reduce((s, v) => s + v, 0),
-        totalCurr: cellsCurr.reduce((s, v) => s + v, 0),
+        totalPrev: isDPU ? dpuPrev : totalPrevCount,
+        totalCurr: isDPU ? dpuCurr : totalCurrCount,
+        totalPrevCount,
+        totalCurrCount,
       };
     });
 
-    rowsArr.sort((a, b) => (b.totalPrev + b.totalCurr) - (a.totalPrev + a.totalCurr));
-    return rowsArr;
-  }, [allMpps, prevWeekDays, currWeekDays]);
+    // Не показываем строки, где за 2 недели суммарно 0 дефектов
+    let filtered = rowsArr.filter(r => (r.totalPrevCount + r.totalCurrCount) > 0);
+
+    if (sortCW) {
+      filtered.sort((a, b) => sortCW === 'prev'
+        ? b.totalPrev - a.totalPrev
+        : b.totalCurr - a.totalCurr);
+    } else if (sortDay) {
+      filtered.sort((a, b) => {
+        const va = sortDay.week === 'prev' ? a.cellsPrev[sortDay.index] : a.cellsCurr[sortDay.index];
+        const vb = sortDay.week === 'prev' ? b.cellsPrev[sortDay.index] : b.cellsCurr[sortDay.index];
+        return vb - va;
+      });
+    } else {
+      filtered.sort((a, b) => (b.totalPrevCount + b.totalCurrCount) - (a.totalPrevCount + a.totalCurrCount));
+    }
+
+    return filtered;
+  }, [allMpps, prevWeekDays, currWeekDays, sortDay, sortCW, carsCounts, isDPU]);
+
+  const handleDayHeaderClick = (week, index) => {
+    setSortCW(null);
+    setSortDay(prev =>
+      prev?.week === week && prev?.index === index ? null : { week, index }
+    );
+  };
+
+  const handleCWHeaderClick = (week) => {
+    setSortDay(null);
+    setSortCW(prev => (prev === week ? null : week));
+  };
 
   return (
     <div style={{ marginTop: 24 }}>
-      <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 12, color: BRAND.text }}>
-        📋 Топ дефектов по бригаде (14 дней)
-      </h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: BRAND.text, margin: 0 }}>
+          📋 Топ дефектов по бригаде (14 дней)
+        </h3>
+        {(sortDay || sortCW) && (
+          <button
+            onClick={() => { setSortDay(null); setSortCW(null); }}
+            style={{
+              padding: '4px 10px',
+              background: '#E5E7EB',
+              color: '#374151',
+              border: 'none',
+              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Сбросить сортировку ✕
+          </button>
+        )}
+      </div>
 
       <div style={{
         display: 'grid',
@@ -753,23 +878,71 @@ function BrigadeMPPTable({ allMpps, onCellClick }) {
       }}>
         <div style={mppTableStyles.dark}>Дефект (MPP)</div>
 
-        {prevWeekDays.map((d, i) => (
-          <div key={`ph${i}`} style={mppTableStyles.hdr}>
-            <span style={{ display: 'block' }}>{formatDateDDMM(d)}</span>
-            <span style={{ display: 'block', color: '#9CA3AF' }}>{getDayOfWeekFromDate(d)}</span>
-          </div>
-        ))}
-        <div style={mppTableStyles.hdr}>
+        {prevWeekDays.map((d, i) => {
+          const isSorted = sortDay?.week === 'prev' && sortDay?.index === i;
+          return (
+            <div
+              key={`ph${i}`}
+              style={{
+                ...mppTableStyles.hdr,
+                cursor: 'pointer',
+                background: isSorted ? '#2563EB' : '#374151',
+                userSelect: 'none',
+              }}
+              onClick={() => handleDayHeaderClick('prev', i)}
+              title="Сортировать по этому дню"
+            >
+              <span style={{ display: 'block' }}>{formatDateDDMM(d)}</span>
+              <span style={{ display: 'block', color: isSorted ? '#FFF' : '#9CA3AF' }}>
+                {getDayOfWeekFromDate(d)}
+              </span>
+            </div>
+          );
+        })}
+        <div
+          style={{
+            ...mppTableStyles.hdr,
+            cursor: 'pointer',
+            background: sortCW === 'prev' ? '#2563EB' : '#374151',
+            userSelect: 'none',
+          }}
+          onClick={() => handleCWHeaderClick('prev')}
+          title="Сортировать по сумме недели"
+        >
           <span style={{ fontWeight: 700 }}>CW{prevWeekNum}</span>
         </div>
 
-        {currWeekDays.map((d, i) => (
-          <div key={`ch${i}`} style={mppTableStyles.hdr}>
-            <span style={{ display: 'block' }}>{formatDateDDMM(d)}</span>
-            <span style={{ display: 'block', color: '#9CA3AF' }}>{getDayOfWeekFromDate(d)}</span>
-          </div>
-        ))}
-        <div style={mppTableStyles.hdr}>
+        {currWeekDays.map((d, i) => {
+          const isSorted = sortDay?.week === 'curr' && sortDay?.index === i;
+          return (
+            <div
+              key={`ch${i}`}
+              style={{
+                ...mppTableStyles.hdr,
+                cursor: 'pointer',
+                background: isSorted ? '#2563EB' : '#374151',
+                userSelect: 'none',
+              }}
+              onClick={() => handleDayHeaderClick('curr', i)}
+              title="Сортировать по этому дню"
+            >
+              <span style={{ display: 'block' }}>{formatDateDDMM(d)}</span>
+              <span style={{ display: 'block', color: isSorted ? '#FFF' : '#9CA3AF' }}>
+                {getDayOfWeekFromDate(d)}
+              </span>
+            </div>
+          );
+        })}
+        <div
+          style={{
+            ...mppTableStyles.hdr,
+            cursor: 'pointer',
+            background: sortCW === 'curr' ? '#2563EB' : '#374151',
+            userSelect: 'none',
+          }}
+          onClick={() => handleCWHeaderClick('curr')}
+          title="Сортировать по сумме недели"
+        >
           <span style={{ fontWeight: 700 }}>CW{currWeekNum}</span>
         </div>
 
@@ -787,10 +960,13 @@ function BrigadeMPPTable({ allMpps, onCellClick }) {
           <React.Fragment key={row.mpp}>
             <div style={mppTableStyles.name} title={row.mpp}>{row.mpp}</div>
 
-            {row.cellsPrev.map((count, ci) => {
+            {row.cellsPrev.map((val, ci) => {
               const ds = prevWeekDays[ci].toISOString().split('T')[0];
-              const bg = getDefectColor(count);
-              const textColor = count > 15 ? '#FFF' : '#000';
+              const count = row.countsPrev[ci];
+              const bg = colorFunc(val);
+              const textColor = isDPU
+                ? (val > 300 ? '#FFF' : '#000')
+                : (val > 15 ? '#FFF' : '#000');
               return (
                 <div
                   key={`cp${ci}`}
@@ -802,22 +978,25 @@ function BrigadeMPPTable({ allMpps, onCellClick }) {
                   }}
                   onClick={() => count > 0 && onCellClick(row, ds)}
                 >
-                  {count}
+                  {isDPU ? formatDPU(val) : val}
                 </div>
               );
             })}
             <div style={{
               ...mppTableStyles.total,
-              background: getDefectColor(row.totalPrev),
-              color: row.totalPrev > 15 ? '#FFF' : '#000',
+              background: colorFunc(row.totalPrev),
+              color: (isDPU ? row.totalPrev > 300 : row.totalPrev > 15) ? '#FFF' : '#000',
             }}>
-              {row.totalPrev}
+              {isDPU ? formatDPU(row.totalPrev) : row.totalPrev}
             </div>
 
-            {row.cellsCurr.map((count, ci) => {
+            {row.cellsCurr.map((val, ci) => {
               const ds = currWeekDays[ci].toISOString().split('T')[0];
-              const bg = getDefectColor(count);
-              const textColor = count > 15 ? '#FFF' : '#000';
+              const count = row.countsCurr[ci];
+              const bg = colorFunc(val);
+              const textColor = isDPU
+                ? (val > 300 ? '#FFF' : '#000')
+                : (val > 15 ? '#FFF' : '#000');
               return (
                 <div
                   key={`cc${ci}`}
@@ -829,16 +1008,16 @@ function BrigadeMPPTable({ allMpps, onCellClick }) {
                   }}
                   onClick={() => count > 0 && onCellClick(row, ds)}
                 >
-                  {count}
+                  {isDPU ? formatDPU(val) : val}
                 </div>
               );
             })}
             <div style={{
               ...mppTableStyles.total,
-              background: getDefectColor(row.totalCurr),
-              color: row.totalCurr > 15 ? '#FFF' : '#000',
+              background: colorFunc(row.totalCurr),
+              color: (isDPU ? row.totalCurr > 300 : row.totalCurr > 15) ? '#FFF' : '#000',
             }}>
-              {row.totalCurr}
+              {isDPU ? formatDPU(row.totalCurr) : row.totalCurr}
             </div>
           </React.Fragment>
         ))}
@@ -1256,7 +1435,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
         </h2>
 
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-          {/* Месяцы */}
           <div style={{ flex: '1 1 300px', minWidth: 250 }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8, color: '#3B82F6' }}>
               📅 Последние 3 месяца
@@ -1282,7 +1460,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
             </ResponsiveContainer>
           </div>
 
-          {/* Недели */}
           <div style={{ flex: '1 1 300px', minWidth: 250 }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8, color: '#F59E0B' }}>
               📆 Последние 4 недели
@@ -1304,7 +1481,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
             </ResponsiveContainer>
           </div>
 
-          {/* Дни */}
           <div style={{ flex: '2 1 350px', minWidth: 300 }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 8, color: '#10B981' }}>
               📊 Последние 14 дней
@@ -1332,14 +1508,13 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
         </div>
 
         {/* Таблица 14 дней */}
-        <BrigadeMPPTable allMpps={topMpps} onCellClick={handleCellClick} />
+        <BrigadeMPPTable allMpps={topMpps} onCellClick={handleCellClick} metric={metric} />
       </div>
     );
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
-      {/* Фильтры */}
       <div style={{
         display: 'flex',
         flexWrap: 'wrap',
