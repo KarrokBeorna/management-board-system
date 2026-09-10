@@ -179,6 +179,31 @@ const wideModalStyle = {
   maxWidth: '720px',
 };
 
+/* ===================== ХЕЛПЕРЫ ДЛЯ ДАТ И ЦВЕТА (как в DailyTopPage) ===================== */
+function getTodayStr() {
+  const d = new Date();
+  return d.toISOString().split('T')[0];
+}
+
+function formatDateShort(dateStr) {
+  const [, m, d] = dateStr.split('-');
+  return `${d}.${m}`;
+}
+
+function getDayOfWeekShort(dateStr) {
+  const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+  const d = new Date(dateStr + 'T00:00:00');
+  return days[d.getDay()];
+}
+
+function getDefectColor(value) {
+  if (value === 0) return '#00B050';
+  if (value <= 4)  return '#92D050';
+  if (value <= 8)  return '#FFFF00';
+  if (value <= 15) return '#FFC000';
+  return '#FF0000';
+}
+
 /* ===================== МУЛЬТИСЕЛЕКТ ===================== */
 function MultiSelect({ options, selected, onChange, placeholder }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -411,7 +436,6 @@ function HelpModal({ isOpen, onClose }) {
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 28, cursor: 'pointer', color: BRAND.textSecondary, lineHeight: 1 }}>×</button>
         </div>
 
-        {/* Переключатель разделов */}
         <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
           <button
             onClick={() => setActiveSection('assign')}
@@ -427,50 +451,104 @@ function HelpModal({ isOpen, onClose }) {
           </button>
         </div>
 
-        {/* Содержимое */}
         {activeSection === 'assign' ? (
           <div style={{ fontSize: '1.1rem', lineHeight: 1.6, color: BRAND.text }}>
             <p style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: 10 }}>Что это?</p>
-            <p>Здесь показаны <b>дефекты без владельца</b> за выбранный период. Это дефекты, у которых ещё не назначена ответственная бригада.</p>
-            <p style={{ marginTop: 10 }}>Этот раздел нужно регулярно проверять и назначать бригады, чтобы каждый дефект имел ответственного.</p>
-
+            <p>Здесь показаны <b>дефекты без владельца</b> за выбранный период.</p>
             <div style={{ backgroundColor: '#F8FAFC', borderRadius: 12, padding: 16, marginTop: 16 }}>
               <p style={{ fontWeight: 700, marginBottom: 8 }}>Пошагово:</p>
               <ol style={{ paddingLeft: 20, margin: 0 }}>
-                <li>Выберите даты и чекпоинты (если нужно).</li>
+                <li>Выберите даты и чекпоинты.</li>
                 <li>В таблице найдите дефект.</li>
-                <li>В колонке «Бригада» выберите нужную бригаду из списка.</li>
-                <li>Нажмите кнопку «Назначить».</li>
-                <li>После назначения дефект исчезнет из этого списка.</li>
+                <li>В колонке «Бригада» выберите бригаду.</li>
+                <li>Нажмите «Назначить».</li>
               </ol>
             </div>
-            <p style={{ marginTop: 16, color: BRAND.textSecondary }}>💡 Если дефектов много, можно сначала импортировать справочник во вкладке «Справочник», тогда большинство дефектов автоматически получат владельца.</p>
+            <p style={{ marginTop: 16, color: BRAND.textSecondary }}>💡 Совет: сначала импортируйте справочник.</p>
           </div>
         ) : (
           <div style={{ fontSize: '1.1rem', lineHeight: 1.6, color: BRAND.text }}>
             <p style={{ fontSize: '1.2rem', fontWeight: 600, marginBottom: 10 }}>Что это?</p>
-            <p>Здесь вы можете <b>добавлять, редактировать и удалять</b> записи, которые связывают дефект (модель + деталь + дефект) с ответственной бригадой.</p>
-            <p style={{ marginTop: 10 }}>Это нужно для того, чтобы при построении отчёта каждый дефект автоматически попадал в нужную бригаду.</p>
-
+            <p>Здесь вы можете <b>добавлять, редактировать и удалять</b> записи справочника.</p>
             <div style={{ backgroundColor: '#F8FAFC', borderRadius: 12, padding: 16, marginTop: 16 }}>
               <p style={{ fontWeight: 700, marginBottom: 8 }}>Как добавить вручную:</p>
               <ol style={{ paddingLeft: 20, margin: 0 }}>
                 <li>Выберите модель.</li>
-                <li>Введите деталь (например, «Бампер»).</li>
-                <li>Введите дефект (например, «Повреждение»).</li>
-                <li>Выберите бригаду.</li>
-                <li>Нажмите «Добавить».</li>
-              </ol>
-              <p style={{ fontWeight: 700, marginTop: 16, marginBottom: 8 }}>Как импортировать из Excel:</p>
-              <ol style={{ paddingLeft: 20, margin: 0 }}>
-                <li>Нажмите кнопку «Импорт».</li>
-                <li>Выберите способ: загрузить файл или вставить текст.</li>
-                <li>Файл должен содержать столбцы: <b>Модель, Деталь, Дефект, Бригада</b>.</li>
-                <li>Для текста: каждая строка вида <code>Модель[TAB]Деталь[TAB]Дефект[TAB]Бригада</code>.</li>
+                <li>Введите деталь.</li>
+                <li>Введите дефект.</li>
+                <li>Выберите бригаду и нажмите «Добавить».</li>
               </ol>
             </div>
-            <p style={{ marginTop: 16, color: BRAND.textSecondary }}>💡 После импорта или добавления записей они сразу начнут применяться в отчёте.</p>
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ===================== МОДАЛЬНОЕ ОКНО VIN ===================== */
+function VINModal({ defect, vins, loading, onClose }) {
+  const [exporting, setExporting] = useState(false);
+  if (!defect) return null;
+
+  const handleExport = () => {
+    if (vins.length === 0) return;
+    setExporting(true);
+    const data = vins.map(vin => ({ VIN: vin }));
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'VIN');
+    const fileName = `VIN_${(defect.mpp || '').replace(/[^a-zа-яё0-9]/gi, '_')}_${getTodayStr()}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+    setTimeout(() => setExporting(false), 2000);
+  };
+
+  return (
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <div style={{ ...modalStyle, maxWidth: 600 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+          <h3 style={{ margin: 0, color: BRAND.text, fontSize: '1.2rem' }}>
+            VIN для дефекта: {defect.mpp}
+          </h3>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', fontSize: 22, cursor: 'pointer', color: BRAND.textSecondary }}>✕</button>
+        </div>
+        {loading ? (
+          <div style={{ color: BRAND.textSecondary }}>Загрузка...</div>
+        ) : vins.length === 0 ? (
+          <div style={{ color: BRAND.textSecondary }}>Нет данных</div>
+        ) : (
+          <>
+            <div style={{ color: BRAND.textSecondary, marginBottom: 12 }}>
+              Всего уникальных VIN: <b>{vins.length}</b>
+            </div>
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#2563EB',
+                color: '#FFF',
+                border: 'none',
+                borderRadius: 6,
+                fontWeight: 600,
+                fontSize: 14,
+                marginBottom: 12,
+                cursor: exporting ? 'not-allowed' : 'pointer',
+                opacity: exporting ? 0.6 : 1,
+              }}
+            >
+              {exporting ? 'Выгружается...' : 'Экспорт в Excel'}
+            </button>
+            <div style={{ maxHeight: 320, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {vins.map((vin, idx) => (
+                  <li key={idx} style={{ padding: '6px 12px', borderBottom: `1px solid ${BRAND.border}`, color: BRAND.text, fontSize: 14 }}>
+                    {vin}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -586,7 +664,6 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
         defectType,
       });
 
-      // если выбрана конкретная смена, передаём точное время
       if (shiftFilter !== 'all' && shiftStart && shiftEnd) {
         params.delete('dateFrom');
         params.delete('dateTo');
@@ -613,7 +690,6 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
     loadData();
   }, [dateFrom, dateTo, selectedCheckpoints, metric, defectType, shiftFilter, shiftStart, shiftEnd]);
 
-  // Топ 3 бригады по выбранной метрике
   const top3Brigades = useMemo(() => {
     if (!topBrigades.length) return [];
     const sorted = [...topBrigades].sort((a, b) => {
@@ -810,7 +886,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
   );
 }
 
-/* ===================== ОТЧЕТ ПО БРИГАДАМ (ТРЕНДЫ) ===================== */
+/* ===================== ОТЧЕТ ПО БРИГАДАМ (ТРЕНДЫ + ТОП MPP) ===================== */
 function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
   const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
   const [defectType, setDefectType] = useState('all');
@@ -818,54 +894,87 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
   const [metric, setMetric] = useState('count');
   const [shiftFilter, setShiftFilter] = useState('all');
   const [trendsByBrigade, setTrendsByBrigade] = useState({});
+  const [topMppsByBrigade, setTopMppsByBrigade] = useState({});
+  const [selectedDays, setSelectedDays] = useState({});
   const [loading, setLoading] = useState(false);
+
+  const [selectedDefect, setSelectedDefect] = useState(null);
+  const [vins, setVins] = useState([]);
+  const [vinsLoading, setVinsLoading] = useState(false);
 
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
   const brigadesOptions = brigades.map(b => b.name).filter(name => name !== 'Бригада не найдена');
+  const todayStr = getTodayStr();
 
   const formatValue = (value) => metric === 'dpu' ? Number(value).toFixed(2) : value;
 
-    const fetchTrendForBrigade = async (brigadeName) => {
-        const allCheckpointsSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
-        const checkpointParam = allCheckpointsSelected ? 'ALL' : selectedCheckpoints.join(',');
+  const buildCommonParams = () => {
+    const allSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
+    const checkpointParam = allSelected ? 'ALL' : selectedCheckpoints.join(',');
+    const params = new URLSearchParams({
+      checkpoint: checkpointParam,
+      defectType,
+      metric,
+    });
+    if (shiftFilter !== 'all') params.append('shift', shiftFilter);
+    return params;
+  };
 
-        const params = new URLSearchParams({
-            checkpoint: checkpointParam,
-            defectType,
-            brigades: brigadeName,
-            metric,
-        });
+  const fetchTrendForBrigade = async (brigadeName) => {
+    const params = buildCommonParams();
+    params.append('brigades', brigadeName);
+    const res = await fetch(`${API_BASE}/api/brigade-report/trend?${params}`);
+    if (!res.ok) throw new Error(`Ошибка загрузки трендов для бригады ${brigadeName}`);
+    return await res.json();
+  };
 
-        // Если выбрана конкретная смена, добавляем shift
-        if (shiftFilter !== 'all') {
-            params.append('shift', shiftFilter);
-        }
+  const fetchTopMppsForBrigade = async (brigadeName) => {
+    const params = buildCommonParams();
+    params.delete('metric');
+    params.append('brigade', brigadeName);
+    const res = await fetch(`${API_BASE}/api/brigade-report/top-mpp?${params}`);
+    if (!res.ok) throw new Error(`Ошибка загрузки топ MPP для бригады ${brigadeName}`);
+    return await res.json();
+  };
 
-        const res = await fetch(`${API_BASE}/api/brigade-report/trend?${params}`);
-        if (!res.ok) throw new Error(`Ошибка загрузки трендов для бригады ${brigadeName}`);
-        return await res.json();
-    };
-
-  const loadAllTrends = async () => {
+  const loadAllData = async () => {
     if (selectedBrigades.length === 0) {
       setTrendsByBrigade({});
+      setTopMppsByBrigade({});
       return;
     }
-
     setLoading(true);
     try {
       const newTrends = {};
+      const newTopMpps = {};
       await Promise.all(
         selectedBrigades.map(async (brigadeName) => {
           try {
-            const data = await fetchTrendForBrigade(brigadeName);
-            newTrends[brigadeName] = data;
+            const [trendData, mppData] = await Promise.all([
+              fetchTrendForBrigade(brigadeName),
+              fetchTopMppsForBrigade(brigadeName),
+            ]);
+            newTrends[brigadeName] = trendData;
+            newTopMpps[brigadeName] = mppData;
           } catch (err) {
             console.error(err);
           }
         })
       );
       setTrendsByBrigade(newTrends);
+      setTopMppsByBrigade(newTopMpps);
+
+      // Установить день по умолчанию (сегодня, если есть, иначе последний доступный)
+      setSelectedDays(prev => {
+        const next = { ...prev };
+        selectedBrigades.forEach(b => {
+          if (next[b] && (newTopMpps[b] || []).some(x => x.date === next[b])) return;
+          const data = newTopMpps[b] || [];
+          const dates = [...new Set(data.map(d => d.date))].sort().reverse();
+          next[b] = dates.includes(todayStr) ? todayStr : (dates[0] || todayStr);
+        });
+        return next;
+      });
     } catch (err) {
       alert(err.message);
     } finally {
@@ -874,8 +983,144 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
   };
 
   useEffect(() => {
-    loadAllTrends();
-  }, [selectedCheckpoints, selectedBrigades, defectType, metric, shiftFilter]);
+    loadAllData();
+  }, [selectedCheckpoints, selectedBrigades, defectType, shiftFilter]);
+
+  const handleDefectClick = (brigadeName, defect, date) => {
+    setSelectedDefect({ ...defect, brigade: brigadeName, date });
+    setVins([]);
+    setVinsLoading(true);
+
+    const params = buildCommonParams();
+    params.delete('metric');
+    params.append('model', defect.model);
+    params.append('part_name', defect.part_name);
+    params.append('problem_type', defect.problem_type);
+    params.append('date', date);
+
+    fetch(`${API_BASE}/api/brigade-report/top-mpp-vins?${params}`)
+      .then(res => {
+        if (!res.ok) throw new Error('Ошибка загрузки VIN');
+        return res.json();
+      })
+      .then(data => {
+        setVins(Array.isArray(data) ? data : []);
+        setVinsLoading(false);
+      })
+      .catch(err => {
+        console.error(err);
+        setVins([]);
+        setVinsLoading(false);
+      });
+  };
+
+  const closeModal = () => {
+    setSelectedDefect(null);
+    setVins([]);
+  };
+
+  const renderTopMppTable = (brigadeName, allMpps) => {
+    const dates = [...new Set(allMpps.map(d => d.date))].sort().reverse();
+    const selectedDate = selectedDays[brigadeName] || (dates.includes(todayStr) ? todayStr : (dates[0] || todayStr));
+
+    const dayMpps = allMpps
+      .filter(d => d.date === selectedDate)
+      .sort((a, b) => b.count - a.count);
+
+    return (
+      <div style={{ marginTop: 24 }}>
+        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 12, color: BRAND.text }}>
+          📋 Топ дефектов ({brigadeName})
+        </h3>
+
+        <div style={{ backgroundColor: '#1F2937', borderRadius: 6, padding: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#FFF', marginBottom: 8, flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 14, color: '#D1D5DB' }}>День:</span>
+              <select
+                value={selectedDate}
+                onChange={(e) => setSelectedDays(prev => ({ ...prev, [brigadeName]: e.target.value }))}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 6,
+                  border: '1px solid #4B5563',
+                  background: '#111827',
+                  color: '#FFF',
+                  fontSize: 14,
+                  cursor: 'pointer',
+                }}
+              >
+                {dates.length === 0 ? (
+                  <option value={todayStr}>
+                    {formatDateShort(todayStr)} {getDayOfWeekShort(todayStr)}
+                  </option>
+                ) : (
+                  dates.map(d => (
+                    <option key={d} value={d}>
+                      {formatDateShort(d)} {getDayOfWeekShort(d)}{d === todayStr ? ' (сегодня)' : ''}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+            <div style={{ fontSize: 13, color: '#D1D5DB' }}>
+              Всего дефектов: <b style={{ color: '#FFF' }}>{dayMpps.reduce((s, x) => s + x.count, 0)}</b>
+            </div>
+          </div>
+
+          <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+            {dayMpps.length === 0 ? (
+              <div style={{ color: '#D1D5DB', padding: 12, textAlign: 'center' }}>
+                Нет данных за выбранный день
+              </div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', color: '#FFF', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#374151' }}>
+                    <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #4B5563', fontWeight: 600 }}>Дефект</th>
+                    <th style={{ padding: '6px 8px', textAlign: 'center', borderBottom: '1px solid #4B5563', fontWeight: 600, width: 80 }}>Шт.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dayMpps.map((item, idx) => (
+                    <tr
+                      key={idx}
+                      style={{
+                        backgroundColor: idx % 2 === 0 ? '#1F2937' : '#111827',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => handleDefectClick(brigadeName, item, selectedDate)}
+                    >
+                      <td style={{
+                        padding: '6px 8px',
+                        borderBottom: '1px solid #4B5563',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        maxWidth: 400,
+                      }}>
+                        {item.mpp}
+                      </td>
+                      <td style={{
+                        padding: '6px 8px',
+                        backgroundColor: getDefectColor(item.count),
+                        color: item.count > 15 ? '#FFF' : '#000',
+                        fontWeight: 600,
+                        textAlign: 'center',
+                        borderBottom: '1px solid #4B5563',
+                      }}>
+                        {item.count}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const renderBrigadeCard = (brigadeName, data) => {
     if (!data) return null;
@@ -883,6 +1128,7 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
     const monthData = data.month || [];
     const weekData = data.week || [];
     const dayData = data.day || [];
+    const topMpps = topMppsByBrigade[brigadeName] || [];
 
     return (
       <div key={brigadeName} style={{
@@ -906,11 +1152,11 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={monthData} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis 
-                  dataKey="period" 
-                  tick={{ fontSize: 12 }} 
+                <XAxis
+                  dataKey="period"
+                  tick={{ fontSize: 12 }}
                   tickFormatter={(val) => {
-                    const [y, m] = val.split('-');
+                    const [, m] = val.split('-');
                     const monthNames = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
                     return monthNames[parseInt(m,10)-1];
                   }}
@@ -932,9 +1178,9 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={weekData} margin={{ top: 20, right: 20, left: 0, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis 
-                  dataKey="period" 
-                  tick={{ fontSize: 12 }} 
+                <XAxis
+                  dataKey="period"
+                  tick={{ fontSize: 12 }}
                   tickFormatter={(val) => val.split('-W')[1] ? `W${val.split('-W')[1]}` : val}
                 />
                 <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
@@ -954,10 +1200,10 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={dayData} margin={{ top: 20, right: 20, left: 0, bottom: 30 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis 
-                  dataKey="period" 
-                  interval={0} 
-                  tick={{ fontSize: 11 }} 
+                <XAxis
+                  dataKey="period"
+                  interval={0}
+                  tick={{ fontSize: 11 }}
                   tickFormatter={(val) => {
                     const [, m, d] = val.split('-');
                     return `${d}.${m}`;
@@ -972,6 +1218,9 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
             </ResponsiveContainer>
           </div>
         </div>
+
+        {/* Таблица топ MPP */}
+        {renderTopMppTable(brigadeName, topMpps)}
       </div>
     );
   };
@@ -1058,6 +1307,13 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
           {selectedBrigades.map(brigadeName => renderBrigadeCard(brigadeName, trendsByBrigade[brigadeName]))}
         </div>
       )}
+
+      <VINModal
+        defect={selectedDefect}
+        vins={vins}
+        loading={vinsLoading}
+        onClose={closeModal}
+      />
     </div>
   );
 }
@@ -1248,15 +1504,15 @@ function AssignBrigadesPanel({ brigades, password, executeWithPassword, refreshT
 }
 
 /* ===================== СПРАВОЧНИК ===================== */
-function DictionaryPanel({ 
-  dictionaryData, 
-  models, 
-  brigades, 
-  password, 
-  executeWithPassword, 
-  onDataChanged, 
+function DictionaryPanel({
+  dictionaryData,
+  models,
+  brigades,
+  password,
+  executeWithPassword,
+  onDataChanged,
   manageUnlocked,
-  onRequestBrigadePassword 
+  onRequestBrigadePassword
 }) {
   const [filterModel, setFilterModel] = useState('ALL');
   const [filterBrigade, setFilterBrigade] = useState('ALL');
@@ -2074,7 +2330,7 @@ export default function BrigadeReportPage() {
             style={tabStyle(activeTab === 'general')}
             onClick={() => handleTabChange('general')}
           >
-            Общий отчет
+            📊 Общий отчет
           </button>
           <button
             style={tabStyle(activeTab === 'brigade')}

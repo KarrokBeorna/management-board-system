@@ -8682,6 +8682,265 @@ app.get('/api/brigade-report/trend', async (req, res) => {
 });
 
 
+// ================== ТОП MPP ПО БРИГАДЕ (для таблицы под графиками) ==================
+// ================== ХЕЛПЕР: буква смены по UTC-времени создания дефекта ==================
+function getShiftLetterFromDate(creationTime) {
+  const utc = new Date(creationTime);
+  const moscow = new Date(utc.getTime() + 3 * 60 * 60 * 1000);
+  const totalMinutes = moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+  const year = moscow.getUTCFullYear();
+  const month = moscow.getUTCMonth();
+  const day = moscow.getUTCDate();
+
+  const dateObj = new Date(Date.UTC(year, month, day));
+  const dayNum = dateObj.getUTCDay() || 7;
+  dateObj.setUTCDate(dateObj.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(dateObj.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil((((dateObj - yearStart) / 86400000) + 1) / 7);
+  const isEvenWeek = weekNumber % 2 === 0;
+
+  let shiftType;
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
+    shiftType = 'day';
+  } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
+    shiftType = 'evening';
+  } else {
+    shiftType = 'night';
+  }
+
+  if (shiftType === 'night') return 'C';
+  if (shiftType === 'day') return isEvenWeek ? 'B' : 'A';
+  return isEvenWeek ? 'A' : 'B';
+}
+
+// ================== ХЕЛПЕР: московская дата в формате YYYY-MM-DD из UTC-времени ==================
+function getMoscowDateStr(creationTime) {
+  const utc = new Date(creationTime);
+  const moscow = new Date(utc.getTime() + 3 * 60 * 60 * 1000);
+  const y = moscow.getUTCFullYear();
+  const m = String(moscow.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(moscow.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// ================== ХЕЛПЕР: списки постов ==================
+function getPostsForCheckpoints(checkpoint) {
+  const cp7Posts = [
+    'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+    'REPAIR', 'REPAIR_Final',
+    'EXT1', 'PIP2', 'PIP4', 'PIP9'
+  ];
+  const cp8Posts = [
+    'CP8', 'CP8 Gate', 'CP8-gate',
+    '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
+  ];
+  const pipPosts = [
+    'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+  ];
+  const tlPosts = [
+    '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
+  ];
+
+  if (!checkpoint || checkpoint === 'ALL') {
+    return [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts, ...tlPosts])];
+  }
+
+  const cps = checkpoint.split(',').map(c => c.trim()).filter(Boolean);
+  let postList = [];
+  for (const cp of cps) {
+    if (cp === 'CP7') postList.push(...cp7Posts);
+    else if (cp === 'CP8') postList.push(...cp8Posts);
+    else if (cp === 'PIP') postList.push(...pipPosts);
+    else if (cp === 'TL') postList.push(...tlPosts);
+  }
+  return [...new Set(postList)];
+}
+
+// ================== ХЕЛПЕР: условие online/offline ==================
+function getOfflineCondition(defectType) {
+  if (defectType === 'offline') {
+    return '(COALESCE(OFFLINE,0)=1 OR COALESCE(OFFLINE1,0)=1 OR COALESCE(OFFLINE2,0)=1)';
+  }
+  if (defectType === 'online') {
+    return '(COALESCE(OFFLINE,0)=0 AND COALESCE(OFFLINE1,0)=0 AND COALESCE(OFFLINE2,0)=0)';
+  }
+  return '1=1';
+}
+
+// ================== ТОП MPP ПО БРИГАДЕ (последние 14 дней, по московским дням) ==================
+app.get('/api/brigade-report/top-mpp', async (req, res) => {
+  try {
+    const { checkpoint, defectType = 'all', brigade, shift } = req.query;
+    if (!brigade) {
+      return res.status(400).json({ error: 'brigade обязателен' });
+    }
+
+    const postList = getPostsForCheckpoints(checkpoint);
+    if (postList.length === 0) {
+      return res.json([]);
+    }
+    const postListStr = postList.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
+
+    const offlineCondition = getOfflineCondition(defectType);
+
+    const defectsSql = `
+      SELECT d.VIN, d.PART_NAME, d.PROBLEM_TYPE, d.CREATION_TIME, wo.MODEL
+      FROM (
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_biw_qm_defect_info
+        WHERE ${offlineCondition}
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_paint_qm_defect_info
+        WHERE ${offlineCondition}
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_qm_defect_info
+        WHERE ${offlineCondition}
+          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+      ) d
+      JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.POST_NAME IN (${postListStr})
+        AND d.CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+        AND d.CREATION_TIME < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+    `;
+
+    let [defectRows] = await pool.query(defectsSql);
+
+    // Фильтр по смене (A / B / C)
+    if (shift && shift !== 'all') {
+      defectRows = defectRows.filter(
+        d => getShiftLetterFromDate(d.CREATION_TIME) === shift
+      );
+    }
+
+    // Справочник владельцев
+    const [owners] = await notesPool.query(`
+      SELECT do.model, do.part_name, do.problem_type, b.name AS brigade_name
+      FROM defect_owners do
+      LEFT JOIN brigades b ON do.brigade_id = b.id
+    `);
+    const ownerMap = new Map();
+    owners.forEach(o => {
+      ownerMap.set(`${o.model}|${o.part_name}|${o.problem_type}`, o.brigade_name);
+    });
+
+    // Группировка по (московская дата + MPP) только для выбранной бригады
+    const groups = new Map();
+    for (const r of defectRows) {
+      const owner = ownerMap.get(`${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`) || 'Бригада не найдена';
+      if (owner !== brigade) continue;
+
+      const dateStr = getMoscowDateStr(r.CREATION_TIME);
+      const key = `${dateStr}|${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          date: dateStr,
+          model: r.MODEL,
+          part_name: r.PART_NAME,
+          problem_type: r.PROBLEM_TYPE,
+          mpp: `${r.MODEL || ''} ${r.PART_NAME || ''} ${r.PROBLEM_TYPE || ''}`.trim(),
+          count: 0,
+        });
+      }
+      groups.get(key).count++;
+    }
+
+    const result = Array.from(groups.values()).sort((a, b) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      return b.count - a.count;
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка top-mpp:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================== VIN ДЛЯ КОНКРЕТНОГО MPP БРИГАДЫ ЗА МОСКОВСКИЙ ДЕНЬ ==================
+app.get('/api/brigade-report/top-mpp-vins', async (req, res) => {
+  try {
+    const {
+      checkpoint,
+      defectType = 'all',
+      shift,
+      model,
+      part_name,
+      problem_type,
+      date
+    } = req.query;
+
+    if (!model || !part_name || !problem_type || !date) {
+      return res.status(400).json({
+        error: 'model, part_name, problem_type, date обязательны'
+      });
+    }
+
+    const postList = getPostsForCheckpoints(checkpoint);
+    if (postList.length === 0) {
+      return res.json([]);
+    }
+    const postListStr = postList.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
+
+    const offlineCondition = getOfflineCondition(defectType);
+
+    // Забираем дефекты за 15 дней — покрывает любой московский день
+    const query = `
+      SELECT DISTINCT d.VIN, d.CREATION_TIME
+      FROM (
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_biw_qm_defect_info
+        WHERE ${offlineCondition} AND PART_NAME = ? AND PROBLEM_TYPE = ?
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_paint_qm_defect_info
+        WHERE ${offlineCondition} AND PART_NAME = ? AND PROBLEM_TYPE = ?
+        UNION ALL
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        FROM at_qm_defect_info
+        WHERE ${offlineCondition} AND PART_NAME = ? AND PROBLEM_TYPE = ?
+      ) d
+      JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.POST_NAME IN (${postListStr})
+        AND d.CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 15 DAY)
+        AND d.CREATION_TIME < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+        AND wo.MODEL = ?
+    `;
+
+    const params = [
+      part_name, problem_type,
+      part_name, problem_type,
+      part_name, problem_type,
+      model,
+    ];
+
+    let [rows] = await pool.query(query, params);
+
+    // 1) Фильтр по московской дате (той, что отображается в селекторе)
+    rows = rows.filter(r => getMoscowDateStr(r.CREATION_TIME) === date);
+
+    // 2) Фильтр по смене (если выбрана)
+    if (shift && shift !== 'all') {
+      rows = rows.filter(r => getShiftLetterFromDate(r.CREATION_TIME) === shift);
+    }
+
+    // 3) Уникальные VIN
+    const vinSet = new Set(rows.map(r => r.VIN));
+    res.json([...vinSet]);
+  } catch (err) {
+    console.error('Ошибка top-mpp-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ================== ЗАМЕТКИ ==================
 
 // Получение всех заметок
