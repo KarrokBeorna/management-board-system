@@ -175,9 +175,17 @@ const wideModalStyle = {
 };
 
 /* ===================== ХЕЛПЕРЫ ДЛЯ ДАТ И ЦВЕТА ===================== */
+// ЛОКАЛЬНАЯ дата в YYYY-MM-DD (без UTC-сдвига)
+function toLocalDateStr(d) {
+  const date = new Date(d);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function getTodayStr() {
-  const d = new Date();
-  return d.toISOString().split('T')[0];
+  return toLocalDateStr(new Date());
 }
 
 function getDefectColor(value) {
@@ -219,7 +227,7 @@ function getDayOfWeekFromDate(date) {
   return ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'][new Date(date).getDay()];
 }
 
-/* ===================== СТИЛИ ДЛЯ MPP-ТАБЛИЦЫ (как в ReportPage) ===================== */
+/* ===================== СТИЛИ ДЛЯ MPP-ТАБЛИЦЫ ===================== */
 const mppTableStyles = {
   dark: {
     background: '#1F2937',
@@ -683,10 +691,10 @@ function VINModal({ defect, vins, loading, onClose }) {
   );
 }
 
-/* ===================== ТАБЛИЦА ТОП MPP ПО БРИГАДЕ (14 ДНЕЙ, как в ReportPage) ===================== */
+/* ===================== ТАБЛИЦА ТОП MPP ПО БРИГАДЕ (14 ДНЕЙ) ===================== */
 function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
-  const [sortDay, setSortDay] = useState(null); // { week: 'prev'|'curr', index: N }
-  const [sortCW, setSortCW] = useState(null);   // 'prev' | 'curr'
+  const [sortDay, setSortDay] = useState(null);
+  const [sortCW, setSortCW] = useState(null);
   const [carsCounts, setCarsCounts] = useState({});
 
   const isDPU = metric === 'dpu';
@@ -714,11 +722,11 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
     };
   }, []);
 
-  // Загрузка количества машин по каждому из 14 дней (для расчёта DPU)
+  // Загрузка количества машин — ЛОКАЛЬНАЯ дата
   useEffect(() => {
     const allDays = [...prevWeekDays, ...currWeekDays];
     const fetches = allDays.map(date => {
-      const ds = date.toISOString().split('T')[0];
+      const ds = toLocalDateStr(date);
       return fetch(`${API_BASE}/api/cars-count?date=${ds}`)
         .then(res => res.json())
         .catch(() => ({ CARS_COUNT: 0 }));
@@ -726,7 +734,7 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
     Promise.all(fetches).then(results => {
       const counts = {};
       allDays.forEach((date, i) => {
-        const ds = date.toISOString().split('T')[0];
+        const ds = toLocalDateStr(date);
         counts[ds] = results[i]?.CARS_COUNT || 0;
       });
       setCarsCounts(counts);
@@ -750,12 +758,13 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
     });
 
     const rowsArr = Object.values(grouped).map(g => {
+      // ЛОКАЛЬНАЯ дата — совпадёт с ключами с сервера
       const countsPrev = prevWeekDays.map(d => {
-        const ds = d.toISOString().split('T')[0];
+        const ds = toLocalDateStr(d);
         return g.days[ds] || 0;
       });
       const countsCurr = currWeekDays.map(d => {
-        const ds = d.toISOString().split('T')[0];
+        const ds = toLocalDateStr(d);
         return g.days[ds] || 0;
       });
 
@@ -763,11 +772,11 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
       const totalCurrCount = countsCurr.reduce((s, v) => s + v, 0);
 
       const carsPrevSum = prevWeekDays.reduce((s, d) => {
-        const ds = d.toISOString().split('T')[0];
+        const ds = toLocalDateStr(d);
         return s + (carsCounts[ds] || 0);
       }, 0);
       const carsCurrSum = currWeekDays.reduce((s, d) => {
-        const ds = d.toISOString().split('T')[0];
+        const ds = toLocalDateStr(d);
         return s + (carsCounts[ds] || 0);
       }, 0);
 
@@ -776,7 +785,7 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
 
       const cellsPrev = countsPrev.map((count, i) => {
         if (!isDPU) return count;
-        const ds = prevWeekDays[i].toISOString().split('T')[0];
+        const ds = toLocalDateStr(prevWeekDays[i]);
         const cars = carsCounts[ds] || 0;
         if (cars === 0) return 0;
         let v = (count * 1000) / cars;
@@ -785,7 +794,7 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
       });
       const cellsCurr = countsCurr.map((count, i) => {
         if (!isDPU) return count;
-        const ds = currWeekDays[i].toISOString().split('T')[0];
+        const ds = toLocalDateStr(currWeekDays[i]);
         const cars = carsCounts[ds] || 0;
         if (cars === 0) return 0;
         let v = (count * 1000) / cars;
@@ -810,7 +819,6 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
       };
     });
 
-    // Не показываем строки, где за 2 недели суммарно 0 дефектов
     let filtered = rowsArr.filter(r => (r.totalPrevCount + r.totalCurrCount) > 0);
 
     if (sortCW) {
@@ -961,7 +969,7 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
             <div style={mppTableStyles.name} title={row.mpp}>{row.mpp}</div>
 
             {row.cellsPrev.map((val, ci) => {
-              const ds = prevWeekDays[ci].toISOString().split('T')[0];
+              const ds = toLocalDateStr(prevWeekDays[ci]);
               const count = row.countsPrev[ci];
               const bg = colorFunc(val);
               const textColor = isDPU
@@ -991,7 +999,7 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
             </div>
 
             {row.cellsCurr.map((val, ci) => {
-              const ds = currWeekDays[ci].toISOString().split('T')[0];
+              const ds = toLocalDateStr(currWeekDays[ci]);
               const count = row.countsCurr[ci];
               const bg = colorFunc(val);
               const textColor = isDPU
@@ -1028,9 +1036,8 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
 
 /* ===================== ОБЩИЙ ОТЧЕТ (ГИСТОГРАММА) ===================== */
 function BrigadeReport({ brigades, password, executeWithPassword }) {
-  const today = new Date();
-  const [dateFrom, setDateFrom] = useState(today.toISOString().split('T')[0]);
-  const [dateTo, setDateTo] = useState(today.toISOString().split('T')[0]);
+  const [dateFrom, setDateFrom] = useState(toLocalDateStr(new Date()));
+  const [dateTo, setDateTo] = useState(toLocalDateStr(new Date()));
   const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
   const [defectType, setDefectType] = useState('all');
   const [metric, setMetric] = useState('count');
@@ -1507,7 +1514,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
           </div>
         </div>
 
-        {/* Таблица 14 дней */}
         <BrigadeMPPTable allMpps={topMpps} onCellClick={handleCellClick} metric={metric} />
       </div>
     );
@@ -1607,9 +1613,8 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
 
 /* ===================== НАЗНАЧЕНИЕ БРИГАД ===================== */
 function AssignBrigadesPanel({ brigades, password, executeWithPassword, refreshTrigger }) {
-  const today = new Date();
-  const [dateFrom, setDateFrom] = useState(today.toISOString().split('T')[0]);
-  const [dateTo, setDateTo] = useState(today.toISOString().split('T')[0]);
+  const [dateFrom, setDateFrom] = useState(toLocalDateStr(new Date()));
+  const [dateTo, setDateTo] = useState(toLocalDateStr(new Date()));
   const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
   const [defectType, setDefectType] = useState('all');
   const [unassignedDefects, setUnassignedDefects] = useState([]);
@@ -2013,7 +2018,7 @@ function DictionaryPanel({
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Справочник');
-    XLSX.writeFile(wb, `Справочник_дефектов_${new Date().toISOString().slice(0,10)}.xlsx`);
+    XLSX.writeFile(wb, `Справочник_дефектов_${getTodayStr()}.xlsx`);
   };
 
   return (
@@ -2553,7 +2558,6 @@ export default function BrigadeReportPage() {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [passwordError, setPasswordError] = useState('');
   const [pendingAction, setPendingAction] = useState(null);
-  const [passwordVerified, setPasswordVerified] = useState(!!password);
 
   const loadBrigades = async () => {
     try {
@@ -2583,7 +2587,6 @@ export default function BrigadeReportPage() {
     if (pwd === '1234561') {
       sessionStorage.setItem('brigade_password', pwd);
       setPassword(pwd);
-      setPasswordVerified(true);
       setShowPasswordModal(false);
       if (pendingAction) {
         pendingAction(pwd);
@@ -2599,7 +2602,6 @@ export default function BrigadeReportPage() {
     if (tab === 'owners' && !password) {
       setPendingAction(() => (pwd) => {
         setPassword(pwd);
-        setPasswordVerified(true);
         setActiveTab('owners');
       });
       setShowPasswordModal(true);

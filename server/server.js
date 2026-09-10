@@ -7663,6 +7663,160 @@ app.get('/api/drr-electronics-vin-defects', async (req, res) => {
 
 
 
+// =========================================================================
+// ЕДИНЫЙ ХЕЛПЕР: списки постов — ТОЧНО как в /api/brigade-report/data
+// (ALL = CP7 + CP8 + PIP, БЕЗ TL)
+// =========================================================================
+function getPostsForCheckpoints(checkpoint) {
+  const cp7Posts = [
+    'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+    'REPAIR', 'REPAIR_Final',
+    'EXT1', 'PIP2', 'PIP4', 'PIP9'
+  ];
+  const cp8Posts = [
+    'CP8', 'CP8 Gate', 'CP8-gate',
+    '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
+  ];
+  const pipPosts = [
+    'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+  ];
+  const tlPosts = [
+    '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
+  ];
+
+  if (!checkpoint || checkpoint === 'ALL') {
+    return [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts])];
+  }
+
+  const cps = checkpoint.split(',').map(c => c.trim()).filter(Boolean);
+  let postList = [];
+  for (const cp of cps) {
+    if (cp === 'CP7') postList.push(...cp7Posts);
+    else if (cp === 'CP8') postList.push(...cp8Posts);
+    else if (cp === 'PIP') postList.push(...pipPosts);
+    else if (cp === 'TL') postList.push(...tlPosts);
+  }
+  return [...new Set(postList)];
+}
+
+// =========================================================================
+// ЕДИНЫЙ ХЕЛПЕР: online/offline
+// =========================================================================
+function getOfflineCondition(defectType) {
+  if (defectType === 'offline') {
+    return '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 1';
+  }
+  if (defectType === 'online') {
+    return '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 0';
+  }
+  return '1=1';
+}
+
+// =========================================================================
+// ЕДИНЫЙ ХЕЛПЕР: получить сырые дефекты за период
+// IDENTICNO /api/brigade-report/data — без GROUP BY, без LIMIT.
+// =========================================================================
+async function fetchRawDefects(sqlStart, sqlEnd, checkpoint, defectType) {
+  const postList = getPostsForCheckpoints(checkpoint);
+  if (postList.length === 0) return [];
+  const postListStr = postList.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
+
+  const offlineCondition = getOfflineCondition(defectType);
+
+  const sql = `
+    SELECT
+      d.VIN,
+      d.PART_NAME,
+      d.PROBLEM_TYPE,
+      d.CREATION_TIME,
+      d.POST_NAME,
+      wo.MODEL
+    FROM (
+      SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME,
+             OFFLINE, OFFLINE1, OFFLINE2
+      FROM at_biw_qm_defect_info
+      WHERE PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+        AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        AND ${offlineCondition}
+      UNION ALL
+      SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME,
+             OFFLINE, OFFLINE1, OFFLINE2
+      FROM at_paint_qm_defect_info
+      WHERE PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+        AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        AND ${offlineCondition}
+      UNION ALL
+      SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME,
+             OFFLINE, OFFLINE1, OFFLINE2
+      FROM at_qm_defect_info
+      WHERE PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
+        AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        AND ${offlineCondition}
+    ) d
+    JOIN work_order wo ON wo.VIN = d.VIN
+    WHERE d.POST_NAME IN (${postListStr})
+      AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
+  `;
+
+  const [rows] = await pool.query(sql, [sqlStart, sqlEnd]);
+  return rows;
+}
+
+// =========================================================================
+// ЕДИНЫЙ ХЕЛПЕР: буква смены по UTC-времени
+// =========================================================================
+function getShiftLetterFromDate(creationTime) {
+  const utc = new Date(creationTime);
+  const moscow = new Date(utc.getTime() + 3 * 60 * 60 * 1000);
+  const totalMinutes = moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+  const year = moscow.getUTCFullYear();
+  const month = moscow.getUTCMonth();
+  const day = moscow.getUTCDate();
+
+  const dateObj = new Date(Date.UTC(year, month, day));
+  const dayNum = dateObj.getUTCDay() || 7;
+  dateObj.setUTCDate(dateObj.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(dateObj.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil((((dateObj - yearStart) / 86400000) + 1) / 7);
+  const isEvenWeek = weekNumber % 2 === 0;
+
+  let shiftType;
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
+    shiftType = 'day';
+  } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
+    shiftType = 'evening';
+  } else {
+    shiftType = 'night';
+  }
+
+  if (shiftType === 'night') return 'C';
+  if (shiftType === 'day') return isEvenWeek ? 'B' : 'A';
+  return isEvenWeek ? 'A' : 'B';
+}
+
+// =========================================================================
+// ЕДИНЫЙ ХЕЛПЕР: локальная дата Node в формате YYYY-MM-DD
+// =========================================================================
+function getLocalDateStr(date) {
+  const d = new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// =========================================================================
+// ЕДИНЫЙ ХЕЛПЕР: формат SQL-даты из объекта Date (локальное время)
+// =========================================================================
+function formatSqlDateTime(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
+}
 
 // ================== БРИГАДНЫЙ ОТЧЁТ ==================
 
@@ -8381,170 +8535,45 @@ app.get('/api/brigade-report/trend', async (req, res) => {
     const {
       dateFrom,
       dateTo,
-      shift,          // новый параметр: 'A', 'B', 'C' или отсутствует/'all'
+      startTime,
+      endTime,
       checkpoint,
       defectType = 'all',
       brigades,
-      metric = 'count'
+      metric = 'count',
+      shift
     } = req.query;
 
-    // ---------- 1. Определяем диапазон дат ----------
-    let startDate, endDate;
-    const now = new Date();
-    if (dateFrom && dateTo) {
-      startDate = new Date(`${dateFrom}T00:00:00`);
-      endDate = new Date(`${dateTo}T23:59:59`);
+    // 1. Определяем диапазон — идентично /api/brigade-report/data
+    let sqlStart, sqlEnd;
+    if (startTime && endTime) {
+      sqlStart = startTime;
+      sqlEnd = endTime;
+    } else if (dateFrom && dateTo) {
+      sqlStart = `${dateFrom} 00:00:00`;
+      sqlEnd = `${dateTo} 23:59:59`;
     } else {
-      // По умолчанию: последние 3 месяца от вчерашнего дня
-      endDate = new Date(now);
-      endDate.setDate(endDate.getDate() - 1);
-      endDate.setHours(23, 59, 59, 999);
-      startDate = new Date(endDate);
-      startDate.setMonth(startDate.getMonth() - 3);
-      startDate.setHours(0, 0, 0, 0);
+      const now = new Date();
+      const end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+      const start = new Date(end);
+      start.setMonth(start.getMonth() - 3);
+      start.setHours(0, 0, 0, 0);
+      sqlStart = formatSqlDateTime(start);
+      sqlEnd = formatSqlDateTime(end);
     }
 
-    // ---------- 2. Списки постов (как раньше) ----------
-    const cp7Posts = [
-      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-      'REPAIR', 'REPAIR_Final',
-      'EXT1', 'PIP2', 'PIP4', 'PIP9'
-    ];
-    const cp8Posts = [
-      'CP8', 'CP8 Gate', 'CP8-gate',
-      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
-    ];
-    const pipPosts = [
-      'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
-    ];
-    const tlPosts = [
-      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
-    ];
+    // 2. Сырые дефекты — та же выборка, что в data
+    let defectRows = await fetchRawDefects(sqlStart, sqlEnd, checkpoint, defectType);
 
-    let postList = [];
-    if (!checkpoint || checkpoint === 'ALL') {
-      postList = [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts, ...tlPosts])];
-    } else {
-      const checkpoints = checkpoint.split(',').map(cp => cp.trim()).filter(Boolean);
-      for (const cp of checkpoints) {
-        if (cp === 'CP7') postList.push(...cp7Posts);
-        else if (cp === 'CP8') postList.push(...cp8Posts);
-        else if (cp === 'PIP') postList.push(...pipPosts);
-        else if (cp === 'TL') postList.push(...tlPosts);
-        else if (cp !== 'ALL') {
-          return res.status(400).json({ error: `Неверный checkpoint: ${cp}` });
-        }
-      }
-      postList = [...new Set(postList)];
-    }
-    if (postList.length === 0) {
-      return res.json({ month: [], week: [], day: [] });
-    }
-    const postListStr = postList.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
-
-    // ---------- 3. Условие online/offline ----------
-    let offlineCondition = '1=1';
-    if (defectType === 'offline') {
-      offlineCondition = '(COALESCE(OFFLINE,0)=1 OR COALESCE(OFFLINE1,0)=1 OR COALESCE(OFFLINE2,0)=1)';
-    } else if (defectType === 'online') {
-      offlineCondition = '(COALESCE(OFFLINE,0)=0 AND COALESCE(OFFLINE1,0)=0 AND COALESCE(OFFLINE2,0)=0)';
-    }
-
-    // ---------- 4. Выбираем все дефекты за период ----------
-    const defectsSql = `
-      SELECT
-        d.VIN,
-        d.PART_NAME,
-        d.PROBLEM_TYPE,
-        d.CREATION_TIME,
-        d.POST_NAME,
-        wo.MODEL
-      FROM (
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
-        FROM at_biw_qm_defect_info
-        WHERE ${offlineCondition}
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-        UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
-        FROM at_paint_qm_defect_info
-        WHERE ${offlineCondition}
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-        UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
-        FROM at_qm_defect_info
-        WHERE ${offlineCondition}
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-      ) d
-      JOIN work_order wo ON wo.VIN = d.VIN
-      WHERE d.POST_NAME IN (${postListStr})
-        AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
-    `;
-    let [defectRows] = await pool.query(defectsSql, [
-      startDate.toISOString().slice(0, 19).replace('T', ' '),
-      endDate.toISOString().slice(0, 19).replace('T', ' ')
-    ]);
-
-    // ---------- 5. Загружаем CP72 прохождения ----------
-    let [cp72Rows] = await pool.query(`
-      SELECT VIN, CREATION_TIME
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'CP72'
-        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-    `, [
-      startDate.toISOString().slice(0, 19).replace('T', ' '),
-      endDate.toISOString().slice(0, 19).replace('T', ' ')
-    ]);
-
-    // ---------- 6. ФИЛЬТРАЦИЯ ПО СМЕНЕ (если задана) ----------
+    // 3. Фильтр по смене
     if (shift && shift !== 'all') {
-      const shiftLetters = ['A', 'B', 'C'];
-      if (!shiftLetters.includes(shift)) {
-        return res.status(400).json({ error: 'Неверное значение shift' });
-      }
-
-      // Функция определения буквы смены по дате и времени
-      const getShiftLetter = (dateUTC) => {
-        // Переводим в московское время
-        const moscow = new Date(dateUTC.getTime() + 3 * 60 * 60 * 1000);
-        const totalMinutes = moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
-        const year = moscow.getUTCFullYear();
-        const month = moscow.getUTCMonth();
-        const day = moscow.getUTCDate();
-
-        // Вычисляем номер недели (ISO)
-        const dateObj = new Date(Date.UTC(year, month, day));
-        const dayNum = dateObj.getUTCDay() || 7;
-        dateObj.setUTCDate(dateObj.getUTCDate() + 4 - dayNum);
-        const yearStart = new Date(Date.UTC(dateObj.getUTCFullYear(), 0, 1));
-        const weekNumber = Math.ceil((((dateObj - yearStart) / 86400000) + 1) / 7);
-        const isEvenWeek = weekNumber % 2 === 0;
-
-        // Определяем тип смены
-        let shiftType;
-        if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
-          shiftType = 'day';
-        } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
-          shiftType = 'evening';
-        } else {
-          shiftType = 'night';
-        }
-
-        // Возвращаем букву
-        if (shiftType === 'night') return 'C';
-        if (shiftType === 'day') return isEvenWeek ? 'B' : 'A';
-        return isEvenWeek ? 'A' : 'B'; // evening
-      };
-
-      // Применяем фильтр к дефектам
-      defectRows = defectRows.filter(d => getShiftLetter(new Date(d.CREATION_TIME)) === shift);
-      // Применяем фильтр к CP72
-      cp72Rows = cp72Rows.filter(c => getShiftLetter(new Date(c.CREATION_TIME)) === shift);
+      defectRows = defectRows.filter(
+        d => getShiftLetterFromDate(d.CREATION_TIME) === shift
+      );
     }
 
-    // ---------- 7. Загружаем справочник владельцев ----------
+    // 4. Справочник владельцев
     const [owners] = await notesPool.query(`
       SELECT do.model, do.part_name, do.problem_type, b.name AS brigade_name
       FROM defect_owners do
@@ -8556,7 +8585,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       o.brigade_name
     ));
 
-    // ---------- 8. Определяем выбранные бригады ----------
+    // 5. Выбранные бригады
     let selectedBrigadesSet = null;
     if (brigades && brigades !== 'ALL') {
       selectedBrigadesSet = new Set(
@@ -8564,25 +8593,20 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       );
     }
 
-    // ---------- 9. Функции периодов и агрегация (как раньше) ----------
+    // 6. Периоды
     function getPeriodKey(date, type) {
       const d = new Date(date);
       if (type === 'month') {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        return `${y}-${m}`;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       } else if (type === 'week') {
-        const dayNum = d.getDay() || 7;
-        d.setDate(d.getDate() + 4 - dayNum);
-        const yearStart = new Date(d.getFullYear(), 0, 1);
-        const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-        return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
-      } else { // day
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
+        const mon = new Date(d);
+        const dayNum = mon.getDay() || 7;
+        mon.setDate(mon.getDate() + 4 - dayNum);
+        const yearStart = new Date(mon.getFullYear(), 0, 1);
+        const weekNo = Math.ceil((((mon - yearStart) / 86400000) + 1) / 7);
+        return `${mon.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
       }
+      return getLocalDateStr(d);
     }
 
     function generatePeriods(type, count, endDate) {
@@ -8590,36 +8614,32 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       const current = new Date(endDate);
       while (periods.length < count) {
         const key = getPeriodKey(current, type);
-        if (!periods.includes(key)) {
-          periods.push(key);
-        }
-        if (type === 'month') {
-          current.setMonth(current.getMonth() - 1);
-        } else if (type === 'week') {
-          current.setDate(current.getDate() - 7);
-        } else { // day
-          current.setDate(current.getDate() - 1);
-        }
+        if (!periods.includes(key)) periods.push(key);
+        if (type === 'month') current.setMonth(current.getMonth() - 1);
+        else if (type === 'week') current.setDate(current.getDate() - 7);
+        else current.setDate(current.getDate() - 1);
       }
       return periods;
     }
 
-    const monthPeriods = generatePeriods('month', 3, endDate);
-    const weekPeriods = generatePeriods('week', 4, endDate);
-    const dayPeriods = generatePeriods('day', 14, endDate);
+    const endDateObj = new Date(sqlEnd.replace(' ', 'T'));
+    const monthPeriods = generatePeriods('month', 3, endDateObj);
+    const weekPeriods = generatePeriods('week', 4, endDateObj);
+    const dayPeriods = generatePeriods('day', 14, endDateObj);
 
-    // ---------- 10. Инициализация счётчиков ----------
+    // 7. Счётчики
     const monthCounts = new Map(monthPeriods.map(p => [p, 0]));
     const weekCounts = new Map(weekPeriods.map(p => [p, 0]));
     const dayCounts = new Map(dayPeriods.map(p => [p, 0]));
-
     const monthCars = new Map(monthPeriods.map(p => [p, new Set()]));
     const weekCars = new Map(weekPeriods.map(p => [p, new Set()]));
     const dayCars = new Map(dayPeriods.map(p => [p, new Set()]));
 
-    // ---------- 11. Обработка дефектов ----------
+    // 8. Дефекты
     for (const defect of defectRows) {
-      const brigade = ownerMap.get(`${defect.MODEL}|${defect.PART_NAME}|${defect.PROBLEM_TYPE}`) || 'Бригада не найдена';
+      const brigade = ownerMap.get(
+        `${defect.MODEL}|${defect.PART_NAME}|${defect.PROBLEM_TYPE}`
+      ) || 'Бригада не найдена';
       if (selectedBrigadesSet && !selectedBrigadesSet.has(brigade)) continue;
 
       const defDate = new Date(defect.CREATION_TIME);
@@ -8634,8 +8654,22 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       if (dayCounts.has(dKey)) dayCounts.set(dKey, dayCounts.get(dKey) + 1);
     }
 
-    // ---------- 12. Обработка CP72 (автомобили) ----------
-    for (const car of cp72Rows) {
+    // 9. CP72 для DPU
+    const [cp72Rows] = await pool.query(`
+      SELECT VIN, CREATION_TIME
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
+    `, [sqlStart, sqlEnd]);
+
+    let cp72Filtered = cp72Rows;
+    if (shift && shift !== 'all') {
+      cp72Filtered = cp72Rows.filter(
+        c => getShiftLetterFromDate(c.CREATION_TIME) === shift
+      );
+    }
+
+    for (const car of cp72Filtered) {
       const carDate = new Date(car.CREATION_TIME);
 
       const mKey = getPeriodKey(carDate, 'month');
@@ -8648,7 +8682,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       if (dayCars.has(dKey)) dayCars.get(dKey).add(car.VIN);
     }
 
-    // ---------- 13. Формирование результата ----------
+    // 10. Результат
     function buildResult(countsMap, carsMap) {
       const result = [];
       for (const period of countsMap.keys()) {
@@ -8666,14 +8700,10 @@ app.get('/api/brigade-report/trend', async (req, res) => {
       return result.sort((a, b) => a.period.localeCompare(b.period));
     }
 
-    const monthResult = buildResult(monthCounts, monthCars);
-    const weekResult = buildResult(weekCounts, weekCars);
-    const dayResult = buildResult(dayCounts, dayCars);
-
     res.json({
-      month: monthResult,
-      week: weekResult,
-      day: dayResult
+      month: buildResult(monthCounts, monthCars),
+      week: buildResult(weekCounts, weekCars),
+      day: buildResult(dayCounts, dayCars)
     });
   } catch (err) {
     console.error('Ошибка /api/brigade-report/trend:', err.message);
@@ -8683,178 +8713,7 @@ app.get('/api/brigade-report/trend', async (req, res) => {
 
 
 // ================== ТОП MPP ПО БРИГАДЕ (для таблицы под графиками) ==================
-// ================== ХЕЛПЕР: буква смены по UTC-времени создания дефекта ==================
-function getShiftLetterFromDate(creationTime) {
-  const utc = new Date(creationTime);
-  const moscow = new Date(utc.getTime() + 3 * 60 * 60 * 1000);
-  const totalMinutes = moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
-  const year = moscow.getUTCFullYear();
-  const month = moscow.getUTCMonth();
-  const day = moscow.getUTCDate();
 
-  const dateObj = new Date(Date.UTC(year, month, day));
-  const dayNum = dateObj.getUTCDay() || 7;
-  dateObj.setUTCDate(dateObj.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(dateObj.getUTCFullYear(), 0, 1));
-  const weekNumber = Math.ceil((((dateObj - yearStart) / 86400000) + 1) / 7);
-  const isEvenWeek = weekNumber % 2 === 0;
-
-  let shiftType;
-  if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
-    shiftType = 'day';
-  } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
-    shiftType = 'evening';
-  } else {
-    shiftType = 'night';
-  }
-
-  if (shiftType === 'night') return 'C';
-  if (shiftType === 'day') return isEvenWeek ? 'B' : 'A';
-  return isEvenWeek ? 'A' : 'B';
-}
-
-// ================== ХЕЛПЕР: московская дата в формате YYYY-MM-DD из UTC-времени ==================
-function getMoscowDateStr(creationTime) {
-  const utc = new Date(creationTime);
-  const moscow = new Date(utc.getTime() + 3 * 60 * 60 * 1000);
-  const y = moscow.getUTCFullYear();
-  const m = String(moscow.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(moscow.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-// ================== ХЕЛПЕР: списки постов ==================
-function getPostsForCheckpoints(checkpoint) {
-  const cp7Posts = [
-    'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-    'REPAIR', 'REPAIR_Final',
-    'EXT1', 'PIP2', 'PIP4', 'PIP9'
-  ];
-  const cp8Posts = [
-    'CP8', 'CP8 Gate', 'CP8-gate',
-    '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
-  ];
-  const pipPosts = [
-    'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
-  ];
-  const tlPosts = [
-    '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
-  ];
-
-  if (!checkpoint || checkpoint === 'ALL') {
-    return [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts, ...tlPosts])];
-  }
-
-  const cps = checkpoint.split(',').map(c => c.trim()).filter(Boolean);
-  let postList = [];
-  for (const cp of cps) {
-    if (cp === 'CP7') postList.push(...cp7Posts);
-    else if (cp === 'CP8') postList.push(...cp8Posts);
-    else if (cp === 'PIP') postList.push(...pipPosts);
-    else if (cp === 'TL') postList.push(...tlPosts);
-  }
-  return [...new Set(postList)];
-}
-
-// ================== ХЕЛПЕР: условие online/offline ==================
-function getOfflineCondition(defectType) {
-  if (defectType === 'offline') {
-    return '(COALESCE(OFFLINE,0)=1 OR COALESCE(OFFLINE1,0)=1 OR COALESCE(OFFLINE2,0)=1)';
-  }
-  if (defectType === 'online') {
-    return '(COALESCE(OFFLINE,0)=0 AND COALESCE(OFFLINE1,0)=0 AND COALESCE(OFFLINE2,0)=0)';
-  }
-  return '1=1';
-}
-
-// =========================================================================
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (разместить до эндпоинтов)
-// =========================================================================
-
-// =========================================================================
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-// =========================================================================
-
-// Определение буквы смены (A/B/C) по UTC-времени создания дефекта
-function getShiftLetterFromDate(creationTime) {
-  const utc = new Date(creationTime);
-  const moscow = new Date(utc.getTime() + 3 * 60 * 60 * 1000);
-  const totalMinutes = moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
-  const year = moscow.getUTCFullYear();
-  const month = moscow.getUTCMonth();
-  const day = moscow.getUTCDate();
-
-  const dateObj = new Date(Date.UTC(year, month, day));
-  const dayNum = dateObj.getUTCDay() || 7;
-  dateObj.setUTCDate(dateObj.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(dateObj.getUTCFullYear(), 0, 1));
-  const weekNumber = Math.ceil((((dateObj - yearStart) / 86400000) + 1) / 7);
-  const isEvenWeek = weekNumber % 2 === 0;
-
-  let shiftType;
-  if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
-    shiftType = 'day';
-  } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
-    shiftType = 'evening';
-  } else {
-    shiftType = 'night';
-  }
-
-  if (shiftType === 'night') return 'C';
-  if (shiftType === 'day') return isEvenWeek ? 'B' : 'A';
-  return isEvenWeek ? 'A' : 'B';
-}
-
-// Списки постов — оригинальная логика (ALL = все 4 группы)
-function getPostsForCheckpoints(checkpoint) {
-  const cp7Posts = [
-    'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-    'REPAIR', 'REPAIR_Final',
-    'EXT1', 'PIP2', 'PIP4', 'PIP9'
-  ];
-  const cp8Posts = [
-    'CP8', 'CP8 Gate', 'CP8-gate',
-    '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
-  ];
-  const pipPosts = [
-    'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
-  ];
-  const tlPosts = [
-    '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
-  ];
-
-  if (!checkpoint || checkpoint === 'ALL') {
-    return [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts, ...tlPosts])];
-  }
-
-  const cps = checkpoint.split(',').map(c => c.trim()).filter(Boolean);
-  let postList = [];
-  for (const cp of cps) {
-    if (cp === 'CP7') postList.push(...cp7Posts);
-    else if (cp === 'CP8') postList.push(...cp8Posts);
-    else if (cp === 'PIP') postList.push(...pipPosts);
-    else if (cp === 'TL') postList.push(...tlPosts);
-  }
-  return [...new Set(postList)];
-}
-
-// Условие online/offline — ТОЧНО как в /api/defects-dashboard (через S_OFFLINE)
-function getOfflineCondition(defectType) {
-  if (defectType === 'offline') return 'QM_DEF.S_OFFLINE = 1';
-  if (defectType === 'online') return 'QM_DEF.S_OFFLINE = 0';
-  return '1=1';
-}
-
-// Приведение DATE(...) из SQL к строке YYYY-MM-DD
-function normalizeSqlDate(defectDate) {
-  if (defectDate instanceof Date) {
-    const y = defectDate.getFullYear();
-    const m = String(defectDate.getMonth() + 1).padStart(2, '0');
-    const d = String(defectDate.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  return String(defectDate);
-}
 
 // =========================================================================
 // ЭНДПОИНТ: /api/brigade-report/top-mpp
@@ -8866,64 +8725,46 @@ function normalizeSqlDate(defectDate) {
 // =========================================================================
 app.get('/api/brigade-report/top-mpp', async (req, res) => {
   try {
-    const { checkpoint, defectType = 'all', brigade, shift } = req.query;
+    const {
+      dateFrom,
+      dateTo,
+      startTime,
+      endTime,
+      checkpoint,
+      defectType = 'all',
+      brigade,
+      shift
+    } = req.query;
+
     if (!brigade) {
       return res.status(400).json({ error: 'brigade обязателен' });
     }
 
-    const postList = getPostsForCheckpoints(checkpoint);
-    if (postList.length === 0) return res.json([]);
-    const postListStr = postList.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
+    // Тот же диапазон, что в trend
+    let sqlStart, sqlEnd;
+    if (startTime && endTime) {
+      sqlStart = startTime;
+      sqlEnd = endTime;
+    } else if (dateFrom && dateTo) {
+      sqlStart = `${dateFrom} 00:00:00`;
+      sqlEnd = `${dateTo} 23:59:59`;
+    } else {
+      const now = new Date();
+      const end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+      const start = new Date(end);
+      start.setDate(start.getDate() - 13);
+      start.setHours(0, 0, 0, 0);
+      sqlStart = formatSqlDateTime(start);
+      sqlEnd = formatSqlDateTime(end);
+    }
 
-    const offlineCondition = getOfflineCondition(defectType);
+    // ТА ЖЕ выборка, что в data и trend
+    let defectRows = await fetchRawDefects(sqlStart, sqlEnd, checkpoint, defectType);
 
-    const sql = `
-      SELECT
-        QM_DEF.PART_NAME,
-        QM_DEF.PROBLEM_TYPE,
-        DATE(QM_DEF.CREATION_TIME) AS CREATION_DATE,
-        wo.MODEL,
-        QM_DEF.VIN,
-        QM_DEF.POST_NAME,
-        COUNT(*) AS QTY_DEF,
-        MAX(QM_DEF.CREATION_TIME) AS LAST_CREATION_TIME
-      FROM (
-        SELECT VIN, CREATION_TIME, POST_NAME,
-               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-               PART_NAME, PROBLEM_TYPE
-        FROM at_biw_qm_defect_info
-        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-        UNION ALL
-        SELECT VIN, CREATION_TIME, POST_NAME,
-               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-               PART_NAME, PROBLEM_TYPE
-        FROM at_paint_qm_defect_info
-        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-        UNION ALL
-        SELECT VIN, CREATION_TIME, POST_NAME,
-               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-               PART_NAME, PROBLEM_TYPE
-        FROM at_qm_defect_info
-        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-      ) QM_DEF
-      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
-      WHERE QM_DEF.POST_NAME IN (${postListStr})
-        AND ${offlineCondition}
-        AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
-        AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
-      GROUP BY QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE,
-               DATE(QM_DEF.CREATION_TIME), wo.MODEL,
-               QM_DEF.VIN, QM_DEF.POST_NAME
-      ORDER BY LAST_CREATION_TIME DESC
-      LIMIT 5000
-    `;
-
-    let [defectRows] = await pool.query(sql);
-
-    // Фильтр по смене (применяется к уже сгруппированным строкам)
     if (shift && shift !== 'all') {
       defectRows = defectRows.filter(
-        r => getShiftLetterFromDate(r.LAST_CREATION_TIME) === shift
+        d => getShiftLetterFromDate(d.CREATION_TIME) === shift
       );
     }
 
@@ -8934,21 +8775,20 @@ app.get('/api/brigade-report/top-mpp', async (req, res) => {
       LEFT JOIN brigades b ON do.brigade_id = b.id
     `);
     const ownerMap = new Map();
-    owners.forEach(o => {
-      ownerMap.set(
-        `${o.model}|${o.part_name}|${o.problem_type}`,
-        o.brigade_name
-      );
-    });
+    owners.forEach(o => ownerMap.set(
+      `${o.model}|${o.part_name}|${o.problem_type}`,
+      o.brigade_name
+    ));
 
-    // Группировка по (дата + MPP) только для выбранной бригады,
-    // с суммированием QTY_DEF
+    // Группировка по локальной дате Node — как в trend
     const groups = new Map();
     for (const r of defectRows) {
-      const owner = ownerMap.get(`${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`) || 'Бригада не найдена';
+      const owner = ownerMap.get(
+        `${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`
+      ) || 'Бригада не найдена';
       if (owner !== brigade) continue;
 
-      const dateStr = normalizeSqlDate(r.CREATION_DATE);
+      const dateStr = getLocalDateStr(r.CREATION_TIME);
       const key = `${dateStr}|${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
 
       if (!groups.has(key)) {
@@ -8961,7 +8801,7 @@ app.get('/api/brigade-report/top-mpp', async (req, res) => {
           count: 0,
         });
       }
-      groups.get(key).count += Number(r.QTY_DEF) || 0;
+      groups.get(key).count++;
     }
 
     const result = Array.from(groups.values()).sort((a, b) => {
@@ -8984,13 +8824,15 @@ app.get('/api/brigade-report/top-mpp', async (req, res) => {
 app.get('/api/brigade-report/top-mpp-vins', async (req, res) => {
   try {
     const {
+      dateFrom,
+      dateTo,
       checkpoint,
       defectType = 'all',
       shift,
       model,
       part_name,
       problem_type,
-      date,
+      date
     } = req.query;
 
     if (!model || !part_name || !problem_type || !date) {
@@ -8999,52 +8841,40 @@ app.get('/api/brigade-report/top-mpp-vins', async (req, res) => {
       });
     }
 
-    const postList = getPostsForCheckpoints(checkpoint);
-    if (postList.length === 0) return res.json([]);
-    const postListStr = postList.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
-
-    const offlineCondition = getOfflineCondition(defectType);
-
-    const sql = `
-      SELECT DISTINCT QM_DEF.VIN, QM_DEF.CREATION_TIME
-      FROM (
-        SELECT VIN, CREATION_TIME, POST_NAME,
-               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-               PART_NAME, PROBLEM_TYPE
-        FROM at_biw_qm_defect_info
-        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-        UNION ALL
-        SELECT VIN, CREATION_TIME, POST_NAME,
-               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-               PART_NAME, PROBLEM_TYPE
-        FROM at_paint_qm_defect_info
-        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-        UNION ALL
-        SELECT VIN, CREATION_TIME, POST_NAME,
-               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-               PART_NAME, PROBLEM_TYPE
-        FROM at_qm_defect_info
-        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-      ) QM_DEF
-      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
-      WHERE QM_DEF.POST_NAME IN (${postListStr})
-        AND ${offlineCondition}
-        AND QM_DEF.PART_NAME = ?
-        AND QM_DEF.PROBLEM_TYPE = ?
-        AND DATE(QM_DEF.CREATION_TIME) = ?
-        AND wo.MODEL = ?
-    `;
-
-    const params = [part_name, problem_type, date, model];
-
-    let [rows] = await pool.query(sql, params);
-
-    // Фильтр по смене (A/B/C)
-    if (shift && shift !== 'all') {
-      rows = rows.filter(r => getShiftLetterFromDate(r.CREATION_TIME) === shift);
+    let sqlStart, sqlEnd;
+    if (dateFrom && dateTo) {
+      sqlStart = `${dateFrom} 00:00:00`;
+      sqlEnd = `${dateTo} 23:59:59`;
+    } else {
+      const now = new Date();
+      const end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+      const start = new Date(end);
+      start.setDate(start.getDate() - 13);
+      start.setHours(0, 0, 0, 0);
+      sqlStart = formatSqlDateTime(start);
+      sqlEnd = formatSqlDateTime(end);
     }
 
-    const vinSet = new Set(rows.map(r => r.VIN));
+    // ТА ЖЕ выборка
+    let defectRows = await fetchRawDefects(sqlStart, sqlEnd, checkpoint, defectType);
+
+    // Фильтр по конкретному MPP и локальной дате Node
+    defectRows = defectRows.filter(r => {
+      if (r.MODEL !== model) return false;
+      if (r.PART_NAME !== part_name) return false;
+      if (r.PROBLEM_TYPE !== problem_type) return false;
+      return getLocalDateStr(r.CREATION_TIME) === date;
+    });
+
+    // Фильтр по смене
+    if (shift && shift !== 'all') {
+      defectRows = defectRows.filter(
+        r => getShiftLetterFromDate(r.CREATION_TIME) === shift
+      );
+    }
+
+    const vinSet = new Set(defectRows.map(r => r.VIN));
     res.json([...vinSet]);
   } catch (err) {
     console.error('Ошибка top-mpp-vins:', err.message);
