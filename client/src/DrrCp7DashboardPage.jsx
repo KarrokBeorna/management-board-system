@@ -215,6 +215,64 @@ const getCurrentShiftInfo = () => {
   return { weekNumber, shiftLetter, shiftType };
 };
 
+// ============== OPC UA виджет ==============
+function OpcUaWidget() {
+  const [value, setValue] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+
+    const fetchValue = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/opc-value`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (!alive) return;
+        setValue(json.value);
+        setError(json.error || null);
+      } catch (e) {
+        if (alive) setError(String(e.message || e));
+      }
+    };
+
+    fetchValue();
+    const id = setInterval(fetchValue, 3000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      padding: '10px 20px',
+      backgroundColor: '#FFFFFF',
+      borderRadius: '20px',
+      boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+      border: '3px solid #fdfeff',
+    }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+        <span style={{ fontSize: '1rem', color: '#64748B', fontWeight: 700, letterSpacing: '0.5px' }}>PLC</span>
+        <span style={{ fontSize: '1.2rem', color: '#94A3B8', fontWeight: 500 }}>OPC UA</span>
+      </div>
+      <div style={{
+        fontSize: '3rem',
+        fontWeight: 900,
+        color: error ? '#DC2626' : '#059669',
+        lineHeight: 1,
+        minWidth: 60,
+        textAlign: 'center',
+      }}>
+        {error ? '!' : (value !== null && value !== undefined ? value : '—')}
+      </div>
+    </div>
+  );
+}
+
 export default function DrrCp7DashboardPage() {
   const [filter, setFilter] = useState('all');
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
@@ -240,7 +298,7 @@ export default function DrrCp7DashboardPage() {
       const drrParams = new URLSearchParams({
         filter,
         startTime: start,
-        endTime: end
+        endTime: end,
       });
       const drrRes = await fetch(`${API_BASE}/api/drr-cp7-dashboard?${drrParams.toString()}`);
       if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
@@ -250,7 +308,7 @@ export default function DrrCp7DashboardPage() {
       const defectsParams = new URLSearchParams({
         filter,
         startTime: start,
-        endTime: end
+        endTime: end,
       });
       const defectsRes = await fetch(`${API_BASE}/api/drr-cp7-top-defects?${defectsParams.toString()}`);
       if (!defectsRes.ok) throw new Error('Ошибка загрузки топа дефектов');
@@ -321,6 +379,9 @@ export default function DrrCp7DashboardPage() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR CP7 Dashboard</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {/* Показания PLC */}
+          <OpcUaWidget />
+
           {/* Блок недели и смены */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
@@ -410,18 +471,18 @@ export default function DrrCp7DashboardPage() {
       ) : (
         <div style={dashboardGridStyle}>
           <div style={chartColumnStyle}>
-            {/* Карточка Bufer DJ */}
+            {/* === Карточка Bufer DJ === */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'flex-start',
-              marginBottom: '16px',
+              marginBottom: '12px',
               flexShrink: 0,
             }}>
               <div style={{
                 background: '#FFFFFF',
                 borderRadius: '20px',
-                padding: '10px 22px',
+                padding: '10px 24px',
                 boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
                 border: '3px solid #fdfeff',
                 display: 'flex',
@@ -437,7 +498,7 @@ export default function DrrCp7DashboardPage() {
               </div>
             </div>
 
-            <div style={{ position: 'relative', width: '100%', height: '520px' }}>
+            <div style={{ position: 'relative', width: '100%', height: '500px' }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie

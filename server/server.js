@@ -105,15 +105,16 @@ async function checkLesDatabaseConnection() {
 }
 
 
-///////////////////////////
 // ================== OPC UA ЧТЕНИЕ ПЛК ==================
 const { OPCUAClient, MessageSecurityMode, SecurityPolicy } = require('node-opcua');
 
 const OPC_ENDPOINT = 'opc.tcp://10.203.46.10:4840';
 const OPC_NODE_ID = 'ns=3;s="IOT_设备交互数据"."Overhead Process Section"."PLC_TO_IOT"."备用"';
-const OPC_POLL_INTERVAL = 3000; // мс
+const OPC_POLL_INTERVAL = 3000;   // мс между чтениями
+const OPC_MAX_READ_ERRORS = 5;    // сколько подряд ошибок чтения терпим до переподключения
+const OPC_RECONNECT_DELAY = 5000; // пауза перед переподключением к PLC
 
-// Состояние в памяти — отдаётся по HTTP
+// Общее состояние — отдаётся по HTTP
 const opcState = {
   value: null,
   ts: null,
@@ -124,8 +125,11 @@ const opcState = {
 async function startOpcPolling() {
   while (true) {
     let client = null;
+    let session = null;
+
     try {
       console.log(`[OPC UA] Подключение к ${OPC_ENDPOINT}...`);
+
       client = OPCUAClient.create({
         endpointMustExist: false,
         securityMode: MessageSecurityMode.None,
@@ -138,41 +142,69 @@ async function startOpcPolling() {
       });
 
       await client.connect(OPC_ENDPOINT);
-      console.log('[OPC UA] Подключено!');
+      console.log('[OPC UA] Подключено');
+
+      session = await client.createSession();
+      console.log('[OPC UA] Сессия создана');
+
       opcState.connected = true;
       opcState.error = null;
 
-      const session = await client.createSession();
-      const nodeId = OPC_NODE_ID;
+      let readErrors = 0;
 
       while (true) {
         try {
-          const dataValue = await session.readVariableValue(nodeId);
+          const dataValue = await session.readVariableValue(OPC_NODE_ID);
           opcState.value = dataValue.value.value;
           opcState.ts = Date.now();
           opcState.error = null;
+          readErrors = 0;
           console.log(`[OPC UA] Значение: ${opcState.value}`);
         } catch (readErr) {
-          console.error('[OPC UA] Ошибка чтения узла:', readErr.message);
+          readErrors++;
+          console.error(
+            `[OPC UA] Ошибка чтения (${readErrors}/${OPC_MAX_READ_ERRORS}):`,
+            readErr.message
+          );
           opcState.error = `read: ${readErr.message}`;
+
+          // Если ошибки идут подряд — рвём цикл и переподключаемся
+          if (readErrors >= OPC_MAX_READ_ERRORS) {
+            console.error('[OPC UA] Слишком много ошибок чтения — переподключение');
+            break;
+          }
         }
+
         await new Promise((r) => setTimeout(r, OPC_POLL_INTERVAL));
       }
     } catch (connErr) {
       console.error('[OPC UA] Ошибка подключения:', connErr.message);
-      opcState.connected = false;
       opcState.error = `connect: ${connErr.message}`;
-      await new Promise((r) => setTimeout(r, 5000));
     } finally {
+      opcState.connected = false;
+
+      // ВАЖНО: сначала сессия, потом клиент
+      try {
+        if (session) await session.close();
+      } catch (e) {
+        // молча: сессия могла уже умереть вместе с соединением
+      }
       try {
         if (client) await client.disconnect();
-      } catch (e) {}
+      } catch (e) {
+        // молча
+      }
+
+      console.log(`[OPC UA] Отключено, повтор через ${OPC_RECONNECT_DELAY / 1000} с`);
+      await new Promise((r) => setTimeout(r, OPC_RECONNECT_DELAY));
     }
   }
 }
 
-// Запускаем поллинг (не блокирует основной поток)
-startOpcPolling();
+// Запускаем поллинг и ловим необработанные ошибки, чтобы не уронить процесс
+startOpcPolling().catch((e) => {
+  console.error('[OPC UA] Фатальная ошибка поллинга:', e);
+});
 
 // HTTP-эндпоинт для фронта
 app.get('/api/opc-value', (req, res) => {
