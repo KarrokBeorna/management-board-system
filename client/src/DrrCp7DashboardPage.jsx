@@ -215,6 +215,16 @@ const getCurrentShiftInfo = () => {
   return { weekNumber, shiftLetter, shiftType };
 };
 
+// ===== Цвет цифры по значению: >=8 красный, 7 оранжевый, <=6 зелёный =====
+const getOpcValueColor = (value) => {
+  if (value === null || value === undefined) return '#94A3B8';
+  const num = Number(value);
+  if (Number.isNaN(num)) return '#94A3B8';
+  if (num >= 8) return '#DC2626'; // красный
+  if (num === 7) return '#F59E0B'; // оранжевый
+  return '#059669'; // зелёный
+};
+
 // ============== OPC UA виджет ==============
 function OpcUaWidget() {
   const [value, setValue] = useState(null);
@@ -247,28 +257,33 @@ function OpcUaWidget() {
   return (
     <div style={{
       display: 'flex',
+      flexDirection: 'column',
       alignItems: 'center',
-      gap: '12px',
-      padding: '10px 20px',
+      justifyContent: 'center',
+      padding: '10px 24px',
       backgroundColor: '#FFFFFF',
       borderRadius: '20px',
       boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
       border: '3px solid #fdfeff',
+      minWidth: '110px',
     }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-        <span style={{ fontSize: '1rem', color: '#64748B', fontWeight: 700, letterSpacing: '0.5px' }}>PLC</span>
-        <span style={{ fontSize: '1.2rem', color: '#94A3B8', fontWeight: 500 }}>OPC UA</span>
-      </div>
-      <div style={{
-        fontSize: '3rem',
+      <span style={{
+        fontSize: '1.2rem',
+        color: '#64748B',
+        fontWeight: 800,
+        letterSpacing: '0.5px',
+        marginBottom: '4px',
+      }}>
+        Bufer
+      </span>
+      <span style={{
+        fontSize: '6.2rem',
         fontWeight: 900,
-        color: error ? '#DC2626' : '#059669',
+        color: error ? '#DC2626' : getOpcValueColor(value),
         lineHeight: 1,
-        minWidth: 60,
-        textAlign: 'center',
       }}>
         {error ? '!' : (value !== null && value !== undefined ? value : '—')}
-      </div>
+      </span>
     </div>
   );
 }
@@ -379,9 +394,6 @@ export default function DrrCp7DashboardPage() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR CP7 Dashboard</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Показания PLC */}
-          <OpcUaWidget />
-
           {/* Блок недели и смены */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
@@ -471,11 +483,12 @@ export default function DrrCp7DashboardPage() {
       ) : (
         <div style={dashboardGridStyle}>
           <div style={chartColumnStyle}>
-            {/* === Карточка Bufer DJ === */}
+            {/* === Bufer DJ + значение PLC === */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'flex-start',
+              gap: '16px',
               marginBottom: '12px',
               flexShrink: 0,
             }}>
@@ -496,6 +509,9 @@ export default function DrrCp7DashboardPage() {
                   DJ
                 </span>
               </div>
+
+              {/* Значение PLC справа от Bufer DJ */}
+              <OpcUaWidget />
             </div>
 
             <div style={{ position: 'relative', width: '100%', height: '500px' }}>
