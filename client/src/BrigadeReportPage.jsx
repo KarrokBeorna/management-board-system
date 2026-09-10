@@ -1292,7 +1292,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
 
 /* ===================== ОТЧЕТ ПО БРИГАДАМ (ТРЕНДЫ + 14-ДНЕВНАЯ ТАБЛИЦА) ===================== */
 function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
-  const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
+  const [selectedCheckpoints, setSelectedCheckpoints] = useState(['CP7', 'CP8']);
   const [defectType, setDefectType] = useState('all');
   const [selectedBrigades, setSelectedBrigades] = useState([]);
   const [metric, setMetric] = useState('count');
