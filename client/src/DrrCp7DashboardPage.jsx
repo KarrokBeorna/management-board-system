@@ -343,7 +343,7 @@ export default function DrrCp7DashboardPage() {
               width: '80px',
               height: '80px',
               borderRadius: '20px',
-              background: shiftInfo.shiftLetter === 'A' ? '#ffffff' : shiftInfo.shiftLetter === 'B' ? '#ffffff' : '#ffffff',
+              background: '#ffffff',
               color: '#1E293B',
               display: 'flex',
               alignItems: 'center',
@@ -410,7 +410,34 @@ export default function DrrCp7DashboardPage() {
       ) : (
         <div style={dashboardGridStyle}>
           <div style={chartColumnStyle}>
-            <div style={{ position: 'relative', width: '100%', height: '600px' }}>
+            {/* Карточка Bufer DJ */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+              marginBottom: '16px',
+              flexShrink: 0,
+            }}>
+              <div style={{
+                background: '#FFFFFF',
+                borderRadius: '20px',
+                padding: '10px 22px',
+                boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+                border: '3px solid #fdfeff',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+              }}>
+                <span style={{ fontSize: '1.4rem', color: '#64748B', fontWeight: 800, letterSpacing: '0.5px' }}>
+                  Bufer
+                </span>
+                <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#1E293B', letterSpacing: '2px', lineHeight: 1 }}>
+                  DJ
+                </span>
+              </div>
+            </div>
+
+            <div style={{ position: 'relative', width: '100%', height: '520px' }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -429,13 +456,13 @@ export default function DrrCp7DashboardPage() {
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip 
+                  <Tooltip
                     formatter={(value) => `${value.toFixed(1)}%`}
                     contentStyle={{ fontSize: '1.8rem', borderRadius: '16px' }}
                   />
                 </PieChart>
               </ResponsiveContainer>
-              
+
               <div style={{
                 position: 'absolute',
                 top: '50%',
@@ -457,7 +484,7 @@ export default function DrrCp7DashboardPage() {
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalVins}</div>
               </div>
-              <div 
+              <div
                 style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
                 onClick={() => loadVinList('OK')}
               >
@@ -465,7 +492,7 @@ export default function DrrCp7DashboardPage() {
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.closedVins}</div>
               </div>
-              <div 
+              <div
                 style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
                 onClick={() => loadVinList('NOK')}
               >

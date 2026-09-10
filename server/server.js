@@ -104,6 +104,83 @@ async function checkLesDatabaseConnection() {
   }
 }
 
+
+///////////////////////////
+// ================== OPC UA ЧТЕНИЕ ПЛК ==================
+const { OPCUAClient, MessageSecurityMode, SecurityPolicy } = require('node-opcua');
+
+const OPC_ENDPOINT = 'opc.tcp://10.203.46.10:4840';
+const OPC_NODE_ID = 'ns=3;s="IOT_设备交互数据"."Overhead Process Section"."PLC_TO_IOT"."备用"';
+const OPC_POLL_INTERVAL = 3000; // мс
+
+// Состояние в памяти — отдаётся по HTTP
+const opcState = {
+  value: null,
+  ts: null,
+  error: null,
+  connected: false,
+};
+
+async function startOpcPolling() {
+  while (true) {
+    let client = null;
+    try {
+      console.log(`[OPC UA] Подключение к ${OPC_ENDPOINT}...`);
+      client = OPCUAClient.create({
+        endpointMustExist: false,
+        securityMode: MessageSecurityMode.None,
+        securityPolicy: SecurityPolicy.None,
+        connectionStrategy: {
+          initialDelay: 2000,
+          maxRetry: 3,
+          maxDelay: 5000,
+        },
+      });
+
+      await client.connect(OPC_ENDPOINT);
+      console.log('[OPC UA] Подключено!');
+      opcState.connected = true;
+      opcState.error = null;
+
+      const session = await client.createSession();
+      const nodeId = OPC_NODE_ID;
+
+      while (true) {
+        try {
+          const dataValue = await session.readVariableValue(nodeId);
+          opcState.value = dataValue.value.value;
+          opcState.ts = Date.now();
+          opcState.error = null;
+          console.log(`[OPC UA] Значение: ${opcState.value}`);
+        } catch (readErr) {
+          console.error('[OPC UA] Ошибка чтения узла:', readErr.message);
+          opcState.error = `read: ${readErr.message}`;
+        }
+        await new Promise((r) => setTimeout(r, OPC_POLL_INTERVAL));
+      }
+    } catch (connErr) {
+      console.error('[OPC UA] Ошибка подключения:', connErr.message);
+      opcState.connected = false;
+      opcState.error = `connect: ${connErr.message}`;
+      await new Promise((r) => setTimeout(r, 5000));
+    } finally {
+      try {
+        if (client) await client.disconnect();
+      } catch (e) {}
+    }
+  }
+}
+
+// Запускаем поллинг (не блокирует основной поток)
+startOpcPolling();
+
+// HTTP-эндпоинт для фронта
+app.get('/api/opc-value', (req, res) => {
+  res.json(opcState);
+});
+// =======================================================
+
+
 // Старые эндпоинты
 app.get('/api/tables', async (req, res) => {
   try {
