@@ -118,11 +118,6 @@ const buttonStyle = {
   cursor: 'pointer',
 };
 
-const secondaryButtonStyle = {
-  ...buttonStyle,
-  background: '#10B981',
-};
-
 const thStyle = {
   padding: '14px 16px',
   textAlign: 'left',
@@ -179,21 +174,10 @@ const wideModalStyle = {
   maxWidth: '720px',
 };
 
-/* ===================== ХЕЛПЕРЫ ДЛЯ ДАТ И ЦВЕТА (как в DailyTopPage) ===================== */
+/* ===================== ХЕЛПЕРЫ ДЛЯ ДАТ И ЦВЕТА ===================== */
 function getTodayStr() {
   const d = new Date();
   return d.toISOString().split('T')[0];
-}
-
-function formatDateShort(dateStr) {
-  const [, m, d] = dateStr.split('-');
-  return `${d}.${m}`;
-}
-
-function getDayOfWeekShort(dateStr) {
-  const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-  const d = new Date(dateStr + 'T00:00:00');
-  return days[d.getDay()];
 }
 
 function getDefectColor(value) {
@@ -203,6 +187,142 @@ function getDefectColor(value) {
   if (value <= 15) return '#FFC000';
   return '#FF0000';
 }
+
+function getWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+}
+
+function getMonday(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  return new Date(d.setDate(diff));
+}
+
+function formatDateDDMM(date) {
+  const d = new Date(date);
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function getDayOfWeekFromDate(date) {
+  return ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'][new Date(date).getDay()];
+}
+
+/* ===================== СТИЛИ ДЛЯ MPP-ТАБЛИЦЫ (как в ReportPage) ===================== */
+const mppTableStyles = {
+  dark: {
+    background: '#1F2937',
+    padding: '6px 8px',
+    fontWeight: 600,
+    border: '1px solid #4B5563',
+    display: 'flex',
+    alignItems: 'center',
+    fontSize: 11,
+    color: '#FFF',
+  },
+  hdr: {
+    background: '#374151',
+    padding: '4px 3px',
+    fontWeight: 600,
+    border: '1px solid #4B5563',
+    textAlign: 'center',
+    fontSize: 11,
+    color: '#FFF',
+  },
+  name: {
+    background: '#1F2937',
+    padding: '6px 8px',
+    fontWeight: 600,
+    border: '1px solid #4B5563',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    fontSize: 12,
+    color: '#FFF',
+  },
+  val: {
+    padding: '6px 4px',
+    border: '1px solid #4B5563',
+    textAlign: 'center',
+    fontWeight: 600,
+    fontSize: 13,
+    whiteSpace: 'nowrap',
+  },
+  total: {
+    padding: '6px 4px',
+    border: '1px solid #4B5563',
+    textAlign: 'center',
+    fontWeight: 700,
+    fontSize: 13,
+    whiteSpace: 'nowrap',
+  },
+};
+
+/* ===================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ СМЕН ===================== */
+const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
+const getMoscowMinutes = () => {
+  const moscow = getMoscowTime();
+  return moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+};
+const getWeekNumberMoscow = (date) => {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+};
+
+const getShiftTimeRange = (shiftFilter) => {
+  const nowMoscow = getMoscowTime();
+  const totalMinutes = getMoscowMinutes();
+  const year = nowMoscow.getUTCFullYear();
+  const month = String(nowMoscow.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(nowMoscow.getUTCDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`;
+
+  const yesterday = new Date(nowMoscow);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const yestYear = yesterday.getUTCFullYear();
+  const yestMonth = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
+  const yestDay = String(yesterday.getUTCDate()).padStart(2, '0');
+  const yesterdayStr = `${yestYear}-${yestMonth}-${yestDay}`;
+
+  if (shiftFilter === 'all') {
+    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+  }
+
+  const isEvenWeek = getWeekNumberMoscow(nowMoscow) % 2 === 0;
+  let shiftType;
+
+  if (shiftFilter === 'C') {
+    shiftType = 'night';
+  } else if (shiftFilter === 'A') {
+    shiftType = isEvenWeek ? 'evening' : 'day';
+  } else if (shiftFilter === 'B') {
+    shiftType = isEvenWeek ? 'day' : 'evening';
+  } else {
+    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+  }
+
+  if (shiftType === 'night') {
+    const dateToUse = totalMinutes >= 1 * 60 + 31 ? todayStr : yesterdayStr;
+    return { start: `${dateToUse} 01:31:00`, end: `${dateToUse} 07:50:00` };
+  } else if (shiftType === 'day') {
+    const dateToUse = totalMinutes >= 7 * 60 + 50 ? todayStr : yesterdayStr;
+    return { start: `${dateToUse} 07:50:00`, end: `${dateToUse} 16:40:00` };
+  } else if (shiftType === 'evening') {
+    const dateToUse = totalMinutes >= 16 * 60 + 41 ? todayStr : yesterdayStr;
+    const endDateObj = new Date(`${dateToUse}T00:00:00Z`);
+    endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
+    const endStr = `${endDateObj.getUTCFullYear()}-${String(endDateObj.getUTCMonth() + 1).padStart(2, '0')}-${String(endDateObj.getUTCDate()).padStart(2, '0')}`;
+    return { start: `${dateToUse} 16:41:00`, end: `${endStr} 01:30:00` };
+  }
+
+  return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+};
 
 /* ===================== МУЛЬТИСЕЛЕКТ ===================== */
 function MultiSelect({ options, selected, onChange, placeholder }) {
@@ -411,7 +531,7 @@ function PasswordModal({ isOpen, onClose, onSubmit, error, title = 'Введит
   );
 }
 
-/* ===================== ОБУЧЕНИЕ (МОДАЛЬНОЕ ОКНО С ИНСТРУКЦИЯМИ) ===================== */
+/* ===================== ОБУЧЕНИЕ ===================== */
 function HelpModal({ isOpen, onClose }) {
   const [activeSection, setActiveSection] = useState('assign');
 
@@ -555,68 +675,177 @@ function VINModal({ defect, vins, loading, onClose }) {
   );
 }
 
-/* ===================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ СМЕН ===================== */
-const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
-const getMoscowMinutes = () => {
-  const moscow = getMoscowTime();
-  return moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
-};
-const getWeekNumber = (date) => {
-  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-};
+/* ===================== ТАБЛИЦА ТОП MPP ПО БРИГАДЕ (14 ДНЕЙ, как в ReportPage) ===================== */
+function BrigadeMPPTable({ allMpps, onCellClick }) {
+  const { prevWeekDays, currWeekDays, prevWeekNum, currWeekNum } = useMemo(() => {
+    const today = new Date();
+    const mondayThisWeek = getMonday(today);
+    const mondayPrevWeek = new Date(mondayThisWeek);
+    mondayPrevWeek.setDate(mondayPrevWeek.getDate() - 7);
 
-const getShiftTimeRange = (shiftFilter) => {
-  const nowMoscow = getMoscowTime();
-  const totalMinutes = getMoscowMinutes();
-  const year = nowMoscow.getUTCFullYear();
-  const month = String(nowMoscow.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(nowMoscow.getUTCDate()).padStart(2, '0');
-  const todayStr = `${year}-${month}-${day}`;
+    const prevDays = [];
+    const currDays = [];
+    for (let i = 0; i < 7; i++) {
+      prevDays.push(new Date(mondayPrevWeek.getTime() + i * 86400000));
+      currDays.push(new Date(mondayThisWeek.getTime() + i * 86400000));
+    }
 
-  const yesterday = new Date(nowMoscow);
-  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const yestYear = yesterday.getUTCFullYear();
-  const yestMonth = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
-  const yestDay = String(yesterday.getUTCDate()).padStart(2, '0');
-  const yesterdayStr = `${yestYear}-${yestMonth}-${yestDay}`;
+    return {
+      prevWeekDays: prevDays,
+      currWeekDays: currDays,
+      prevWeekNum: getWeekNumber(mondayPrevWeek),
+      currWeekNum: getWeekNumber(mondayThisWeek),
+    };
+  }, []);
 
-  if (shiftFilter === 'all') {
-    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
-  }
+  const rows = useMemo(() => {
+    const grouped = {};
+    (allMpps || []).forEach(item => {
+      const key = item.mpp;
+      if (!grouped[key]) {
+        grouped[key] = {
+          mpp: item.mpp,
+          model: item.model,
+          part_name: item.part_name,
+          problem_type: item.problem_type,
+          days: {},
+        };
+      }
+      grouped[key].days[item.date] = (grouped[key].days[item.date] || 0) + item.count;
+    });
 
-  const isEvenWeek = getWeekNumber(nowMoscow) % 2 === 0;
-  let shiftType;
+    const rowsArr = Object.values(grouped).map(g => {
+      const cellsPrev = prevWeekDays.map(d => {
+        const ds = d.toISOString().split('T')[0];
+        return g.days[ds] || 0;
+      });
+      const cellsCurr = currWeekDays.map(d => {
+        const ds = d.toISOString().split('T')[0];
+        return g.days[ds] || 0;
+      });
+      return {
+        ...g,
+        cellsPrev,
+        cellsCurr,
+        totalPrev: cellsPrev.reduce((s, v) => s + v, 0),
+        totalCurr: cellsCurr.reduce((s, v) => s + v, 0),
+      };
+    });
 
-  if (shiftFilter === 'C') {
-    shiftType = 'night';
-  } else if (shiftFilter === 'A') {
-    shiftType = isEvenWeek ? 'evening' : 'day';
-  } else if (shiftFilter === 'B') {
-    shiftType = isEvenWeek ? 'day' : 'evening';
-  } else {
-    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
-  }
+    rowsArr.sort((a, b) => (b.totalPrev + b.totalCurr) - (a.totalPrev + a.totalCurr));
+    return rowsArr;
+  }, [allMpps, prevWeekDays, currWeekDays]);
 
-  if (shiftType === 'night') {
-    const dateToUse = totalMinutes >= 1 * 60 + 31 ? todayStr : yesterdayStr;
-    return { start: `${dateToUse} 01:31:00`, end: `${dateToUse} 07:50:00` };
-  } else if (shiftType === 'day') {
-    const dateToUse = totalMinutes >= 7 * 60 + 50 ? todayStr : yesterdayStr;
-    return { start: `${dateToUse} 07:50:00`, end: `${dateToUse} 16:40:00` };
-  } else if (shiftType === 'evening') {
-    const dateToUse = totalMinutes >= 16 * 60 + 41 ? todayStr : yesterdayStr;
-    const endDateObj = new Date(`${dateToUse}T00:00:00Z`);
-    endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
-    const endStr = `${endDateObj.getUTCFullYear()}-${String(endDateObj.getUTCMonth() + 1).padStart(2, '0')}-${String(endDateObj.getUTCDate()).padStart(2, '0')}`;
-    return { start: `${dateToUse} 16:41:00`, end: `${endStr} 01:30:00` };
-  }
+  return (
+    <div style={{ marginTop: 24 }}>
+      <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 12, color: BRAND.text }}>
+        📋 Топ дефектов по бригаде (14 дней)
+      </h3>
 
-  return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
-};
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(260px, 2fr) repeat(7, 60px) 60px repeat(7, 60px) 60px',
+        border: '1px solid #4B5563',
+        fontSize: 13,
+        background: '#111827',
+        borderRadius: 6,
+        overflowX: 'auto',
+      }}>
+        <div style={mppTableStyles.dark}>Дефект (MPP)</div>
+
+        {prevWeekDays.map((d, i) => (
+          <div key={`ph${i}`} style={mppTableStyles.hdr}>
+            <span style={{ display: 'block' }}>{formatDateDDMM(d)}</span>
+            <span style={{ display: 'block', color: '#9CA3AF' }}>{getDayOfWeekFromDate(d)}</span>
+          </div>
+        ))}
+        <div style={mppTableStyles.hdr}>
+          <span style={{ fontWeight: 700 }}>CW{prevWeekNum}</span>
+        </div>
+
+        {currWeekDays.map((d, i) => (
+          <div key={`ch${i}`} style={mppTableStyles.hdr}>
+            <span style={{ display: 'block' }}>{formatDateDDMM(d)}</span>
+            <span style={{ display: 'block', color: '#9CA3AF' }}>{getDayOfWeekFromDate(d)}</span>
+          </div>
+        ))}
+        <div style={mppTableStyles.hdr}>
+          <span style={{ fontWeight: 700 }}>CW{currWeekNum}</span>
+        </div>
+
+        {rows.length === 0 ? (
+          <div style={{
+            ...mppTableStyles.dark,
+            gridColumn: '1 / -1',
+            textAlign: 'center',
+            padding: 12,
+            color: '#9CA3AF',
+          }}>
+            Нет данных за 14 дней
+          </div>
+        ) : rows.map(row => (
+          <React.Fragment key={row.mpp}>
+            <div style={mppTableStyles.name} title={row.mpp}>{row.mpp}</div>
+
+            {row.cellsPrev.map((count, ci) => {
+              const ds = prevWeekDays[ci].toISOString().split('T')[0];
+              const bg = getDefectColor(count);
+              const textColor = count > 15 ? '#FFF' : '#000';
+              return (
+                <div
+                  key={`cp${ci}`}
+                  style={{
+                    ...mppTableStyles.val,
+                    background: bg,
+                    color: textColor,
+                    cursor: count > 0 ? 'pointer' : 'default',
+                  }}
+                  onClick={() => count > 0 && onCellClick(row, ds)}
+                >
+                  {count}
+                </div>
+              );
+            })}
+            <div style={{
+              ...mppTableStyles.total,
+              background: getDefectColor(row.totalPrev),
+              color: row.totalPrev > 15 ? '#FFF' : '#000',
+            }}>
+              {row.totalPrev}
+            </div>
+
+            {row.cellsCurr.map((count, ci) => {
+              const ds = currWeekDays[ci].toISOString().split('T')[0];
+              const bg = getDefectColor(count);
+              const textColor = count > 15 ? '#FFF' : '#000';
+              return (
+                <div
+                  key={`cc${ci}`}
+                  style={{
+                    ...mppTableStyles.val,
+                    background: bg,
+                    color: textColor,
+                    cursor: count > 0 ? 'pointer' : 'default',
+                  }}
+                  onClick={() => count > 0 && onCellClick(row, ds)}
+                >
+                  {count}
+                </div>
+              );
+            })}
+            <div style={{
+              ...mppTableStyles.total,
+              background: getDefectColor(row.totalCurr),
+              color: row.totalCurr > 15 ? '#FFF' : '#000',
+            }}>
+              {row.totalCurr}
+            </div>
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /* ===================== ОБЩИЙ ОТЧЕТ (ГИСТОГРАММА) ===================== */
 function BrigadeReport({ brigades, password, executeWithPassword }) {
@@ -713,7 +942,6 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
-      {/* Фильтры */}
       <div style={{
         display: 'flex',
         flexWrap: 'wrap',
@@ -781,9 +1009,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
         </div>
       </div>
 
-      {/* Контейнер для гистограммы и таблицы */}
       <div style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0, gap: 15 }}>
-        {/* Гистограмма */}
         <div style={{ ...cardStyle, flex: 7 }}>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
             Дефекты по бригадам {metric === 'dpu' ? '(DPU per 1000)' : '(шт)'}
@@ -829,7 +1055,6 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
           </div>
         </div>
 
-        {/* Правая колонка: таблица топ бригад */}
         <div style={{ ...cardStyle, flex: 3, display: 'flex', flexDirection: 'column' }}>
           <h2 style={{ fontSize: '1.3rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px', flexShrink: 0 }}>
             Топ 3 бригады по {metric === 'dpu' ? 'DPU' : 'количеству'}
@@ -886,7 +1111,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
   );
 }
 
-/* ===================== ОТЧЕТ ПО БРИГАДАМ (ТРЕНДЫ + ТОП MPP) ===================== */
+/* ===================== ОТЧЕТ ПО БРИГАДАМ (ТРЕНДЫ + 14-ДНЕВНАЯ ТАБЛИЦА) ===================== */
 function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
   const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
   const [defectType, setDefectType] = useState('all');
@@ -895,7 +1120,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
   const [shiftFilter, setShiftFilter] = useState('all');
   const [trendsByBrigade, setTrendsByBrigade] = useState({});
   const [topMppsByBrigade, setTopMppsByBrigade] = useState({});
-  const [selectedDays, setSelectedDays] = useState({});
   const [loading, setLoading] = useState(false);
 
   const [selectedDefect, setSelectedDefect] = useState(null);
@@ -904,7 +1128,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
 
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
   const brigadesOptions = brigades.map(b => b.name).filter(name => name !== 'Бригада не найдена');
-  const todayStr = getTodayStr();
 
   const formatValue = (value) => metric === 'dpu' ? Number(value).toFixed(2) : value;
 
@@ -914,7 +1137,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
     const params = new URLSearchParams({
       checkpoint: checkpointParam,
       defectType,
-      metric,
     });
     if (shiftFilter !== 'all') params.append('shift', shiftFilter);
     return params;
@@ -923,6 +1145,7 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
   const fetchTrendForBrigade = async (brigadeName) => {
     const params = buildCommonParams();
     params.append('brigades', brigadeName);
+    params.append('metric', metric);
     const res = await fetch(`${API_BASE}/api/brigade-report/trend?${params}`);
     if (!res.ok) throw new Error(`Ошибка загрузки трендов для бригады ${brigadeName}`);
     return await res.json();
@@ -930,7 +1153,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
 
   const fetchTopMppsForBrigade = async (brigadeName) => {
     const params = buildCommonParams();
-    params.delete('metric');
     params.append('brigade', brigadeName);
     const res = await fetch(`${API_BASE}/api/brigade-report/top-mpp?${params}`);
     if (!res.ok) throw new Error(`Ошибка загрузки топ MPP для бригады ${brigadeName}`);
@@ -963,18 +1185,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
       );
       setTrendsByBrigade(newTrends);
       setTopMppsByBrigade(newTopMpps);
-
-      // Установить день по умолчанию (сегодня, если есть, иначе последний доступный)
-      setSelectedDays(prev => {
-        const next = { ...prev };
-        selectedBrigades.forEach(b => {
-          if (next[b] && (newTopMpps[b] || []).some(x => x.date === next[b])) return;
-          const data = newTopMpps[b] || [];
-          const dates = [...new Set(data.map(d => d.date))].sort().reverse();
-          next[b] = dates.includes(todayStr) ? todayStr : (dates[0] || todayStr);
-        });
-        return next;
-      });
     } catch (err) {
       alert(err.message);
     } finally {
@@ -986,16 +1196,21 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
     loadAllData();
   }, [selectedCheckpoints, selectedBrigades, defectType, shiftFilter]);
 
-  const handleDefectClick = (brigadeName, defect, date) => {
-    setSelectedDefect({ ...defect, brigade: brigadeName, date });
+  const handleCellClick = (row, date) => {
+    setSelectedDefect({
+      model: row.model,
+      part_name: row.part_name,
+      problem_type: row.problem_type,
+      mpp: row.mpp,
+      date,
+    });
     setVins([]);
     setVinsLoading(true);
 
     const params = buildCommonParams();
-    params.delete('metric');
-    params.append('model', defect.model);
-    params.append('part_name', defect.part_name);
-    params.append('problem_type', defect.problem_type);
+    params.append('model', row.model);
+    params.append('part_name', row.part_name);
+    params.append('problem_type', row.problem_type);
     params.append('date', date);
 
     fetch(`${API_BASE}/api/brigade-report/top-mpp-vins?${params}`)
@@ -1017,109 +1232,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
   const closeModal = () => {
     setSelectedDefect(null);
     setVins([]);
-  };
-
-  const renderTopMppTable = (brigadeName, allMpps) => {
-    const dates = [...new Set(allMpps.map(d => d.date))].sort().reverse();
-    const selectedDate = selectedDays[brigadeName] || (dates.includes(todayStr) ? todayStr : (dates[0] || todayStr));
-
-    const dayMpps = allMpps
-      .filter(d => d.date === selectedDate)
-      .sort((a, b) => b.count - a.count);
-
-    return (
-      <div style={{ marginTop: 24 }}>
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 12, color: BRAND.text }}>
-          📋 Топ дефектов ({brigadeName})
-        </h3>
-
-        <div style={{ backgroundColor: '#1F2937', borderRadius: 6, padding: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#FFF', marginBottom: 8, flexWrap: 'wrap', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 14, color: '#D1D5DB' }}>День:</span>
-              <select
-                value={selectedDate}
-                onChange={(e) => setSelectedDays(prev => ({ ...prev, [brigadeName]: e.target.value }))}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 6,
-                  border: '1px solid #4B5563',
-                  background: '#111827',
-                  color: '#FFF',
-                  fontSize: 14,
-                  cursor: 'pointer',
-                }}
-              >
-                {dates.length === 0 ? (
-                  <option value={todayStr}>
-                    {formatDateShort(todayStr)} {getDayOfWeekShort(todayStr)}
-                  </option>
-                ) : (
-                  dates.map(d => (
-                    <option key={d} value={d}>
-                      {formatDateShort(d)} {getDayOfWeekShort(d)}{d === todayStr ? ' (сегодня)' : ''}
-                    </option>
-                  ))
-                )}
-              </select>
-            </div>
-            <div style={{ fontSize: 13, color: '#D1D5DB' }}>
-              Всего дефектов: <b style={{ color: '#FFF' }}>{dayMpps.reduce((s, x) => s + x.count, 0)}</b>
-            </div>
-          </div>
-
-          <div style={{ maxHeight: 500, overflowY: 'auto' }}>
-            {dayMpps.length === 0 ? (
-              <div style={{ color: '#D1D5DB', padding: 12, textAlign: 'center' }}>
-                Нет данных за выбранный день
-              </div>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', color: '#FFF', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#374151' }}>
-                    <th style={{ padding: '6px 8px', textAlign: 'left', borderBottom: '1px solid #4B5563', fontWeight: 600 }}>Дефект</th>
-                    <th style={{ padding: '6px 8px', textAlign: 'center', borderBottom: '1px solid #4B5563', fontWeight: 600, width: 80 }}>Шт.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dayMpps.map((item, idx) => (
-                    <tr
-                      key={idx}
-                      style={{
-                        backgroundColor: idx % 2 === 0 ? '#1F2937' : '#111827',
-                        cursor: 'pointer',
-                      }}
-                      onClick={() => handleDefectClick(brigadeName, item, selectedDate)}
-                    >
-                      <td style={{
-                        padding: '6px 8px',
-                        borderBottom: '1px solid #4B5563',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        maxWidth: 400,
-                      }}>
-                        {item.mpp}
-                      </td>
-                      <td style={{
-                        padding: '6px 8px',
-                        backgroundColor: getDefectColor(item.count),
-                        color: item.count > 15 ? '#FFF' : '#000',
-                        fontWeight: 600,
-                        textAlign: 'center',
-                        borderBottom: '1px solid #4B5563',
-                      }}>
-                        {item.count}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      </div>
-    );
   };
 
   const renderBrigadeCard = (brigadeName, data) => {
@@ -1219,8 +1331,8 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
           </div>
         </div>
 
-        {/* Таблица топ MPP */}
-        {renderTopMppTable(brigadeName, topMpps)}
+        {/* Таблица 14 дней */}
+        <BrigadeMPPTable allMpps={topMpps} onCellClick={handleCellClick} />
       </div>
     );
   };
