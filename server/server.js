@@ -8771,6 +8771,10 @@ function getOfflineCondition(defectType) {
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (разместить до эндпоинтов)
 // =========================================================================
 
+// =========================================================================
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// =========================================================================
+
 // Определение буквы смены (A/B/C) по UTC-времени создания дефекта
 function getShiftLetterFromDate(creationTime) {
   const utc = new Date(creationTime);
@@ -8801,18 +8805,7 @@ function getShiftLetterFromDate(creationTime) {
   return isEvenWeek ? 'A' : 'B';
 }
 
-// Московская дата в формате YYYY-MM-DD из UTC-времени (не используется в top-mpp,
-// но оставлена для совместимости, если понадобится где-то ещё)
-function getMoscowDateStr(creationTime) {
-  const utc = new Date(creationTime);
-  const moscow = new Date(utc.getTime() + 3 * 60 * 60 * 1000);
-  const y = moscow.getUTCFullYear();
-  const m = String(moscow.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(moscow.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-// Списки постов — как было изначально
+// Списки постов — оригинальная логика (ALL = все 4 группы)
 function getPostsForCheckpoints(checkpoint) {
   const cp7Posts = [
     'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
@@ -8830,7 +8823,6 @@ function getPostsForCheckpoints(checkpoint) {
     '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
   ];
 
-  // ALL по-прежнему = все 4 группы (логика НЕ меняется)
   if (!checkpoint || checkpoint === 'ALL') {
     return [...new Set([...cp7Posts, ...cp8Posts, ...pipPosts, ...tlPosts])];
   }
@@ -8846,14 +8838,10 @@ function getPostsForCheckpoints(checkpoint) {
   return [...new Set(postList)];
 }
 
-// Условие online/offline для SQL
+// Условие online/offline — ТОЧНО как в /api/defects-dashboard (через S_OFFLINE)
 function getOfflineCondition(defectType) {
-  if (defectType === 'offline') {
-    return '(COALESCE(OFFLINE,0)=1 OR COALESCE(OFFLINE1,0)=1 OR COALESCE(OFFLINE2,0)=1)';
-  }
-  if (defectType === 'online') {
-    return '(COALESCE(OFFLINE,0)=0 AND COALESCE(OFFLINE1,0)=0 AND COALESCE(OFFLINE2,0)=0)';
-  }
+  if (defectType === 'offline') return 'QM_DEF.S_OFFLINE = 1';
+  if (defectType === 'online') return 'QM_DEF.S_OFFLINE = 0';
   return '1=1';
 }
 
@@ -8870,9 +8858,11 @@ function normalizeSqlDate(defectDate) {
 
 // =========================================================================
 // ЭНДПОИНТ: /api/brigade-report/top-mpp
-// Возвращает список MPP с количеством по каждому дню за последние 14 дней
-// для конкретной бригады. Группировка — на сервере через DATE(CREATION_TIME),
-// как в /api/defects-dashboard.
+// SQL максимально приближен к /api/defects-dashboard:
+//   - фильтр CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY) внутри каждого подзапроса
+//   - GROUP BY PART_NAME, PROBLEM_TYPE, DATE(CREATION_TIME), MODEL, VIN, POST_NAME
+//   - ORDER BY CREATION_TIME DESC
+//   - LIMIT 5000
 // =========================================================================
 app.get('/api/brigade-report/top-mpp', async (req, res) => {
   try {
@@ -8887,43 +8877,54 @@ app.get('/api/brigade-report/top-mpp', async (req, res) => {
 
     const offlineCondition = getOfflineCondition(defectType);
 
-    const defectsSql = `
+    const sql = `
       SELECT
-        DATE(d.CREATION_TIME) AS defect_date,
-        d.VIN,
-        d.PART_NAME,
-        d.PROBLEM_TYPE,
-        d.CREATION_TIME,
-        wo.MODEL
+        QM_DEF.PART_NAME,
+        QM_DEF.PROBLEM_TYPE,
+        DATE(QM_DEF.CREATION_TIME) AS CREATION_DATE,
+        wo.MODEL,
+        QM_DEF.VIN,
+        QM_DEF.POST_NAME,
+        COUNT(*) AS QTY_DEF,
+        MAX(QM_DEF.CREATION_TIME) AS LAST_CREATION_TIME
       FROM (
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        SELECT VIN, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
         FROM at_biw_qm_defect_info
-        WHERE ${offlineCondition}
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        SELECT VIN, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
         FROM at_paint_qm_defect_info
-        WHERE ${offlineCondition}
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        SELECT VIN, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
         FROM at_qm_defect_info
-        WHERE ${offlineCondition}
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-      ) d
-      JOIN work_order wo ON wo.VIN = d.VIN
-      WHERE d.POST_NAME IN (${postListStr})
-        AND d.CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE QM_DEF.POST_NAME IN (${postListStr})
+        AND ${offlineCondition}
+        AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
+        AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
+      GROUP BY QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE,
+               DATE(QM_DEF.CREATION_TIME), wo.MODEL,
+               QM_DEF.VIN, QM_DEF.POST_NAME
+      ORDER BY LAST_CREATION_TIME DESC
+      LIMIT 5000
     `;
 
-    let [defectRows] = await pool.query(defectsSql);
+    let [defectRows] = await pool.query(sql);
 
-    // Фильтр по смене
+    // Фильтр по смене (применяется к уже сгруппированным строкам)
     if (shift && shift !== 'all') {
-      defectRows = defectRows.filter(d => getShiftLetterFromDate(d.CREATION_TIME) === shift);
+      defectRows = defectRows.filter(
+        r => getShiftLetterFromDate(r.LAST_CREATION_TIME) === shift
+      );
     }
 
     // Справочник владельцев
@@ -8934,16 +8935,20 @@ app.get('/api/brigade-report/top-mpp', async (req, res) => {
     `);
     const ownerMap = new Map();
     owners.forEach(o => {
-      ownerMap.set(`${o.model}|${o.part_name}|${o.problem_type}`, o.brigade_name);
+      ownerMap.set(
+        `${o.model}|${o.part_name}|${o.problem_type}`,
+        o.brigade_name
+      );
     });
 
-    // Группировка по (дата + MPP) только для выбранной бригады
+    // Группировка по (дата + MPP) только для выбранной бригады,
+    // с суммированием QTY_DEF
     const groups = new Map();
     for (const r of defectRows) {
       const owner = ownerMap.get(`${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`) || 'Бригада не найдена';
       if (owner !== brigade) continue;
 
-      const dateStr = normalizeSqlDate(r.defect_date);
+      const dateStr = normalizeSqlDate(r.CREATION_DATE);
       const key = `${dateStr}|${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
 
       if (!groups.has(key)) {
@@ -8956,7 +8961,7 @@ app.get('/api/brigade-report/top-mpp', async (req, res) => {
           count: 0,
         });
       }
-      groups.get(key).count++;
+      groups.get(key).count += Number(r.QTY_DEF) || 0;
     }
 
     const result = Array.from(groups.values()).sort((a, b) => {
@@ -8973,8 +8978,8 @@ app.get('/api/brigade-report/top-mpp', async (req, res) => {
 
 // =========================================================================
 // ЭНДПОИНТ: /api/brigade-report/top-mpp-vins
-// Возвращает уникальные VIN'ы по конкретному MPP за конкретный день
-// (дата — серверная, как в /api/defects-dashboard) с учётом фильтра смены.
+// Уникальные VIN'ы по конкретному MPP за конкретный день
+// (дата — серверная, как в /api/defects-dashboard), с учётом фильтра смены.
 // =========================================================================
 app.get('/api/brigade-report/top-mpp-vins', async (req, res) => {
   try {
@@ -9000,40 +9005,39 @@ app.get('/api/brigade-report/top-mpp-vins', async (req, res) => {
 
     const offlineCondition = getOfflineCondition(defectType);
 
-    const query = `
-      SELECT DISTINCT d.VIN, d.CREATION_TIME
+    const sql = `
+      SELECT DISTINCT QM_DEF.VIN, QM_DEF.CREATION_TIME
       FROM (
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        SELECT VIN, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
         FROM at_biw_qm_defect_info
-        WHERE ${offlineCondition}
-          AND PART_NAME = ? AND PROBLEM_TYPE = ?
-          AND DATE(CREATION_TIME) = ?
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        SELECT VIN, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
         FROM at_paint_qm_defect_info
-        WHERE ${offlineCondition}
-          AND PART_NAME = ? AND PROBLEM_TYPE = ?
-          AND DATE(CREATION_TIME) = ?
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
         UNION ALL
-        SELECT VIN, PART_NAME, PROBLEM_TYPE, CREATION_TIME, POST_NAME
+        SELECT VIN, CREATION_TIME, POST_NAME,
+               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+               PART_NAME, PROBLEM_TYPE
         FROM at_qm_defect_info
-        WHERE ${offlineCondition}
-          AND PART_NAME = ? AND PROBLEM_TYPE = ?
-          AND DATE(CREATION_TIME) = ?
-      ) d
-      JOIN work_order wo ON wo.VIN = d.VIN
-      WHERE d.POST_NAME IN (${postListStr})
+        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+      ) QM_DEF
+      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+      WHERE QM_DEF.POST_NAME IN (${postListStr})
+        AND ${offlineCondition}
+        AND QM_DEF.PART_NAME = ?
+        AND QM_DEF.PROBLEM_TYPE = ?
+        AND DATE(QM_DEF.CREATION_TIME) = ?
         AND wo.MODEL = ?
     `;
 
-    const params = [
-      part_name, problem_type, date,
-      part_name, problem_type, date,
-      part_name, problem_type, date,
-      model,
-    ];
+    const params = [part_name, problem_type, date, model];
 
-    let [rows] = await pool.query(query, params);
+    let [rows] = await pool.query(sql, params);
 
     // Фильтр по смене (A/B/C)
     if (shift && shift !== 'all') {
