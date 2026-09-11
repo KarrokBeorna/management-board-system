@@ -59,6 +59,7 @@ const tabBarStyle = {
   borderRadius: 12,
   padding: '6px',
   width: 'fit-content',
+  flexWrap: 'wrap',
 };
 
 const tabStyle = (active) => ({
@@ -175,7 +176,6 @@ const wideModalStyle = {
 };
 
 /* ===================== ХЕЛПЕРЫ ДЛЯ ДАТ И ЦВЕТА ===================== */
-// ЛОКАЛЬНАЯ дата в YYYY-MM-DD (без UTC-сдвига)
 function toLocalDateStr(d) {
   const date = new Date(d);
   const y = date.getFullYear();
@@ -722,7 +722,6 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
     };
   }, []);
 
-  // Загрузка количества машин — ЛОКАЛЬНАЯ дата
   useEffect(() => {
     const allDays = [...prevWeekDays, ...currWeekDays];
     const fetches = allDays.map(date => {
@@ -758,7 +757,6 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
     });
 
     const rowsArr = Object.values(grouped).map(g => {
-      // ЛОКАЛЬНАЯ дата — совпадёт с ключами с сервера
       const countsPrev = prevWeekDays.map(d => {
         const ds = toLocalDateStr(d);
         return g.days[ds] || 0;
@@ -1293,6 +1291,259 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ===================== ОБЩИЙ ОТЧЕТ ПО БРИГАДАМ (по сменам A / B) ===================== */
+function BrigadeReportByShift({ brigades, password, executeWithPassword }) {
+  const [dateFrom, setDateFrom] = useState(toLocalDateStr(new Date()));
+  const [dateTo, setDateTo] = useState(toLocalDateStr(new Date()));
+  const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
+  const [defectType, setDefectType] = useState('all');
+  const [metric, setMetric] = useState('count');
+  const [dataA, setDataA] = useState(null);
+  const [dataB, setDataB] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
+
+  const loadBoth = async () => {
+    setLoading(true);
+    try {
+      const allSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
+      const checkpointParam = allSelected ? 'ALL' : selectedCheckpoints.join(',');
+
+      const baseParams = () => {
+        const p = new URLSearchParams({
+          dateFrom,
+          dateTo,
+          checkpoint: checkpointParam,
+          metric,
+          defectType,
+        });
+        return p;
+      };
+
+      const [resA, resB] = await Promise.all([
+        fetch(`${API_BASE}/api/brigade-report/data?${baseParams().toString()}&shift=A`).then(r => r.json()),
+        fetch(`${API_BASE}/api/brigade-report/data?${baseParams().toString()}&shift=B`).then(r => r.json()),
+      ]);
+      setDataA(resA);
+      setDataB(resB);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadBoth();
+  }, [dateFrom, dateTo, selectedCheckpoints, metric, defectType]);
+
+  const formatDpu = (value) => Number(value).toFixed(2);
+
+  const getTop3 = (topBrigades) => {
+    if (!topBrigades || !topBrigades.length) return [];
+    return [...topBrigades].sort((a, b) => {
+      const va = metric === 'dpu' ? a.dpu : a.count;
+      const vb = metric === 'dpu' ? b.dpu : b.count;
+      return vb - va;
+    }).slice(0, 3);
+  };
+
+  const getTopMpps = (brigade) => {
+    return [...brigade.mpps].sort((a, b) => {
+      const va = metric === 'dpu' ? a.dpu : a.count;
+      const vb = metric === 'dpu' ? b.dpu : b.count;
+      return vb - va;
+    }).slice(0, 5);
+  };
+
+  const renderShiftBlock = (title, accentColor, data) => {
+    if (!data) {
+      return (
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: BRAND.textSecondary, fontSize: '1.2rem' }}>
+          Загрузка...
+        </div>
+      );
+    }
+
+    const histogramData = data.histogram || [];
+    const top3Brigades = getTop3(data.topBrigades);
+
+    return (
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 15 }}>
+        <h2 style={{
+          fontSize: '1.6rem',
+          fontWeight: 900,
+          color: accentColor,
+          margin: 0,
+          padding: '10px 0',
+          borderBottom: `3px solid ${accentColor}`,
+          textAlign: 'center',
+        }}>
+          {title}
+        </h2>
+
+        <div style={{ ...cardStyle, flex: 1, minHeight: 400 }}>
+          <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
+            Дефекты по бригадам {metric === 'dpu' ? '(DPU per 1000)' : '(шт)'}
+          </h3>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            {histogramData.length > 0 ? (
+              <div style={{ height: Math.max(300, histogramData.length * 40) }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={histogramData}
+                    layout="vertical"
+                    margin={{ top: 10, right: 60, left: 20, bottom: 10 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type="number" domain={[0, 'dataMax']} tick={{ fontSize: 11 }} />
+                    <YAxis type="category" dataKey="category" tick={{ fontSize: 11 }} width={130} />
+                    <Tooltip contentStyle={{ fontSize: '1rem' }} formatter={(value) => metric === 'dpu' ? formatDpu(value) : value} />
+                    <Bar dataKey="value" fill={accentColor} barSize={22}>
+                      <LabelList
+                        dataKey="value"
+                        position="right"
+                        formatter={(value) => metric === 'dpu' ? formatDpu(value) : value}
+                        style={{ fontSize: '0.9rem', fontWeight: 700, fill: BRAND.text }}
+                      />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <p style={{ textAlign: 'center', padding: '30px', color: BRAND.textSecondary }}>
+                Нет данных
+              </p>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '15px', marginTop: '10px', justifyContent: 'center', fontSize: '0.95rem', flexWrap: 'wrap' }}>
+            <div>Всего авто: <b>{data.totalCars}</b></div>
+            <div>Всего дефектов: <b>{data.totalDefects}</b></div>
+            <div>Без владельца: <b>{data.unassignedCount}</b></div>
+          </div>
+        </div>
+
+        <div style={{ ...cardStyle, flex: 1, minHeight: 300 }}>
+          <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: BRAND.text, marginBottom: '10px' }}>
+            Топ 3 бригады по {metric === 'dpu' ? 'DPU' : 'количеству'}
+          </h3>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            {top3Brigades.length > 0 ? (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...thStyle, textAlign: 'left' }}>Бригада / Дефект (MPP)</th>
+                    <th style={{ ...thStyle, textAlign: 'center' }}>{metric === 'dpu' ? 'DPU' : 'Шт'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {top3Brigades.map((brigade) => {
+                    const totalValue = metric === 'dpu' ? formatDpu(brigade.dpu) : brigade.count;
+                    const mpps = getTopMpps(brigade);
+                    return (
+                      <React.Fragment key={brigade.brigade}>
+                        <tr style={{ backgroundColor: '#F0F5FF', fontWeight: 700 }}>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: accentColor }}>{brigade.brigade}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'center', color: accentColor }}>{totalValue}</td>
+                        </tr>
+                        {mpps.map((mpp, idx) => (
+                          <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                            <td style={{ ...tdStyle, paddingLeft: '30px' }}>
+                              {mpp.model} {mpp.part_name} {mpp.problem_type}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'center' }}>
+                              {metric === 'dpu' ? formatDpu(mpp.dpu) : mpp.count}
+                            </td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <p style={{ textAlign: 'center', padding: '20px', color: BRAND.textSecondary }}>Нет данных</p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 15 }}>
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 12,
+        alignItems: 'center',
+        padding: '15px',
+        backgroundColor: '#F8FAFC',
+        borderRadius: BRAND.radius,
+      }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Начало:
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Конец:
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Чекпоинты:
+          <MultiSelect
+            options={['ALL', ...availableCheckpoints]}
+            selected={selectedCheckpoints}
+            onChange={setSelectedCheckpoints}
+            placeholder="Все"
+          />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          Тип дефекта:
+          <select value={defectType} onChange={(e) => setDefectType(e.target.value)} style={inputStyle}>
+            <option value="all">Все</option>
+            <option value="offline">Offline</option>
+            <option value="online">Online</option>
+          </select>
+        </label>
+        <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+          <button
+            onClick={() => setMetric('count')}
+            style={{
+              ...buttonStyle,
+              background: metric === 'count' ? BRAND.primary : '#E5E7EB',
+              color: metric === 'count' ? '#FFFFFF' : '#374151',
+            }}
+          >
+            Шт
+          </button>
+          <button
+            onClick={() => setMetric('dpu')}
+            style={{
+              ...buttonStyle,
+              background: metric === 'dpu' ? BRAND.primary : '#E5E7EB',
+              color: metric === 'dpu' ? '#FFFFFF' : '#374151',
+            }}
+          >
+            DPU per 1000
+          </button>
+        </div>
+      </div>
+
+      {loading && !dataA && !dataB ? (
+        <div style={{ textAlign: 'center', padding: '30px', fontSize: '1.5rem' }}>Загрузка...</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0, gap: 15 }}>
+          {renderShiftBlock('Смена A', '#2563EB', dataA)}
+          <div style={{ width: 1, background: BRAND.border, flexShrink: 0 }} />
+          {renderShiftBlock('Смена B', '#F59E0B', dataB)}
+        </div>
+      )}
     </div>
   );
 }
@@ -2619,7 +2870,13 @@ export default function BrigadeReportPage() {
             style={tabStyle(activeTab === 'general')}
             onClick={() => handleTabChange('general')}
           >
-            📊 Общий отчет
+            Общий отчет
+          </button>
+          <button
+            style={tabStyle(activeTab === 'generalByShift')}
+            onClick={() => handleTabChange('generalByShift')}
+          >
+            📊 Общий отчет по сменам
           </button>
           <button
             style={tabStyle(activeTab === 'brigade')}
@@ -2638,6 +2895,12 @@ export default function BrigadeReportPage() {
 
       {activeTab === 'general' ? (
         <BrigadeReport
+          brigades={brigades}
+          password={password}
+          executeWithPassword={executeWithPassword}
+        />
+      ) : activeTab === 'generalByShift' ? (
+        <BrigadeReportByShift
           brigades={brigades}
           password={password}
           executeWithPassword={executeWithPassword}
