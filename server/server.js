@@ -8075,7 +8075,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
   }
 });
 
-// ================== БРИГАДНЫЙ ОТЧЁТ – ТОП ДЕФЕКТОВ БЕЗ ВЛАДЕЛЬЦА ==================
+
 // ================== БРИГАДНЫЙ ОТЧЁТ – ТОП ДЕФЕКТОВ БЕЗ ВЛАДЕЛЬЦА ==================
 app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
   try {
