@@ -5473,6 +5473,7 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
   try {
     const { filter = 'all', startTime, endTime } = req.query;
 
+    // -------- 1. Определяем окно отчёта --------
     let rangeStart, rangeEnd;
     if (startTime && endTime) {
       rangeStart = startTime;
@@ -5486,16 +5487,15 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
       rangeEnd = `${y}-${m}-${d} 23:59:59`;
     }
 
+    // -------- 2. Посты БЕЗ REPAIR / REPAIR_Final --------
     const postLists = {
       all: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        
         'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
       ],
       cp7: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        
-        'EXT1','PIP9'
+        'EXT1', 'PIP9'
       ],
       pip: [
         'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
@@ -5505,55 +5505,65 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    // 1. Все VIN, прошедшие CP72 в заданном окне
+    // -------- 3. Все VIN с их временем CP72 --------
     const [cp72Rows] = await pool.query(`
-      SELECT VIN
+      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
       FROM at_om_wiptrackinghistory
       WHERE WC_NAME = 'CP72'
         AND CREATION_TIME >= ?
         AND CREATION_TIME <= ?
       GROUP BY VIN
     `, [rangeStart, rangeEnd]);
-    const totalVins = cp72Rows.length;
 
+    const totalVins = cp72Rows.length;
     if (totalVins === 0) {
       return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0 });
     }
 
-    // 2. Дефекты по выбранным постам и времени
-    const [defectRows] = await pool.query(`
-      SELECT
-        d.VIN,
-        d.STATUS
-      FROM at_qm_defect_info d
-      WHERE d.POST_NAME IN (${postListStr})
-        AND d.CREATION_TIME >= ?
-        AND d.CREATION_TIME <= ?
-        AND d.VIN IN (
-          SELECT VIN FROM at_om_wiptrackinghistory
-          WHERE WC_NAME = 'CP72'
-            AND CREATION_TIME >= ?
-            AND CREATION_TIME <= ?
-        )
-    `, [rangeStart, rangeEnd, rangeStart, rangeEnd]);
+    const vins = cp72Rows.map(r => r.VIN);
+    const placeholders = vins.map(() => '?').join(',');
+    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
 
+    // -------- 4. Дефекты этих VIN --------
+    // Берём все дефекты этих VIN по выбранным постам,
+    // затем фильтруем на стороне Node: оставляем те,
+    // у которых CREATION_TIME <= CP72_TIME + 20 минут.
+    const [defectRows] = await pool.query(`
+      SELECT d.VIN, d.STATUS, d.CREATION_TIME
+      FROM at_qm_defect_info d
+      WHERE d.VIN IN (${placeholders})
+        AND d.POST_NAME IN (${postListStr})
+    `, vins);
+
+    // -------- 5. Для каждого VIN фильтруем дефекты с грейс-периодом --------
+    const GRACE_MS = 20 * 60 * 1000; // 20 минут
     const vinDefectMap = new Map();
+
     defectRows.forEach(row => {
-      const vin = row.VIN;
-      if (!vinDefectMap.has(vin)) {
-        vinDefectMap.set(vin, { total: 0, closed: 0 });
+      const cp72TimeStr = cp72TimeMap.get(row.VIN);
+      if (!cp72TimeStr) return;
+
+      const cp72TimeMs = new Date(cp72TimeStr).getTime();
+      const defectTimeMs = new Date(row.CREATION_TIME).getTime();
+
+      // Дефект учитывается только если он создан не позже CP72 + 20 минут
+      if (defectTimeMs > cp72TimeMs + GRACE_MS) return;
+
+      if (!vinDefectMap.has(row.VIN)) {
+        vinDefectMap.set(row.VIN, { total: 0, closed: 0 });
       }
-      const stat = vinDefectMap.get(vin);
+      const stat = vinDefectMap.get(row.VIN);
       stat.total += 1;
       if (row.STATUS && row.STATUS.toLowerCase() === 'closed') {
         stat.closed += 1;
       }
     });
 
+    // -------- 6. Классификация VIN --------
     let closedVins = 0;
     cp72Rows.forEach(row => {
-      const vin = row.VIN;
-      const stat = vinDefectMap.get(vin);
+      const stat = vinDefectMap.get(row.VIN);
+      // OK, если дефектов нет ИЛИ все закрыты
       if (!stat || stat.total === stat.closed) {
         closedVins += 1;
       }
@@ -5592,13 +5602,11 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
     const postLists = {
       all: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'REPAIR', 'REPAIR_Final',
         'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
       ],
       cp7: [
         'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'REPAIR', 'REPAIR_Final',
-        'EXT1', 'PIP2', 'PIP4', 'PIP9'
+        'EXT1', 'PIP9'
       ],
       pip: [
         'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
@@ -5608,9 +5616,9 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    // 1. VIN, прошедшие CP72 в окне
+    // VIN + CP72_TIME
     const [cp72Rows] = await pool.query(`
-      SELECT VIN
+      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
       FROM at_om_wiptrackinghistory
       WHERE WC_NAME = 'CP72'
         AND CREATION_TIME >= ?
@@ -5618,11 +5626,13 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
       GROUP BY VIN
     `, [rangeStart, rangeEnd]);
 
-    if (cp72Rows.length === 0) {
-      return res.json([]);
-    }
+    if (cp72Rows.length === 0) return res.json([]);
 
-    // 2. Все дефекты (выбранные посты) для этих VIN в окне
+    const vins = cp72Rows.map(r => r.VIN);
+    const placeholders = vins.map(() => '?').join(',');
+    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
+
+    // Все дефекты этих VIN
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN,
@@ -5630,29 +5640,33 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
         d.PART_NAME,
         d.PROBLEM_TYPE,
         d.PROBLEM_GRADE,
-        d.STATUS
+        d.STATUS,
+        d.CREATION_TIME
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.POST_NAME IN (${postListStr})
-        AND d.CREATION_TIME >= ?
-        AND d.CREATION_TIME <= ?
-        AND d.VIN IN (
-          SELECT VIN FROM at_om_wiptrackinghistory
-          WHERE WC_NAME = 'CP72'
-            AND CREATION_TIME >= ?
-            AND CREATION_TIME <= ?
-        )
-    `, [rangeStart, rangeEnd, rangeStart, rangeEnd]);
+        AND d.VIN IN (${placeholders})
+    `, [...vins]);
 
-    // 3. Определяем NOK VIN (у которых есть хотя бы один незакрытый дефект)
+    const GRACE_MS = 20 * 60 * 1000;
+
+    // Фильтруем дефекты по CP72_TIME + 20 мин
+    const filteredDefects = defectRows.filter(row => {
+      const cp72TimeStr = cp72TimeMap.get(row.VIN);
+      if (!cp72TimeStr) return false;
+      const cp72TimeMs = new Date(cp72TimeStr).getTime();
+      const defectTimeMs = new Date(row.CREATION_TIME).getTime();
+      return defectTimeMs <= cp72TimeMs + GRACE_MS;
+    });
+
+    // NOK VIN
     const vinStatusMap = new Map();
-    defectRows.forEach(row => {
-      const vin = row.VIN;
-      if (!vinStatusMap.has(vin)) {
-        vinStatusMap.set(vin, { hasOpen: false });
+    filteredDefects.forEach(row => {
+      if (!vinStatusMap.has(row.VIN)) {
+        vinStatusMap.set(row.VIN, { hasOpen: false });
       }
       if (row.STATUS && row.STATUS.toLowerCase() !== 'closed') {
-        vinStatusMap.get(vin).hasOpen = true;
+        vinStatusMap.get(row.VIN).hasOpen = true;
       }
     });
 
@@ -5661,11 +5675,10 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
       if (val.hasOpen) openVins.add(vin);
     });
 
-    // 4. Группируем только незакрытые дефекты NOK VIN, считаем количество строк
+    // Топ незакрытых дефектов у NOK VIN
     const defectGroupMap = new Map();
-    defectRows.forEach(row => {
+    filteredDefects.forEach(row => {
       if (!openVins.has(row.VIN)) return;
-      // Учитываем только незакрытые дефекты
       if (row.STATUS && row.STATUS.toLowerCase() === 'closed') return;
 
       const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
@@ -5680,11 +5693,7 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
     });
 
     const topDefects = Array.from(defectGroupMap.values())
-      .map(d => ({
-        mpp: d.mpp,
-        grade: d.grade,
-        defectCount: d.defectCount,
-      }))
+      .map(d => ({ mpp: d.mpp, grade: d.grade, defectCount: d.defectCount }))
       .sort((a, b) => b.defectCount - a.defectCount)
       .slice(0, 20);
 
@@ -5703,14 +5712,14 @@ app.get('/api/drr-cp7-vins', async (req, res) => {
     }
 
     const postLists = {
-      all: ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'],
-      cp7: ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'],
+      all: ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'],
+      cp7: ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'EXT1', 'PIP9'],
       pip: ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9']
     };
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    // 1. VIN, прошедшие CP72 в окне
+    // VIN + CP72_TIME
     const [cp72Rows] = await pool.query(`
       SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
       FROM at_om_wiptrackinghistory
@@ -5723,33 +5732,41 @@ app.get('/api/drr-cp7-vins', async (req, res) => {
 
     const vins = cp72Rows.map(r => r.VIN);
     const placeholders = vins.map(() => '?').join(',');
+    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
 
-    // 2. Дефекты этих VIN в заданном окне
+    // Все дефекты этих VIN
     const [defectRows] = await pool.query(`
-      SELECT d.VIN, d.STATUS
+      SELECT d.VIN, d.STATUS, d.CREATION_TIME
       FROM at_qm_defect_info d
       WHERE d.VIN IN (${placeholders})
         AND d.POST_NAME IN (${postListStr})
-        AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
-    `, [...vins, startTime, endTime]);
+    `, vins);
 
-    // 3. NOK VIN
+    const GRACE_MS = 20 * 60 * 1000;
+
+    // Фильтруем по CP72_TIME + 20 мин
+    const filteredDefects = defectRows.filter(row => {
+      const cp72TimeStr = cp72TimeMap.get(row.VIN);
+      if (!cp72TimeStr) return false;
+      const cp72TimeMs = new Date(cp72TimeStr).getTime();
+      const defectTimeMs = new Date(row.CREATION_TIME).getTime();
+      return defectTimeMs <= cp72TimeMs + GRACE_MS;
+    });
+
+    // NOK-множество
     const nokSet = new Set();
-    defectRows.forEach(row => {
+    filteredDefects.forEach(row => {
       if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
         nokSet.add(row.VIN);
       }
     });
 
-    // 4. Получаем модели для всех VIN из work_order
+    // Модели
     const [modelRows] = await pool.query(`
-      SELECT VIN, MODEL
-      FROM work_order
-      WHERE VIN IN (${placeholders})
+      SELECT VIN, MODEL FROM work_order WHERE VIN IN (${placeholders})
     `, vins);
     const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
 
-    // 5. Формируем итоговый список
     const result = cp72Rows
       .filter(row => {
         const isNok = nokSet.has(row.VIN);
