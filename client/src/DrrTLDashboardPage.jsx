@@ -306,7 +306,7 @@ export default function DrrTLDashboardPage() {
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>
-        <h1 style={titleStyle}>DRR Testline</h1>
+        <h1 style={titleStyle}>DRR ADAS</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
@@ -453,7 +453,7 @@ export default function DrrTLDashboardPage() {
 
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
-              <h2 style={tableTitleStyle}>Топ дефектов Testline</h2>
+              <h2 style={tableTitleStyle}>Топ дефектов NOK авто</h2>
               <div style={tableScrollStyle}>
                 {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
