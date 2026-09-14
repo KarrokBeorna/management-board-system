@@ -483,34 +483,14 @@ export default function DrrCp7DashboardPage() {
       ) : (
         <div style={dashboardGridStyle}>
           <div style={chartColumnStyle}>
-            {/* === Bufer DJ + значение PLC === */}
+            {/* === Значение PLC (Bufer) === */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'flex-start',
-              gap: '16px',
               marginBottom: '12px',
               flexShrink: 0,
             }}>
-              <div style={{
-                background: '#FFFFFF',
-                borderRadius: '20px',
-                padding: '10px 24px',
-                boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
-                border: '3px solid #fdfeff',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-              }}>
-                <span style={{ fontSize: '1.4rem', color: '#64748B', fontWeight: 800, letterSpacing: '0.5px' }}>
-                  Bufer
-                </span>
-                <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#1E293B', letterSpacing: '2px', lineHeight: 1 }}>
-                  DJ
-                </span>
-              </div>
-
-              {/* Значение PLC справа от Bufer DJ */}
               <OpcUaWidget />
             </div>
 
