@@ -21,7 +21,7 @@ import DrrCp8DashboardPage from './assets/cp8drr.png'; //
 import drrTestlinePreview from './assets/tldrr.png';
 import DrrPIPDashboardPage from './assets/drrpip.png'; //
 import electronicsPreview from './assets/elec.png'; // 
-import brigPreview from './assets/123.png'; // замените на реальное имя файла
+import brigPreview from './assets/briga.png'; // замените на реальное имя файла
 
 // ====== СТИЛИ ======
 const sectionStyle = {
