@@ -353,7 +353,7 @@ export default function HomePage() {
     { to: "/warranty", imgSrc: warrantyPreview, caption: "Warranty", accentColor: "#10B981" },
     { to: "/holds-sgp", imgSrc: HoldsSgpPage, caption: "Holds СГП", accentColor: "#EF4444" },
     { to: "http://10.27.195.16/reports/024", imgSrc: externalReportPreview, caption: "DRR по заводу", accentColor: "#EF4444" },
-    //{ to: "/brigade-report", imgSrc: brigPreview, caption: "Бригадный отчет", accentColor: "#3B82F6" }
+    { to: "/brigade-report", imgSrc: brigPreview, caption: "Бригадный отчет", accentColor: "#3B82F6" }
   ];
 
   const filterCards = (cards) => {
