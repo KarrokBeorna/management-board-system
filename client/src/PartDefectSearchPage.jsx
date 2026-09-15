@@ -345,6 +345,7 @@ export default function PartDefectSearchPage() {
     loading,
     error,
     exportName,
+    exportData,
     columnFilters,
     allData,
     activeFilterColumn,
@@ -383,7 +384,7 @@ export default function PartDefectSearchPage() {
               />
               <span style={{ fontSize: 13 }}>Уникальные VIN</span>
             </label>
-            <button onClick={() => exportToExcel(data, exportName)} style={{ ...buttonStyle, background: '#059669', padding: '6px 12px', fontSize: 12 }}>
+            <button onClick={() => exportToExcel(exportData, exportName)} style={{ ...buttonStyle, background: '#059669', padding: '6px 12px', fontSize: 12 }}>
               📊 Excel
             </button>
           </div>
@@ -498,6 +499,7 @@ export default function PartDefectSearchPage() {
             leftLoading,
             leftError,
             'part_defect_search',
+            filteredLeftData,
             leftColumnFilters,
             leftAllData,
             activeFilterColumn,
@@ -533,6 +535,7 @@ export default function PartDefectSearchPage() {
             rightLoading,
             rightError,
             'vin_defect_search',
+            filteredRightData,
             rightColumnFilters,
             rightAllData,
             activeFilterColumn,
