@@ -6277,160 +6277,6 @@ app.get('/api/drr-cp7-history-top-mpp', async (req, res) => {
 });
 
 
-app.get('/api/testpage-data', async (req, res) => {
-  try {
-    const { filter = 'all', startTime, endTime } = req.query;
-    if (!startTime || !endTime) {
-      return res.status(400).json({ error: 'startTime и endTime обязательны' });
-    }
-
-    const postLists = {
-      all: [
-        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'REPAIR', 'REPAIR_Final',
-        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
-      ],
-      cp7: [
-        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'REPAIR', 'REPAIR_Final',
-        'EXT1', 'PIP2', 'PIP4', 'PIP9'
-      ],
-      pip: [
-        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
-      ]
-    };
-    const postList = postLists[filter] || postLists.all;
-    const postListStr = postList.map(p => `'${p}'`).join(',');
-
-    const sql = `
-      WITH cp72_vins AS (
-          SELECT 
-              VIN,
-              MIN(CREATION_TIME) AS CP72_TIME
-          FROM at_om_wiptrackinghistory
-          WHERE WC_NAME = 'CP72'
-            AND CREATION_TIME >= ?
-            AND CREATION_TIME <= ?
-          GROUP BY VIN
-      ),
-      defect_status AS (
-          SELECT 
-              d.VIN,
-              d.PART_NAME,
-              d.PROBLEM_TYPE,
-              d.PROBLEM_GRADE,
-              d.POST_NAME,
-              d.CREATION_TIME,
-              COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) AS repair_time,
-              cp.CP72_TIME,
-              DATE_ADD(cp.CP72_TIME, INTERVAL 17 MINUTE) AS ADJUSTED_CP72_TIME,
-              CASE 
-                  -- Пустые PART_NAME и PROBLEM_TYPE -> CLOSED
-                  WHEN (d.PART_NAME IS NULL OR TRIM(d.PART_NAME) = '') 
-                       AND (d.PROBLEM_TYPE IS NULL OR TRIM(d.PROBLEM_TYPE) = '') 
-                  THEN 'CLOSED'
-                  -- Если ремонт выполнен до скорректированного CP72 -> CLOSED
-                  WHEN COALESCE(d.REPAIR_TIME, d.REPAIR_TIME1) < DATE_ADD(cp.CP72_TIME, INTERVAL 5 MINUTE) THEN 'CLOSED'
-                  -- Всё остальное (включая repair_time IS NULL) -> OFF
-                  ELSE 'OFF'
-              END AS calculated_status
-          FROM at_qm_defect_info d
-          JOIN cp72_vins cp ON d.VIN = cp.VIN
-          WHERE d.POST_NAME IN (${postListStr})
-            AND d.CREATION_TIME >= ?
-            AND d.CREATION_TIME <= ?
-      ),
-      vin_summary AS (
-          SELECT 
-              VIN,
-              COUNT(*) AS total_defects,
-              SUM(CASE WHEN calculated_status = 'CLOSED' THEN 1 ELSE 0 END) AS closed_defects,
-              SUM(CASE WHEN calculated_status = 'OFF' THEN 1 ELSE 0 END) AS off_defects
-          FROM defect_status
-          GROUP BY VIN
-      )
-      SELECT 
-          d.VIN,
-          wo.MODEL,
-          d.PART_NAME,
-          d.PROBLEM_TYPE,
-          d.PROBLEM_GRADE,
-          d.POST_NAME,
-          d.calculated_status AS STATUS,
-          d.CREATION_TIME,
-          d.repair_time AS REPAIR_TIME,
-          d.CP72_TIME,
-          d.ADJUSTED_CP72_TIME,
-          CASE 
-              WHEN vs.off_defects = 0 THEN 1 
-              ELSE 0 
-          END AS ALL_DEFECTS_CLOSED
-      FROM defect_status d
-      LEFT JOIN work_order wo ON wo.VIN = d.VIN
-      LEFT JOIN vin_summary vs ON vs.VIN = d.VIN
-      ORDER BY d.VIN, d.CREATION_TIME
-    `;
-
-    const [rows] = await pool.query(sql, [startTime, endTime, startTime, endTime]);
-
-    if (!rows.length) {
-      return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0, topDefects: [] });
-    }
-
-    const vinMap = new Map();
-    rows.forEach(row => {
-      const vin = row.VIN;
-      if (!vinMap.has(vin)) {
-        vinMap.set(vin, { allClosed: row.ALL_DEFECTS_CLOSED === 1, model: row.MODEL || '-' });
-      }
-      if (row.ALL_DEFECTS_CLOSED === 0) {
-        vinMap.get(vin).allClosed = false;
-      }
-      if (row.MODEL) {
-        vinMap.get(vin).model = row.MODEL;
-      }
-    });
-
-    const totalVins = vinMap.size;
-    const closedVins = Array.from(vinMap.values()).filter(v => v.allClosed).length;
-    const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
-
-    const notClosedVins = new Set(
-      Array.from(vinMap.entries())
-        .filter(([, v]) => !v.allClosed)
-        .map(([vin]) => vin)
-    );
-
-    const defectMap = new Map();
-    rows.forEach(row => {
-      if (!notClosedVins.has(row.VIN)) return;
-      const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
-      if (!defectMap.has(mpp)) {
-        defectMap.set(mpp, { mpp, grade: row.PROBLEM_GRADE || '-', affectedVins: new Set() });
-      }
-      defectMap.get(mpp).affectedVins.add(row.VIN);
-    });
-
-    const topDefects = Array.from(defectMap.values())
-      .map(d => ({
-        mpp: d.mpp,
-        grade: d.grade,
-        affectedVins: d.affectedVins.size,
-      }))
-      .sort((a, b) => b.affectedVins - a.affectedVins)
-      .slice(0, 20);
-
-    res.json({
-      totalVins,
-      closedVins,
-      drrPercent: Math.round(drrPercent * 10) / 10,
-      topDefects,
-    });
-  } catch (err) {
-    console.error('Ошибка testpage-data:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 app.get('/api/drr-cp8-dashboard', async (req, res) => {
   try {
@@ -8945,6 +8791,352 @@ app.get('/api/brigade-report/top-mpp-vins', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
+
+
+
+
+
+app.get('/api/drr-cp7-dashboard-test', async (req, res) => {
+  try {
+    const { filter = 'all', startTime, endTime } = req.query;
+
+    let rangeStart, rangeEnd;
+    if (startTime && endTime) {
+      rangeStart = startTime;
+      rangeEnd = endTime;
+    } else {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      rangeStart = `${y}-${m}-${d} 00:00:00`;
+      rangeEnd = `${y}-${m}-${d} 23:59:59`;
+    }
+
+    // Посты без REPAIR / REPAIR_Final
+    const postLists = {
+      all: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ],
+      cp7: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'EXT1', 'PIP9'
+      ],
+      pip: [
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ]
+    };
+    const postList = postLists[filter] || postLists.all;
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    // 1) VIN + CP72_TIME
+    const [cp72Rows] = await pool.query(`
+      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
+      GROUP BY VIN
+    `, [rangeStart, rangeEnd]);
+
+    const totalVins = cp72Rows.length;
+    if (totalVins === 0) {
+      return res.json({
+        totalVins: 0, closedVins: 0, nokVins: 0, drrPercent: 0,
+        debug: {
+          notClosedDefects: 0,
+          closedLateDefects: 0,
+          ignoredAfterCp72: 0,
+          graceMinutes: 20
+        }
+      });
+    }
+
+    const vins = cp72Rows.map(r => r.VIN);
+    const placeholders = vins.map(() => '?').join(',');
+    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
+
+    // 2) Все дефекты этих VIN
+    const [defectRows] = await pool.query(`
+      SELECT d.VIN, d.STATUS, d.CREATION_TIME, d.LAST_MODIFIED_TIME
+      FROM at_qm_defect_info d
+      WHERE d.VIN IN (${placeholders})
+        AND d.POST_NAME IN (${postListStr})
+    `, vins);
+
+    const GRACE_MS = 20 * 60 * 1000; // 20 минут
+    const vinHasNok = new Map();
+
+    let notClosedDefects = 0;
+    let closedLateDefects = 0;
+    let ignoredAfterCp72 = 0;
+
+    defectRows.forEach(row => {
+      const cp72TimeStr = cp72TimeMap.get(row.VIN);
+      if (!cp72TimeStr) return;
+      const cp72Ms = new Date(cp72TimeStr).getTime();
+      const createdMs = new Date(row.CREATION_TIME).getTime();
+
+      // Отсечка: дефект создан позже CP72 + 20 мин — не влияет
+      if (createdMs > cp72Ms + GRACE_MS) {
+        ignoredAfterCp72 += 1;
+        return;
+      }
+
+      const isClosed = row.STATUS && row.STATUS.toUpperCase() === 'CLOSED';
+
+      if (!isClosed) {
+        vinHasNok.set(row.VIN, true);
+        notClosedDefects += 1;
+        return;
+      }
+
+      if (!row.LAST_MODIFIED_TIME) {
+        vinHasNok.set(row.VIN, true);
+        notClosedDefects += 1;
+        return;
+      }
+
+      const closedMs = new Date(row.LAST_MODIFIED_TIME).getTime();
+      if (closedMs > cp72Ms + GRACE_MS) {
+        vinHasNok.set(row.VIN, true);
+        closedLateDefects += 1;
+      }
+    });
+
+    let closedVins = 0;
+    cp72Rows.forEach(row => {
+      if (!vinHasNok.get(row.VIN)) closedVins += 1;
+    });
+
+    const nokVins = totalVins - closedVins;
+    const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
+
+    res.json({
+      totalVins,
+      closedVins,
+      nokVins,
+      drrPercent: Math.round(drrPercent * 10) / 10,
+      debug: {
+        notClosedDefects,
+        closedLateDefects,
+        ignoredAfterCp72,
+        graceMinutes: 20
+      }
+    });
+  } catch (err) {
+    console.error('Ошибка DRR CP7 Dashboard TEST:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/drr-cp7-top-defects-test', async (req, res) => {
+  try {
+    const { filter = 'all', startTime, endTime } = req.query;
+
+    let rangeStart, rangeEnd;
+    if (startTime && endTime) {
+      rangeStart = startTime;
+      rangeEnd = endTime;
+    } else {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      rangeStart = `${y}-${m}-${d} 00:00:00`;
+      rangeEnd = `${y}-${m}-${d} 23:59:59`;
+    }
+
+    const postLists = {
+      all: ['CP7','CP7 Audit','CP7 Gate','CP7-gate','EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9'],
+      cp7: ['CP7','CP7 Audit','CP7 Gate','CP7-gate','EXT1','PIP9'],
+      pip: ['EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9']
+    };
+    const postList = postLists[filter] || postLists.all;
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    // 1) VIN + CP72_TIME
+    const [cp72Rows] = await pool.query(`
+      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
+      GROUP BY VIN
+    `, [rangeStart, rangeEnd]);
+
+    if (cp72Rows.length === 0) return res.json([]);
+
+    const vins = cp72Rows.map(r => r.VIN);
+    const placeholders = vins.map(() => '?').join(',');
+    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
+
+    // 2) Все дефекты
+    const [defectRows] = await pool.query(`
+      SELECT
+        d.VIN,
+        wo.MODEL,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.PROBLEM_GRADE,
+        d.STATUS,
+        d.CREATION_TIME,
+        d.LAST_MODIFIED_TIME
+      FROM at_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.POST_NAME IN (${postListStr})
+        AND d.VIN IN (${placeholders})
+    `, [...vins]);
+
+    const GRACE_MS = 20 * 60 * 1000;
+    const defectGroupMap = new Map();
+
+    defectRows.forEach(row => {
+      const cp72TimeStr = cp72TimeMap.get(row.VIN);
+      if (!cp72TimeStr) return;
+      const cp72Ms = new Date(cp72TimeStr).getTime();
+      const createdMs = new Date(row.CREATION_TIME).getTime();
+
+      // Отсечка: дефект создан позже CP72 + 20 мин — не учитываем
+      if (createdMs > cp72Ms + GRACE_MS) return;
+
+      const isClosed = row.STATUS && row.STATUS.toUpperCase() === 'CLOSED';
+
+      let isNokDefect = false;
+      if (!isClosed) {
+        isNokDefect = true;
+      } else if (!row.LAST_MODIFIED_TIME) {
+        isNokDefect = true;
+      } else {
+        const closedMs = new Date(row.LAST_MODIFIED_TIME).getTime();
+        if (closedMs > cp72Ms + GRACE_MS) isNokDefect = true;
+      }
+
+      if (!isNokDefect) return;
+
+      const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
+      if (!defectGroupMap.has(mpp)) {
+        defectGroupMap.set(mpp, {
+          mpp,
+          grade: row.PROBLEM_GRADE || '-',
+          defectCount: 0,
+          statuses: {}
+        });
+      }
+      const g = defectGroupMap.get(mpp);
+      g.defectCount += 1;
+      g.statuses[row.STATUS] = (g.statuses[row.STATUS] || 0) + 1;
+    });
+
+    const topDefects = Array.from(defectGroupMap.values())
+      .sort((a, b) => b.defectCount - a.defectCount)
+      .slice(0, 20);
+
+    res.json(topDefects);
+  } catch (err) {
+    console.error('Ошибка DRR CP7 Top Defects TEST:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/drr-cp7-vins-test', async (req, res) => {
+  try {
+    const { filter = 'all', startTime, endTime, status } = req.query;
+    if (!startTime || !endTime || !status) {
+      return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
+    }
+
+    const postLists = {
+      all: ['CP7','CP7 Audit','CP7 Gate','CP7-gate','EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9'],
+      cp7: ['CP7','CP7 Audit','CP7 Gate','CP7-gate','EXT1','PIP9'],
+      pip: ['EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9']
+    };
+    const postList = postLists[filter] || postLists.all;
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    // VIN + CP72_TIME
+    const [cp72Rows] = await pool.query(`
+      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
+      GROUP BY VIN
+    `, [startTime, endTime]);
+
+    if (cp72Rows.length === 0) return res.json([]);
+
+    const vins = cp72Rows.map(r => r.VIN);
+    const placeholders = vins.map(() => '?').join(',');
+    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
+
+    // Все дефекты
+    const [defectRows] = await pool.query(`
+      SELECT d.VIN, d.STATUS, d.CREATION_TIME, d.LAST_MODIFIED_TIME
+      FROM at_qm_defect_info d
+      WHERE d.VIN IN (${placeholders})
+        AND d.POST_NAME IN (${postListStr})
+    `, vins);
+
+    const GRACE_MS = 20 * 60 * 1000;
+    const nokSet = new Set();
+
+    defectRows.forEach(row => {
+      const cp72TimeStr = cp72TimeMap.get(row.VIN);
+      if (!cp72TimeStr) return;
+      const cp72Ms = new Date(cp72TimeStr).getTime();
+      const createdMs = new Date(row.CREATION_TIME).getTime();
+
+      // Отсечка
+      if (createdMs > cp72Ms + GRACE_MS) return;
+
+      const isClosed = row.STATUS && row.STATUS.toUpperCase() === 'CLOSED';
+
+      if (!isClosed) {
+        nokSet.add(row.VIN);
+        return;
+      }
+      if (!row.LAST_MODIFIED_TIME) {
+        nokSet.add(row.VIN);
+        return;
+      }
+      const closedMs = new Date(row.LAST_MODIFIED_TIME).getTime();
+      if (closedMs > cp72Ms + GRACE_MS) {
+        nokSet.add(row.VIN);
+      }
+    });
+
+    // Модели
+    const [modelRows] = await pool.query(`
+      SELECT VIN, MODEL FROM work_order WHERE VIN IN (${placeholders})
+    `, vins);
+    const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
+
+    const result = cp72Rows
+      .filter(row => {
+        const isNok = nokSet.has(row.VIN);
+        if (status === 'NOK') return isNok;
+        if (status === 'OK') return !isNok;
+        return false;
+      })
+      .map(row => ({
+        vin: row.VIN,
+        model: modelMap.get(row.VIN) || '-',
+        cp72_time: row.CP72_TIME,
+      }))
+      .sort((a, b) => new Date(a.cp72_time) - new Date(b.cp72_time));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка drr-cp7-vins TEST:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
+
 
 
 // ================== ЗАМЕТКИ ==================

@@ -1,987 +1,602 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import * as XLSX from 'xlsx';
-import { saveAs } from 'file-saver';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, PieChart, Pie, Cell, LabelList
-} from 'recharts';
+import React, { useState, useEffect } from 'react';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 
-const inputStyle = {
-  padding: '8px 12px',
-  borderRadius: 8,
-  border: '1px solid #D1D5DB',
-  fontSize: 14,
-  background: '#F9FAFB',
+const containerStyle = {
+  padding: '20px',
+  fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
+  width: '100%',
+  height: '125vh',
+  boxSizing: 'border-box',
+  backgroundColor: '#F8FAFC',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+  zoom: 0.8,
 };
 
-const buttonStyle = {
-  padding: '8px 20px',
-  borderRadius: 8,
-  border: 'none',
-  background: '#2563EB',
-  color: 'white',
-  fontWeight: 600,
-  fontSize: 14,
-  cursor: 'pointer',
+const headerStyle = {
   display: 'flex',
   alignItems: 'center',
-  gap: 6,
+  justifyContent: 'space-between',
+  marginBottom: '20px',
+  flexShrink: 0,
 };
 
-const cardStyle = {
+const titleStyle = {
+  fontSize: '2.5rem',
+  fontWeight: 900,
+  color: '#1E293B',
+  margin: 0,
+};
+
+const filterGroupStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px',
+};
+
+const filterButtonStyle = (active) => ({
+  padding: '12px 24px',
+  borderRadius: '12px',
+  border: 'none',
+  fontWeight: 700,
+  fontSize: '1.4rem',
+  background: active ? '#2563EB' : '#FFFFFF',
+  color: active ? '#FFFFFF' : '#64748B',
+  cursor: 'pointer',
+  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+  transition: 'all 0.2s',
+});
+
+const timeFilterButtonStyle = (active, activeColor) => ({
+  ...filterButtonStyle(active),
+  background: active ? activeColor : '#FFFFFF',
+  color: active ? '#FFFFFF' : '#64748B',
+});
+
+const dashboardGridStyle = {
+  display: 'flex',
+  gap: '20px',
+  flex: 1,
+  minHeight: 0,
+};
+
+const chartColumnStyle = {
+  flex: '0 0 40%',
   backgroundColor: '#FFFFFF',
-  borderRadius: 16,
-  padding: 28,
-  marginBottom: 30,
-  boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-  border: '1px solid #F0F0F5',
+  borderRadius: '24px',
+  padding: '24px',
+  display: 'flex',
+  flexDirection: 'column',
+  boxShadow: '0 8px 30px rgba(0,0,0,0.05)',
+  minHeight: 0,
 };
 
-const COLORS = ['#3B82F6', '#F59E0B', '#10B981', '#EF4444', '#8B5CF6', '#EC4899', '#6366F1', '#14B8A6', '#F97316', '#84CC16'];
+const rightColumnStyle = {
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: 0,
+  gap: '20px',
+};
 
-const formatHours = (value) =>
-  value.toLocaleString('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const tableCardStyle = {
+  flex: 1,
+  backgroundColor: '#FFFFFF',
+  borderRadius: '24px',
+  padding: '24px',
+  display: 'flex',
+  flexDirection: 'column',
+  boxShadow: '0 8px 30px rgba(0,0,0,0.05)',
+  minHeight: 0,
+};
 
-const truncate = (str, maxLen = 28) =>
-  str.length > maxLen ? str.substring(0, maxLen - 3) + '...' : str;
+const debugCardStyle = {
+  backgroundColor: '#FFFFFF',
+  borderRadius: '24px',
+  padding: '24px',
+  boxShadow: '0 8px 30px rgba(0,0,0,0.05)',
+  border: '2px solid #FCD34D',
+};
 
-// ====== МУЛЬТИСЕЛЕКТ ======
-function MultiSelect({ options, selected, onChange, placeholder }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef(null);
+const tableTitleStyle = {
+  fontSize: '2rem',
+  fontWeight: 800,
+  color: '#1E293B',
+  margin: '0 0 16px 0',
+};
 
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+const tableScrollStyle = {
+  flex: 1,
+  overflowY: 'auto',
+  border: '1px solid #E2E8F0',
+  borderRadius: '12px',
+};
 
-  const nonAllOptions = options.filter(o => o !== 'ALL');
-  const allSelected = selected.length === nonAllOptions.length && nonAllOptions.length > 0;
+const thStyle = {
+  padding: '18px 24px',
+  textAlign: 'left',
+  fontWeight: 800,
+  color: '#475569',
+  borderBottom: '3px solid #E2E8F0',
+  background: '#F8FAFC',
+  fontSize: '1.6rem',
+  textTransform: 'uppercase',
+  position: 'sticky',
+  top: 0,
+  zIndex: 10,
+};
 
-  const handleToggle = (value) => {
-    if (value === 'ALL') {
-      if (allSelected) {
-        onChange([]);
-      } else {
-        onChange(nonAllOptions);
-      }
-    } else {
-      const updated = selected.includes(value)
-        ? selected.filter(v => v !== value)
-        : [...selected, value];
-      onChange(updated);
+const tdStyle = {
+  padding: '14px 24px',
+  borderBottom: '1px solid #F1F5F9',
+  color: '#1E293B',
+  fontSize: '1.6rem',
+};
+
+const PIE_COLORS = ['#10B981', '#EF4444'];
+
+const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
+
+const getMoscowMinutes = () => {
+  const moscow = getMoscowTime();
+  return moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+};
+
+const getDefaultTimeFilter = () => {
+  const totalMinutes = getMoscowMinutes();
+  if (totalMinutes >= 1 * 60 + 31 && totalMinutes < 7 * 60 + 50) return 'night';
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 16 * 60 + 41) return 'day';
+  return 'evening';
+};
+
+const getTimeRange = (timeFilter) => {
+  const nowMoscow = getMoscowTime();
+  const year = nowMoscow.getUTCFullYear();
+  const month = String(nowMoscow.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(nowMoscow.getUTCDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`;
+
+  const yesterday = new Date(nowMoscow);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const yestYear = yesterday.getUTCFullYear();
+  const yestMonth = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
+  const yestDay = String(yesterday.getUTCDate()).padStart(2, '0');
+  const yesterdayStr = `${yestYear}-${yestMonth}-${yestDay}`;
+
+  const totalMinutes = getMoscowMinutes();
+
+  if (timeFilter === 'all') {
+    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+  }
+  if (timeFilter === 'day') {
+    const dateToUse = totalMinutes >= 7 * 60 + 50 ? todayStr : yesterdayStr;
+    return { start: `${dateToUse} 07:50:00`, end: `${dateToUse} 16:40:00` };
+  }
+  if (timeFilter === 'evening') {
+    const dateToUse = totalMinutes >= 16 * 60 + 41 ? todayStr : yesterdayStr;
+    const startDateObj = new Date(`${dateToUse}T00:00:00Z`);
+    const endDateObj = new Date(startDateObj);
+    endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
+    const endStr = `${endDateObj.getUTCFullYear()}-${String(endDateObj.getUTCMonth() + 1).padStart(2, '0')}-${String(endDateObj.getUTCDate()).padStart(2, '0')}`;
+    return { start: `${dateToUse} 16:41:00`, end: `${endStr} 01:30:00` };
+  }
+  if (timeFilter === 'night') {
+    const dateToUse = totalMinutes >= 1 * 60 + 31 ? todayStr : yesterdayStr;
+    return { start: `${dateToUse} 01:31:00`, end: `${dateToUse} 07:50:00` };
+  }
+  return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+};
+
+const getWeekNumber = (date) => {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+};
+
+const getCurrentShiftInfo = () => {
+  const nowMoscow = getMoscowTime();
+  const totalMinutes = getMoscowMinutes();
+  let shiftDate = new Date(nowMoscow);
+  let shiftType = 'night';
+
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
+    shiftType = 'day';
+  } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
+    shiftType = 'evening';
+    if (totalMinutes <= 1 * 60 + 30) {
+      shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
     }
-  };
+  } else {
+    shiftType = 'night';
+  }
 
-  const displayText = selected.length === 0 || allSelected
-    ? placeholder
-    : selected.join(', ');
+  const weekNumber = getWeekNumber(shiftDate);
+  const isEvenWeek = weekNumber % 2 === 0;
+  let shiftLetter = 'C';
+  if (shiftType === 'night') shiftLetter = 'C';
+  else if (shiftType === 'day') shiftLetter = isEvenWeek ? 'B' : 'A';
+  else if (shiftType === 'evening') shiftLetter = isEvenWeek ? 'A' : 'B';
 
-  return (
-    <div ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        style={{
-          ...inputStyle,
-          width: 120,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 4,
-          cursor: 'pointer',
-          textAlign: 'left',
-          padding: '8px 10px',
-        }}
-      >
-        <span style={{
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          maxWidth: 80,
-          fontSize: 13,
-        }}>
-          {displayText}
-        </span>
-        <span style={{ fontSize: 10, color: '#6B7280' }}>▼</span>
-      </button>
-      {isOpen && (
-        <div style={{
-          position: 'absolute',
-          top: '100%',
-          left: 0,
-          marginTop: 4,
-          background: '#FFFFFF',
-          borderRadius: 12,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-          padding: 12,
-          minWidth: 200,
-          zIndex: 100,
-          border: '1px solid #F0F0F5',
-          maxHeight: 300,
-          overflowY: 'auto',
-        }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
-            <input
-              type="checkbox"
-              checked={allSelected}
-              onChange={() => handleToggle('ALL')}
-            />
-            Все
-          </label>
-          {nonAllOptions.map(option => (
-            <label key={option} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', cursor: 'pointer', fontSize: 14 }}>
-              <input
-                type="checkbox"
-                checked={selected.includes(option)}
-                onChange={() => handleToggle(option)}
-              />
-              {option}
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+  return { weekNumber, shiftLetter, shiftType };
+};
 
-export default function MppWeeklyTopPage() {
-  const [activeTab, setActiveTab] = useState('report');
+export default function DrrCp7DashboardTestPage() {
+  const [filter, setFilter] = useState('all');
+  const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
+  const [isManualFilter, setIsManualFilter] = useState(false);
+  const [shiftInfo, setShiftInfo] = useState(getCurrentShiftInfo());
+  const [drrData, setDrrData] = useState({
+    totalVins: 0,
+    closedVins: 0,
+    nokVins: 0,
+    drrPercent: 0,
+    debug: { notClosedDefects: 0, closedLateDefects: 0, ignoredAfterCp72: 0, graceMinutes: 20 },
+  });
+  const [topDefects, setTopDefects] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Фильтры
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
-  const [selectedModels, setSelectedModels] = useState([]);
-  const [data, setData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [expandedMpp, setExpandedMpp] = useState(null);
-  const [vinData, setVinData] = useState([]);
-  const [vinLoading, setVinLoading] = useState(false);
+  const [vinList, setVinList] = useState([]);
+  const [vinListStatus, setVinListStatus] = useState('');
+  const [showVinModal, setShowVinModal] = useState(false);
+  const [vinModalLoading, setVinModalLoading] = useState(false);
 
-  // Аналитика
-  const [analyticsData, setAnalyticsData] = useState([]);
-  const [analyticsSummary, setAnalyticsSummary] = useState({ totalVins: 0, totalRemVins: 0 });
-  const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [analyticsError, setAnalyticsError] = useState(null);
-
-  // Скрытие строк дефектов
-  const [hiddenRows, setHiddenRows] = useState({});
-  const hiddenCount = Object.values(hiddenRows).filter(Boolean).length;
-
-  // Для графика динамики
-  const [trendModalOpen, setTrendModalOpen] = useState(false);
-  const [trendData, setTrendData] = useState(null);
-  const [trendLoading, setTrendLoading] = useState(false);
-  const [trendMpp, setTrendMpp] = useState('');
-
-  const availableModels = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
-  const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
-
-  // Установка дат по умолчанию (вчера)
-  useEffect(() => {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yStr = yesterday.toISOString().split('T')[0];
-    setDateFrom(yStr);
-    setDateTo(yStr);
-  }, []);
-
-  // ====== ЗАГРУЗКА ДАННЫХ С МНОЖЕСТВЕННЫМ ВЫБОРОМ ======
   const loadData = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const allCheckpointsSelected = selectedCheckpoints.length === availableCheckpoints.length;
-      const allModelsSelected = selectedModels.length === availableModels.length;
-      
-      const checkpointList = (selectedCheckpoints.length === 0 || allCheckpointsSelected) 
-        ? ['ALL'] 
-        : selectedCheckpoints;
-      
-      const modelList = (selectedModels.length === 0 || allModelsSelected) 
-        ? ['ALL'] 
-        : selectedModels;
-      
-      const allResults = [];
-      
-      for (const cp of checkpointList) {
-        for (const mdl of modelList) {
-          const params = new URLSearchParams({
-            dateFrom,
-            dateTo,
-            checkpoint: cp,
-            model: mdl,
-            defectType: 'offline',
-          });
-          
-          const res = await fetch(`${API_BASE}/api/mpp-weekly-top?${params.toString()}`);
-          if (!res.ok) throw new Error('Ошибка загрузки данных');
-          const json = await res.json();
-          
-          if (Array.isArray(json)) {
-            allResults.push(...json);
-          }
-        }
-      }
-      
-      // Объединяем дубликаты MPP
-      const uniqueMap = {};
-      allResults.forEach(row => {
-        if (!uniqueMap[row.MPP]) {
-          uniqueMap[row.MPP] = { ...row };
-        } else {
-          uniqueMap[row.MPP].DEFECT_COUNT += row.DEFECT_COUNT;
-          uniqueMap[row.MPP].VIN_COUNT += row.VIN_COUNT;
-          uniqueMap[row.MPP].TOTAL_VINS += row.TOTAL_VINS || 0;
-          uniqueMap[row.MPP].REMZONE_VINS += row.REMZONE_VINS || 0;
-        }
+      const { start, end } = getTimeRange(timeFilter);
+
+      const drrParams = new URLSearchParams({
+        filter,
+        startTime: start,
+        endTime: end,
       });
-      
-      // Пересчитываем REMZONE_PERCENT
-      Object.values(uniqueMap).forEach(row => {
-        if (row.TOTAL_VINS > 0) {
-          row.REMZONE_PERCENT = ((row.REMZONE_VINS * 100) / row.TOTAL_VINS).toFixed(2);
-        }
+      const drrRes = await fetch(`${API_BASE}/api/drr-cp7-dashboard-test?${drrParams.toString()}`);
+      if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
+      const drrJson = await drrRes.json();
+      setDrrData(drrJson);
+
+      const defectsParams = new URLSearchParams({
+        filter,
+        startTime: start,
+        endTime: end,
       });
-      
-      setData(Object.values(uniqueMap));
+      const defectsRes = await fetch(`${API_BASE}/api/drr-cp7-top-defects-test?${defectsParams.toString()}`);
+      if (!defectsRes.ok) throw new Error('Ошибка загрузки топа дефектов');
+      const defectsJson = await defectsRes.json();
+      setTopDefects(defectsJson);
     } catch (err) {
-      alert(err.message);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const loadVins = async (row) => {
-    setVinLoading(true);
+  const loadVinList = async (status) => {
+    setVinModalLoading(true);
     try {
-      const params = new URLSearchParams({
-        partName: row.PART_NAME,
-        problemType: row.PROBLEM_TYPE,
-        dateFrom,
-        dateTo,
-        model: row.MODEL,
-      });
-      const res = await fetch(`${API_BASE}/api/mpp-vins?${params.toString()}`);
-      if (!res.ok) throw new Error('Ошибка загрузки VIN');
+      const { start, end } = getTimeRange(timeFilter);
+      const params = new URLSearchParams({ filter, startTime: start, endTime: end, status });
+      const res = await fetch(`${API_BASE}/api/drr-cp7-vins-test?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки списка VIN');
       const json = await res.json();
-      setVinData(json);
+      setVinList(json);
+      setVinListStatus(status);
+      setShowVinModal(true);
     } catch (err) {
       alert(err.message);
     } finally {
-      setVinLoading(false);
+      setVinModalLoading(false);
     }
   };
 
-  const handleToggleMpp = (row) => {
-    if (expandedMpp === row.MPP) {
-      setExpandedMpp(null);
-      setVinData([]);
-    } else {
-      setExpandedMpp(row.MPP);
-      loadVins(row);
-    }
-  };
-
-  const exportVins = () => {
-    if (vinData.length === 0) return;
-    const exportData = vinData.map(v => ({
-      VIN: v.VIN,
-      Модель: v.MODEL,
-      В_ремзоне: v.IN_REMZONE ? 'Да' : 'Нет',
-      Время_дефекта: v.DEFECT_TIME || '',
-      Зашёл: v.REM_IN || '',
-      Вышел: v.REM_OUT || '',
-      Время_в_ремзоне: v.REM_DURATION || '',
-    }));
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'VINs');
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `VIN_${expandedMpp}.xlsx`);
-  };
-
-  const exportFullReport = async () => {
-    if (data.length === 0) return;
-    setLoading(true);
-    try {
-      const wb = XLSX.utils.book_new();
-      const summary = data.map(row => ({
-        MPP: row.MPP,
-        Модель: row.MODEL,
-        'Кол-во авто': row.VIN_COUNT || 0,
-        'Кол-во дефектов': row.DEFECT_COUNT,
-        'DPU per 1000': row.DPU,
-        'Доля в ремзоне, %': row.REMZONE_PERCENT || '0.00',
-      }));
-      const wsSummary = XLSX.utils.json_to_sheet(summary);
-      XLSX.utils.book_append_sheet(wb, wsSummary, 'Топ MPP');
-
-      for (let row of data) {
-        try {
-          const params = new URLSearchParams({
-            partName: row.PART_NAME,
-            problemType: row.PROBLEM_TYPE,
-            dateFrom,
-            dateTo,
-            model: row.MODEL,
-          });
-          const res = await fetch(`${API_BASE}/api/mpp-vins?${params.toString()}`);
-          if (res.ok) {
-            const vins = await res.json();
-            if (vins.length > 0) {
-              const vinExport = vins.map(v => ({
-                VIN: v.VIN,
-                Модель: v.MODEL,
-                В_ремзоне: v.IN_REMZONE ? 'Да' : 'Нет',
-                Время_дефекта: v.DEFECT_TIME || '',
-                Зашёл: v.REM_IN || '',
-                Вышел: v.REM_OUT || '',
-                Время_в_ремзоне: v.REM_DURATION || '',
-              }));
-              const wsVin = XLSX.utils.json_to_sheet(vinExport);
-              let sheetName = `VIN ${row.MPP}`.substring(0, 31);
-              XLSX.utils.book_append_sheet(wb, wsVin, sheetName);
-            }
-          }
-        } catch (err) {
-          console.warn(`Не удалось загрузить VIN для ${row.MPP}`);
-        }
-      }
-
-      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      saveAs(new Blob([buf], { type: 'application/octet-stream' }), 'Топ_MPP_за_неделю.xlsx');
-    } catch (err) {
-      alert('Ошибка при экспорте: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ====== ЗАГРУЗКА АНАЛИТИКИ С МНОЖЕСТВЕННЫМ ВЫБОРОМ ======
-  const loadAnalytics = async () => {
-    setAnalyticsLoading(true);
-    setAnalyticsError(null);
-    try {
-      const allCheckpointsSelected = selectedCheckpoints.length === availableCheckpoints.length;
-      const allModelsSelected = selectedModels.length === availableModels.length;
-      
-      const checkpointList = (selectedCheckpoints.length === 0 || allCheckpointsSelected) 
-        ? ['ALL'] 
-        : selectedCheckpoints;
-      
-      const modelList = (selectedModels.length === 0 || allModelsSelected) 
-        ? ['ALL'] 
-        : selectedModels;
-      
-      let allData = [];
-      let totalVinsSum = 0;
-      let totalRemVinsSum = 0;
-      
-      for (const cp of checkpointList) {
-        for (const mdl of modelList) {
-          const params = new URLSearchParams({
-            dateFrom,
-            dateTo,
-            checkpoint: cp,
-            model: mdl,
-          });
-          
-          const res = await fetch(`${API_BASE}/api/mpp-drr-analytics?${params.toString()}`);
-          if (!res.ok) throw new Error('Ошибка загрузки аналитики');
-          const json = await res.json();
-          
-          if (json.data) {
-            allData.push(...json.data);
-          }
-          if (json.summary) {
-            totalVinsSum += json.summary.totalVins || 0;
-            totalRemVinsSum += json.summary.totalRemVins || 0;
-          }
-        }
-      }
-      
-      // Объединяем дубликаты MPP
-      const uniqueMap = {};
-      allData.forEach(row => {
-        if (!uniqueMap[row.MPP]) {
-          uniqueMap[row.MPP] = { ...row };
-        } else {
-          uniqueMap[row.MPP].DEFECT_COUNT += row.DEFECT_COUNT;
-          uniqueMap[row.MPP].REMZONE_COUNT += row.REMZONE_COUNT;
-          uniqueMap[row.MPP].TOTAL_HOURS += row.TOTAL_HOURS;
-        }
-      });
-      
-      setAnalyticsData(Object.values(uniqueMap));
-      setAnalyticsSummary({
-        totalVins: totalVinsSum,
-        totalRemVins: totalRemVinsSum,
-      });
-    } catch (err) {
-      setAnalyticsError(err.message);
-    } finally {
-      setAnalyticsLoading(false);
-    }
-  };
-
-  // Загрузка при открытии вкладки и когда даты готовы
   useEffect(() => {
-    if (activeTab === 'report' && dateFrom && dateTo) loadData();
-  }, [activeTab, dateFrom, dateTo]);
+    loadData();
+  }, [filter, timeFilter]);
 
-  // Группировка по моделям для круговой диаграммы
-  const modelData = useMemo(() => {
-    if (!analyticsData.length) return [];
-    const map = {};
-    analyticsData.forEach(d => {
-      const model = d.MODEL || 'Неизвестно';
-      map[model] = (map[model] || 0) + d.TOTAL_HOURS;
-    });
-    return Object.entries(map)
-      .map(([name, hours]) => ({ name, hours }))
-      .sort((a, b) => b.hours - a.hours);
-  }, [analyticsData]);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const newShiftInfo = getCurrentShiftInfo();
+      setShiftInfo(newShiftInfo);
+      if (!isManualFilter) {
+        const defaultFilter = getDefaultTimeFilter();
+        setTimeFilter(defaultFilter);
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [isManualFilter]);
 
-  const handleToggleRow = (mpp) => {
-    setHiddenRows(prev => ({ ...prev, [mpp]: !prev[mpp] }));
+  useEffect(() => {
+    const interval = setInterval(loadData, 30000);
+    return () => clearInterval(interval);
+  }, [filter, timeFilter]);
+
+  const nokVins = drrData.nokVins ?? (drrData.totalVins - drrData.closedVins);
+
+  const pieData = [
+    { name: 'DRR', value: drrData.drrPercent },
+    { name: 'Не прямой сход', value: Math.max(0, 100 - drrData.drrPercent) },
+  ];
+
+  const handleFilterClick = (f) => {
+    setIsManualFilter(true);
+    setTimeFilter(f);
   };
 
-  const showAllRows = () => {
-    setHiddenRows({});
-  };
-
-  // Функция открытия модального окна с трендом
-  const openTrend = async (row) => {
-    setTrendMpp(row.MPP);
-    setTrendModalOpen(true);
-    setTrendLoading(true);
-    try {
-      const checkpointParam = (selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length) 
-        ? 'ALL' 
-        : selectedCheckpoints.join(',');
-      
-      const fetchTrend = (periodType) => {
-        const params = new URLSearchParams({
-          partName: row.PART_NAME,
-          problemType: row.PROBLEM_TYPE,
-          model: row.MODEL,
-          checkpoint: checkpointParam,
-          periodType,
-        });
-        return fetch(`${API_BASE}/api/mpp-defect-trend?${params.toString()}`).then(r => r.json());
-      };
-      
-      const [monthData, weekData, dayData] = await Promise.all([
-        fetchTrend('month'),
-        fetchTrend('week'),
-        fetchTrend('day'),
-      ]);
-      
-      setTrendData({ month: monthData, week: weekData, day: dayData });
-    } catch (err) {
-      alert('Ошибка загрузки тренда: ' + err.message);
-    } finally {
-      setTrendLoading(false);
-    }
-  };
+  const { start, end } = getTimeRange(timeFilter);
 
   return (
-    <div style={{ padding: 30, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
-      <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 30 }}>Топ дефектов по DRR</h1>
-
-      <div style={{ display: 'flex', gap: 12, marginBottom: 30 }}>
-        <button onClick={() => setActiveTab('report')} style={{
-          padding: '10px 28px', borderRadius: 10, border: 'none', fontWeight: 600, fontSize: 15,
-          background: activeTab === 'report' ? '#2563EB' : '#F3F4F6',
-          color: activeTab === 'report' ? '#FFFFFF' : '#6B7280', cursor: 'pointer',
-        }}>Отчёт</button>
-        <button onClick={() => setActiveTab('analytics')} style={{
-          padding: '10px 28px', borderRadius: 10, border: 'none', fontWeight: 600, fontSize: 15,
-          background: activeTab === 'analytics' ? '#2563EB' : '#F3F4F6',
-          color: activeTab === 'analytics' ? '#FFFFFF' : '#6B7280', cursor: 'pointer',
-        }}>Аналитика по DRR</button>
-      </div>
-
-      {activeTab === 'report' && (
-        <div style={cardStyle}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-              Начало:
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-              Конец:
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-              Чекпоинты:
-              <MultiSelect
-                options={['ALL', ...availableCheckpoints]}
-                selected={selectedCheckpoints}
-                onChange={setSelectedCheckpoints}
-                placeholder="Все"
-              />
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-              Модели:
-              <MultiSelect
-                options={['ALL', ...availableModels]}
-                selected={selectedModels}
-                onChange={setSelectedModels}
-                placeholder="Все"
-              />
-            </label>
-            
-            <div style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
-              <button onClick={loadData} disabled={loading} style={buttonStyle}>
-                {loading ? '⏳ Загрузка...' : '▶ Загрузить'}
-              </button>
-              <button onClick={exportFullReport} disabled={data.length === 0 || loading} style={{ ...buttonStyle, background: '#059669' }}>
-                📊 Экспорт
-              </button>
+    <div style={containerStyle}>
+      <div style={headerStyle}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <h1 style={titleStyle}>DRR CP7 Dashboard (TEST)</h1>
+          <span style={{ fontSize: '1.1rem', color: '#64748B', fontWeight: 600 }}>
+            Логика: LAST_MODIFIED_TIME ≤ CP72 + {drrData.debug?.graceMinutes ?? 20} мин · окно: {start} — {end}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
+            <div style={{
+              background: '#FFFFFF',
+              borderRadius: '20px',
+              padding: '12px 28px',
+              boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+              border: '3px solid #fdfeff',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+            }}>
+              <span style={{ fontSize: '1.8rem', color: '#64748B', fontWeight: 800 }}>CW</span>
+              <span style={{ fontSize: '3rem', fontWeight: 900, color: '#1E293B', letterSpacing: '2px', lineHeight: 1 }}>
+                {shiftInfo.weekNumber}
+              </span>
+            </div>
+            <div style={{
+              width: '80px',
+              height: '80px',
+              borderRadius: '20px',
+              background: '#ffffff',
+              color: '#1E293B',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 900,
+              fontSize: '3.5rem',
+              lineHeight: 1,
+              boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
+              border: '4px solid #FFFFFF',
+            }}>
+              {shiftInfo.shiftLetter}
             </div>
           </div>
 
-          {data.length > 0 && (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#F9FAFB' }}>
-                    <th style={thStyle}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span>MPP</span>
-                        {hiddenCount > 0 && (
-                          <button
-                            onClick={showAllRows}
-                            title="Показать все скрытые строки"
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: '#60A5FA',
-                              cursor: 'pointer',
-                              fontSize: 12,
-                              fontWeight: 600,
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 4,
-                            }}
-                          >
-                            <span>👁️</span> {hiddenCount}
-                          </button>
-                        )}
-                      </div>
-                    </th>
-                    <th style={thStyle}>Модель</th>
-                    <th style={thStyle}>Кол-во авто</th>
-                    <th style={thStyle}>Кол-во дефектов</th>
-                    <th style={thStyle}>DPU per 1000</th>
-                    <th style={thStyle}>Доля в ремзоне, %</th>
-                    <th style={thStyle}>Пост внесения</th>
-                    <th style={thStyle}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((row, idx) => {
-                    if (hiddenRows[row.MPP]) return null;
-                    return (
-                      <React.Fragment key={row.MPP}>
-                        <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                          <td style={tdStyle}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleToggleRow(row.MPP);
-                                }}
-                                title="Свернуть строку"
-                                style={{
-                                  background: 'transparent',
-                                  border: 'none',
-                                  color: '#D1D5DB',
-                                  cursor: 'pointer',
-                                  fontSize: 14,
-                                  padding: 0,
-                                  lineHeight: 1,
-                                  width: 18,
-                                  textAlign: 'center',
-                                }}
-                              >
-                                ▾
-                              </button>
-                              <span>{row.MPP}</span>
-                            </div>
+          <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
+
+          <div style={filterGroupStyle}>
+            <button style={filterButtonStyle(filter === 'all')} onClick={() => setFilter('all')}>Все</button>
+            <button style={filterButtonStyle(filter === 'cp7')} onClick={() => setFilter('cp7')}>CP7</button>
+            <button style={filterButtonStyle(filter === 'pip')} onClick={() => setFilter('pip')}>PIP</button>
+          </div>
+
+          <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
+
+          <div style={filterGroupStyle}>
+            <button style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')} onClick={() => handleFilterClick('all')}>Сутки</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')} onClick={() => handleFilterClick('day')}>День</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')} onClick={() => handleFilterClick('evening')}>Вечер</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')} onClick={() => handleFilterClick('night')}>Ночь</button>
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: '2.5rem', textAlign: 'center', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748B' }}>
+          Загрузка данных...
+        </div>
+      ) : error ? (
+        <div style={{ fontSize: '2.5rem', textAlign: 'center', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#DC2626' }}>
+          ❌ {error}
+        </div>
+      ) : (
+        <div style={dashboardGridStyle}>
+          <div style={chartColumnStyle}>
+            <div style={{ position: 'relative', width: '100%', height: '500px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius="75%"
+                    outerRadius="98%"
+                    paddingAngle={4}
+                    stroke="#FFFFFF"
+                    strokeWidth={4}
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value) => `${value.toFixed(1)}%`}
+                    contentStyle={{ fontSize: '1.8rem', borderRadius: '16px' }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                textAlign: 'center',
+                pointerEvents: 'none',
+              }}>
+                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
+                <div style={{ fontSize: '6.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
+                  {drrData.drrPercent.toFixed(1)}%
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Всего авто</div>
+                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalVins}</div>
+              </div>
+              <div
+                style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                onClick={() => loadVinList('OK')}
+              >
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
+                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.closedVins}</div>
+              </div>
+              <div
+                style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                onClick={() => loadVinList('NOK')}
+              >
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK Авто</div>
+                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{nokVins}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={rightColumnStyle}>
+            {/* === DEBUG PANEL === */}
+            <div style={debugCardStyle}>
+              <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#92400E', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                🧪 Debug: как считался DRR
+              </h2>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div style={{ backgroundColor: '#FEF3C7', borderRadius: 12, padding: '14px 18px', border: '1px solid #FCD34D' }}>
+                  <div style={{ fontSize: '1.1rem', color: '#78350F', fontWeight: 600 }}>Всего авто (CP72)</div>
+                  <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#78350F' }}>{drrData.totalVins}</div>
+                </div>
+                <div style={{ backgroundColor: '#D1FAE5', borderRadius: 12, padding: '14px 18px', border: '1px solid #6EE7B7' }}>
+                  <div style={{ fontSize: '1.1rem', color: '#065F46', fontWeight: 600 }}>OK (закрыты вовремя)</div>
+                  <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#065F46' }}>{drrData.closedVins}</div>
+                </div>
+                <div style={{ backgroundColor: '#FEE2E2', borderRadius: 12, padding: '14px 18px', border: '1px solid #FCA5A5' }}>
+                  <div style={{ fontSize: '1.1rem', color: '#991B1B', fontWeight: 600 }}>Не закрыты вообще (NOK)</div>
+                  <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#991B1B' }}>{drrData.debug?.notClosedDefects ?? 0}</div>
+                </div>
+                <div style={{ backgroundColor: '#FFE4E6', borderRadius: 12, padding: '14px 18px', border: '1px solid #FDA4AF' }}>
+                  <div style={{ fontSize: '1.1rem', color: '#9F1239', fontWeight: 600 }}>
+                    Закрыты позже CP72+{drrData.debug?.graceMinutes ?? 20}м (NOK)
+                  </div>
+                  <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#9F1239' }}>{drrData.debug?.closedLateDefects ?? 0}</div>
+                </div>
+                <div style={{ backgroundColor: '#E0E7FF', borderRadius: 12, padding: '14px 18px', border: '1px solid #A5B4FC', gridColumn: '1 / -1' }}>
+                  <div style={{ fontSize: '1.1rem', color: '#3730A3', fontWeight: 600 }}>
+                    Игнорируется (создан после CP72 + {drrData.debug?.graceMinutes ?? 20} мин)
+                  </div>
+                  <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#3730A3' }}>{drrData.debug?.ignoredAfterCp72 ?? 0}</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 14, fontSize: '1.1rem', color: '#78350F', backgroundColor: '#FFFBEB', borderRadius: 8, padding: '10px 14px', border: '1px dashed #FCD34D' }}>
+                <b>Проверка:</b> OK + NOK = {drrData.closedVins + nokVins} = Всего авто = {drrData.totalVins}{' '}
+                {(drrData.closedVins + nokVins) === drrData.totalVins ? '✅' : '❌ РАСХОЖДЕНИЕ!'}
+              </div>
+            </div>
+
+            <div style={tableCardStyle}>
+              <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP7</h2>
+              <div style={tableScrollStyle}>
+                {topDefects.length > 0 ? (
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>Описание дефекта (MPP)</th>
+                        <th style={thStyle}>Класс</th>
+                        <th style={thStyle}>Кол-во дефектов</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topDefects.map((defect, idx) => (
+                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                          <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none' }}>
+                            {defect.mpp}
                           </td>
-                          <td style={{ ...tdStyle, fontSize: '10px' }}>{row.MODEL}</td>
-                          <td style={{ ...tdStyle, textAlign: 'center' }}>{row.VIN_COUNT}</td>
-                          <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DEFECT_COUNT}</td>
-                          <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DPU}</td>
-                          <td style={{ ...tdStyle, textAlign: 'center' }}>{row.REMZONE_PERCENT || '0.00'}</td>
-                          <td style={tdStyle}>{row.POST_NAME}</td>
-                          <td style={tdStyle}>
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <button
-                                onClick={() => openTrend(row)}
-                                title="Динамика дефекта"
-                                style={{ ...buttonStyle, background: '#8B5CF6', padding: '4px 10px', fontSize: 12 }}
-                              >
-                                📈
-                              </button>
-                              <button onClick={() => handleToggleMpp(row)} style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}>
-                                {expandedMpp === row.MPP ? 'Скрыть VIN' : 'VIN'}
-                              </button>
-                            </div>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
+                          <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '2rem', color: idx < 3 ? '#DC2626' : '#1E293B' }}>
+                            {defect.defectCount}
                           </td>
                         </tr>
-                        {expandedMpp === row.MPP && (
-                          <tr>
-                            <td colSpan={8} style={{ padding: 0 }}>
-                              <div style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8, margin: '8px 0' }}>
-                                {vinLoading ? (
-                                  <p>Загрузка VIN...</p>
-                                ) : (
-                                  <>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                      <span style={{ fontWeight: 600 }}>VIN для "{row.MPP}" ({vinData.length} шт.)</span>
-                                      <button onClick={exportVins} style={{ ...buttonStyle, background: '#059669', padding: '4px 10px', fontSize: 12 }}>📊 Экспорт VIN</button>
-                                    </div>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                                      <thead>
-                                        <tr style={{ backgroundColor: '#E5E7EB' }}>
-                                          <th style={thStyle}>VIN</th>
-                                          <th style={thStyle}>Модель</th>
-                                          <th style={thStyle}>В ремзоне</th>
-                                          <th style={thStyle}>Время дефекта</th>
-                                          <th style={thStyle}>Зашёл</th>
-                                          <th style={thStyle}>Вышел</th>
-                                          <th style={thStyle}>Время в ремзоне</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {vinData.map((v, i) => (
-                                          <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                                            <td style={tdStyle}>{v.VIN}</td>
-                                            <td style={tdStyle}>{v.MODEL}</td>
-                                            <td style={{ ...tdStyle, textAlign: 'center', color: v.IN_REMZONE ? '#DC2626' : '#059669', fontWeight: 600 }}>
-                                              {v.IN_REMZONE ? 'Да' : 'Нет'}
-                                            </td>
-                                            <td style={tdStyle}>{v.DEFECT_TIME || '—'}</td>
-                                            <td style={tdStyle}>{v.REM_IN || '—'}</td>
-                                            <td style={tdStyle}>{v.REM_OUT || '—'}</td>
-                                            <td style={tdStyle}>{v.REM_DURATION || '—'}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p style={{ textAlign: 'center', padding: '40px', color: '#64748B', fontSize: '2rem' }}>Нет данных</p>
+                )}
+              </div>
             </div>
-          )}
+          </div>
         </div>
       )}
 
-      {activeTab === 'analytics' && (
-        <div style={cardStyle}>
-          <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ background: '#EEF2FF', padding: '4px 12px', borderRadius: 6, color: '#2563EB', fontSize: 16 }}>📈</span>
-            Аналитика по DRR
-          </h2>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-              Начало:
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-              Конец:
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-              Чекпоинты:
-              <MultiSelect
-                options={['ALL', ...availableCheckpoints]}
-                selected={selectedCheckpoints}
-                onChange={setSelectedCheckpoints}
-                placeholder="Все"
-              />
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-              Модели:
-              <MultiSelect
-                options={['ALL', ...availableModels]}
-                selected={selectedModels}
-                onChange={setSelectedModels}
-                placeholder="Все"
-              />
-            </label>
-            
-            <div style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
-              <button onClick={loadAnalytics} disabled={analyticsLoading} style={buttonStyle}>
-                {analyticsLoading ? '⏳ Загрузка...' : '▶ Загрузить аналитику'}
-              </button>
+      {showVinModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000,
+        }} onClick={() => setShowVinModal(false)}>
+          <div style={{
+            backgroundColor: '#FFFFFF',
+            borderRadius: 16,
+            padding: 24,
+            width: '90%',
+            maxWidth: 600,
+            maxHeight: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
+                VIN ({vinListStatus}) — {vinList.length} шт.
+              </h3>
+              <button onClick={() => setShowVinModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }}>×</button>
             </div>
-          </div>
-
-          {analyticsError && <p style={{ color: '#DC2626' }}>❌ {analyticsError}</p>}
-
-          {analyticsData.length > 0 && (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px,1fr))', gap: 16, marginBottom: 30 }}>
-                <div style={{
-                  backgroundColor: '#FFFFFF', borderRadius: 16, padding: '24px',
-                  boxShadow: '0 8px 20px rgba(0,0,0,0.08)', borderLeft: '4px solid #3B82F6',
-                  textAlign: 'center', transition: 'transform 0.2s',
-                }}>
-                  <div style={{ fontSize: 15, color: '#6B7280', marginBottom: 10 }}>Всего авто</div>
-                  <div style={{ fontSize: 32, fontWeight: 800, color: '#1F2937' }}>{analyticsSummary.totalVins}</div>
-                </div>
-                <div style={{
-                  backgroundColor: '#FFFFFF', borderRadius: 16, padding: '24px',
-                  boxShadow: '0 8px 20px rgba(0,0,0,0.08)', borderLeft: '4px solid #10B981',
-                  textAlign: 'center', transition: 'transform 0.2s',
-                }}>
-                  <div style={{ fontSize: 15, color: '#6B7280', marginBottom: 10 }}>Авто в ремзоне</div>
-                  <div style={{ fontSize: 32, fontWeight: 800, color: '#1F2937' }}>{analyticsSummary.totalRemVins}</div>
-                </div>
-                <div style={{
-                  backgroundColor: '#FFFFFF', borderRadius: 16, padding: '24px',
-                  boxShadow: '0 8px 20px rgba(0,0,0,0.08)', borderLeft: '4px solid #F59E0B',
-                  textAlign: 'center', transition: 'transform 0.2s',
-                }}>
-                  <div style={{ fontSize: 15, color: '#6B7280', marginBottom: 10 }}>Общее время в ремзоне</div>
-                  <div style={{ fontSize: 32, fontWeight: 800, color: '#1F2937' }}>
-                    {formatHours(analyticsData.reduce((sum, d) => sum + d.TOTAL_HOURS, 0))} ч
-                  </div>
-                  <div style={{ fontSize: 14, color: '#6B7280', marginTop: 4 }}>
-                    ({(analyticsData.reduce((sum, d) => sum + d.TOTAL_HOURS, 0) / 24).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} дн)
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', marginBottom: 30 }}>
-                <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 20 }}>Суммарное время в ремзоне по дефектам</h3>
-                <ResponsiveContainer width="100%" height={800}>
-                  <BarChart data={[...analyticsData].sort((a, b) => b.TOTAL_HOURS - a.TOTAL_HOURS)} layout="vertical" margin={{ top: 20, right: 60, left: 20, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F5" />
-                    <XAxis type="number" tickFormatter={formatHours} />
-                    <YAxis type="category" dataKey="MPP" tick={{ fontSize: 8 }} width={450} interval={0} />
-                    <Tooltip formatter={formatHours} />
-                    <Bar dataKey="TOTAL_HOURS" fill="#3B82F6" barSize={48} radius={[0, 8, 8, 0]}>
-                      <LabelList dataKey="TOTAL_HOURS" position="right" formatter={formatHours} style={{ fill: '#1F2937', fontSize: 13 }} />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div style={{ display: 'flex', gap: 20, marginBottom: 30, flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: 300, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, boxShadow: '0 4px 12px rgba(0,0,0,0.04)' }}>
-                  <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 20 }}>Доля времени по дефектам</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <ResponsiveContainer width="100%" height={280}>
-                      <PieChart>
-                        <Pie
-                          data={analyticsData.slice(0, 10)}
-                          dataKey="TOTAL_HOURS"
-                          nameKey="MPP"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={90}
-                          label={({ MPP, percent }) => `${(percent * 100).toFixed(1)}%`}
-                          labelLine={{ stroke: '#9CA3AF', strokeWidth: 1 }}
-                        >
-                          {analyticsData.slice(0, 10).map((_, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={formatHours} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px 16px', marginTop: 16 }}>
-                      {analyticsData.slice(0, 10).map((d, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#374151' }}>
-                          <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: COLORS[i % COLORS.length], display: 'inline-block' }} />
-                          {truncate(d.MPP, 20)}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ flex: 1, minWidth: 300, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, boxShadow: '0 4px 12px rgba(0,0,0,0.04)' }}>
-                  <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 20 }}>Доля времени по моделям</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <ResponsiveContainer width="100%" height={280}>
-                      <PieChart>
-                        <Pie
-                          data={modelData}
-                          dataKey="hours"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={90}
-                          label={({ name, percent }) => `${(percent * 100).toFixed(1)}%`}
-                          labelLine={{ stroke: '#9CA3AF', strokeWidth: 1 }}
-                        >
-                          {modelData.map((_, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={formatHours} />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px 16px', marginTop: 16 }}>
-                      {modelData.map((d, i) => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#374151' }}>
-                          <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: COLORS[i % COLORS.length], display: 'inline-block' }} />
-                          {d.name}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, boxShadow: '0 4px 12px rgba(0,0,0,0.04)' }}>
-                <h3 style={{ fontWeight: 600, color: '#1F2937', marginBottom: 20 }}>Детализация</h3>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            {vinModalLoading ? (
+              <p>Загрузка...</p>
+            ) : (
+              <div style={{ overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ backgroundColor: '#F9FAFB' }}>
-                      <th style={thStyle}>MPP</th>
-                      <th style={thStyle}>Часы</th>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>VIN</th>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Модель</th>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>CP72</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {[...analyticsData].sort((a, b) => b.TOTAL_HOURS - a.TOTAL_HOURS).slice(0, 20).map((row, i) => (
-                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                        <td style={tdStyle}>{row.MPP}</td>
-                        <td style={{ ...tdStyle, textAlign: 'right' }}>{formatHours(row.TOTAL_HOURS)}</td>
+                    {vinList.map((item, idx) => (
+                      <tr key={idx}>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.cp72_time ? new Date(item.cp72_time).toLocaleString('ru-RU') : ''}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {trendModalOpen && (
-        <div style={{
-          position: 'fixed',
-          top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-        }} onClick={() => setTrendModalOpen(false)}>
-          <div style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 16,
-            padding: 24,
-            width: '96%',
-            maxWidth: 1600,
-            maxHeight: '95vh',
-            overflowY: 'auto',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1F2937' }}>
-                Динамика дефекта: {trendMpp}
-              </h3>
-              <button
-                onClick={() => setTrendModalOpen(false)}
-                style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280' }}
-              >
-                ✕
-              </button>
-            </div>
-            {trendLoading ? (
-              <p>Загрузка...</p>
-            ) : (
-              trendData && (
-                <div style={{ display: 'flex', flexDirection: 'row', gap: 20, flexWrap: 'nowrap' }}>
-                  {/* Месяцы */}
-                  <div style={{ flex: '1 1 0', minWidth: 250 }}>
-                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
-                    <ResponsiveContainer width="100%" height={320}>
-                      <BarChart data={trendData.month} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis 
-                          dataKey="period" 
-                          tick={{ fontSize: 16, fill: '#1F2937' }} 
-                          tickFormatter={(val) => {
-                            const [y, m] = val.split('-');
-                            const monthNames = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
-                            return monthNames[parseInt(m,10)-1];
-                          }}
-                        />
-                        <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
-                        <Bar dataKey="defect_count" fill="#3B82F6" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  {/* Недели */}
-                  <div style={{ flex: '1 1 0', minWidth: 250 }}>
-                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
-                    <ResponsiveContainer width="100%" height={320}>
-                      <BarChart data={trendData.week} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis 
-                          dataKey="period" 
-                          tick={{ fontSize: 16, fill: '#1F2937' }} 
-                          tickFormatter={(val) => val.split('-W')[1] ? `W${val.split('-W')[1]}` : val}
-                        />
-                        <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
-                        <Bar dataKey="defect_count" fill="#F59E0B" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  {/* Дни – одинаковый margin и высота */}
-                  <div style={{ flex: '2 1 0', minWidth: 350 }}>
-                    <h4 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
-                    <ResponsiveContainer width="100%" height={320}>
-                      <BarChart data={trendData.day} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis 
-                          dataKey="period" 
-                          interval={0} 
-                          tick={{ fontSize: 16, fill: '#1F2937' }} 
-                          tickFormatter={(val) => {
-                            const [, m, d] = val.split('-');
-                            return `${d}.${m}`;
-                          }}
-                        />
-                        <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={false} />
-                        <Bar dataKey="defect_count" fill="#10B981" radius={[4,4,0,0]}>
-                          <LabelList dataKey="defect_count" position="top" style={{ fontSize: 16, fill: '#1F2937', fontWeight: 700 }} />
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              )
             )}
           </div>
         </div>
@@ -989,19 +604,3 @@ export default function MppWeeklyTopPage() {
     </div>
   );
 }
-
-const thStyle = {
-  padding: '12px 10px',
-  textAlign: 'left',
-  fontWeight: 600,
-  color: '#374151',
-  borderBottom: '2px solid #E5E7EB',
-  background: '#F9FAFB',
-  whiteSpace: 'nowrap',
-};
-
-const tdStyle = {
-  padding: '10px',
-  borderBottom: '1px solid #F0F0F5',
-  color: '#1F2937',
-};
