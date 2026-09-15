@@ -1374,7 +1374,7 @@ function BrigadeReportByShift({ brigades, password, executeWithPassword }) {
     const top3Brigades = getTop3(data.topBrigades);
 
     return (
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 15 }}>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 800, display: 'flex', flexDirection: 'column', gap: 15 }}>
         <h2 style={{
           fontSize: '1.6rem',
           fontWeight: 900,
@@ -1535,15 +1535,22 @@ function BrigadeReportByShift({ brigades, password, executeWithPassword }) {
         </div>
       </div>
 
-      {loading && !dataA && !dataB ? (
+        {loading && !dataA && !dataB ? (
         <div style={{ textAlign: 'center', padding: '30px', fontSize: '1.5rem' }}>Загрузка...</div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0, gap: 15 }}>
-          {renderShiftBlock('Смена A', '#2563EB', dataA)}
-          <div style={{ width: 1, background: BRAND.border, flexShrink: 0 }} />
-          {renderShiftBlock('Смена B', '#F59E0B', dataB)}
+        ) : (
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            <div style={{
+            display: 'flex',
+            flexDirection: 'row',
+            gap: 15,
+            minHeight: '100%',
+            }}>
+            {renderShiftBlock('Смена A', '#2563EB', dataA)}
+            <div style={{ width: 1, background: BRAND.border, flexShrink: 0 }} />
+            {renderShiftBlock('Смена B', '#F59E0B', dataB)}
+            </div>
         </div>
-      )}
+        )}
     </div>
   );
 }
