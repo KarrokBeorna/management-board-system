@@ -7,12 +7,13 @@ const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
   width: '100%',
-  height: '100vh',
+  height: '125vh',      // ← было 100vh, теперь 125vh (100 / 0.8)
   boxSizing: 'border-box',
   backgroundColor: '#F8FAFC',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
+  zoom: 0.8,            // ← добавить эту строку
 };
 
 const headerStyle = {
