@@ -1,4 +1,3 @@
-// ReportPage.jsx – основной дашборд (без фильтра смен)
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
 const API_BASE = '';
@@ -73,6 +72,7 @@ export default function ReportPage() {
   const [defectType, setDefectType] = useState('default');
   const [selectedModel, setSelectedModel] = useState('ALL');
   const [unit, setUnit] = useState('defects');
+  const [shift, setShift] = useState('all');
 
   const [sortDay, setSortDay] = useState(null);
   const [sortCW, setSortCW] = useState(null);
@@ -107,19 +107,17 @@ export default function ReportPage() {
       const res = await fetch(`${API_BASE}/api/defect-notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          mpp, 
-          responsible: updated.responsible || '', 
-          action: updated.action || '' 
+        body: JSON.stringify({
+          mpp,
+          responsible: updated.responsible || '',
+          action: updated.action || ''
         }),
       });
-      
       const json = await res.json();
       if (json.success && json.note) {
-        // Обновляем updated_at из ответа
-        setUserNotes(prev => ({ 
-          ...prev, 
-          [mpp]: { ...prev[mpp], updated_at: json.note.updated_at } 
+        setUserNotes(prev => ({
+          ...prev,
+          [mpp]: { ...prev[mpp], updated_at: json.note.updated_at }
         }));
       }
     } catch (err) {
@@ -152,6 +150,8 @@ export default function ReportPage() {
     const params = new URLSearchParams();
     if (checkpoint !== 'ALL') params.append('checkpoint', checkpoint);
     if (defectType !== 'default') params.append('defectType', defectType);
+    if (shift !== 'all') params.append('shift', shift);
+
     const defectsUrl = `${API_BASE}/api/defects-dashboard${params.toString() ? '?' + params.toString() : ''}`;
 
     setLoading(true);
@@ -200,7 +200,7 @@ export default function ReportPage() {
         setCarsLoading(false);
       })
       .catch(() => setCarsLoading(false));
-  }, [checkpoint, defectType, selectedModel, allDays, prevWeekDays, currWeekDays]);
+  }, [checkpoint, defectType, selectedModel, shift, allDays, prevWeekDays, currWeekDays]);
 
   useEffect(() => {
     loadDataRef.current = loadAllData;
@@ -338,6 +338,14 @@ export default function ReportPage() {
           <option value="dpu">DPU per 1000</option>
         </select>
 
+        <span style={styles.filterLabel}>Смена:</span>
+        <select value={shift} onChange={e => setShift(e.target.value)} style={styles.filterSelect}>
+          <option value="all">Сутки</option>
+          <option value="A">A</option>
+          <option value="B">B</option>
+          <option value="C">C</option>
+        </select>
+
         {sortDay && <span style={styles.sortInfo}>Сорт: день {sortDay.week==='prev'?'прошл':'тек'} {sortDay.index+1} <button onClick={()=>setSortDay(null)} style={styles.clearBtn}>✕</button></span>}
         {sortCW && <span style={styles.sortInfo}>Сорт: CW{sortCW==='prev'?prevWeekNum:currWeekNum} <button onClick={()=>setSortCW(null)} style={styles.clearBtn}>✕</button></span>}
       </div>
@@ -438,7 +446,6 @@ export default function ReportPage() {
 
           return (
             <React.Fragment key={row.MPP}>
-              {/* Ячейка названия дефекта с кнопкой скрытия слева от таблицы */}
               <div
                 style={{
                   ...styles.name,

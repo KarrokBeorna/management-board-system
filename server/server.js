@@ -266,10 +266,10 @@ app.get('/api/cars-count', async (req, res) => {
 // ================== ДАШБОРД (основной + Daily Top) – с новыми списками постов ==================
 app.get('/api/defects-dashboard', async (req, res) => {
   try {
-    const { checkpoint, defectType } = req.query;
+    const { checkpoint, defectType, shift = 'all' } = req.query;
     const type = defectType || 'default';
 
-    // Единые списки постов для всех отчётов
+    // Списки постов
     const cp7Posts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
       'REPAIR', 'REPAIR_Final',
@@ -280,7 +280,7 @@ app.get('/api/defects-dashboard', async (req, res) => {
       '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'
     ];
     const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT','CP8 Touch Up'];
+    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'];
 
     let postList = [];
     if (checkpoint === 'CP7') postList = cp7Posts;
@@ -291,50 +291,108 @@ app.get('/api/defects-dashboard', async (req, res) => {
 
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    let whereClause = '';
+    let whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr})`;
     if (type === 'offline') {
-      whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr}) AND QM_DEF.S_OFFLINE = 1`;
+      whereClause += ` AND QM_DEF.S_OFFLINE = 1`;
     } else if (type === 'online') {
-      whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr}) AND QM_DEF.S_OFFLINE = 0`;
+      whereClause += ` AND QM_DEF.S_OFFLINE = 0`;
+    }
+
+    // ---------- SHIFT_DATE ----------
+    // 07:50 = 470 мин, 16:40 = 1000 мин, 16:41 = 1001 мин
+    // 01:30 = 90 мин, 01:31 = 91 мин
+    const minutesExpr = `(HOUR(QM_DEF.CREATION_TIME) * 60 + MINUTE(QM_DEF.CREATION_TIME))`;
+
+    let shiftDateExpr;
+    if (shift === 'all') {
+      shiftDateExpr = `DATE(QM_DEF.CREATION_TIME)`;
+    } else if (shift === 'C') {
+      // Ночь: 01:31 — 07:49 (нижняя граница включительно, верхняя до 07:50)
+      shiftDateExpr = `
+        CASE WHEN ${minutesExpr} BETWEEN 91 AND 469
+             THEN DATE(QM_DEF.CREATION_TIME) END
+      `;
+    } else if (shift === 'A') {
+      // Чётная неделя → A = вечер, Нечётная → A = день
+      shiftDateExpr = `
+        CASE
+          WHEN WEEKOFYEAR(QM_DEF.CREATION_TIME) % 2 = 0 THEN
+            CASE
+              WHEN ${minutesExpr} BETWEEN 1001 AND 1439
+                THEN DATE(QM_DEF.CREATION_TIME)
+              WHEN ${minutesExpr} BETWEEN 0 AND 90
+                THEN DATE_SUB(DATE(QM_DEF.CREATION_TIME), INTERVAL 1 DAY)
+            END
+          ELSE
+            CASE WHEN ${minutesExpr} BETWEEN 470 AND 1000
+                 THEN DATE(QM_DEF.CREATION_TIME) END
+        END
+      `;
+    } else if (shift === 'B') {
+      // Чётная неделя → B = день, Нечётная → B = вечер
+      shiftDateExpr = `
+        CASE
+          WHEN WEEKOFYEAR(QM_DEF.CREATION_TIME) % 2 = 0 THEN
+            CASE WHEN ${minutesExpr} BETWEEN 470 AND 1000
+                 THEN DATE(QM_DEF.CREATION_TIME) END
+          ELSE
+            CASE
+              WHEN ${minutesExpr} BETWEEN 1001 AND 1439
+                THEN DATE(QM_DEF.CREATION_TIME)
+              WHEN ${minutesExpr} BETWEEN 0 AND 90
+                THEN DATE_SUB(DATE(QM_DEF.CREATION_TIME), INTERVAL 1 DAY)
+            END
+        END
+      `;
     } else {
-      whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr})`;
+      shiftDateExpr = `DATE(QM_DEF.CREATION_TIME)`;
     }
 
     const query = `
-      SELECT 
-        QM_DEF.PART_NAME,
-        QM_DEF.PROBLEM_TYPE,
-        CONCAT(QM_DEF.PART_NAME, ' ', QM_DEF.PROBLEM_TYPE) AS PP,
-        DATE(QM_DEF.CREATION_TIME) AS CREATION_TIME,
-        wo.MODEL,
-        QM_DEF.VIN,
-        QM_DEF.POST_NAME,
+      SELECT
+        t.PART_NAME,
+        t.PROBLEM_TYPE,
+        CONCAT(t.PART_NAME, ' ', t.PROBLEM_TYPE) AS PP,
+        t.SHIFT_DATE AS CREATION_TIME,
+        t.MODEL,
+        t.VIN,
+        t.POST_NAME,
         COUNT(*) AS QTY_DEF
       FROM (
-        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
-               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-               PART_NAME, PROBLEM_TYPE
-        FROM at_biw_qm_defect_info
-        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-        UNION ALL
-        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
-               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-               PART_NAME, PROBLEM_TYPE
-        FROM at_paint_qm_defect_info
-        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-        UNION ALL
-        SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
-               (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
-               PART_NAME, PROBLEM_TYPE
-        FROM at_qm_defect_info
-        WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-      ) QM_DEF
-      JOIN work_order wo ON wo.VIN = QM_DEF.VIN
-      WHERE 1=1 ${whereClause}
-        AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
-        AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
-      GROUP BY QM_DEF.PART_NAME, QM_DEF.PROBLEM_TYPE, DATE(QM_DEF.CREATION_TIME), wo.MODEL, QM_DEF.VIN, QM_DEF.POST_NAME
-      ORDER BY CREATION_TIME DESC
+        SELECT
+          QM_DEF.PART_NAME,
+          QM_DEF.PROBLEM_TYPE,
+          QM_DEF.VIN,
+          QM_DEF.POST_NAME,
+          wo.MODEL,
+          (${shiftDateExpr}) AS SHIFT_DATE
+        FROM (
+          SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+                 PART_NAME, PROBLEM_TYPE
+          FROM at_biw_qm_defect_info
+          WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+          UNION ALL
+          SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+                 PART_NAME, PROBLEM_TYPE
+          FROM at_paint_qm_defect_info
+          WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+          UNION ALL
+          SELECT VIN, CREATION_TIME, CHECK_POINT, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE,
+                 PART_NAME, PROBLEM_TYPE
+          FROM at_qm_defect_info
+          WHERE CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+        ) QM_DEF
+        JOIN work_order wo ON wo.VIN = QM_DEF.VIN
+        WHERE 1=1 ${whereClause}
+          AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
+          AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''
+      ) t
+      WHERE t.SHIFT_DATE IS NOT NULL
+      GROUP BY t.PART_NAME, t.PROBLEM_TYPE, t.SHIFT_DATE, t.MODEL, t.VIN, t.POST_NAME
+      ORDER BY t.SHIFT_DATE DESC
       LIMIT 5000
     `;
 
@@ -353,7 +411,7 @@ app.get('/api/defects-dashboard', async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    console.error('ОШИБКА:', err.message);
+    console.error('ОШИБКА defects-dashboard:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
