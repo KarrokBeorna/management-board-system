@@ -7911,7 +7911,6 @@ app.get('/api/brigade-report/data', async (req, res) => {
 
     const postListStr = postList.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
 
-    // ---------- Условие online/offline ----------
     let offlineCondition = '1=1';
     if (defectType === 'offline') {
       offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 1';
@@ -7919,7 +7918,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
       offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 0';
     }
 
-    // ---------- 1. Количество авто, прошедших CP72 ----------
+    // ---------- 1. totalCars: все VIN за период (БЕЗ учёта смены) ----------
     const [carsResult] = await pool.query(`
       SELECT COUNT(DISTINCT VIN) AS total
       FROM at_om_wiptrackinghistory
@@ -7928,7 +7927,55 @@ app.get('/api/brigade-report/data', async (req, res) => {
     `, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
     const totalCars = carsResult[0]?.total || 0;
 
-    // ---------- 2. Дефекты за период (+1 день для переходящей вечерней смены) ----------
+    // ---------- Хелперы для смен ----------
+    const getISOWeek = (dateObj) => {
+      const d = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    };
+
+    const toDateStr = (d) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const getShiftType = (dateObj) => {
+      const total = dateObj.getHours() * 60 + dateObj.getMinutes();
+      if (total <= 90) return 'evening';
+      if (total >= 91 && total < 470) return 'night';
+      if (total <= 1000) return 'day';
+      return 'evening';
+    };
+
+    const getShiftLetter = (shiftStartDate, shiftType) => {
+      if (shiftType === 'night') return 'C';
+      const week = getISOWeek(shiftStartDate);
+      const isEven = week % 2 === 0;
+      if (shiftType === 'day') return isEven ? 'B' : 'A';
+      if (shiftType === 'evening') return isEven ? 'A' : 'B';
+      return null;
+    };
+
+    const matchesShiftAndPeriod = (dateObj) => {
+      const shiftType = getShiftType(dateObj);
+      if (!shiftType) return false;
+
+      const shiftStart = new Date(dateObj);
+      if (shiftType === 'evening' && (dateObj.getHours() * 60 + dateObj.getMinutes()) <= 90) {
+        shiftStart.setDate(shiftStart.getDate() - 1);
+      }
+
+      const shiftStartStr = toDateStr(shiftStart);
+      if (shiftStartStr < dateFrom || shiftStartStr > dateTo) return false;
+
+      if (shift !== 'all') {
+        const letter = getShiftLetter(shiftStart, shiftType);
+        if (letter !== shift) return false;
+      }
+      return true;
+    };
+
+    // ---------- 2. Дефекты за период + 1 день ----------
     const nextDayObj = new Date(`${dateTo}T12:00:00`);
     nextDayObj.setDate(nextDayObj.getDate() + 1);
     const nextDayStr = `${nextDayObj.getFullYear()}-${String(nextDayObj.getMonth() + 1).padStart(2, '0')}-${String(nextDayObj.getDate()).padStart(2, '0')}`;
@@ -7983,61 +8030,13 @@ app.get('/api/brigade-report/data', async (req, res) => {
       o.brigade_name
     ));
 
-    // ---------- 4. Хелперы для смен ----------
-    const getISOWeek = (dateObj) => {
-      const d = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
-      const dayNum = d.getUTCDay() || 7;
-      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-      return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-    };
-
-    const toDateStr = (d) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-    // Тип смены по времени суток
-    const getShiftType = (dateObj) => {
-      const total = dateObj.getHours() * 60 + dateObj.getMinutes();
-      if (total <= 90) return 'evening';              // 00:00 – 01:30
-      if (total >= 91 && total < 470) return 'night'; // 01:31 – 07:49
-      if (total <= 1000) return 'day';                // 07:50 – 16:40
-      return 'evening';                               // 16:41 – 23:59
-    };
-
-    // Буква смены (A/B/C) по дате начала смены
-    const getShiftLetter = (shiftStartDate, shiftType) => {
-      if (shiftType === 'night') return 'C';
-      const week = getISOWeek(shiftStartDate);
-      const isEven = week % 2 === 0;
-      if (shiftType === 'day') return isEven ? 'B' : 'A';
-      if (shiftType === 'evening') return isEven ? 'A' : 'B';
-      return null;
-    };
-
-    // ---------- 5. Фильтрация по смене и группировка ----------
+    // ---------- 4. Фильтрация дефектов по смене + группировка ----------
     const brigadeDataMap = new Map();
     let totalDefects = 0;
 
     for (const r of defectRows) {
       const d = new Date(r.CREATION_TIME);
-      const shiftType = getShiftType(d);
-      if (!shiftType) continue;
-
-      // Определяем дату начала смены (для вечерней после полуночи — предыдущий день)
-      const shiftStart = new Date(d);
-      if (shiftType === 'evening' && (d.getHours() * 60 + d.getMinutes()) <= 90) {
-        shiftStart.setDate(shiftStart.getDate() - 1);
-      }
-
-      // Сравнение по строке даты (а не по объекту Date с часами)
-      const shiftStartStr = toDateStr(shiftStart);
-      if (shiftStartStr < dateFrom || shiftStartStr > dateTo) continue;
-
-      // Фильтр по конкретной смене
-      if (shift !== 'all') {
-        const letter = getShiftLetter(shiftStart, shiftType);
-        if (letter !== shift) continue;
-      }
+      if (!matchesShiftAndPeriod(d)) continue;
 
       totalDefects += 1;
 
@@ -8069,7 +8068,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
       brigadeData.mppsMap.get(mppKey).count += 1;
     }
 
-    // ---------- 6. Расчёт DPU ----------
+    // ---------- 5. Расчёт DPU ----------
     const calculateDpu = (count) => {
       if (totalCars === 0) return 0;
       const raw = count / totalCars * 1000;
@@ -8085,7 +8084,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
       brigadeData.mpps.sort((a, b) => b.count - a.count);
     }
 
-    // ---------- 7. Ответ ----------
+    // ---------- 6. Ответ ----------
     const histogram = Array.from(brigadeDataMap.entries())
       .map(([name, data]) => ({
         category: name,

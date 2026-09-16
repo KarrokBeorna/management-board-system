@@ -1033,6 +1033,42 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
   );
 }
 
+// Определяем текущую активную смену (A / B / C) по московскому времени
+const getCurrentShiftLetter = () => {
+  const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const totalMinutes = nowMoscow.getUTCHours() * 60 + nowMoscow.getUTCMinutes();
+
+  // Определяем тип смены
+  let shiftType;
+  let shiftDate = new Date(nowMoscow);
+
+  if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
+    shiftType = 'day';
+  } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
+    shiftType = 'evening';
+    // Вечерняя после полуночи относится к предыдущему дню
+    if (totalMinutes <= 1 * 60 + 30) {
+      shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
+    }
+  } else {
+    shiftType = 'night';
+  }
+
+  if (shiftType === 'night') return 'C';
+
+  // ISO-номер недели
+  const d = new Date(Date.UTC(shiftDate.getUTCFullYear(), shiftDate.getUTCMonth(), shiftDate.getUTCDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  const isEven = weekNumber % 2 === 0;
+
+  if (shiftType === 'day') return isEven ? 'B' : 'A';
+  if (shiftType === 'evening') return isEven ? 'A' : 'B';
+  return 'C';
+};
+
 /* ===================== ОБЩИЙ ОТЧЕТ (ГИСТОГРАММА) ===================== */
 function BrigadeReport({ brigades, password, executeWithPassword }) {
   const today = new Date();
@@ -1041,7 +1077,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
   const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
   const [defectType, setDefectType] = useState('all');
   const [metric, setMetric] = useState('count');
-  const [shiftFilter, setShiftFilter] = useState('all');
+  const [shiftFilter, setShiftFilter] = useState(() => getCurrentShiftLetter());
   const [histogramData, setHistogramData] = useState([]);
   const [totalCars, setTotalCars] = useState(0);
   const [unassignedCount, setUnassignedCount] = useState(0);
