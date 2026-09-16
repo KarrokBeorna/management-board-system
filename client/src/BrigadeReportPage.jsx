@@ -1088,37 +1088,36 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
 
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
 
-  const loadData = async () => {
-    setTotalCars(data.totalCars);
-    setTotalCarsShift(data.totalCarsShift);
+    const loadData = async () => {
     setLoading(true);
     try {
-      const allSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
-      const checkpointParam = allSelected ? 'ALL' : selectedCheckpoints.join(',');
+        const allSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
+        const checkpointParam = allSelected ? 'ALL' : selectedCheckpoints.join(',');
 
-      const params = new URLSearchParams({
+        const params = new URLSearchParams({
         dateFrom,
         dateTo,
         checkpoint: checkpointParam,
         metric,
         defectType,
         shift: shiftFilter,
-      });
+        });
 
-      const res = await fetch(`${API_BASE}/api/brigade-report/data?${params}`);
-      if (!res.ok) throw new Error('Ошибка загрузки данных');
-      const data = await res.json();
-      setHistogramData(data.histogram);
-      setTotalCars(data.totalCars);
-      setUnassignedCount(data.unassignedCount);
-      setTotalDefects(data.totalDefects);
-      setTopBrigades(data.topBrigades || []);
+        const res = await fetch(`${API_BASE}/api/brigade-report/data?${params}`);
+        if (!res.ok) throw new Error('Ошибка загрузки данных');
+        const data = await res.json();
+        setHistogramData(data.histogram);
+        setTotalCars(data.totalCars);
+        setTotalCarsShift(data.totalCarsShift || 0);   // ← тоже перестраховка
+        setUnassignedCount(data.unassignedCount);
+        setTotalDefects(data.totalDefects);
+        setTopBrigades(data.topBrigades || []);
     } catch (err) {
-      alert(err.message);
+        alert(err.message);
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
-  };
+    };
 
   useEffect(() => {
     loadData();
@@ -1444,7 +1443,7 @@ function BrigadeReportByShift({ brigades, password, executeWithPassword }) {
             )}
           </div>
           <div style={{ display: 'flex', gap: '15px', marginTop: '10px', justifyContent: 'center', fontSize: '0.95rem', flexWrap: 'wrap' }}>
-            <div>Всего авто: <b>{data.totalCars}</b></div>
+            <div>Всего авто: <b>{data.totalCarsShift ?? data.totalCars}</b></div>
             <div>Всего дефектов: <b>{data.totalDefects}</b></div>
             <div>Без владельца: <b>{data.unassignedCount}</b></div>
           </div>
