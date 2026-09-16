@@ -1084,10 +1084,13 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
   const [totalDefects, setTotalDefects] = useState(0);
   const [topBrigades, setTopBrigades] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [totalCarsShift, setTotalCarsShift] = useState(0);
 
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
 
   const loadData = async () => {
+    setTotalCars(data.totalCars);
+    setTotalCarsShift(data.totalCarsShift);
     setLoading(true);
     try {
       const allSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
@@ -1252,7 +1255,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
             )}
           </div>
           <div style={{ display: 'flex', gap: '20px', marginTop: '10px', justifyContent: 'center', fontSize: '1.1rem' }}>
-            <div>Всего авто: <b>{totalCars}</b></div>
+            <div>Всего авто: <b>{totalCarsShift}</b>{shiftFilter !== 'all' && <> (за сутки: <b>{totalCars}</b>)</>}</div>
             <div>Всего дефектов: <b>{totalDefects}</b></div>
             <div>Дефектов без владельца: <b>{unassignedCount}</b></div>
           </div>

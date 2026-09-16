@@ -7871,7 +7871,6 @@ app.get('/api/brigade-report/brigades', async (req, res) => {
 
 // Получение данных для отчёта (гистограмма + топ дефектов без владельца)
 // ================== БРИГАДНЫЙ ОТЧЁТ – ДАННЫЕ ДЛЯ ГИСТОГРАММЫ И ТАБЛИЦЫ ==================
-// ================== БРИГАДНЫЙ ОТЧЁТ – ДАННЫЕ ДЛЯ ГИСТОГРАММЫ ==================
 app.get('/api/brigade-report/data', async (req, res) => {
   try {
     const {
@@ -7888,17 +7887,10 @@ app.get('/api/brigade-report/data', async (req, res) => {
     }
 
     // ---------- Списки постов ----------
-    const cp7Posts = [
-      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-      'REPAIR', 'REPAIR_Final',
-      'EXT1', 'PIP2', 'PIP4', 'PIP9'
-    ];
-    const cp8Posts = [
-      'CP8', 'CP8 Gate', 'CP8-gate',
-      '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'
-    ];
-    const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-    const tlPosts  = ['360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT', 'CP8 Touch Up'];
+    const cp7Posts = ['CP7','CP7 Audit','CP7 Gate','CP7-gate','REPAIR','REPAIR_Final','EXT1','PIP2','PIP4','PIP9'];
+    const cp8Posts = ['CP8','CP8 Gate','CP8-gate','360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT','CP8 Touch Up'];
+    const pipPosts = ['EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9'];
+    const tlPosts  = ['360','ADAS','ADAS+RB','TEST TRACK','TRACK','WA','WT','CP8 Touch Up'];
 
     let postList = [];
     if (!checkpoint || checkpoint === 'ALL') {
@@ -7918,16 +7910,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
       offlineCondition = '(OFFLINE OR OFFLINE1 OR OFFLINE2) = 0';
     }
 
-    // ---------- 1. totalCars: все VIN за период (БЕЗ учёта смены) ----------
-    const [carsResult] = await pool.query(`
-      SELECT COUNT(DISTINCT VIN) AS total
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'CP72'
-        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-    `, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
-    const totalCars = carsResult[0]?.total || 0;
-
-    // ---------- Хелперы для смен ----------
+    // ---------- Хелперы смен ----------
     const getISOWeek = (dateObj) => {
       const d = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
       const dayNum = d.getUTCDay() || 7;
@@ -7975,11 +7958,44 @@ app.get('/api/brigade-report/data', async (req, res) => {
       return true;
     };
 
-    // ---------- 2. Дефекты за период + 1 день ----------
+    // ---------- 1. Все VIN с CP72_TIME ----------
     const nextDayObj = new Date(`${dateTo}T12:00:00`);
     nextDayObj.setDate(nextDayObj.getDate() + 1);
     const nextDayStr = `${nextDayObj.getFullYear()}-${String(nextDayObj.getMonth() + 1).padStart(2, '0')}-${String(nextDayObj.getDate()).padStart(2, '0')}`;
 
+    const [cp72Rows] = await pool.query(`
+      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
+      GROUP BY VIN
+    `, [`${dateFrom} 00:00:00`, `${nextDayStr} 23:59:59`]);
+
+    // ---------- 2. Два знаменателя ----------
+    // totalCars      = все VIN за период (знаменатель DPU, НЕ зависит от смены)
+    // totalCarsShift = VIN, попавшие в окно смены (для отображения «Всего авто»)
+    const periodStartStr = dateFrom;
+    const periodEndStr = dateTo;
+    let totalCars = 0;
+    let totalCarsShift = 0;
+
+    for (const row of cp72Rows) {
+      if (!row.CP72_TIME) continue;
+      const d = new Date(row.CP72_TIME);
+      const dStr = toDateStr(d);
+
+      // Все авто за период
+      if (dStr >= periodStartStr && dStr <= periodEndStr) {
+        totalCars += 1;
+      }
+
+      // Авто за выбранную смену
+      if (matchesShiftAndPeriod(d)) {
+        totalCarsShift += 1;
+      }
+    }
+
+    // ---------- 3. Дефекты ----------
     const defectsSql = `
       SELECT
         d.PART_NAME,
@@ -8018,7 +8034,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
       `${nextDayStr} 23:59:59`,
     ]);
 
-    // ---------- 3. Справочник владельцев ----------
+    // ---------- 4. Справочник владельцев ----------
     const [owners] = await notesPool.query(`
       SELECT do.model, do.part_name, do.problem_type, b.name AS brigade_name
       FROM defect_owners do
@@ -8030,7 +8046,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
       o.brigade_name
     ));
 
-    // ---------- 4. Фильтрация дефектов по смене + группировка ----------
+    // ---------- 5. Фильтрация + группировка ----------
     const brigadeDataMap = new Map();
     let totalDefects = 0;
 
@@ -8045,11 +8061,8 @@ app.get('/api/brigade-report/data', async (req, res) => {
 
       if (!brigadeDataMap.has(brigade)) {
         brigadeDataMap.set(brigade, {
-          brigade,
-          count: 0,
-          dpu: 0,
-          mppsMap: new Map(),
-          mpps: [],
+          brigade, count: 0, dpu: 0,
+          mppsMap: new Map(), mpps: [],
         });
       }
       const brigadeData = brigadeDataMap.get(brigade);
@@ -8058,17 +8071,14 @@ app.get('/api/brigade-report/data', async (req, res) => {
       const mppKey = `${r.MODEL}|${r.PART_NAME}|${r.PROBLEM_TYPE}`;
       if (!brigadeData.mppsMap.has(mppKey)) {
         brigadeData.mppsMap.set(mppKey, {
-          model: r.MODEL,
-          part_name: r.PART_NAME,
-          problem_type: r.PROBLEM_TYPE,
-          count: 0,
-          dpu: 0,
+          model: r.MODEL, part_name: r.PART_NAME, problem_type: r.PROBLEM_TYPE,
+          count: 0, dpu: 0,
         });
       }
       brigadeData.mppsMap.get(mppKey).count += 1;
     }
 
-    // ---------- 5. Расчёт DPU ----------
+    // ---------- 6. DPU (знаменатель = totalCars за период) ----------
     const calculateDpu = (count) => {
       if (totalCars === 0) return 0;
       const raw = count / totalCars * 1000;
@@ -8084,7 +8094,7 @@ app.get('/api/brigade-report/data', async (req, res) => {
       brigadeData.mpps.sort((a, b) => b.count - a.count);
     }
 
-    // ---------- 6. Ответ ----------
+    // ---------- 7. Ответ ----------
     const histogram = Array.from(brigadeDataMap.entries())
       .map(([name, data]) => ({
         category: name,
@@ -8109,7 +8119,8 @@ app.get('/api/brigade-report/data', async (req, res) => {
 
     res.json({
       histogram,
-      totalCars,
+      totalCars,           // все авто за период (знаменатель DPU)
+      totalCarsShift,      // авто в окне смены (для UI «Всего авто»)
       unassignedCount,
       totalDefects,
       topBrigades,
