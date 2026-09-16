@@ -291,28 +291,30 @@ const getWeekNumberMoscow = (date) => {
   return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
 };
 
-const getShiftTimeRange = (shiftFilter) => {
-  const nowMoscow = getMoscowTime();
-  const totalMinutes = getMoscowMinutes();
-  const year = nowMoscow.getUTCFullYear();
-  const month = String(nowMoscow.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(nowMoscow.getUTCDate()).padStart(2, '0');
-  const todayStr = `${year}-${month}-${day}`;
+const getShiftTimeRange = (shiftFilter, baseDate) => {
+  if (!baseDate) return null;
 
-  const yesterday = new Date(nowMoscow);
-  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const yestYear = yesterday.getUTCFullYear();
-  const yestMonth = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
-  const yestDay = String(yesterday.getUTCDate()).padStart(2, '0');
-  const yesterdayStr = `${yestYear}-${yestMonth}-${yestDay}`;
+  // baseDate может быть строкой 'YYYY-MM-DD' или Date
+  let dateObj;
+  if (typeof baseDate === 'string') {
+    dateObj = new Date(`${baseDate}T12:00:00`);
+  } else {
+    dateObj = new Date(baseDate);
+  }
+  if (isNaN(dateObj.getTime())) return null;
 
+  const dateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+
+  // Сутки — календарные
   if (shiftFilter === 'all') {
-    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+    return { start: `${dateStr} 00:00:00`, end: `${dateStr} 23:59:59` };
   }
 
-  const isEvenWeek = getWeekNumberMoscow(nowMoscow) % 2 === 0;
-  let shiftType;
+  // Определяем тип смены по чётности ISO-недели
+  const weekNumber = getWeekNumber(dateObj);
+  const isEvenWeek = weekNumber % 2 === 0;
 
+  let shiftType;
   if (shiftFilter === 'C') {
     shiftType = 'night';
   } else if (shiftFilter === 'A') {
@@ -320,24 +322,23 @@ const getShiftTimeRange = (shiftFilter) => {
   } else if (shiftFilter === 'B') {
     shiftType = isEvenWeek ? 'day' : 'evening';
   } else {
-    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+    return { start: `${dateStr} 00:00:00`, end: `${dateStr} 23:59:59` };
   }
 
   if (shiftType === 'night') {
-    const dateToUse = totalMinutes >= 1 * 60 + 31 ? todayStr : yesterdayStr;
-    return { start: `${dateToUse} 01:31:00`, end: `${dateToUse} 07:50:00` };
-  } else if (shiftType === 'day') {
-    const dateToUse = totalMinutes >= 7 * 60 + 50 ? todayStr : yesterdayStr;
-    return { start: `${dateToUse} 07:50:00`, end: `${dateToUse} 16:40:00` };
-  } else if (shiftType === 'evening') {
-    const dateToUse = totalMinutes >= 16 * 60 + 41 ? todayStr : yesterdayStr;
-    const endDateObj = new Date(`${dateToUse}T00:00:00Z`);
-    endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
-    const endStr = `${endDateObj.getUTCFullYear()}-${String(endDateObj.getUTCMonth() + 1).padStart(2, '0')}-${String(endDateObj.getUTCDate()).padStart(2, '0')}`;
-    return { start: `${dateToUse} 16:41:00`, end: `${endStr} 01:30:00` };
+    return { start: `${dateStr} 01:31:00`, end: `${dateStr} 07:50:00` };
+  }
+  if (shiftType === 'day') {
+    return { start: `${dateStr} 07:50:00`, end: `${dateStr} 16:40:00` };
+  }
+  if (shiftType === 'evening') {
+    const nextDay = new Date(dateObj);
+    nextDay.setDate(nextDay.getDate() + 1);
+    const nextStr = `${nextDay.getFullYear()}-${String(nextDay.getMonth() + 1).padStart(2, '0')}-${String(nextDay.getDate()).padStart(2, '0')}`;
+    return { start: `${dateStr} 16:41:00`, end: `${nextStr} 01:30:00` };
   }
 
-  return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
+  return null;
 };
 
 /* ===================== МУЛЬТИСЕЛЕКТ ===================== */
@@ -1034,14 +1035,13 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
 
 /* ===================== ОБЩИЙ ОТЧЕТ (ГИСТОГРАММА) ===================== */
 function BrigadeReport({ brigades, password, executeWithPassword }) {
-  const [dateFrom, setDateFrom] = useState(toLocalDateStr(new Date()));
-  const [dateTo, setDateTo] = useState(toLocalDateStr(new Date()));
+  const today = new Date();
+  const [dateFrom, setDateFrom] = useState(today.toISOString().split('T')[0]);
+  const [dateTo, setDateTo] = useState(today.toISOString().split('T')[0]);
   const [selectedCheckpoints, setSelectedCheckpoints] = useState([]);
   const [defectType, setDefectType] = useState('all');
   const [metric, setMetric] = useState('count');
   const [shiftFilter, setShiftFilter] = useState('all');
-  const [shiftStart, setShiftStart] = useState('');
-  const [shiftEnd, setShiftEnd] = useState('');
   const [histogramData, setHistogramData] = useState([]);
   const [totalCars, setTotalCars] = useState(0);
   const [unassignedCount, setUnassignedCount] = useState(0);
@@ -1051,38 +1051,20 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
 
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
 
-  useEffect(() => {
-    if (shiftFilter !== 'all') {
-      const { start, end } = getShiftTimeRange(shiftFilter);
-      setShiftStart(start);
-      setShiftEnd(end);
-      setDateFrom(start.slice(0, 10));
-      setDateTo(end.slice(0, 10));
-    } else {
-      setShiftStart('');
-      setShiftEnd('');
-    }
-  }, [shiftFilter]);
-
   const loadData = async () => {
     setLoading(true);
     try {
       const allSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
       const checkpointParam = allSelected ? 'ALL' : selectedCheckpoints.join(',');
+
       const params = new URLSearchParams({
         dateFrom,
         dateTo,
         checkpoint: checkpointParam,
         metric,
         defectType,
+        shift: shiftFilter,
       });
-
-      if (shiftFilter !== 'all' && shiftStart && shiftEnd) {
-        params.delete('dateFrom');
-        params.delete('dateTo');
-        params.append('startTime', shiftStart);
-        params.append('endTime', shiftEnd);
-      }
 
       const res = await fetch(`${API_BASE}/api/brigade-report/data?${params}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
@@ -1101,7 +1083,7 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
 
   useEffect(() => {
     loadData();
-  }, [dateFrom, dateTo, selectedCheckpoints, metric, defectType, shiftFilter, shiftStart, shiftEnd]);
+  }, [dateFrom, dateTo, selectedCheckpoints, metric, defectType, shiftFilter]);
 
   const top3Brigades = useMemo(() => {
     if (!topBrigades.length) return [];
@@ -1137,11 +1119,11 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
       }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Начало:
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} disabled={shiftFilter !== 'all'} style={inputStyle} />
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Конец:
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} disabled={shiftFilter !== 'all'} style={inputStyle} />
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: BRAND.textSecondary, fontWeight: 500, whiteSpace: 'nowrap' }}>
           Смена:
@@ -1212,7 +1194,8 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis type="number" domain={[0, 'dataMax']} tick={{ fontSize: 13 }} />
                     <YAxis type="category" dataKey="category" tick={{ fontSize: 13 }} width={160} />
-                    <Tooltip contentStyle={{ fontSize: '1.2rem' }}
+                    <Tooltip
+                      contentStyle={{ fontSize: '1.2rem' }}
                       formatter={(value) => metric === 'dpu' ? formatDpu(value) : value}
                     />
                     <Bar dataKey="value" fill={BRAND.primary} barSize={32}>
