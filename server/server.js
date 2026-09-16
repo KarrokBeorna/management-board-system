@@ -20,7 +20,13 @@ app.use(cors({
 app.use(express.json({ limit: '256mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
+// ================== ПАРОЛИ ==================
+const BRIGADE_PASSWORD        = process.env.BRIGADE_PASSWORD        || '1234561';
+const IMPORT_PASSWORD         = process.env.IMPORT_PASSWORD         || '4002';
+const BRIGADE_MANAGE_PASSWORD = process.env.BRIGADE_MANAGE_PASSWORD || '4002';
 
+
+// ================== БД ==================
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   port: parseInt(process.env.DB_PORT) || 3306,
@@ -44,29 +50,30 @@ const notesPool = mysql.createPool({
 });
 
 const mesPool = mysql.createPool({
-  host: '10.203.0.28',
-  port: 3306,
-  user: 'appuser',
-  password: 'msU1ceq~ST)2(Lf8',
-  database: 'higoplat_fusion_mes',
+  host: process.env.MES_HOST,
+  port: parseInt(process.env.MES_PORT) || 3306,
+  user: process.env.MES_USER,
+  password: process.env.MES_PASSWORD,
+  database: process.env.MES_NAME,
   waitForConnections: true,
   connectTimeout: 10000,
   dateStrings: true,
 });
 
-console.log(process.env.NOTES_USER)
-
-// ===== НОВЫЙ ПУЛ ДЛЯ БАЗЫ LES =====
 const lesPool = mysql.createPool({
-  host: '10.203.0.29',
-  port: 3306,
-  user: 'appuser',
-  password: 'msU1ceq~ST)2(Lf8',
-  database: 'higoplat_fusion_les',
+  host: process.env.LES_HOST,
+  port: parseInt(process.env.LES_PORT) || 3306,
+  user: process.env.LES_USER,
+  password: process.env.LES_PASSWORD,
+  database: process.env.LES_NAME,
   waitForConnections: true,
   connectTimeout: 10000,
   dateStrings: true,
 });
+
+console.log('DB_USER:', process.env.DB_USER);
+console.log('MES_HOST:', process.env.MES_HOST);
+console.log('LES_HOST:', process.env.LES_HOST);
 
 async function checkDatabaseConnection() {
   try {
@@ -108,11 +115,11 @@ async function checkLesDatabaseConnection() {
 // ================== OPC UA ЧТЕНИЕ ПЛК ==================
 const { OPCUAClient, MessageSecurityMode, SecurityPolicy } = require('node-opcua');
 
-const OPC_ENDPOINT = 'opc.tcp://10.203.46.10:4840';
-const OPC_NODE_ID = 'ns=3;s="IOT_设备交互数据"."Overhead Process Section"."PLC_TO_IOT"."备用"';
-const OPC_POLL_INTERVAL = 3000;   // мс между чтениями
-const OPC_MAX_READ_ERRORS = 5;    // сколько подряд ошибок чтения терпим до переподключения
-const OPC_RECONNECT_DELAY = 5000; // пауза перед переподключением к PLC
+const OPC_ENDPOINT        = process.env.OPC_ENDPOINT || 'opc.tcp://10.203.46.10:4840';
+const OPC_NODE_ID         = process.env.OPC_NODE_ID  || 'ns=3;s="IOT_设备交互数据"."Overhead Process Section"."PLC_TO_IOT"."备用"';
+const OPC_POLL_INTERVAL   = parseInt(process.env.OPC_POLL_INTERVAL)   || 3000;
+const OPC_MAX_READ_ERRORS = parseInt(process.env.OPC_MAX_READ_ERRORS) || 5;
+const OPC_RECONNECT_DELAY = parseInt(process.env.OPC_RECONNECT_DELAY) || 5000;
 
 // Общее состояние — отдаётся по HTTP
 const opcState = {
@@ -3557,7 +3564,7 @@ app.get('/api/daily-dashboard-top5', async (req, res) => {
 // Проверка пароля
 app.post('/api/warranty/check-password', (req, res) => {
   const { password } = req.body;
-  const correctPassword = '1234561';
+  const correctPassword = BRIGADE_PASSWORD;
   if (password === correctPassword) {
     res.json({ success: true });
   } else {
@@ -8169,8 +8176,7 @@ app.post('/api/brigade-report/assign-owner', async (req, res) => {
     }
 
     // Проверка пароля
-    const correctPassword = '1234561'; // можно вынести в env
-    if (password !== correctPassword) {
+    if (password !== BRIGADE_PASSWORD) {
       return res.status(403).json({ error: 'Неверный пароль' });
     }
 
@@ -8218,7 +8224,7 @@ app.post('/api/brigade-report/dictionary', async (req, res) => {
     if (!model || !part_name || !problem_type || !brigadeName || !password) {
       return res.status(400).json({ error: 'Не все обязательные поля заполнены' });
     }
-    if (password !== '1234561') {
+    if (password !== BRIGADE_PASSWORD) {
       return res.status(403).json({ error: 'Неверный пароль' });
     }
 
@@ -8247,7 +8253,7 @@ app.delete('/api/brigade-report/dictionary/:id', async (req, res) => {
     const { id } = req.params;
     const { password } = req.body;
     if (!password) return res.status(400).json({ error: 'Пароль обязателен' });
-    if (password !== '1234561') return res.status(403).json({ error: 'Неверный пароль' });
+    if (password !== BRIGADE_PASSWORD) return res.status(403).json({ error: 'Неверный пароль' });
 
     await notesPool.query('DELETE FROM defect_owners WHERE id = ?', [id]);
     res.json({ success: true });
@@ -8311,7 +8317,7 @@ app.post('/api/brigade-report/import', async (req, res) => {
       return res.status(400).json({ error: 'Не переданы данные или пароль' });
     }
     // Пароль для импорта — 4002 (отдельный от основного)
-    if (password !== '4002') {
+    if (password !== IMPORT_PASSWORD) {
       return res.status(403).json({ error: 'Неверный пароль для импорта' });
     }
 
@@ -8351,7 +8357,7 @@ app.post('/api/brigade-report/assign-all-models', async (req, res) => {
     if (!part_name || !problem_type || !brigadeName || !password) {
       return res.status(400).json({ error: 'Не все обязательные поля заполнены' });
     }
-    if (password !== '1234561') {
+    if (password !== BRIGADE_PASSWORD) {
       return res.status(403).json({ error: 'Неверный пароль' });
     }
 
@@ -8387,7 +8393,7 @@ app.post('/api/brigade-report/brigades', async (req, res) => {
     if (!name || !password) {
       return res.status(400).json({ error: 'name и password обязательны' });
     }
-    if (password !== '1234561') {
+    if (password !== BRIGADE_PASSWORD) {
       return res.status(403).json({ error: 'Неверный пароль' });
     }
 
@@ -8417,7 +8423,7 @@ app.delete('/api/brigade-report/brigades/:id', async (req, res) => {
     if (!password) {
       return res.status(400).json({ error: 'password обязателен' });
     }
-    if (password !== '1234561') {
+    if (password !== BRIGADE_PASSWORD) {
       return res.status(403).json({ error: 'Неверный пароль' });
     }
 
