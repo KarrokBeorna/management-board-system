@@ -12,6 +12,7 @@ function getISOWeek(date) {
   return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
 }
 
+
 const app = express();
 app.use(cors({
   origin: 'http://localhost:30000',
