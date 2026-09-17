@@ -9122,6 +9122,57 @@ app.get('/api/remzone-work-status/hourly', async (req, res) => {
   }
 });
 
+// ---------- 3. Детали: список дефектов сотрудника за день (или за час) ----------
+app.get('/api/remzone-work-status/details', async (req, res) => {
+  try {
+    const { repair_person, date, hour } = req.query;
+    if (!repair_person || !date) {
+      return res.status(400).json({ error: 'repair_person и date обязательны' });
+    }
+
+    const params = [repair_person, date];
+    let hourFilter = '';
+    if (hour !== undefined && hour !== null && hour !== '') {
+      hourFilter = ' AND HOUR(d.REPAIR_TIME) = ?';
+      params.push(Number(hour));
+    }
+
+    const [rows] = await pool.query(`
+      SELECT
+        d.VIN,
+        wo.MODEL,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.POST_NAME,
+        d.CHECK_POINT,
+        d.REPAIR_TIME
+      FROM at_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.REPAIR_PERSON = ?
+        AND d.REPAIR_TIME IS NOT NULL
+        AND DATE(d.REPAIR_TIME) = ?
+        ${hourFilter}
+      ORDER BY d.REPAIR_TIME ASC
+    `, params);
+
+    res.json({
+      rows: rows.map(r => ({
+        vin: r.VIN,
+        model: r.MODEL || '—',
+        part_name: r.PART_NAME || '—',
+        problem_type: r.PROBLEM_TYPE || '—',
+        post_name: r.POST_NAME || '—',
+        checkpoint: r.CHECK_POINT || '—',
+        repair_time: r.REPAIR_TIME,
+      })),
+    });
+  } catch (err) {
+    console.error('Ошибка /api/remzone-work-status/details:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 
 

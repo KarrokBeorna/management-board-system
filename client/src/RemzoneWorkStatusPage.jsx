@@ -33,6 +33,11 @@ function addDays(dateStr, n) {
   d.setDate(d.getDate() + n);
   return toLocalDateStr(d);
 }
+function formatDateTime(str) {
+  if (!str) return '—';
+  const s = String(str).replace('T', ' ');
+  return s.slice(0, 19);
+}
 
 /* ===================== СТИЛИ ===================== */
 const containerStyle = {
@@ -192,7 +197,6 @@ const thTotalStyle = {
   padding: '6px 8px',
 };
 
-/* ---------- th для hourly ---------- */
 const thHourStyle = {
   padding: '4px 2px',
   textAlign: 'center',
@@ -236,6 +240,13 @@ const tdCWCellStyle = {
   color: '#1E40AF',
 };
 
+const tdClickableStyle = {
+  cursor: 'pointer',
+  textDecoration: 'underline dotted',
+  textDecorationColor: 'rgba(29,78,216,0.35)',
+  textUnderlineOffset: 2,
+};
+
 /* ---------- Кнопка часов ---------- */
 const hoursBtnStyle = {
   fontSize: 9,
@@ -250,7 +261,6 @@ const hoursBtnStyle = {
   lineHeight: 1.2,
 };
 
-/* ---------- Кнопки часовых дней ---------- */
 const hourlyBtnActiveStyle = {
   padding: '4px 9px',
   borderRadius: 6,
@@ -272,14 +282,94 @@ const hourlyBtnStyle = {
   cursor: 'pointer',
 };
 
+/* ---------- Модалка ---------- */
+const modalOverlayStyle = {
+  position: 'fixed',
+  top: 0, left: 0, right: 0, bottom: 0,
+  backgroundColor: 'rgba(15,23,42,0.6)',
+  backdropFilter: 'blur(4px)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex: 2000,
+  padding: 20,
+};
+
+const modalStyle = {
+  backgroundColor: '#FFFFFF',
+  borderRadius: 16,
+  boxShadow: '0 25px 50px -12px rgba(0,0,0,0.35)',
+  width: '100%',
+  maxWidth: 1000,
+  maxHeight: '85vh',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+};
+
+const modalHeaderStyle = {
+  padding: '16px 20px',
+  borderBottom: '1px solid #E2E8F0',
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  background: 'linear-gradient(180deg,#F8FAFC,#FFFFFF)',
+};
+
+const modalTitleStyle = {
+  margin: 0,
+  fontSize: '1.1rem',
+  fontWeight: 800,
+  color: '#0F172A',
+};
+
+const modalCloseStyle = {
+  background: 'transparent',
+  border: 'none',
+  fontSize: 22,
+  cursor: 'pointer',
+  color: '#64748B',
+  lineHeight: 1,
+};
+
+const modalBodyStyle = {
+  padding: 0,
+  overflow: 'auto',
+  flex: 1,
+  minHeight: 0,
+};
+
+const detailThStyle = {
+  padding: '10px 12px',
+  textAlign: 'left',
+  fontWeight: 700,
+  color: '#FFFFFF',
+  background: HEADER_BG_MAIN,
+  fontSize: 12,
+  position: 'sticky',
+  top: 0,
+  zIndex: 3,
+  whiteSpace: 'nowrap',
+  borderRight: '1px solid rgba(255,255,255,0.15)',
+};
+
+const detailTdStyle = {
+  padding: '8px 12px',
+  borderBottom: '1px solid #F1F5F9',
+  borderRight: '1px solid #F1F5F9',
+  color: '#1E293B',
+  fontSize: 13,
+  whiteSpace: 'nowrap',
+};
+
 /* ===================== КОМПОНЕНТ ===================== */
 export default function RemzoneWorkStatusPage() {
   const [mode, setMode] = useState('daily');
   const [hourlyDate, setHourlyDate] = useState(getTodayStr());
-  const [sortDay, setSortDay] = useState(null);   // YYYY-MM-DD
-  const [sortWeek, setSortWeek] = useState(null); // 'prev' | 'curr'
-  const [sortTotal, setSortTotal] = useState('desc'); // 'desc' | 'asc'
-  const [sortHour, setSortHour] = useState(null); // 0..23
+  const [sortDay, setSortDay] = useState(null);
+  const [sortWeek, setSortWeek] = useState(null);
+  const [sortTotal, setSortTotal] = useState('desc');
+  const [sortHour, setSortHour] = useState(null);
 
   const [periodStart, setPeriodStart] = useState(() => {
     const mondayThisWeek = getMonday(new Date());
@@ -294,6 +384,12 @@ export default function RemzoneWorkStatusPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+
+  // Модалка с деталями
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsContext, setDetailsContext] = useState(null); // { person, name, date, hour }
+  const [detailsList, setDetailsList] = useState([]);
 
   const daysList = useMemo(() => {
     const days = [];
@@ -409,6 +505,44 @@ export default function RemzoneWorkStatusPage() {
     XLSX.writeFile(wb, `Remzone_${mode}_${toLocalDateStr(new Date())}.xlsx`);
   };
 
+  /* ================ ОТКРЫТИЕ ДЕТАЛЕЙ ================ */
+  const openDetails = async (row, date, hour) => {
+    const person = row.repair_person; // полный ключ "REPXX|ФИО"
+    if (!person) return;
+
+    setDetailsContext({
+      person,
+      name: row.person_name || row.repair_person || '—',
+      account: row.person_account || row.repair_account || '—',
+      date,
+      hour,
+    });
+    setDetailsList([]);
+    setDetailsLoading(true);
+    setDetailsOpen(true);
+
+    try {
+      const params = new URLSearchParams({ repair_person: person, date });
+      if (hour !== undefined && hour !== null) params.append('hour', hour);
+      const res = await fetch(`${API_BASE}/api/remzone-work-status/details?${params}`);
+      if (!res.ok) throw new Error('Ошибка загрузки деталей');
+      const json = await res.json();
+      setDetailsList(json.rows || []);
+    } catch (err) {
+      console.error(err);
+      setDetailsList([]);
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  const closeDetails = () => {
+    setDetailsOpen(false);
+    setDetailsContext(null);
+    setDetailsList([]);
+  };
+
+  /* ================ СОРТИРОВКА / НАВИГАЦИЯ ================ */
   const handleDayHeaderClick = (dateStr) => {
     setSortWeek(null);
     setSortDay(prev => (prev === dateStr ? null : dateStr));
@@ -424,7 +558,7 @@ export default function RemzoneWorkStatusPage() {
     setSortTotal(prev => (prev === 'desc' ? 'asc' : 'desc'));
   };
   const handleHourHeaderClick = (h) => {
-    setSortTotal('desc'); // сбрасываем total-сортировку (визуально)
+    setSortTotal('desc');
     setSortHour(prev => (prev === h ? null : h));
   };
   const handleOpenHourly = (dateStr, e) => {
@@ -602,10 +736,7 @@ export default function RemzoneWorkStatusPage() {
                       return (
                         <th
                           key={h}
-                          style={{
-                            ...thHourStyle,
-                            background: isSorted ? HEADER_BG_ACTIVE : HEADER_BG_MAIN,
-                          }}
+                          style={{ ...thHourStyle, background: isSorted ? HEADER_BG_ACTIVE : HEADER_BG_MAIN }}
                           onClick={() => handleHourHeaderClick(h)}
                           title="Сортировать по этому часу"
                         >
@@ -650,7 +781,17 @@ export default function RemzoneWorkStatusPage() {
                         {prevWeekDays.map(d => {
                           const val = row.days?.[d] || 0;
                           return (
-                            <td key={d} style={{ ...tdBaseStyle, color: val > 0 ? '#1E293B' : '#CBD5E1', fontWeight: val > 0 ? 600 : 400 }}>
+                            <td
+                              key={d}
+                              style={{
+                                ...tdBaseStyle,
+                                ...(val > 0 ? tdClickableStyle : {}),
+                                color: val > 0 ? '#1D4ED8' : '#CBD5E1',
+                                fontWeight: val > 0 ? 700 : 400,
+                              }}
+                              onClick={() => val > 0 && openDetails(row, d, null)}
+                              title={val > 0 ? 'Показать детали' : ''}
+                            >
                               {val > 0 ? val : '·'}
                             </td>
                           );
@@ -663,7 +804,17 @@ export default function RemzoneWorkStatusPage() {
                         {currWeekDays.map(d => {
                           const val = row.days?.[d] || 0;
                           return (
-                            <td key={d} style={{ ...tdBaseStyle, color: val > 0 ? '#1E293B' : '#CBD5E1', fontWeight: val > 0 ? 600 : 400 }}>
+                            <td
+                              key={d}
+                              style={{
+                                ...tdBaseStyle,
+                                ...(val > 0 ? tdClickableStyle : {}),
+                                color: val > 0 ? '#1D4ED8' : '#CBD5E1',
+                                fontWeight: val > 0 ? 700 : 400,
+                              }}
+                              onClick={() => val > 0 && openDetails(row, d, null)}
+                              title={val > 0 ? 'Показать детали' : ''}
+                            >
                               {val > 0 ? val : '·'}
                             </td>
                           );
@@ -688,12 +839,15 @@ export default function RemzoneWorkStatusPage() {
                               key={h}
                               style={{
                                 ...tdBaseStyle,
+                                ...(val > 0 ? tdClickableStyle : {}),
                                 padding: '5px 2px',
-                                color: val > 0 ? '#1E293B' : '#CBD5E1',
+                                color: val > 0 ? '#1D4ED8' : '#CBD5E1',
                                 fontWeight: val > 0 ? 700 : 400,
                                 minWidth: 32,
                                 fontSize: 11,
                               }}
+                              onClick={() => val > 0 && openDetails(row, hourlyDate, h)}
+                              title={val > 0 ? 'Показать детали' : ''}
                             >
                               {val > 0 ? val : '·'}
                             </td>
@@ -709,6 +863,68 @@ export default function RemzoneWorkStatusPage() {
           )}
         </div>
       </div>
+
+      {/* Модальное окно с деталями */}
+      {detailsOpen && detailsContext && (
+        <div style={modalOverlayStyle} onClick={closeDetails}>
+          <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
+            <div style={modalHeaderStyle}>
+              <div>
+                <h3 style={modalTitleStyle}>
+                  {detailsContext.name}
+                  <span style={{ marginLeft: 10, fontWeight: 500, color: '#64748B', fontSize: 13 }}>
+                    ({detailsContext.account})
+                  </span>
+                </h3>
+                <div style={{ fontSize: 12, color: '#64748B', marginTop: 4 }}>
+                  {detailsContext.date}
+                  {detailsContext.hour !== null && detailsContext.hour !== undefined && (
+                    <> · {String(detailsContext.hour).padStart(2, '0')}:00–{String(detailsContext.hour + 1).padStart(2, '0')}:00</>
+                  )}
+                  {' · '}
+                  Всего: <b>{detailsList.length}</b>
+                </div>
+              </div>
+              <button style={modalCloseStyle} onClick={closeDetails} title="Закрыть">✕</button>
+            </div>
+
+            <div style={modalBodyStyle}>
+              {detailsLoading ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#64748B' }}>Загрузка...</div>
+              ) : detailsList.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#64748B' }}>Нет данных</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...detailThStyle, width: 60, textAlign: 'center' }}>№</th>
+                      <th style={detailThStyle}>Время ремонта</th>
+                      <th style={detailThStyle}>Модель</th>
+                      <th style={detailThStyle}>Деталь</th>
+                      <th style={detailThStyle}>Дефект</th>
+                      <th style={detailThStyle}>VIN</th>
+                      <th style={detailThStyle}>Пост</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detailsList.map((d, i) => (
+                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                        <td style={{ ...detailTdStyle, textAlign: 'center', color: '#94A3B8' }}>{i + 1}</td>
+                        <td style={{ ...detailTdStyle, fontFamily: 'monospace' }}>{formatDateTime(d.repair_time)}</td>
+                        <td style={detailTdStyle}>{d.model}</td>
+                        <td style={detailTdStyle}>{d.part_name}</td>
+                        <td style={detailTdStyle}>{d.problem_type}</td>
+                        <td style={{ ...detailTdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{d.vin}</td>
+                        <td style={detailTdStyle}>{d.post_name}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
