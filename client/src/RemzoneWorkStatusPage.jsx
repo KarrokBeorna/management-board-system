@@ -36,7 +36,7 @@ function addDays(dateStr, n) {
 
 /* ===================== СТИЛИ ===================== */
 const containerStyle = {
-  padding: '20px',
+  padding: '16px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
   width: '100%',
   height: '100vh',
@@ -51,14 +51,14 @@ const headerStyle = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  marginBottom: '14px',
+  marginBottom: '12px',
   flexWrap: 'wrap',
-  gap: 12,
+  gap: 10,
   flexShrink: 0,
 };
 
 const titleStyle = {
-  fontSize: '1.8rem',
+  fontSize: '1.6rem',
   fontWeight: 900,
   color: '#0F172A',
   margin: 0,
@@ -67,8 +67,8 @@ const titleStyle = {
 
 const cardStyle = {
   backgroundColor: '#FFFFFF',
-  borderRadius: 14,
-  padding: 14,
+  borderRadius: 12,
+  padding: 12,
   border: '1px solid #E2E8F0',
   flex: 1,
   minHeight: 0,
@@ -78,7 +78,7 @@ const cardStyle = {
 };
 
 const inputStyle = {
-  padding: '7px 10px',
+  padding: '6px 10px',
   borderRadius: 8,
   border: '1px solid #CBD5E1',
   fontSize: 13,
@@ -87,7 +87,7 @@ const inputStyle = {
 };
 
 const mainTabStyle = (active) => ({
-  padding: '9px 18px',
+  padding: '8px 16px',
   borderRadius: 10,
   border: 'none',
   fontWeight: 700,
@@ -102,7 +102,7 @@ const mainTabStyle = (active) => ({
 const filterBarStyle = {
   display: 'flex',
   flexWrap: 'wrap',
-  gap: 10,
+  gap: 8,
   alignItems: 'center',
   marginBottom: 10,
   padding: 10,
@@ -141,17 +141,15 @@ const tableWrapStyle = {
   background: '#FFFFFF',
 };
 
-/* ---------- Цвета шапки ---------- */
-const HEADER_GRAD_MAIN = 'linear-gradient(180deg,#1E40AF 0%,#1E3A8A 100%)';
-const HEADER_GRAD_DAY  = 'linear-gradient(180deg,#3B82F6 0%,#1D4ED8 100%)';
-const HEADER_GRAD_DAY_ACTIVE = 'linear-gradient(180deg,#0EA5E9 0%,#0284C7 100%)';
-const HEADER_GRAD_CW   = 'linear-gradient(180deg,#7C3AED 0%,#6D28D9 100%)';
-const HEADER_GRAD_CW_ACTIVE = 'linear-gradient(180deg,#8B5CF6 0%,#7C3AED 100%)';
-const HEADER_GRAD_TOT  = 'linear-gradient(180deg,#10B981 0%,#047857 100%)';
+/* ---------- Единая синяя палитра для шапки ---------- */
+const HEADER_BG_DARK   = 'linear-gradient(180deg,#1E40AF 0%,#1E3A8A 100%)';
+const HEADER_BG_MAIN   = 'linear-gradient(180deg,#2563EB 0%,#1D4ED8 100%)';
+const HEADER_BG_ACCENT = 'linear-gradient(180deg,#1D4ED8 0%,#1E3A8A 100%)';
+const HEADER_BG_ACTIVE = 'linear-gradient(180deg,#0EA5E9 0%,#0284C7 100%)';
 
 /* ---------- Базовые th ---------- */
 const thBaseStyle = {
-  padding: '8px 6px',
+  padding: '6px 5px',
   textAlign: 'center',
   fontWeight: 700,
   color: '#FFFFFF',
@@ -168,40 +166,40 @@ const thBaseStyle = {
 const thMainLeftStyle = {
   ...thBaseStyle,
   textAlign: 'left',
-  background: HEADER_GRAD_MAIN,
-  minWidth: 100,
-  paddingLeft: 12,
+  background: HEADER_BG_DARK,
+  minWidth: 90,
+  paddingLeft: 10,
 };
 
 const thDayStyle = {
   ...thBaseStyle,
-  background: HEADER_GRAD_DAY,
-  minWidth: 62,
-  padding: '6px 4px',
+  background: HEADER_BG_MAIN,
+  minWidth: 58,
+  padding: '5px 3px',
 };
 
 const thCWStyle = {
   ...thBaseStyle,
-  background: HEADER_GRAD_CW,
-  minWidth: 62,
-  padding: '6px 4px',
+  background: HEADER_BG_ACCENT,
+  minWidth: 58,
+  padding: '5px 4px',
 };
 
 const thTotalStyle = {
   ...thBaseStyle,
-  background: HEADER_GRAD_TOT,
-  minWidth: 60,
+  background: HEADER_BG_ACCENT,
+  minWidth: 56,
   padding: '6px 8px',
 };
 
-/* ---------- th для hourly (двухстрочные подписи) ---------- */
+/* ---------- th для hourly ---------- */
 const thHourStyle = {
-  padding: '6px 4px',
+  padding: '4px 2px',
   textAlign: 'center',
   fontWeight: 700,
   color: '#FFFFFF',
-  background: HEADER_GRAD_DAY,
-  fontSize: 10,
+  background: HEADER_BG_MAIN,
+  fontSize: 9,
   position: 'sticky',
   top: 0,
   zIndex: 5,
@@ -209,12 +207,14 @@ const thHourStyle = {
   boxSizing: 'border-box',
   borderRight: '1px solid rgba(255,255,255,0.15)',
   borderBottom: '1px solid rgba(0,0,0,0.15)',
-  minWidth: 52,
+  minWidth: 32,
+  cursor: 'pointer',
+  userSelect: 'none',
 };
 
 /* ---------- td ---------- */
 const tdBaseStyle = {
-  padding: '6px 8px',
+  padding: '5px 6px',
   borderBottom: '1px solid #F1F5F9',
   borderRight: '1px solid #F1F5F9',
   color: '#1E293B',
@@ -226,34 +226,33 @@ const tdLeftStyle = { ...tdBaseStyle, textAlign: 'left', fontWeight: 600 };
 const tdTotalCellStyle = {
   ...tdBaseStyle,
   fontWeight: 800,
-  background: '#ECFDF5',
-  color: '#047857',
+  background: '#EFF6FF',
+  color: '#1D4ED8',
 };
 const tdCWCellStyle = {
   ...tdBaseStyle,
   fontWeight: 700,
-  background: '#F5F3FF',
-  color: '#6D28D9',
+  background: '#F8FAFC',
+  color: '#1E40AF',
 };
 
 /* ---------- Кнопка часов ---------- */
 const hoursBtnStyle = {
-  fontSize: 10,
-  padding: '1px 6px',
+  fontSize: 9,
+  padding: '1px 5px',
   marginTop: 1,
-  borderRadius: 6,
-  border: '1px solid rgba(255,255,255,0.4)',
-  background: 'rgba(255,255,255,0.15)',
+  borderRadius: 5,
+  border: '1px solid rgba(255,255,255,0.35)',
+  background: 'rgba(255,255,255,0.12)',
   color: '#FFFFFF',
   cursor: 'pointer',
   fontWeight: 600,
   lineHeight: 1.2,
-  transition: 'background 0.15s',
 };
 
 /* ---------- Кнопки часовых дней ---------- */
 const hourlyBtnActiveStyle = {
-  padding: '5px 10px',
+  padding: '4px 9px',
   borderRadius: 6,
   border: '1px solid #1D4ED8',
   background: 'linear-gradient(135deg,#2563EB,#1D4ED8)',
@@ -263,7 +262,7 @@ const hourlyBtnActiveStyle = {
   cursor: 'pointer',
 };
 const hourlyBtnStyle = {
-  padding: '5px 10px',
+  padding: '4px 9px',
   borderRadius: 6,
   border: '1px solid #CBD5E1',
   background: '#FFFFFF',
@@ -277,8 +276,10 @@ const hourlyBtnStyle = {
 export default function RemzoneWorkStatusPage() {
   const [mode, setMode] = useState('daily');
   const [hourlyDate, setHourlyDate] = useState(getTodayStr());
-  const [sortDay, setSortDay] = useState(null);
-  const [sortWeek, setSortWeek] = useState(null);
+  const [sortDay, setSortDay] = useState(null);   // YYYY-MM-DD
+  const [sortWeek, setSortWeek] = useState(null); // 'prev' | 'curr'
+  const [sortTotal, setSortTotal] = useState('desc'); // 'desc' | 'asc'
+  const [sortHour, setSortHour] = useState(null); // 0..23
 
   const [periodStart, setPeriodStart] = useState(() => {
     const mondayThisWeek = getMonday(new Date());
@@ -344,6 +345,7 @@ export default function RemzoneWorkStatusPage() {
 
   const sortedRows = useMemo(() => {
     const copy = [...filteredRows];
+
     if (mode === 'daily') {
       if (sortDay) {
         copy.sort((a, b) => (b.days?.[sortDay] || 0) - (a.days?.[sortDay] || 0));
@@ -355,13 +357,21 @@ export default function RemzoneWorkStatusPage() {
           return sb - sa;
         });
       } else {
-        copy.sort((a, b) => (b.total || 0) - (a.total || 0));
+        copy.sort((a, b) => sortTotal === 'desc'
+          ? (b.total || 0) - (a.total || 0)
+          : (a.total || 0) - (b.total || 0));
       }
     } else {
-      copy.sort((a, b) => (b.total || 0) - (a.total || 0));
+      if (sortHour !== null) {
+        copy.sort((a, b) => (b.hours?.[sortHour] || 0) - (a.hours?.[sortHour] || 0));
+      } else {
+        copy.sort((a, b) => sortTotal === 'desc'
+          ? (b.total || 0) - (a.total || 0)
+          : (a.total || 0) - (b.total || 0));
+      }
     }
     return copy;
-  }, [filteredRows, mode, sortDay, sortWeek, prevWeekDays, currWeekDays]);
+  }, [filteredRows, mode, sortDay, sortWeek, sortTotal, sortHour, prevWeekDays, currWeekDays]);
 
   /* ================ ЭКСПОРТ ================ */
   const handleExport = () => {
@@ -407,6 +417,16 @@ export default function RemzoneWorkStatusPage() {
     setSortDay(null);
     setSortWeek(prev => (prev === week ? null : week));
   };
+  const handleTotalHeaderClick = () => {
+    setSortDay(null);
+    setSortWeek(null);
+    setSortHour(null);
+    setSortTotal(prev => (prev === 'desc' ? 'asc' : 'desc'));
+  };
+  const handleHourHeaderClick = (h) => {
+    setSortTotal('desc'); // сбрасываем total-сортировку (визуально)
+    setSortHour(prev => (prev === h ? null : h));
+  };
   const handleOpenHourly = (dateStr, e) => {
     e.stopPropagation();
     setHourlyDate(dateStr);
@@ -421,7 +441,10 @@ export default function RemzoneWorkStatusPage() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button style={mainTabStyle(mode === 'daily')} onClick={() => setMode('daily')}>📅 По дням</button>
           <button style={mainTabStyle(mode === 'hourly')} onClick={() => setMode('hourly')}>🕐 По часам (за день)</button>
-          <button style={{ ...mainTabStyle(false), background: 'linear-gradient(135deg,#059669,#10B981)', color: '#FFF' }} onClick={handleExport}>📊 Экспорт</button>
+          <button
+            style={{ ...mainTabStyle(false), background: 'linear-gradient(135deg,#059669,#10B981)', color: '#FFF' }}
+            onClick={handleExport}
+          >📊 Экспорт</button>
         </div>
       </div>
 
@@ -494,19 +517,15 @@ export default function RemzoneWorkStatusPage() {
                     {prevWeekDays.map(d => {
                       const isSorted = sortDay === d;
                       return (
-                        <th
-                          key={d}
-                          style={{ ...thDayStyle, background: isSorted ? HEADER_GRAD_DAY_ACTIVE : HEADER_GRAD_DAY }}
-                        >
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                        <th key={d} style={{ ...thDayStyle, background: isSorted ? HEADER_BG_ACTIVE : HEADER_BG_MAIN }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
                             <div
-                              style={{ cursor: 'pointer', userSelect: 'none', fontWeight: 800, fontSize: 12, letterSpacing: '0.02em' }}
+                              style={{ cursor: 'pointer', userSelect: 'none', fontWeight: 800, fontSize: 11 }}
                               onClick={() => handleDayHeaderClick(d)}
-                              title="Сортировать по этому дню"
                             >
                               {formatDateDDMM(new Date(d + 'T12:00:00'))} {isSorted && '▼'}
                             </div>
-                            <div style={{ fontSize: 10, fontWeight: 500, opacity: 0.9 }}>
+                            <div style={{ fontSize: 9, fontWeight: 500, opacity: 0.9 }}>
                               {getDayOfWeekShort(new Date(d + 'T12:00:00'))}
                             </div>
                             <button
@@ -523,10 +542,9 @@ export default function RemzoneWorkStatusPage() {
                       style={{
                         ...thCWStyle,
                         cursor: 'pointer',
-                        background: sortWeek === 'prev' ? HEADER_GRAD_CW_ACTIVE : HEADER_GRAD_CW,
+                        background: sortWeek === 'prev' ? HEADER_BG_ACTIVE : HEADER_BG_ACCENT,
                       }}
                       onClick={() => handleWeekHeaderClick('prev')}
-                      title="Сортировать по сумме недели"
                     >
                       CW{prevWeekNum} {sortWeek === 'prev' && '▼'}
                     </th>
@@ -534,19 +552,15 @@ export default function RemzoneWorkStatusPage() {
                     {currWeekDays.map(d => {
                       const isSorted = sortDay === d;
                       return (
-                        <th
-                          key={d}
-                          style={{ ...thDayStyle, background: isSorted ? HEADER_GRAD_DAY_ACTIVE : HEADER_GRAD_DAY }}
-                        >
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                        <th key={d} style={{ ...thDayStyle, background: isSorted ? HEADER_BG_ACTIVE : HEADER_BG_MAIN }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
                             <div
-                              style={{ cursor: 'pointer', userSelect: 'none', fontWeight: 800, fontSize: 12, letterSpacing: '0.02em' }}
+                              style={{ cursor: 'pointer', userSelect: 'none', fontWeight: 800, fontSize: 11 }}
                               onClick={() => handleDayHeaderClick(d)}
-                              title="Сортировать по этому дню"
                             >
                               {formatDateDDMM(new Date(d + 'T12:00:00'))} {isSorted && '▼'}
                             </div>
-                            <div style={{ fontSize: 10, fontWeight: 500, opacity: 0.9 }}>
+                            <div style={{ fontSize: 9, fontWeight: 500, opacity: 0.9 }}>
                               {getDayOfWeekShort(new Date(d + 'T12:00:00'))}
                             </div>
                             <button
@@ -563,33 +577,60 @@ export default function RemzoneWorkStatusPage() {
                       style={{
                         ...thCWStyle,
                         cursor: 'pointer',
-                        background: sortWeek === 'curr' ? HEADER_GRAD_CW_ACTIVE : HEADER_GRAD_CW,
+                        background: sortWeek === 'curr' ? HEADER_BG_ACTIVE : HEADER_BG_ACCENT,
                       }}
                       onClick={() => handleWeekHeaderClick('curr')}
-                      title="Сортировать по сумме недели"
                     >
                       CW{currWeekNum} {sortWeek === 'curr' && '▼'}
                     </th>
 
-                    <th style={thTotalStyle}>Итого</th>
+                    <th
+                      style={{ ...thTotalStyle, cursor: 'pointer', background: (sortDay || sortWeek) ? HEADER_BG_ACCENT : HEADER_BG_ACTIVE }}
+                      onClick={handleTotalHeaderClick}
+                      title="Сортировать по итогу"
+                    >
+                      Итого {!sortDay && !sortWeek && (sortTotal === 'desc' ? '▼' : '▲')}
+                    </th>
                   </tr>
                 ) : (
                   <tr>
-                    <th style={{ ...thMainLeftStyle, rowSpan: 2 }}>Акк. сотр. дораб.</th>
-                    <th style={{ ...thMainLeftStyle, rowSpan: 2 }}>Сотрудник дораб. в линии</th>
-                    {Array.from({ length: 24 }, (_, h) => (
-                      <th key={h} style={thHourStyle}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1.1 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.95 }}>
-                            {String(h).padStart(2, '0')}:00-
+                    <th style={{ ...thMainLeftStyle, rowSpan: 2, minWidth: 80 }}>Акк. сотр. дораб.</th>
+                    <th style={{ ...thMainLeftStyle, rowSpan: 2, minWidth: 130 }}>Сотрудник дораб. в линии</th>
+
+                    {Array.from({ length: 24 }, (_, h) => {
+                      const isSorted = sortHour === h;
+                      return (
+                        <th
+                          key={h}
+                          style={{
+                            ...thHourStyle,
+                            background: isSorted ? HEADER_BG_ACTIVE : HEADER_BG_MAIN,
+                          }}
+                          onClick={() => handleHourHeaderClick(h)}
+                          title="Сортировать по этому часу"
+                        >
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.05 }}>
+                            <div>{String(h).padStart(2, '0')}:00-</div>
+                            <div>
+                              {String(h + 1).padStart(2, '0')}:00 {isSorted && '▼'}
+                            </div>
                           </div>
-                          <div style={{ fontSize: 11, fontWeight: 800 }}>
-                            {String(h + 1).padStart(2, '0')}:00
-                          </div>
-                        </div>
-                      </th>
-                    ))}
-                    <th style={{ ...thTotalStyle, rowSpan: 2 }}>Итого</th>
+                        </th>
+                      );
+                    })}
+
+                    <th
+                      style={{
+                        ...thTotalStyle,
+                        rowSpan: 2,
+                        cursor: 'pointer',
+                        background: sortHour !== null ? HEADER_BG_ACCENT : HEADER_BG_ACTIVE,
+                      }}
+                      onClick={handleTotalHeaderClick}
+                      title="Сортировать по итогу"
+                    >
+                      Итого {sortHour === null && (sortTotal === 'desc' ? '▼' : '▲')}
+                    </th>
                   </tr>
                 )}
               </thead>
@@ -647,10 +688,11 @@ export default function RemzoneWorkStatusPage() {
                               key={h}
                               style={{
                                 ...tdBaseStyle,
-                                padding: '6px 3px',
+                                padding: '5px 2px',
                                 color: val > 0 ? '#1E293B' : '#CBD5E1',
-                                fontWeight: val > 0 ? 600 : 400,
-                                minWidth: 52,
+                                fontWeight: val > 0 ? 700 : 400,
+                                minWidth: 32,
+                                fontSize: 11,
                               }}
                             >
                               {val > 0 ? val : '·'}
