@@ -8985,10 +8985,24 @@ app.get('/api/brigade-report/top-mpp-vins', async (req, res) => {
 });
 
 // ================== REMZONE WORK STATUS ==================
+// ================== REMZONE WORK STATUS ==================
+
+// Фильтр: оставляем только RE-аккаунты (REP%, rep%, repXX|)
+// Проверяем и REPAIR_ACCOUNT, и левую часть REPAIR_PERSON до знака "|"
+const REMZONE_FILTER = `
+  AND (
+    UPPER(REPAIR_ACCOUNT) LIKE 'REP%'
+    OR UPPER(SUBSTRING_INDEX(REPAIR_PERSON, '|', 1)) LIKE 'REP%'
+  )
+`;
+
+// ---------- 1. Ежедневный режим: по дням за период ----------
 app.get('/api/remzone-work-status/daily', async (req, res) => {
   try {
     const { dateFrom, dateTo } = req.query;
-    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    }
 
     const [rows] = await pool.query(`
       SELECT
@@ -8997,50 +9011,61 @@ app.get('/api/remzone-work-status/daily', async (req, res) => {
         REPAIR_ACCOUNT,
         COUNT(*) AS cnt
       FROM at_qm_defect_info
-      WHERE STATUS = 'CLOSED'
-        AND REPAIR_TIME IS NOT NULL
+      WHERE REPAIR_TIME IS NOT NULL
         AND REPAIR_TIME >= ? AND REPAIR_TIME <= ?
         AND REPAIR_PERSON IS NOT NULL AND TRIM(REPAIR_PERSON) <> ''
-        AND (
-          REPAIR_ACCOUNT LIKE 'RE%'
-          OR REPAIR_PERSON LIKE 'REP%'
-          OR REPAIR_PERSON LIKE 'rep%'
-        )
+        ${REMZONE_FILTER}
       GROUP BY repair_date, REPAIR_PERSON, REPAIR_ACCOUNT
       ORDER BY repair_date
     `, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
 
     const personsMap = new Map();
+
     for (const row of rows) {
       const key = row.REPAIR_PERSON;
+
       if (!personsMap.has(key)) {
-        const parts = String(row.REPAIR_PERSON || '').split('|');
+        const raw = String(row.REPAIR_PERSON || '');
+        const parts = raw.split('|');
+        const acc = (parts[0] || '').trim();
+        const name = (parts[1] || '').trim();
+
         personsMap.set(key, {
-          repair_person: row.REPAIR_PERSON,
-          repair_account: row.REPAIR_ACCOUNT || parts[0] || '',
-          person_account: parts[0] || row.REPAIR_ACCOUNT || '',
-          person_name: parts[1] || row.REPAIR_PERSON || '',
+          repair_person: raw,
+          repair_account: row.REPAIR_ACCOUNT || acc || '',
+          person_account: acc || row.REPAIR_ACCOUNT || '',
+          // Если ФИО пустое (например, "REP00|") — показываем аккаунт
+          person_name: name || acc || raw || '—',
           days: {},
           total: 0,
         });
       }
+
       const person = personsMap.get(key);
       const dateStr = String(row.repair_date).slice(0, 10);
-      person.days[dateStr] = (person.days[dateStr] || 0) + Number(row.cnt || 0);
-      person.total += Number(row.cnt || 0);
+      const cnt = Number(row.cnt || 0);
+
+      person.days[dateStr] = (person.days[dateStr] || 0) + cnt;
+      person.total += cnt;
     }
 
-    res.json({ rows: Array.from(personsMap.values()).sort((a, b) => b.total - a.total) });
+    const result = Array.from(personsMap.values())
+      .sort((a, b) => b.total - a.total);
+
+    res.json({ rows: result });
   } catch (err) {
-    console.error('Ошибка daily:', err.message);
+    console.error('Ошибка /api/remzone-work-status/daily:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
+// ---------- 2. Часовой режим: по часам за конкретный день ----------
 app.get('/api/remzone-work-status/hourly', async (req, res) => {
   try {
     const { date } = req.query;
-    if (!date) return res.status(400).json({ error: 'date обязателен' });
+    if (!date) {
+      return res.status(400).json({ error: 'date обязателен' });
+    }
 
     const [rows] = await pool.query(`
       SELECT
@@ -9049,43 +9074,50 @@ app.get('/api/remzone-work-status/hourly', async (req, res) => {
         REPAIR_ACCOUNT,
         COUNT(*) AS cnt
       FROM at_qm_defect_info
-      WHERE STATUS = 'CLOSED'
-        AND REPAIR_TIME IS NOT NULL
+      WHERE REPAIR_TIME IS NOT NULL
         AND DATE(REPAIR_TIME) = ?
         AND REPAIR_PERSON IS NOT NULL AND TRIM(REPAIR_PERSON) <> ''
-        AND (
-          REPAIR_ACCOUNT LIKE 'RE%'
-          OR REPAIR_PERSON LIKE 'REP%'
-          OR REPAIR_PERSON LIKE 'rep%'
-        )
+        ${REMZONE_FILTER}
       GROUP BY hour, REPAIR_PERSON, REPAIR_ACCOUNT
     `, [date]);
 
     const personsMap = new Map();
+
     for (const row of rows) {
       const key = row.REPAIR_PERSON;
+
       if (!personsMap.has(key)) {
-        const parts = String(row.REPAIR_PERSON || '').split('|');
+        const raw = String(row.REPAIR_PERSON || '');
+        const parts = raw.split('|');
+        const acc = (parts[0] || '').trim();
+        const name = (parts[1] || '').trim();
+
         personsMap.set(key, {
-          repair_person: row.REPAIR_PERSON,
-          repair_account: row.REPAIR_ACCOUNT || parts[0] || '',
-          person_account: parts[0] || row.REPAIR_ACCOUNT || '',
-          person_name: parts[1] || row.REPAIR_PERSON || '',
+          repair_person: raw,
+          repair_account: row.REPAIR_ACCOUNT || acc || '',
+          person_account: acc || row.REPAIR_ACCOUNT || '',
+          person_name: name || acc || raw || '—',
           hours: Array(24).fill(0),
           total: 0,
         });
       }
+
       const person = personsMap.get(key);
       const h = Number(row.hour);
+      const cnt = Number(row.cnt || 0);
+
       if (h >= 0 && h <= 23) {
-        person.hours[h] += Number(row.cnt || 0);
-        person.total += Number(row.cnt || 0);
+        person.hours[h] += cnt;
+        person.total += cnt;
       }
     }
 
-    res.json({ rows: Array.from(personsMap.values()).sort((a, b) => b.total - a.total) });
+    const result = Array.from(personsMap.values())
+      .sort((a, b) => b.total - a.total);
+
+    res.json({ rows: result });
   } catch (err) {
-    console.error('Ошибка hourly:', err.message);
+    console.error('Ошибка /api/remzone-work-status/hourly:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
