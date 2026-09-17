@@ -23,6 +23,7 @@ import DrrTLDashboardPage from './DrrTLDashboardPage';
 import DrrPipDashboardPage from './DrrPipDashboardPage';
 import DefectElectronicsTopPage from './DefectElectronicsTopPage';
 import BrigadeReportPage from './BrigadeReportPage';
+import RemzoneWorkStatusPage from './RemzoneWorkStatusPage';
 
 import TestPage from './testpage'; // тестовая страница
 export default function App() {
@@ -50,6 +51,7 @@ export default function App() {
         <Route path="/drr-pip-dashboard" element={<DrrPipDashboardPage />} />
         <Route path="/defect-electronics-top" element={<DefectElectronicsTopPage />} />
         <Route path="/brigade-report" element={<BrigadeReportPage />} />
+        <Route path="/remzone-work-status" element={<RemzoneWorkStatusPage />} />
 
         <Route path="/testpage" element={<TestPage />} />
       </Route>
