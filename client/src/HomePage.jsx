@@ -22,7 +22,7 @@ import drrTestlinePreview from './assets/tldrr.png';
 import DrrPIPDashboardPage from './assets/drrpip.png'; //
 import electronicsPreview from './assets/elec.png'; // 
 import brigPreview from './assets/briga.png';
-import RemPreview from './assets/123.png'; // замените на реальное имя файла
+import RemPreview from './assets/remzs.png'; // замените на реальное имя файла
 
 
 // ====== СТИЛИ ======
