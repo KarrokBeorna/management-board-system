@@ -66,6 +66,7 @@ export default function Layout() {
   location.pathname === '/drr-cp8-dashboard' || 
   location.pathname === '/drr-tl-dashboard' || 
   location.pathname === '/drr-pip-dashboard' || 
+  location.pathname === '/remzone-work-status' ||
   location.pathname === '/brigade-report';
 
   return (

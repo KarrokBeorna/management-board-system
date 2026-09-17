@@ -8985,14 +8985,10 @@ app.get('/api/brigade-report/top-mpp-vins', async (req, res) => {
 });
 
 // ================== REMZONE WORK STATUS ==================
-
-// Режим daily: количество завершённых ремонтов по дням для каждого сотрудника
 app.get('/api/remzone-work-status/daily', async (req, res) => {
   try {
     const { dateFrom, dateTo } = req.query;
-    if (!dateFrom || !dateTo) {
-      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
-    }
+    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
 
     const [rows] = await pool.query(`
       SELECT
@@ -9005,6 +9001,11 @@ app.get('/api/remzone-work-status/daily', async (req, res) => {
         AND REPAIR_TIME IS NOT NULL
         AND REPAIR_TIME >= ? AND REPAIR_TIME <= ?
         AND REPAIR_PERSON IS NOT NULL AND TRIM(REPAIR_PERSON) <> ''
+        AND (
+          REPAIR_ACCOUNT LIKE 'RE%'
+          OR REPAIR_PERSON LIKE 'REP%'
+          OR REPAIR_PERSON LIKE 'rep%'
+        )
       GROUP BY repair_date, REPAIR_PERSON, REPAIR_ACCOUNT
       ORDER BY repair_date
     `, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
@@ -9017,7 +9018,7 @@ app.get('/api/remzone-work-status/daily', async (req, res) => {
         personsMap.set(key, {
           repair_person: row.REPAIR_PERSON,
           repair_account: row.REPAIR_ACCOUNT || parts[0] || '',
-          person_account: parts[0] || '',
+          person_account: parts[0] || row.REPAIR_ACCOUNT || '',
           person_name: parts[1] || row.REPAIR_PERSON || '',
           days: {},
           total: 0,
@@ -9029,15 +9030,13 @@ app.get('/api/remzone-work-status/daily', async (req, res) => {
       person.total += Number(row.cnt || 0);
     }
 
-    const result = Array.from(personsMap.values()).sort((a, b) => b.total - a.total);
-    res.json({ rows: result });
+    res.json({ rows: Array.from(personsMap.values()).sort((a, b) => b.total - a.total) });
   } catch (err) {
-    console.error('Ошибка /api/remzone-work-status/daily:', err.message);
+    console.error('Ошибка daily:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Режим hourly: количество завершённых ремонтов по часам за конкретный день
 app.get('/api/remzone-work-status/hourly', async (req, res) => {
   try {
     const { date } = req.query;
@@ -9054,6 +9053,11 @@ app.get('/api/remzone-work-status/hourly', async (req, res) => {
         AND REPAIR_TIME IS NOT NULL
         AND DATE(REPAIR_TIME) = ?
         AND REPAIR_PERSON IS NOT NULL AND TRIM(REPAIR_PERSON) <> ''
+        AND (
+          REPAIR_ACCOUNT LIKE 'RE%'
+          OR REPAIR_PERSON LIKE 'REP%'
+          OR REPAIR_PERSON LIKE 'rep%'
+        )
       GROUP BY hour, REPAIR_PERSON, REPAIR_ACCOUNT
     `, [date]);
 
@@ -9065,7 +9069,7 @@ app.get('/api/remzone-work-status/hourly', async (req, res) => {
         personsMap.set(key, {
           repair_person: row.REPAIR_PERSON,
           repair_account: row.REPAIR_ACCOUNT || parts[0] || '',
-          person_account: parts[0] || '',
+          person_account: parts[0] || row.REPAIR_ACCOUNT || '',
           person_name: parts[1] || row.REPAIR_PERSON || '',
           hours: Array(24).fill(0),
           total: 0,
@@ -9074,15 +9078,14 @@ app.get('/api/remzone-work-status/hourly', async (req, res) => {
       const person = personsMap.get(key);
       const h = Number(row.hour);
       if (h >= 0 && h <= 23) {
-        person.hours[h] = (person.hours[h] || 0) + Number(row.cnt || 0);
+        person.hours[h] += Number(row.cnt || 0);
         person.total += Number(row.cnt || 0);
       }
     }
 
-    const result = Array.from(personsMap.values()).sort((a, b) => b.total - a.total);
-    res.json({ rows: result });
+    res.json({ rows: Array.from(personsMap.values()).sort((a, b) => b.total - a.total) });
   } catch (err) {
-    console.error('Ошибка /api/remzone-work-status/hourly:', err.message);
+    console.error('Ошибка hourly:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
