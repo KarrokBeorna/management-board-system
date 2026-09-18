@@ -9174,6 +9174,7 @@ app.get('/api/remzone-work-status/details', async (req, res) => {
   }
 });
 
+
 // ================== VEHICLE ON WHEELS ==================
 app.get('/api/vehicle-on-wheels', async (req, res) => {
   try {
