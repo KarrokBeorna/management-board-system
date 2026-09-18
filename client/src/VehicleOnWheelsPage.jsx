@@ -335,6 +335,8 @@ export default function VehicleOnWheelsPage() {
   };
 
   // ---------- Открытие модалки ----------
+  // Для CP72 → Ремзона используем уже загруженные data.rows (без запросов к серверу).
+  // Для CPA и REP — запрос на сервер.
   const openDetails = async (type) => {
     const titleMap = {
       cp72: 'CP72 → Ремзона',
@@ -349,7 +351,6 @@ export default function VehicleOnWheelsPage() {
     setModalCount(0);
     setModalUnique(0);
 
-    // Для CP72 → Ремзона используем уже загруженные data.rows (не дёргаем сервер)
     if (type === 'cp72') {
       const rows = (data.rows || []).map(r => ({
         vin: r.vin,
@@ -364,7 +365,6 @@ export default function VehicleOnWheelsPage() {
       return;
     }
 
-    // Для CPA и REP — запрашиваем с сервера
     setModalLoading(true);
     try {
       const { start, end } = getTimeRange(timeFilter);
