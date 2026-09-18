@@ -3,7 +3,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 
-/* ===================== СТИЛИ (как в DRR CP7) ===================== */
+/* ===================== СТИЛИ ===================== */
 const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
@@ -63,10 +63,12 @@ const dashboardGridStyle = {
   gap: '20px',
   flex: 1,
   minHeight: 0,
+  minWidth: 0,
 };
 
 const chartColumnStyle = {
   flex: '0 0 40%',
+  minWidth: 0,
   backgroundColor: '#FFFFFF',
   borderRadius: '24px',
   padding: '24px',
@@ -78,6 +80,7 @@ const chartColumnStyle = {
 
 const rightColumnStyle = {
   flex: 1,
+  minWidth: 0,
   display: 'flex',
   flexDirection: 'column',
   minHeight: 0,
@@ -85,13 +88,14 @@ const rightColumnStyle = {
 
 const tableCardStyle = {
   flex: 1,
+  minWidth: 0,
+  minHeight: 0,
   backgroundColor: '#FFFFFF',
   borderRadius: '24px',
   padding: '24px',
   display: 'flex',
   flexDirection: 'column',
   boxShadow: '0 8px 30px rgba(0,0,0,0.05)',
-  minHeight: 0,
 };
 
 const tableTitleStyle = {
@@ -102,10 +106,14 @@ const tableTitleStyle = {
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
+  flexShrink: 0,
 };
 
 const tableScrollStyle = {
   flex: 1,
+  minHeight: 0,
+  minWidth: 0,
+  width: '100%',
   overflowY: 'auto',
   overflowX: 'auto',
   border: '1px solid #E2E8F0',
@@ -113,13 +121,13 @@ const tableScrollStyle = {
 };
 
 const thStyle = {
-  padding: 'clamp(6px, 0.6vw, 12px) clamp(8px, 0.9vw, 16px)',
+  padding: 'clamp(5px, 0.5vw, 10px) clamp(6px, 0.7vw, 14px)',
   textAlign: 'left',
   fontWeight: 800,
   color: '#475569',
   borderBottom: '3px solid #E2E8F0',
   background: '#F8FAFC',
-  fontSize: 'clamp(0.75rem, 0.9vw, 1.05rem)',
+  fontSize: 'clamp(0.72rem, 0.85vw, 1rem)',
   textTransform: 'uppercase',
   position: 'sticky',
   top: 0,
@@ -128,10 +136,10 @@ const thStyle = {
 };
 
 const tdStyle = {
-  padding: 'clamp(6px, 0.6vw, 10px) clamp(8px, 0.9vw, 16px)',
+  padding: 'clamp(4px, 0.5vw, 10px) clamp(6px, 0.7vw, 14px)',
   borderBottom: '1px solid #F1F5F9',
   color: '#1E293B',
-  fontSize: 'clamp(0.7rem, 0.85vw, 1rem)',
+  fontSize: 'clamp(0.68rem, 0.8vw, 0.95rem)',
   whiteSpace: 'nowrap',
 };
 
@@ -249,7 +257,8 @@ export default function VehicleOnWheelsPage() {
     cpaUnique: 0,
     repairTotal: 0,
     repairUnique: 0,
-    zoneCounts: {},
+    greenCounts: {},
+    greenUnique: {},
     cpaTarget: 160,
   });
   const [loading, setLoading] = useState(true);
@@ -271,7 +280,8 @@ export default function VehicleOnWheelsPage() {
         cpaUnique: json.cpaUnique || 0,
         repairTotal: json.repairTotal || 0,
         repairUnique: json.repairUnique || 0,
-        zoneCounts: json.zoneCounts || {},
+        greenCounts: json.greenCounts || {},
+        greenUnique: json.greenUnique || {},
         cpaTarget: json.cpaTarget || 160,
       });
     } catch (err) {
@@ -301,7 +311,6 @@ export default function VehicleOnWheelsPage() {
     return () => clearInterval(interval);
   }, [timeFilter]);
 
-  // Процент считается ТОЛЬКО от cpaCount (не от уникальных)
   const cpaPercent = data.cpaTarget > 0
     ? Math.min(100, (data.cpaCount / data.cpaTarget) * 100)
     : 0;
@@ -321,7 +330,6 @@ export default function VehicleOnWheelsPage() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>Vehicle on wheels</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* CW + смена */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
               background: '#FFFFFF',
@@ -357,7 +365,6 @@ export default function VehicleOnWheelsPage() {
 
           <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
 
-          {/* Фильтры времени */}
           <div style={filterGroupStyle}>
             <button
               style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')}
@@ -389,7 +396,7 @@ export default function VehicleOnWheelsPage() {
         </div>
       ) : (
         <div style={dashboardGridStyle}>
-          {/* Левая колонка: pie chart + 3 карточки */}
+          {/* Левая колонка */}
           <div style={chartColumnStyle}>
             <div style={{ position: 'relative', width: '100%', height: '380px', flexShrink: 0 }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -438,7 +445,6 @@ export default function VehicleOnWheelsPage() {
               </div>
             </div>
 
-            {/* 3 карточки */}
             <div style={{ display: 'flex', gap: '12px', marginTop: '16px', flexWrap: 'wrap' }}>
               <div style={{
                 flex: 1,
@@ -499,13 +505,13 @@ export default function VehicleOnWheelsPage() {
             </div>
           </div>
 
-          {/* Правая колонка: таблица */}
+          {/* Правая колонка */}
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Авто прошедшие CP72 и попавшие в ремзону</h2>
               <div style={tableScrollStyle}>
                 {data.rows.length > 0 ? (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <table style={{ width: '100%', minWidth: 900, borderCollapse: 'collapse' }}>
                     <thead>
                       <tr>
                         <th style={thStyle}>VIN</th>
@@ -528,7 +534,7 @@ export default function VehicleOnWheelsPage() {
                               background: '#EEF2FF',
                               color: '#1D4ED8',
                               fontWeight: 700,
-                              fontSize: 'clamp(0.7rem, 0.8vw, 1rem)',
+                              fontSize: 'clamp(0.68rem, 0.8vw, 1rem)',
                             }}>
                               {row.zone}
                             </span>
