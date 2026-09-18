@@ -9182,8 +9182,40 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    // 1. Авто, прошедшие CP72 в окне и попавшие в одну из зон ремзоны
-    const sql = `
+    const TEST_LINE_ZONES = ['TLWA', 'TLRT', 'TLADAS', 'TLTT', 'CPA'];
+    const REPAIR_ZONES = ['REPASS', 'REPPS', 'REPWS', 'REPLK', 'REPSHORT', 'REPELEC', 'REPNOISE'];
+    const ALL_ZONES = [...TEST_LINE_ZONES, ...REPAIR_ZONES];
+    const placeholders = ALL_ZONES.map(() => '?').join(',');
+
+    // Зелёные цифры — из tm_vhc_test_line_movement (DISTINCT VIN за период)
+    const [greenRows] = await mesPool.query(`
+      SELECT node_nature, COUNT(DISTINCT vin) AS cnt
+      FROM tm_vhc_test_line_movement
+      WHERE node_nature IN (${placeholders})
+        AND gmt_create >= ? AND gmt_create <= ?
+        AND is_deleted = 0
+      GROUP BY node_nature
+    `, [...ALL_ZONES, startTime, endTime]);
+
+    // Синие цифры — из tm_vhc_test_line_online (текущее количество записей)
+    const [blueRows] = await mesPool.query(`
+      SELECT node_nature, COUNT(*) AS cnt
+      FROM tm_vhc_test_line_online
+      WHERE node_nature IN (${placeholders})
+      GROUP BY node_nature
+    `, [...ALL_ZONES]);
+
+    const greenCounts = {};
+    greenRows.forEach(r => { greenCounts[r.node_nature] = Number(r.cnt || 0); });
+
+    const blueCounts = {};
+    blueRows.forEach(r => { blueCounts[r.node_nature] = Number(r.cnt || 0); });
+
+    const cpaCount = greenCounts['CPA'] || 0;
+    const repairTotal = REPAIR_ZONES.reduce((s, z) => s + (greenCounts[z] || 0), 0);
+
+    // Таблица: CP72 → REP-зона
+    const [rows] = await mesPool.query(`
       SELECT
         cp.vin,
         z.zone,
@@ -9199,27 +9231,16 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
           AND vm.scan_time >= ? AND vm.scan_time <= ?
       ) AS cp
       INNER JOIN (
-        SELECT tlo.node_nature AS zone, tlo.vin, tlo.gmt_modified AS TIME_ZONE
-        FROM tm_vhc_test_line_online tlo
-        WHERE tlo.node_nature IN ('REPASS','REPWS','REPPS','REPLK','REPSHORT','REPELEC','REPNOISE')
+        SELECT tvtlm.node_nature AS zone, tvtlm.vin, tvtlm.gmt_create AS TIME_ZONE
+        FROM tm_vhc_test_line_movement tvtlm
+        WHERE tvtlm.node_nature IN ('REPASS','REPPS','REPWS','REPLK','REPSHORT','REPELEC','REPNOISE')
+          AND tvtlm.is_deleted = 0
+          AND tvtlm.gmt_create >= ? AND tvtlm.gmt_create <= ?
       ) AS z ON cp.vin = z.vin
       ORDER BY z.zone, cp.vin
-    `;
-    const [rows] = await mesPool.query(sql, [startTime, endTime]);
+    `, [startTime, endTime, startTime, endTime]);
 
-    // 2. Уникальные VIN + сумма записей
     const uniqueVins = new Set(rows.map(r => r.vin)).size;
-    const totalRecords = rows.length;
-
-    // 3. Количество уникальных VIN на посту CPA за тот же период
-    const cpaSql = `
-      SELECT COUNT(DISTINCT tlo.vin) AS cpa_count
-      FROM tm_vhc_test_line_online tlo
-      WHERE tlo.node_nature = 'CPA'
-        AND tlo.gmt_modified >= ? AND tlo.gmt_modified <= ?
-    `;
-    const [cpaRows] = await mesPool.query(cpaSql, [startTime, endTime]);
-    const cpaCount = cpaRows[0]?.cpa_count || 0;
 
     res.json({
       rows: rows.map(r => ({
@@ -9231,8 +9252,10 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
         elapsed_zone_sec: r.elapsed_zone_sec,
       })),
       uniqueVins,
-      totalRecords,
       cpaCount,
+      repairTotal,
+      greenCounts,
+      blueCounts,
       cpaTarget: 160,
     });
   } catch (err) {

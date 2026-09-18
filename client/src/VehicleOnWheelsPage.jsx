@@ -3,7 +3,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 
-/* ===================== СТИЛИ (как в DRR CP7) ===================== */
+/* ===================== СТИЛИ ===================== */
 const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
@@ -95,27 +95,31 @@ const tableCardStyle = {
 };
 
 const tableTitleStyle = {
-  fontSize: '1.6rem',
+  fontSize: 'clamp(1.1rem, 1.4vw, 1.6rem)',
   fontWeight: 800,
   color: '#1E293B',
   margin: '0 0 16px 0',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
 };
 
 const tableScrollStyle = {
   flex: 1,
   overflowY: 'auto',
+  overflowX: 'auto',
   border: '1px solid #E2E8F0',
   borderRadius: '12px',
 };
 
 const thStyle = {
-  padding: '12px 16px',
+  padding: 'clamp(6px, 0.6vw, 12px) clamp(8px, 0.9vw, 16px)',
   textAlign: 'left',
   fontWeight: 800,
   color: '#475569',
   borderBottom: '3px solid #E2E8F0',
   background: '#F8FAFC',
-  fontSize: '1.1rem',
+  fontSize: 'clamp(0.75rem, 0.9vw, 1.05rem)',
   textTransform: 'uppercase',
   position: 'sticky',
   top: 0,
@@ -124,15 +128,16 @@ const thStyle = {
 };
 
 const tdStyle = {
-  padding: '10px 16px',
+  padding: 'clamp(6px, 0.6vw, 10px) clamp(8px, 0.9vw, 16px)',
   borderBottom: '1px solid #F1F5F9',
   color: '#1E293B',
-  fontSize: '1.1rem',
+  fontSize: 'clamp(0.7rem, 0.85vw, 1rem)',
+  whiteSpace: 'nowrap',
 };
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
-/* ===================== ХЕЛПЕРЫ ДЛЯ ВРЕМЕНИ ===================== */
+/* ===================== ХЕЛПЕРЫ ===================== */
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
 const getMoscowMinutes = () => {
   const moscow = getMoscowTime();
@@ -240,8 +245,10 @@ export default function VehicleOnWheelsPage() {
   const [data, setData] = useState({
     rows: [],
     uniqueVins: 0,
-    totalRecords: 0,
     cpaCount: 0,
+    repairTotal: 0,
+    greenCounts: {},
+    blueCounts: {},
     cpaTarget: 160,
   });
   const [loading, setLoading] = useState(true);
@@ -256,7 +263,15 @@ export default function VehicleOnWheelsPage() {
       const res = await fetch(`${API_BASE}/api/vehicle-on-wheels?${params}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
       const json = await res.json();
-      setData(json);
+      setData({
+        rows: json.rows || [],
+        uniqueVins: json.uniqueVins || 0,
+        cpaCount: json.cpaCount || 0,
+        repairTotal: json.repairTotal || 0,
+        greenCounts: json.greenCounts || {},
+        blueCounts: json.blueCounts || {},
+        cpaTarget: json.cpaTarget || 160,
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -264,17 +279,13 @@ export default function VehicleOnWheelsPage() {
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, [timeFilter]);
+  useEffect(() => { loadData(); }, [timeFilter]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       const newShiftInfo = getCurrentShiftInfo();
       setShiftInfo(newShiftInfo);
-      if (!isManualFilter) {
-        setTimeFilter(getDefaultTimeFilter());
-      }
+      if (!isManualFilter) setTimeFilter(getDefaultTimeFilter());
     }, 60000);
     return () => clearInterval(interval);
   }, [isManualFilter]);
@@ -303,16 +314,11 @@ export default function VehicleOnWheelsPage() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>Vehicle on wheels</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* CW + смена */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
-              background: '#FFFFFF',
-              borderRadius: '20px',
-              padding: '10px 24px',
+              background: '#FFFFFF', borderRadius: '20px', padding: '10px 24px',
               boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
+              display: 'flex', alignItems: 'center', gap: '12px',
             }}>
               <span style={{ fontSize: '1.6rem', color: '#64748B', fontWeight: 800 }}>CW</span>
               <span style={{ fontSize: '2.5rem', fontWeight: 900, color: '#1E293B', letterSpacing: '2px', lineHeight: 1 }}>
@@ -320,17 +326,9 @@ export default function VehicleOnWheelsPage() {
               </span>
             </div>
             <div style={{
-              width: '70px',
-              height: '70px',
-              borderRadius: '20px',
-              background: '#FFFFFF',
-              color: '#1E293B',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 900,
-              fontSize: '3rem',
-              lineHeight: 1,
+              width: '70px', height: '70px', borderRadius: '20px', background: '#FFFFFF',
+              color: '#1E293B', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 900, fontSize: '3rem', lineHeight: 1,
               boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
             }}>
               {shiftInfo.shiftLetter}
@@ -339,24 +337,11 @@ export default function VehicleOnWheelsPage() {
 
           <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
 
-          {/* Фильтры времени */}
           <div style={filterGroupStyle}>
-            <button
-              style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')}
-              onClick={() => handleFilterClick('all')}
-            >Сутки</button>
-            <button
-              style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')}
-              onClick={() => handleFilterClick('day')}
-            >День</button>
-            <button
-              style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')}
-              onClick={() => handleFilterClick('evening')}
-            >Вечер</button>
-            <button
-              style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')}
-              onClick={() => handleFilterClick('night')}
-            >Ночь</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')} onClick={() => handleFilterClick('all')}>Сутки</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')} onClick={() => handleFilterClick('day')}>День</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')} onClick={() => handleFilterClick('evening')}>Вечер</button>
+            <button style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')} onClick={() => handleFilterClick('night')}>Ночь</button>
           </div>
         </div>
       </div>
@@ -371,7 +356,6 @@ export default function VehicleOnWheelsPage() {
         </div>
       ) : (
         <div style={dashboardGridStyle}>
-          {/* Левая колонка: pie chart + 3 карточки */}
           <div style={chartColumnStyle}>
             <div style={{ position: 'relative', width: '100%', height: '380px', flexShrink: 0 }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -392,20 +376,14 @@ export default function VehicleOnWheelsPage() {
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip
-                    formatter={(value) => `${value.toFixed(1)}%`}
-                    contentStyle={{ fontSize: '1.4rem', borderRadius: '16px' }}
-                  />
+                  <Tooltip formatter={(value) => `${value.toFixed(1)}%`} contentStyle={{ fontSize: '1.4rem', borderRadius: '16px' }} />
                 </PieChart>
               </ResponsiveContainer>
 
               <div style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
+                position: 'absolute', top: '50%', left: '50%',
                 transform: 'translate(-50%, -50%)',
-                textAlign: 'center',
-                pointerEvents: 'none',
+                textAlign: 'center', pointerEvents: 'none',
               }}>
                 <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#1E293B', marginBottom: '4px' }}>CPA</div>
                 <div style={{ fontSize: '4.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
@@ -417,60 +395,39 @@ export default function VehicleOnWheelsPage() {
               </div>
             </div>
 
-            {/* 3 карточки */}
             <div style={{ display: 'flex', gap: '12px', marginTop: '16px', flexWrap: 'wrap' }}>
               <div style={{
-                flex: 1,
-                backgroundColor: '#1E293B',
-                borderRadius: '12px',
-                padding: '14px',
-                textAlign: 'center',
-                color: '#FFFFFF',
-                minHeight: '110px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
+                flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '14px',
+                textAlign: 'center', color: '#FFFFFF', minHeight: '110px',
+                display: 'flex', flexDirection: 'column', justifyContent: 'center',
               }}>
                 <div style={{ fontSize: '0.9rem', fontWeight: 600, opacity: 0.9, lineHeight: 1.2 }}>CP72 → Ремзона</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '8px auto' }} />
                 <div style={{ fontSize: '2.8rem', fontWeight: 900, lineHeight: 1 }}>{data.uniqueVins}</div>
               </div>
+
               <div style={{
-                flex: 1,
-                backgroundColor: '#2563EB',
-                borderRadius: '12px',
-                padding: '14px',
-                textAlign: 'center',
-                color: '#FFFFFF',
-                minHeight: '110px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
+                flex: 1, backgroundColor: '#2563EB', borderRadius: '12px', padding: '14px',
+                textAlign: 'center', color: '#FFFFFF', minHeight: '110px',
+                display: 'flex', flexDirection: 'column', justifyContent: 'center',
               }}>
                 <div style={{ fontSize: '0.9rem', fontWeight: 600, opacity: 0.9, lineHeight: 1.2 }}>CPA</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '8px auto' }} />
                 <div style={{ fontSize: '2.8rem', fontWeight: 900, lineHeight: 1 }}>{data.cpaCount}</div>
               </div>
+
               <div style={{
-                flex: 1,
-                backgroundColor: '#DC2626',
-                borderRadius: '12px',
-                padding: '14px',
-                textAlign: 'center',
-                color: '#FFFFFF',
-                minHeight: '110px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
+                flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '14px',
+                textAlign: 'center', color: '#FFFFFF', minHeight: '110px',
+                display: 'flex', flexDirection: 'column', justifyContent: 'center',
               }}>
                 <div style={{ fontSize: '0.9rem', fontWeight: 600, opacity: 0.9, lineHeight: 1.2 }}>Записей в ремзону</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '8px auto' }} />
-                <div style={{ fontSize: '2.8rem', fontWeight: 900, lineHeight: 1 }}>{data.totalRecords}</div>
+                <div style={{ fontSize: '2.8rem', fontWeight: 900, lineHeight: 1 }}>{data.repairTotal}</div>
               </div>
             </div>
           </div>
 
-          {/* Правая колонка: таблица */}
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Авто прошедшие CP72 и попавшие в ремзону</h2>
@@ -493,13 +450,9 @@ export default function VehicleOnWheelsPage() {
                           <td style={{ ...tdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{row.vin}</td>
                           <td style={tdStyle}>
                             <span style={{
-                              display: 'inline-block',
-                              padding: '2px 10px',
-                              borderRadius: 8,
-                              background: '#EEF2FF',
-                              color: '#1D4ED8',
-                              fontWeight: 700,
-                              fontSize: '1rem',
+                              display: 'inline-block', padding: '2px 10px', borderRadius: 8,
+                              background: '#EEF2FF', color: '#1D4ED8', fontWeight: 700,
+                              fontSize: 'clamp(0.7rem, 0.8vw, 1rem)',
                             }}>
                               {row.zone}
                             </span>
