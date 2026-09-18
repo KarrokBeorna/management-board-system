@@ -9188,9 +9188,14 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
     const ALL_ZONES = [...TEST_LINE_ZONES, ...REPAIR_ZONES];
     const placeholders = ALL_ZONES.map(() => '?').join(',');
 
-    // Зелёные цифры — из tm_vhc_test_line_movement (DISTINCT VIN за период)
+    // Зелёные цифры — из tm_vhc_test_line_movement
+    // count = COUNT(*)          — количество записей (зелёная цифра)
+    // unique = COUNT(DISTINCT vin) — уникальные VIN (подпись)
     const [greenRows] = await mesPool.query(`
-      SELECT node_nature, COUNT(DISTINCT vin) AS cnt
+      SELECT
+        node_nature,
+        COUNT(*) AS cnt,
+        COUNT(DISTINCT vin) AS uniq
       FROM tm_vhc_test_line_movement
       WHERE node_nature IN (${placeholders})
         AND gmt_create >= ? AND gmt_create <= ?
@@ -9198,22 +9203,20 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
       GROUP BY node_nature
     `, [...ALL_ZONES, startTime, endTime]);
 
-    // Синие цифры — из tm_vhc_test_line_online (текущее количество записей)
-    const [blueRows] = await mesPool.query(`
-      SELECT node_nature, COUNT(*) AS cnt
-      FROM tm_vhc_test_line_online
-      WHERE node_nature IN (${placeholders})
-      GROUP BY node_nature
-    `, [...ALL_ZONES]);
-
     const greenCounts = {};
-    greenRows.forEach(r => { greenCounts[r.node_nature] = Number(r.cnt || 0); });
+    const greenUnique = {};
+    greenRows.forEach(r => {
+      greenCounts[r.node_nature] = Number(r.cnt || 0);
+      greenUnique[r.node_nature] = Number(r.uniq || 0);
+    });
 
-    const blueCounts = {};
-    blueRows.forEach(r => { blueCounts[r.node_nature] = Number(r.cnt || 0); });
-
+    // CPA — для карточки и pie chart
     const cpaCount = greenCounts['CPA'] || 0;
+    const cpaUnique = greenUnique['CPA'] || 0;
+
+    // Сумма по REP-зонам — для карточки «Записей в ремзону»
     const repairTotal = REPAIR_ZONES.reduce((s, z) => s + (greenCounts[z] || 0), 0);
+    const repairUnique = REPAIR_ZONES.reduce((s, z) => s + (greenUnique[z] || 0), 0);
 
     // Таблица: CP72 → REP-зона
     const [rows] = await mesPool.query(`
@@ -9252,11 +9255,23 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
         time_zone: r.TIME_ZONE,
         elapsed_zone_sec: r.elapsed_zone_sec,
       })),
+
+      // Карточка «CP72 → Ремзона»
       uniqueVins,
-      cpaCount,
-      repairTotal,
+
+      // CPA (карточка + pie chart)
+      cpaCount,      // зелёная цифра — всего записей
+      cpaUnique,     // подпись — уникальных VIN
+
+      // Ремзона (карточка)
+      repairTotal,   // сумма зелёных по REP-зонам
+      repairUnique,  // сумма уникальных VIN по REP-зонам
+
+      // Полные разбивки (на будущее)
       greenCounts,
-      blueCounts,
+      greenUnique,
+
+      // Цель для pie chart
       cpaTarget: 160,
     });
   } catch (err) {
