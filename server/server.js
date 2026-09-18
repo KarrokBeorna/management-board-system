@@ -9188,9 +9188,7 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
     const ALL_ZONES = [...TEST_LINE_ZONES, ...REPAIR_ZONES];
     const placeholders = ALL_ZONES.map(() => '?').join(',');
 
-    // Зелёные цифры — из tm_vhc_test_line_movement
-    // count = COUNT(*)          — количество записей (зелёная цифра)
-    // unique = COUNT(DISTINCT vin) — уникальные VIN (подпись)
+    // ---------- 1. Зелёные цифры (для pie chart и карточки «Ремонт ОК») ----------
     const [greenRows] = await mesPool.query(`
       SELECT
         node_nature,
@@ -9210,15 +9208,10 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
       greenUnique[r.node_nature] = Number(r.uniq || 0);
     });
 
-    // CPA — для карточки и pie chart
     const cpaCount = greenCounts['CPA'] || 0;
     const cpaUnique = greenUnique['CPA'] || 0;
 
-    // Сумма по REP-зонам — для карточки «Записей в ремзону»
-    const repairTotal = REPAIR_ZONES.reduce((s, z) => s + (greenCounts[z] || 0), 0);
-    const repairUnique = REPAIR_ZONES.reduce((s, z) => s + (greenUnique[z] || 0), 0);
-
-    // Таблица: CP72 → REP-зона
+    // ---------- 2. Таблица: CP72 → REP-зона ----------
     const [rows] = await mesPool.query(`
       SELECT
         cp.vin,
@@ -9228,11 +9221,12 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
         z.TIME_ZONE,
         TIMESTAMPDIFF(SECOND, z.TIME_ZONE, NOW()) AS elapsed_zone_sec
       FROM (
-        SELECT tvv.vin, vm.scan_time AS TIME_CP72
+        SELECT tvv.vin, MIN(vm.scan_time) AS TIME_CP72
         FROM tm_vhc_vehicle_movement vm
         INNER JOIN tm_vhc_vehicle tvv ON vm.tm_vhc_vehicle_id = tvv.id
         WHERE vm.tm_bas_uloc_id = '1990320932460523522'
           AND vm.scan_time >= ? AND vm.scan_time <= ?
+        GROUP BY tvv.vin
       ) AS cp
       INNER JOIN (
         SELECT tvtlm.node_nature AS zone, tvtlm.vin, tvtlm.gmt_create AS TIME_ZONE
@@ -9244,8 +9238,31 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
       ORDER BY z.zone, cp.vin
     `, [startTime, endTime, startTime, endTime]);
 
-    const uniqueVins = new Set(rows.map(r => r.vin)).size;
+    // Уникальные VIN в таблице (CP72 → REP)
+    const tableVinsSet = new Set(rows.map(r => r.vin));
+    const uniqueVins = tableVinsSet.size;
 
+    // ---------- 3. VIN, которые были в CPA за тот же период ----------
+    const [cpaVinsRows] = await mesPool.query(`
+      SELECT DISTINCT vin
+      FROM tm_vhc_test_line_movement
+      WHERE node_nature = 'CPA'
+        AND gmt_create >= ? AND gmt_create <= ?
+        AND is_deleted = 0
+    `, [startTime, endTime]);
+
+    const cpaVinsSet = new Set(cpaVinsRows.map(r => r.vin));
+
+    // ---------- 4. «Записей в ремзону» = VIN из таблицы, которых НЕ было в CPA ----------
+    const repVinsOnly = new Set();
+    tableVinsSet.forEach(v => {
+      if (!cpaVinsSet.has(v)) repVinsOnly.add(v);
+    });
+
+    const repairTotal = repVinsOnly.size;
+    const repairUnique = repairTotal; // это уже уникальные VIN
+
+    // ---------- 5. Ответ ----------
     res.json({
       rows: rows.map(r => ({
         vin: r.vin,
@@ -9259,15 +9276,15 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
       // Карточка «CP72 → Ремзона»
       uniqueVins,
 
-      // CPA (карточка + pie chart)
-      cpaCount,      // зелёная цифра — всего записей
-      cpaUnique,     // подпись — уникальных VIN
+      // Карточка «Ремонт ОК» + pie chart
+      cpaCount,      // всего записей CPA за период
+      cpaUnique,     // уникальных VIN в CPA
 
-      // Ремзона (карточка)
-      repairTotal,   // сумма зелёных по REP-зонам
-      repairUnique,  // сумма уникальных VIN по REP-зонам
+      // Карточка «Записей в ремзону» (без CPA)
+      repairTotal,
+      repairUnique,
 
-      // Полные разбивки (на будущее)
+      // Полные разбивки
       greenCounts,
       greenUnique,
 

@@ -432,7 +432,6 @@ export default function VehicleOnWheelsPage() {
                 textAlign: 'center',
                 pointerEvents: 'none',
               }}>
-                <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#1E293B', marginBottom: '4px' }}>CPA</div>
                 <div style={{ fontSize: '4.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {cpaPercent.toFixed(1)}%
                 </div>
@@ -465,7 +464,7 @@ export default function VehicleOnWheelsPage() {
 
               <div style={{
                 flex: 1,
-                backgroundColor: '#2563EB',
+                backgroundColor: '#059669',
                 borderRadius: '12px',
                 padding: '14px',
                 textAlign: 'center',
@@ -475,7 +474,7 @@ export default function VehicleOnWheelsPage() {
                 flexDirection: 'column',
                 justifyContent: 'center',
               }}>
-                <div style={{ fontSize: '0.9rem', fontWeight: 600, opacity: 0.9, lineHeight: 1.2 }}>CPA</div>
+                <div style={{ fontSize: '0.9rem', fontWeight: 600, opacity: 0.9, lineHeight: 1.2 }}>Ремонт ОК</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '8px auto' }} />
                 <div style={{ fontSize: '2.8rem', fontWeight: 900, lineHeight: 1 }}>{data.cpaCount}</div>
                 <div style={{ fontSize: '0.7rem', opacity: 0.75, marginTop: 4 }}>
