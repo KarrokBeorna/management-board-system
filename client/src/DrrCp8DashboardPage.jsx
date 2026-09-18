@@ -306,7 +306,7 @@ export default function DrrCp8DashboardPage() {
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>
-        <h1 style={titleStyle}>DRR Final Dashboard</h1>
+        <h1 style={titleStyle}>DRR CPFinal</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{

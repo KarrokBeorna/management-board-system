@@ -9378,6 +9378,7 @@ app.get('/api/vehicle-on-wheels/details/rep', async (req, res) => {
 });
 
 // VIN «CP72 → Ремзона» (все из таблицы, включая тех, кто ушёл в CPA)
+// VIN «CP72 → Ремзона» (совпадает с карточкой: те, кто ушёл в REP и НЕ был в CPA)
 app.get('/api/vehicle-on-wheels/details/cp72-remzone', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
@@ -9387,8 +9388,9 @@ app.get('/api/vehicle-on-wheels/details/cp72-remzone', async (req, res) => {
       SELECT
         cp.vin,
         z.zone,
-        tvm.vhc_model AS model,
-        z.TIME_ZONE AS event_time
+        tvv.vhc_model AS model,
+        z.TIME_ZONE AS event_time,
+        cp.TIME_CP72 AS cp72_time
       FROM (
         SELECT tvv.vin, MIN(vm.scan_time) AS TIME_CP72
         FROM tm_vhc_vehicle_movement vm
@@ -9404,9 +9406,15 @@ app.get('/api/vehicle-on-wheels/details/cp72-remzone', async (req, res) => {
           AND tvtlm.is_deleted = 0
           AND tvtlm.gmt_create >= ? AND tvtlm.gmt_create <= ?
       ) AS z ON cp.vin = z.vin
-      LEFT JOIN tm_vhc_vehicle tvm ON tvm.vin = cp.vin
+      LEFT JOIN tm_vhc_vehicle tvv ON tvv.vin = cp.vin
+      WHERE cp.vin NOT IN (
+        SELECT DISTINCT vin FROM tm_vhc_test_line_movement
+        WHERE node_nature = 'CPA'
+          AND gmt_create >= ? AND gmt_create <= ?
+          AND is_deleted = 0
+      )
       ORDER BY z.TIME_ZONE
-    `, [startTime, endTime, startTime, endTime]);
+    `, [startTime, endTime, startTime, endTime, startTime, endTime]);
 
     res.json({
       rows: rows.map(r => ({
@@ -9417,6 +9425,7 @@ app.get('/api/vehicle-on-wheels/details/cp72-remzone', async (req, res) => {
       })),
     });
   } catch (err) {
+    console.error('Ошибка details/cp72-remzone:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
