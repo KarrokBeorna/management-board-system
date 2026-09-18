@@ -9176,6 +9176,7 @@ app.get('/api/remzone-work-status/details', async (req, res) => {
 
 
 // ================== VEHICLE ON WHEELS ==================
+// ================== VEHICLE ON WHEELS ==================
 app.get('/api/vehicle-on-wheels', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
@@ -9216,19 +9217,14 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
       SELECT
         cp.vin,
         z.zone,
-        cp.model,
         cp.TIME_CP72,
         TIMESTAMPDIFF(SECOND, cp.TIME_CP72, NOW()) AS elapsed_cp72_sec,
         z.TIME_ZONE,
         TIMESTAMPDIFF(SECOND, z.TIME_ZONE, NOW()) AS elapsed_zone_sec
       FROM (
-        SELECT
-          tvv.vin,
-          MIN(vm.scan_time) AS TIME_CP72,
-          MAX(too.product) AS model
+        SELECT tvv.vin, MIN(vm.scan_time) AS TIME_CP72
         FROM tm_vhc_vehicle_movement vm
         INNER JOIN tm_vhc_vehicle tvv ON vm.tm_vhc_vehicle_id = tvv.id
-        LEFT JOIN tm_ofm_order too ON too.vin = tvv.vin
         WHERE vm.tm_bas_uloc_id = '1990320932460523522'
           AND vm.scan_time >= ? AND vm.scan_time <= ?
         GROUP BY tvv.vin
@@ -9264,7 +9260,7 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
 
     const cpaVinsSet = new Set(cpaVinsRows.map(r => r.vin));
 
-    // ---------- 4. Карточка «Записей в ремзону» = таблица (без CPA) ----------
+    // ---------- 4. VIN из CP72 → REP (без CPA) для карточки «Записей в ремзону» ----------
     const repairTotal = uniqueVins;
     const repairUnique = uniqueVins;
 
@@ -9273,7 +9269,6 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
       rows: rows.map(r => ({
         vin: r.vin,
         zone: r.zone,
-        model: r.model || '—',
         time_cp72: r.TIME_CP72,
         elapsed_cp72_sec: r.elapsed_cp72_sec,
         time_zone: r.TIME_ZONE,
@@ -9281,6 +9276,7 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
       })),
 
       // Карточка «CP72 → Ремзона»
+      // = все VIN, включая тех, кто потом уехал в CPA
       uniqueVins,
 
       // Карточка «Ремонт ОК» + pie chart
@@ -9300,6 +9296,38 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
     });
   } catch (err) {
     console.error('Ошибка /api/vehicle-on-wheels:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// VIN в CPA (для карточки «Ремонт ОК»)
+app.get('/api/vehicle-on-wheels/details/cpa', async (req, res) => {
+  try {
+    const { startTime, endTime } = req.query;
+    if (!startTime || !endTime) return res.status(400).json({ error: 'startTime и endTime обязательны' });
+
+    const [rows] = await mesPool.query(`
+      SELECT
+        tvtlm.vin,
+        tvtlm.node_nature AS zone,
+        tvtlm.vhc_model AS model,
+        tvtlm.gmt_create AS event_time
+      FROM tm_vhc_test_line_movement tvtlm
+      WHERE tvtlm.node_nature = 'CPA'
+        AND tvtlm.gmt_create >= ? AND tvtlm.gmt_create <= ?
+        AND tvtlm.is_deleted = 0
+      ORDER BY tvtlm.gmt_create
+    `, [startTime, endTime]);
+
+    res.json({
+      rows: rows.map(r => ({
+        vin: r.vin,
+        model: r.model || '—',
+        zone: r.zone || 'CPA',
+        event_time: r.event_time,
+      })),
+    });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
