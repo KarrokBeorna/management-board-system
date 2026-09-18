@@ -9381,15 +9381,13 @@ app.get('/api/vehicle-on-wheels/details/rep', async (req, res) => {
 app.get('/api/vehicle-on-wheels/details/cp72-remzone', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
-    if (!startTime || !endTime) {
-      return res.status(400).json({ error: 'startTime и endTime обязательны' });
-    }
+    if (!startTime || !endTime) return res.status(400).json({ error: 'startTime и endTime обязательны' });
 
     const [rows] = await mesPool.query(`
       SELECT
         cp.vin,
         z.zone,
-        tvv.vhc_model AS model,
+        too.product AS model,
         cp.TIME_CP72 AS cp72_time,
         z.TIME_ZONE AS zone_time
       FROM (
@@ -9407,7 +9405,7 @@ app.get('/api/vehicle-on-wheels/details/cp72-remzone', async (req, res) => {
           AND tvtlm.is_deleted = 0
           AND tvtlm.gmt_create >= ? AND tvtlm.gmt_create <= ?
       ) AS z ON cp.vin = z.vin
-      LEFT JOIN tm_vhc_vehicle tvv ON tvv.vin = cp.vin
+      LEFT JOIN tm_ofm_order too ON too.vin = cp.vin
       WHERE cp.vin NOT IN (
         SELECT DISTINCT vin FROM tm_vhc_test_line_movement
         WHERE node_nature = 'CPA'

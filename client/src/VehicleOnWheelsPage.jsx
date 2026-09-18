@@ -267,7 +267,7 @@ export default function VehicleOnWheelsPage() {
   // ---------- Стейт модалки ----------
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
-  const [modalType, setModalType] = useState(''); // 'cp72' | 'cpa' | 'rep'
+  const [modalType, setModalType] = useState('');
   const [modalLoading, setModalLoading] = useState(false);
   const [modalRows, setModalRows] = useState([]);
   const [modalCount, setModalCount] = useState(0);
@@ -336,12 +336,6 @@ export default function VehicleOnWheelsPage() {
 
   // ---------- Открытие модалки ----------
   const openDetails = async (type) => {
-    const { start, end } = getTimeRange(timeFilter);
-    const urlMap = {
-      cp72: `${API_BASE}/api/vehicle-on-wheels/details/cp72-remzone`,
-      cpa: `${API_BASE}/api/vehicle-on-wheels/details/cpa`,
-      rep: `${API_BASE}/api/vehicle-on-wheels/details/rep`,
-    };
     const titleMap = {
       cp72: 'CP72 → Ремзона',
       cpa: 'Ремонт ОК',
@@ -351,12 +345,33 @@ export default function VehicleOnWheelsPage() {
     setModalOpen(true);
     setModalTitle(titleMap[type]);
     setModalType(type);
-    setModalLoading(true);
     setModalRows([]);
     setModalCount(0);
     setModalUnique(0);
 
+    // Для CP72 → Ремзона используем уже загруженные data.rows (не дёргаем сервер)
+    if (type === 'cp72') {
+      const rows = (data.rows || []).map(r => ({
+        vin: r.vin,
+        model: r.model || '—',
+        zone: r.zone,
+        cp72_time: r.time_cp72,
+        zone_time: r.time_zone,
+      }));
+      setModalRows(rows);
+      setModalCount(rows.length);
+      setModalUnique(new Set(rows.map(r => r.vin)).size);
+      return;
+    }
+
+    // Для CPA и REP — запрашиваем с сервера
+    setModalLoading(true);
     try {
+      const { start, end } = getTimeRange(timeFilter);
+      const urlMap = {
+        cpa: `${API_BASE}/api/vehicle-on-wheels/details/cpa`,
+        rep: `${API_BASE}/api/vehicle-on-wheels/details/rep`,
+      };
       const params = new URLSearchParams({ startTime: start, endTime: end });
       const res = await fetch(`${urlMap[type]}?${params}`);
       if (!res.ok) throw new Error('Ошибка загрузки деталей');
@@ -451,7 +466,6 @@ export default function VehicleOnWheelsPage() {
         </div>
       ) : (
         <div style={dashboardGridStyle}>
-          {/* Левая колонка */}
           <div style={chartColumnStyle}>
             <div style={{ position: 'relative', width: '100%', height: '380px', flexShrink: 0 }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -504,7 +518,6 @@ export default function VehicleOnWheelsPage() {
               </div>
             </div>
 
-            {/* 3 карточки */}
             <div style={{ display: 'flex', gap: '12px', marginTop: '16px', flexWrap: 'wrap' }}>
               <div
                 onClick={() => openDetails('cp72')}
@@ -586,7 +599,6 @@ export default function VehicleOnWheelsPage() {
             </div>
           </div>
 
-          {/* Правая колонка */}
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>Авто прошедшие CP72 и попавшие в ремзону</h2>
@@ -637,7 +649,6 @@ export default function VehicleOnWheelsPage() {
         </div>
       )}
 
-      {/* Модальное окно с деталями */}
       {modalOpen && (
         <div
           onClick={closeModal}
