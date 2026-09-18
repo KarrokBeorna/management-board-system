@@ -393,7 +393,7 @@ export default function DrrCp7DashboardPage() {
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>
-        <h1 style={titleStyle}>DRR CP7 Dashboard</h1>
+        <h1 style={titleStyle}>DRR CP7</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           {/* Блок недели и смены */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>

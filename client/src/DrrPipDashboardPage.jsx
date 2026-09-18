@@ -304,7 +304,7 @@ export default function DrrPipDashboardPage() {
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>
-        <h1 style={titleStyle}>PIP DRR Dashboard</h1>
+        <h1 style={titleStyle}>DRR PIP</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{

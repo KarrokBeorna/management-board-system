@@ -9176,6 +9176,7 @@ app.get('/api/remzone-work-status/details', async (req, res) => {
 
 
 // ================== VEHICLE ON WHEELS ==================
+// ================== VEHICLE ON WHEELS ==================
 app.get('/api/vehicle-on-wheels', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
@@ -9211,7 +9212,7 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
     const cpaCount = greenCounts['CPA'] || 0;
     const cpaUnique = greenUnique['CPA'] || 0;
 
-    // ---------- 2. Таблица: CP72 → REP-зона ----------
+    // ---------- 2. Таблица: CP72 → REP, БЕЗ тех, кто был в CPA ----------
     const [rows] = await mesPool.query(`
       SELECT
         cp.vin,
@@ -9235,10 +9236,16 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
           AND tvtlm.is_deleted = 0
           AND tvtlm.gmt_create >= ? AND tvtlm.gmt_create <= ?
       ) AS z ON cp.vin = z.vin
+      WHERE cp.vin NOT IN (
+        SELECT DISTINCT vin FROM tm_vhc_test_line_movement
+        WHERE node_nature = 'CPA'
+          AND gmt_create >= ? AND gmt_create <= ?
+          AND is_deleted = 0
+      )
       ORDER BY z.zone, cp.vin
-    `, [startTime, endTime, startTime, endTime]);
+    `, [startTime, endTime, startTime, endTime, startTime, endTime]);
 
-    // Уникальные VIN в таблице (CP72 → REP)
+    // Уникальные VIN в таблице (после фильтра CPA)
     const tableVinsSet = new Set(rows.map(r => r.vin));
     const uniqueVins = tableVinsSet.size;
 
@@ -9253,14 +9260,9 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
 
     const cpaVinsSet = new Set(cpaVinsRows.map(r => r.vin));
 
-    // ---------- 4. «Записей в ремзону» = VIN из таблицы, которых НЕ было в CPA ----------
-    const repVinsOnly = new Set();
-    tableVinsSet.forEach(v => {
-      if (!cpaVinsSet.has(v)) repVinsOnly.add(v);
-    });
-
-    const repairTotal = repVinsOnly.size;
-    const repairUnique = repairTotal; // это уже уникальные VIN
+    // ---------- 4. VIN из CP72 → REP (без CPA) для карточки «Записей в ремзону» ----------
+    const repairTotal = uniqueVins;
+    const repairUnique = uniqueVins;
 
     // ---------- 5. Ответ ----------
     res.json({
@@ -9274,11 +9276,12 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
       })),
 
       // Карточка «CP72 → Ремзона»
+      // = все VIN, включая тех, кто потом уехал в CPA
       uniqueVins,
 
       // Карточка «Ремонт ОК» + pie chart
-      cpaCount,      // всего записей CPA за период
-      cpaUnique,     // уникальных VIN в CPA
+      cpaCount,
+      cpaUnique,
 
       // Карточка «Записей в ремзону» (без CPA)
       repairTotal,
@@ -9296,6 +9299,129 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// VIN в CPA (для карточки «Ремонт ОК»)
+app.get('/api/vehicle-on-wheels/details/cpa', async (req, res) => {
+  try {
+    const { startTime, endTime } = req.query;
+    if (!startTime || !endTime) return res.status(400).json({ error: 'startTime и endTime обязательны' });
+
+    const [rows] = await mesPool.query(`
+      SELECT
+        tvtlm.vin,
+        tvtlm.node_nature AS zone,
+        tvtlm.vhc_model AS model,
+        tvtlm.gmt_create AS event_time
+      FROM tm_vhc_test_line_movement tvtlm
+      WHERE tvtlm.node_nature = 'CPA'
+        AND tvtlm.gmt_create >= ? AND tvtlm.gmt_create <= ?
+        AND tvtlm.is_deleted = 0
+      ORDER BY tvtlm.gmt_create
+    `, [startTime, endTime]);
+
+    res.json({
+      rows: rows.map(r => ({
+        vin: r.vin,
+        model: r.model || '—',
+        zone: r.zone || 'CPA',
+        event_time: r.event_time,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// VIN в REP (для карточки «Записей в ремзону»)
+app.get('/api/vehicle-on-wheels/details/rep', async (req, res) => {
+  try {
+    const { startTime, endTime } = req.query;
+    if (!startTime || !endTime) return res.status(400).json({ error: 'startTime и endTime обязательны' });
+
+    const [rows] = await mesPool.query(`
+      SELECT
+        tvtlm.vin,
+        tvtlm.node_nature AS zone,
+        tvtlm.vhc_model AS model,
+        tvtlm.gmt_create AS event_time
+      FROM tm_vhc_test_line_movement tvtlm
+      WHERE tvtlm.node_nature IN ('REPASS','REPPS','REPWS','REPLK','REPSHORT','REPELEC','REPNOISE')
+        AND tvtlm.gmt_create >= ? AND tvtlm.gmt_create <= ?
+        AND tvtlm.is_deleted = 0
+        AND tvtlm.vin IN (
+          SELECT tvv.vin
+          FROM tm_vhc_vehicle_movement vm
+          INNER JOIN tm_vhc_vehicle tvv ON vm.tm_vhc_vehicle_id = tvv.id
+          WHERE vm.tm_bas_uloc_id = '1990320932460523522'
+            AND vm.scan_time >= ? AND vm.scan_time <= ?
+        )
+        AND tvtlm.vin NOT IN (
+          SELECT DISTINCT vin FROM tm_vhc_test_line_movement
+          WHERE node_nature = 'CPA'
+            AND gmt_create >= ? AND gmt_create <= ?
+            AND is_deleted = 0
+        )
+      ORDER BY tvtlm.gmt_create
+    `, [startTime, endTime, startTime, endTime, startTime, endTime]);
+
+    res.json({
+      rows: rows.map(r => ({
+        vin: r.vin,
+        model: r.model || '—',
+        zone: r.zone,
+        event_time: r.event_time,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// VIN «CP72 → Ремзона» (все из таблицы, включая тех, кто ушёл в CPA)
+app.get('/api/vehicle-on-wheels/details/cp72-remzone', async (req, res) => {
+  try {
+    const { startTime, endTime } = req.query;
+    if (!startTime || !endTime) return res.status(400).json({ error: 'startTime и endTime обязательны' });
+
+    const [rows] = await mesPool.query(`
+      SELECT
+        cp.vin,
+        z.zone,
+        tvm.vhc_model AS model,
+        z.TIME_ZONE AS event_time
+      FROM (
+        SELECT tvv.vin, MIN(vm.scan_time) AS TIME_CP72
+        FROM tm_vhc_vehicle_movement vm
+        INNER JOIN tm_vhc_vehicle tvv ON vm.tm_vhc_vehicle_id = tvv.id
+        WHERE vm.tm_bas_uloc_id = '1990320932460523522'
+          AND vm.scan_time >= ? AND vm.scan_time <= ?
+        GROUP BY tvv.vin
+      ) AS cp
+      INNER JOIN (
+        SELECT tvtlm.node_nature AS zone, tvtlm.vin, tvtlm.gmt_create AS TIME_ZONE
+        FROM tm_vhc_test_line_movement tvtlm
+        WHERE tvtlm.node_nature IN ('REPASS','REPPS','REPWS','REPLK','REPSHORT','REPELEC','REPNOISE')
+          AND tvtlm.is_deleted = 0
+          AND tvtlm.gmt_create >= ? AND tvtlm.gmt_create <= ?
+      ) AS z ON cp.vin = z.vin
+      LEFT JOIN tm_vhc_vehicle tvm ON tvm.vin = cp.vin
+      ORDER BY z.TIME_ZONE
+    `, [startTime, endTime, startTime, endTime]);
+
+    res.json({
+      rows: rows.map(r => ({
+        vin: r.vin,
+        model: r.model || '—',
+        zone: r.zone,
+        event_time: r.event_time,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 
 

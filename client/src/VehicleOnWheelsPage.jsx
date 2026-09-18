@@ -264,6 +264,14 @@ export default function VehicleOnWheelsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // ---------- Стейт модалки ----------
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTitle, setModalTitle] = useState('');
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalRows, setModalRows] = useState([]);
+  const [modalCount, setModalCount] = useState(0);
+  const [modalUnique, setModalUnique] = useState(0);
+
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -325,10 +333,54 @@ export default function VehicleOnWheelsPage() {
     setTimeFilter(filter);
   };
 
+  // ---------- Открытие модалки ----------
+  const openDetails = async (type) => {
+    const { start, end } = getTimeRange(timeFilter);
+    const urlMap = {
+      cp72: `${API_BASE}/api/vehicle-on-wheels/details/cp72-remzone`,
+      cpa: `${API_BASE}/api/vehicle-on-wheels/details/cpa`,
+      rep: `${API_BASE}/api/vehicle-on-wheels/details/rep`,
+    };
+    const titleMap = {
+      cp72: 'CP72 → Ремзона',
+      cpa: 'Ремонт ОК',
+      rep: 'Записей в ремзону (без CPA)',
+    };
+
+    setModalOpen(true);
+    setModalTitle(titleMap[type]);
+    setModalLoading(true);
+    setModalRows([]);
+    setModalCount(0);
+    setModalUnique(0);
+
+    try {
+      const params = new URLSearchParams({ startTime: start, endTime: end });
+      const res = await fetch(`${urlMap[type]}?${params}`);
+      if (!res.ok) throw new Error('Ошибка загрузки деталей');
+      const json = await res.json();
+      const rows = json.rows || [];
+      setModalRows(rows);
+      setModalCount(rows.length);
+      setModalUnique(new Set(rows.map(r => r.vin)).size);
+    } catch (err) {
+      console.error(err);
+      setModalRows([]);
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setModalRows([]);
+    setModalTitle('');
+  };
+
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>
-        <h1 style={titleStyle}>Vehicle on wheels</h1>
+        <h1 style={titleStyle}>Repairs</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
@@ -431,49 +483,69 @@ export default function VehicleOnWheelsPage() {
                 transform: 'translate(-50%, -50%)',
                 textAlign: 'center',
                 pointerEvents: 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 4,
               }}>
-                <div style={{ fontSize: '4.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
+                <div style={{ fontSize: '4rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {cpaPercent.toFixed(1)}%
                 </div>
-                <div style={{ fontSize: '1rem', color: '#64748B', marginTop: 6 }}>
+                <div style={{ fontSize: '0.95rem', color: '#64748B', lineHeight: 1 }}>
                   {data.cpaCount} / {data.cpaTarget}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: 2 }}>
+                <div style={{ fontSize: '0.75rem', color: '#94A3B8', lineHeight: 1 }}>
                   уникальных VIN: {data.cpaUnique}
                 </div>
               </div>
             </div>
 
+            {/* 3 карточки */}
             <div style={{ display: 'flex', gap: '12px', marginTop: '16px', flexWrap: 'wrap' }}>
-              <div style={{
-                flex: 1,
-                backgroundColor: '#1E293B',
-                borderRadius: '12px',
-                padding: '14px',
-                textAlign: 'center',
-                color: '#FFFFFF',
-                minHeight: '110px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-              }}>
+              <div
+                onClick={() => openDetails('cp72')}
+                style={{
+                  flex: 1,
+                  backgroundColor: '#1E293B',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  textAlign: 'center',
+                  color: '#FFFFFF',
+                  minHeight: '110px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'transform 0.15s',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              >
                 <div style={{ fontSize: '0.9rem', fontWeight: 600, opacity: 0.9, lineHeight: 1.2 }}>CP72 → Ремзона</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '8px auto' }} />
                 <div style={{ fontSize: '2.8rem', fontWeight: 900, lineHeight: 1 }}>{data.uniqueVins}</div>
               </div>
 
-              <div style={{
-                flex: 1,
-                backgroundColor: '#059669',
-                borderRadius: '12px',
-                padding: '14px',
-                textAlign: 'center',
-                color: '#FFFFFF',
-                minHeight: '110px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-              }}>
+              <div
+                onClick={() => openDetails('cpa')}
+                style={{
+                  flex: 1,
+                  backgroundColor: '#059669',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  textAlign: 'center',
+                  color: '#FFFFFF',
+                  minHeight: '110px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'transform 0.15s',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              >
                 <div style={{ fontSize: '0.9rem', fontWeight: 600, opacity: 0.9, lineHeight: 1.2 }}>Ремонт ОК</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '8px auto' }} />
                 <div style={{ fontSize: '2.8rem', fontWeight: 900, lineHeight: 1 }}>{data.cpaCount}</div>
@@ -482,18 +554,25 @@ export default function VehicleOnWheelsPage() {
                 </div>
               </div>
 
-              <div style={{
-                flex: 1,
-                backgroundColor: '#DC2626',
-                borderRadius: '12px',
-                padding: '14px',
-                textAlign: 'center',
-                color: '#FFFFFF',
-                minHeight: '110px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-              }}>
+              <div
+                onClick={() => openDetails('rep')}
+                style={{
+                  flex: 1,
+                  backgroundColor: '#DC2626',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  textAlign: 'center',
+                  color: '#FFFFFF',
+                  minHeight: '110px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  transition: 'transform 0.15s',
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              >
                 <div style={{ fontSize: '0.9rem', fontWeight: 600, opacity: 0.9, lineHeight: 1.2 }}>Записей в ремзону</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '8px auto' }} />
                 <div style={{ fontSize: '2.8rem', fontWeight: 900, lineHeight: 1 }}>{data.repairTotal}</div>
@@ -550,6 +629,90 @@ export default function VehicleOnWheelsPage() {
                   <p style={{ textAlign: 'center', padding: '40px', color: '#64748B', fontSize: '1.6rem' }}>Нет данных</p>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно с деталями */}
+      {modalOpen && (
+        <div
+          onClick={closeModal}
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 2000, padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#FFFFFF', borderRadius: 16,
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.35)',
+              width: '100%', maxWidth: 1100, maxHeight: '85vh',
+              display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            }}
+          >
+            <div style={{
+              padding: '16px 20px', borderBottom: '1px solid #E2E8F0',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: 'linear-gradient(180deg,#F8FAFC,#FFFFFF)',
+            }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: '#0F172A' }}>
+                  {modalTitle}
+                </h3>
+                <div style={{ fontSize: 12, color: '#64748B', marginTop: 4 }}>
+                  Всего записей: <b>{modalCount}</b> · уникальных VIN: <b>{modalUnique}</b>
+                </div>
+              </div>
+              <button
+                onClick={closeModal}
+                style={{ background: 'transparent', border: 'none', fontSize: 22, cursor: 'pointer', color: '#64748B' }}
+              >✕</button>
+            </div>
+            <div style={{ overflow: 'auto', flex: 1 }}>
+              {modalLoading ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#64748B' }}>Загрузка...</div>
+              ) : modalRows.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#64748B' }}>Нет данных</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>№</th>
+                      <th style={thStyle}>VIN</th>
+                      <th style={thStyle}>Модель</th>
+                      <th style={thStyle}>Зона</th>
+                      <th style={thStyle}>Время события</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modalRows.map((r, i) => (
+                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                        <td style={{ ...tdStyle, color: '#94A3B8', textAlign: 'center' }}>{i + 1}</td>
+                        <td style={{ ...tdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{r.vin}</td>
+                        <td style={tdStyle}>{r.model}</td>
+                        <td style={tdStyle}>
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '2px 10px',
+                            borderRadius: 8,
+                            background: '#EEF2FF',
+                            color: '#1D4ED8',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                          }}>
+                            {r.zone}
+                          </span>
+                        </td>
+                        <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{formatDateTime(r.event_time)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </div>
