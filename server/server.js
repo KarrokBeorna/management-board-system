@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
+const { sendEmail } = require('./mailer');
+const cron = require('node-cron');
 
 // Вспомогательная функция
 function getISOWeek(date) {
@@ -9172,7 +9174,72 @@ app.get('/api/remzone-work-status/details', async (req, res) => {
   }
 });
 
+// ================== VEHICLE ON WHEELS ==================
+app.get('/api/vehicle-on-wheels', async (req, res) => {
+  try {
+    const { startTime, endTime } = req.query;
+    if (!startTime || !endTime) {
+      return res.status(400).json({ error: 'startTime и endTime обязательны' });
+    }
 
+    // 1. Авто, прошедшие CP72 в окне и попавшие в одну из зон ремзоны
+    const sql = `
+      SELECT
+        cp.vin,
+        z.zone,
+        cp.TIME_CP72,
+        TIMESTAMPDIFF(SECOND, cp.TIME_CP72, NOW()) AS elapsed_cp72_sec,
+        z.TIME_ZONE,
+        TIMESTAMPDIFF(SECOND, z.TIME_ZONE, NOW()) AS elapsed_zone_sec
+      FROM (
+        SELECT tvv.vin, vm.scan_time AS TIME_CP72
+        FROM tm_vhc_vehicle_movement vm
+        INNER JOIN tm_vhc_vehicle tvv ON vm.tm_vhc_vehicle_id = tvv.id
+        WHERE vm.tm_bas_uloc_id = '1990320932460523522'
+          AND vm.scan_time >= ? AND vm.scan_time <= ?
+      ) AS cp
+      INNER JOIN (
+        SELECT tlo.node_nature AS zone, tlo.vin, tlo.gmt_modified AS TIME_ZONE
+        FROM tm_vhc_test_line_online tlo
+        WHERE tlo.node_nature IN ('REPASS','REPWS','REPPS','REPLK','REPSHORT','REPELEC','REPNOISE')
+      ) AS z ON cp.vin = z.vin
+      ORDER BY z.zone, cp.vin
+    `;
+    const [rows] = await mesPool.query(sql, [startTime, endTime]);
+
+    // 2. Уникальные VIN + сумма записей
+    const uniqueVins = new Set(rows.map(r => r.vin)).size;
+    const totalRecords = rows.length;
+
+    // 3. Количество уникальных VIN на посту CPA за тот же период
+    const cpaSql = `
+      SELECT COUNT(DISTINCT tlo.vin) AS cpa_count
+      FROM tm_vhc_test_line_online tlo
+      WHERE tlo.node_nature = 'CPA'
+        AND tlo.gmt_modified >= ? AND tlo.gmt_modified <= ?
+    `;
+    const [cpaRows] = await mesPool.query(cpaSql, [startTime, endTime]);
+    const cpaCount = cpaRows[0]?.cpa_count || 0;
+
+    res.json({
+      rows: rows.map(r => ({
+        vin: r.vin,
+        zone: r.zone,
+        time_cp72: r.TIME_CP72,
+        elapsed_cp72_sec: r.elapsed_cp72_sec,
+        time_zone: r.TIME_ZONE,
+        elapsed_zone_sec: r.elapsed_zone_sec,
+      })),
+      uniqueVins,
+      totalRecords,
+      cpaCount,
+      cpaTarget: 160,
+    });
+  } catch (err) {
+    console.error('Ошибка /api/vehicle-on-wheels:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 

@@ -22,8 +22,8 @@ import drrTestlinePreview from './assets/tldrr.png';
 import DrrPIPDashboardPage from './assets/drrpip.png'; //
 import electronicsPreview from './assets/elec.png'; // 
 import brigPreview from './assets/briga.png';
-import RemPreview from './assets/remzs.png'; // замените на реальное имя файла
-
+import RemPreview from './assets/remzs.png'; 
+import VehPreview from './assets/cp7drr.png';// замените на реальное имя файла
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -344,7 +344,8 @@ export default function HomePage() {
     { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR ADAS Dashboard", accentColor: "#0ea5e9" },
     { to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "PIP DRR Dashboard", accentColor: "#0EA5E9" },
     { to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Electronics Defects Top", accentColor: "#8B5CF6" },
-    { to: "/remzone-work-status", imgSrc: RemPreview, caption: "Remzone Work Status", accentColor: "#8B5CF6" }
+    { to: "/remzone-work-status", imgSrc: RemPreview, caption: "Remzone Work Status", accentColor: "#8B5CF6" },
+    { to: "/vehicle-on-wheels", imgSrc: VehPreview, caption: "Vehicle on Wheels", accentColor: "#e22910" }
   ];
 
   const allServiceCards = [
