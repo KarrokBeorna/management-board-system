@@ -9378,19 +9378,20 @@ app.get('/api/vehicle-on-wheels/details/rep', async (req, res) => {
 });
 
 // VIN «CP72 → Ремзона» (все из таблицы, включая тех, кто ушёл в CPA)
-// VIN «CP72 → Ремзона» (совпадает с карточкой: те, кто ушёл в REP и НЕ был в CPA)
 app.get('/api/vehicle-on-wheels/details/cp72-remzone', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
-    if (!startTime || !endTime) return res.status(400).json({ error: 'startTime и endTime обязательны' });
+    if (!startTime || !endTime) {
+      return res.status(400).json({ error: 'startTime и endTime обязательны' });
+    }
 
     const [rows] = await mesPool.query(`
       SELECT
         cp.vin,
         z.zone,
         tvv.vhc_model AS model,
-        z.TIME_ZONE AS event_time,
-        cp.TIME_CP72 AS cp72_time
+        cp.TIME_CP72 AS cp72_time,
+        z.TIME_ZONE AS zone_time
       FROM (
         SELECT tvv.vin, MIN(vm.scan_time) AS TIME_CP72
         FROM tm_vhc_vehicle_movement vm
@@ -9421,7 +9422,8 @@ app.get('/api/vehicle-on-wheels/details/cp72-remzone', async (req, res) => {
         vin: r.vin,
         model: r.model || '—',
         zone: r.zone,
-        event_time: r.event_time,
+        cp72_time: r.cp72_time,
+        zone_time: r.zone_time,
       })),
     });
   } catch (err) {

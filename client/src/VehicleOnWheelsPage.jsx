@@ -267,6 +267,7 @@ export default function VehicleOnWheelsPage() {
   // ---------- Стейт модалки ----------
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
+  const [modalType, setModalType] = useState(''); // 'cp72' | 'cpa' | 'rep'
   const [modalLoading, setModalLoading] = useState(false);
   const [modalRows, setModalRows] = useState([]);
   const [modalCount, setModalCount] = useState(0);
@@ -349,6 +350,7 @@ export default function VehicleOnWheelsPage() {
 
     setModalOpen(true);
     setModalTitle(titleMap[type]);
+    setModalType(type);
     setModalLoading(true);
     setModalRows([]);
     setModalCount(0);
@@ -375,6 +377,7 @@ export default function VehicleOnWheelsPage() {
     setModalOpen(false);
     setModalRows([]);
     setModalTitle('');
+    setModalType('');
   };
 
   return (
@@ -685,7 +688,14 @@ export default function VehicleOnWheelsPage() {
                       <th style={thStyle}>VIN</th>
                       <th style={thStyle}>Модель</th>
                       <th style={thStyle}>Зона</th>
-                      <th style={thStyle}>Время события</th>
+                      {modalType === 'cp72' ? (
+                        <>
+                          <th style={thStyle}>Время CP72</th>
+                          <th style={thStyle}>Время в зоне</th>
+                        </>
+                      ) : (
+                        <th style={thStyle}>Время события</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -707,7 +717,14 @@ export default function VehicleOnWheelsPage() {
                             {r.zone}
                           </span>
                         </td>
-                        <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{formatDateTime(r.event_time)}</td>
+                        {modalType === 'cp72' ? (
+                          <>
+                            <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{formatDateTime(r.cp72_time)}</td>
+                            <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{formatDateTime(r.zone_time)}</td>
+                          </>
+                        ) : (
+                          <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{formatDateTime(r.event_time)}</td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
