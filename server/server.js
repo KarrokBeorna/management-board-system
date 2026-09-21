@@ -6363,23 +6363,24 @@ app.get('/api/drr-cp8-dashboard', async (req, res) => {
       rangeEnd = `${y}-${m}-${d} 23:59:59`;
     }
 
-    // 1. VIN, прошедшие CP72 за период (MES)
-    const [cp72Rows] = await mesPool.query(`
-      SELECT DISTINCT vin
-      FROM ti_mes_movement
-      WHERE uloc_no = 'CP72'
-        AND scan_time >= ?
-        AND scan_time < ?
+    // VIN, последний раз прошедшие TLTT за период
+    const [tlttRows] = await mesPool.query(`
+      SELECT vin, MAX(gmt_create) AS tltt_time
+      FROM tm_vhc_test_line_movement
+      WHERE node_nature = 'TLTT'
+        AND gmt_create >= ?
+        AND gmt_create <= ?
+        AND is_deleted = 0
+      GROUP BY vin
     `, [rangeStart, rangeEnd]);
 
-    if (cp72Rows.length === 0) {
+    if (tlttRows.length === 0) {
       return res.json({ totalVins: 0, closedVins: 0, drrPercent: 0 });
     }
 
-    const vins = cp72Rows.map(r => r.vin);
+    const vins = tlttRows.map(r => r.vin);
     const placeholders = vins.map(() => '?').join(',');
 
-    // 2. Дефекты по расширенному списку постов для этих VIN
     const defectPosts = [
       'TLTT','CP8','TLADAS','TLWA','TLRT','CPA',
       'CP8 Gate','CP8-gate','360','ADAS','ADAS+RB',
@@ -6388,17 +6389,14 @@ app.get('/api/drr-cp8-dashboard', async (req, res) => {
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
     const [defectRows] = await pool.query(`
-      SELECT
-        d.VIN,
-        d.STATUS
+      SELECT d.VIN, d.STATUS
       FROM at_qm_defect_info d
       WHERE d.POST_NAME IN (${defectPostsStr})
         AND d.CREATION_TIME >= ?
-        AND d.CREATION_TIME < ?
+        AND d.CREATION_TIME <= ?
         AND d.VIN IN (${placeholders})
     `, [rangeStart, rangeEnd, ...vins]);
 
-    // 3. Для каждого VIN определяем, есть ли хотя бы один не closed дефект
     const vinHasOpenDefect = new Set();
     defectRows.forEach(row => {
       if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
@@ -6406,15 +6404,14 @@ app.get('/api/drr-cp8-dashboard', async (req, res) => {
       }
     });
 
-    // 4. Подсчёт closedVins (OK) – автомобиль OK, если нет открытых дефектов
     let closedVins = 0;
-    cp72Rows.forEach(row => {
+    tlttRows.forEach(row => {
       if (!vinHasOpenDefect.has(row.vin)) closedVins += 1;
     });
 
-    const drrPercent = (closedVins / cp72Rows.length) * 100;
+    const drrPercent = (closedVins / tlttRows.length) * 100;
     res.json({
-      totalVins: cp72Rows.length,
+      totalVins: tlttRows.length,
       closedVins,
       drrPercent: Math.round(drrPercent * 10) / 10,
     });
@@ -6431,27 +6428,27 @@ app.get('/api/drr-cp8-top-defects', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    // 1. VIN, прошедшие CP72 за период (MES)
-    const [cp72Rows] = await mesPool.query(`
-      SELECT vin, MIN(scan_time) AS cp72_time
-      FROM ti_mes_movement
-      WHERE uloc_no = 'CP72'
-        AND scan_time >= ? AND scan_time <= ?
+    // VIN + последний проход TLTT
+    const [tlttRows] = await mesPool.query(`
+      SELECT vin, MAX(gmt_create) AS tltt_time
+      FROM tm_vhc_test_line_movement
+      WHERE node_nature = 'TLTT'
+        AND gmt_create >= ? AND gmt_create <= ?
+        AND is_deleted = 0
       GROUP BY vin
     `, [startTime, endTime]);
 
-    if (cp72Rows.length === 0) return res.json([]);
+    if (tlttRows.length === 0) return res.json([]);
 
-    const vins = cp72Rows.map(r => r.vin);
+    const vins = tlttRows.map(r => r.vin);
     const placeholders = vins.map(() => '?').join(',');
 
-    // 2. Все дефекты на заданных постах для этих VIN (с учётом времени создания)
     const defectPosts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
       'REPAIR', 'REPAIR_Final',
       'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9',
       'CP8 Touch Up', '360', 'ADAS', 'ADAS+RB',
-      'TEST TRACK', 'TRACK', 'WA'
+      'TEST TRACK', 'TRACK', 'WA','WT'
     ];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
@@ -6470,7 +6467,6 @@ app.get('/api/drr-cp8-top-defects', async (req, res) => {
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
     `, [...vins, startTime, endTime]);
 
-    // 3. Определяем NOK VIN (у которых есть хотя бы один незакрытый дефект)
     const nokSet = new Set();
     defectRows.forEach(row => {
       if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
@@ -6480,11 +6476,10 @@ app.get('/api/drr-cp8-top-defects', async (req, res) => {
 
     if (nokSet.size === 0) return res.json([]);
 
-    // 4. Группируем только незакрытые дефекты NOK VIN, считаем количество строк
     const defectGroupMap = new Map();
     defectRows.forEach(row => {
-      if (!nokSet.has(row.VIN)) return; // только NOK VIN
-      if (row.STATUS && row.STATUS.toLowerCase() === 'closed') return; // пропускаем закрытые
+      if (!nokSet.has(row.VIN)) return;
+      if (row.STATUS && row.STATUS.toLowerCase() === 'closed') return;
 
       const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
       if (!defectGroupMap.has(mpp)) {
@@ -6520,27 +6515,27 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
       return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
     }
 
-    // 1. VIN, прошедшие CP72 за период (MES)
-    const [cp72Rows] = await mesPool.query(`
-      SELECT vin, MIN(scan_time) AS cp72_time
-      FROM ti_mes_movement
-      WHERE uloc_no = 'CP72'
-        AND scan_time >= ? AND scan_time <= ?
+    // VIN + последний проход TLTT
+    const [tlttRows] = await mesPool.query(`
+      SELECT vin, MAX(gmt_create) AS tltt_time
+      FROM tm_vhc_test_line_movement
+      WHERE node_nature = 'TLTT'
+        AND gmt_create >= ? AND gmt_create <= ?
+        AND is_deleted = 0
       GROUP BY vin
     `, [startTime, endTime]);
 
-    if (cp72Rows.length === 0) return res.json([]);
+    if (tlttRows.length === 0) return res.json([]);
 
-    const vins = cp72Rows.map(r => r.vin);
+    const vins = tlttRows.map(r => r.vin);
     const placeholders = vins.map(() => '?').join(',');
 
-    // 2. Дефекты на указанных постах
     const defectPosts = [
       'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
       'REPAIR', 'REPAIR_Final',
       'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9',
       'CP8 Touch Up', '360', 'ADAS', 'ADAS+RB',
-      'TEST TRACK', 'TRACK', 'WA'
+      'TEST TRACK', 'TRACK', 'WA','WT'
     ];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
@@ -6552,7 +6547,6 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
     `, [...vins, startTime, endTime]);
 
-    // 3. NOK VIN
     const nokSet = new Set();
     defectRows.forEach(row => {
       if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
@@ -6560,7 +6554,6 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
       }
     });
 
-    // 4. Получаем модели из work_order
     const [modelRows] = await pool.query(`
       SELECT VIN, MODEL
       FROM work_order
@@ -6568,8 +6561,7 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
     `, vins);
     const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
 
-    // 5. Формируем итоговый список
-    const result = cp72Rows
+    const result = tlttRows
       .filter(row => {
         const isNok = nokSet.has(row.vin);
         if (status === 'NOK') return isNok;
@@ -6579,7 +6571,7 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
       .map(row => ({
         vin: row.vin,
         model: modelMap.get(row.vin) || '-',
-        cp72_time: row.cp72_time,
+        cp72_time: row.tltt_time,  // для совместимости фронта
       }))
       .sort((a, b) => new Date(a.cp72_time) - new Date(b.cp72_time));
 
