@@ -23,7 +23,7 @@ import DrrPIPDashboardPage from './assets/drrpip.png'; //
 import electronicsPreview from './assets/elec.png'; // 
 import brigPreview from './assets/briga.png';
 import RemPreview from './assets/remzs.png'; 
-import VehPreview from './assets/cp7drr.png';// замените на реальное имя файла
+import VehPreview from './assets/repai.png';// замените на реальное имя файла
 
 // ====== СТИЛИ ======
 const sectionStyle = {
