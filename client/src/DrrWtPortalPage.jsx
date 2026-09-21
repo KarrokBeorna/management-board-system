@@ -127,7 +127,7 @@ const tdStyle = {
   fontSize: '1.6rem',
 };
 
-const PIE_COLORS = ['#10B981', '#DC2626'];
+const PIE_COLORS = ['#10B981', '#EF4444'];
 
 /* ===================== ХЕЛПЕРЫ ДЛЯ ВРЕМЕНИ ===================== */
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
