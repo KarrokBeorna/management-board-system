@@ -6448,11 +6448,9 @@ app.get('/api/drr-cp8-top-defects', async (req, res) => {
 
     // 2. Все дефекты на заданных постах для этих VIN (с учётом времени создания)
     const defectPosts = [
-      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-      'REPAIR', 'REPAIR_Final',
-      'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9',
-      'CP8 Touch Up', '360', 'ADAS', 'ADAS+RB',
-      'TEST TRACK', 'TRACK', 'WA','WT'
+      'TLTT','CP8','TLADAS','TLWA','TLRT','CPA',
+      'CP8 Gate','CP8-gate','360','ADAS','ADAS+RB',
+      'TEST TRACK','TRACK','WA','WT','CP8 Touch Up'
     ];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
@@ -6537,11 +6535,9 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
 
     // 2. Дефекты на указанных постах
     const defectPosts = [
-      'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-      'REPAIR', 'REPAIR_Final',
-      'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9',
-      'CP8 Touch Up', '360', 'ADAS', 'ADAS+RB',
-      'TEST TRACK', 'TRACK', 'WA','WT'
+      'TLTT','CP8','TLADAS','TLWA','TLRT','CPA',
+      'CP8 Gate','CP8-gate','360','ADAS','ADAS+RB',
+      'TEST TRACK','TRACK','WA','WT','CP8 Touch Up'
     ];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
