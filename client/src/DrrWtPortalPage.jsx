@@ -301,7 +301,7 @@ export default function DrrWtPortalPage() {
 
   const pieData = [
     { name: 'Ушли на TLTT', value: data.tlttPercent },
-    { name: 'Отправлены в ремзону', value: Math.max(0, 100 - data.tlttPercent) },
+    { name: 'Отправлены в REP', value: Math.max(0, 100 - data.tlttPercent) },
   ];
 
   const handleFilterClick = (filter) => {
