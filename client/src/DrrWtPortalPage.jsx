@@ -437,7 +437,7 @@ export default function DrrWtPortalPage() {
                 }}
                 onClick={() => loadVinList('REP')}
               >
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Отправлены в ремзону</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Ушли в REP</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }} />
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.repVins}</div>
               </div>
