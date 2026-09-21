@@ -68,6 +68,7 @@ export default function Layout() {
   location.pathname === '/drr-pip-dashboard' || 
   location.pathname === '/remzone-work-status' ||
   location.pathname === '/vehicle-on-wheels' ||
+  location.pathname === '/drr-wt-portal' ||
   location.pathname === '/brigade-report';
 
   return (
