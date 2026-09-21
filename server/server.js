@@ -9442,11 +9442,8 @@ app.get('/api/vehicle-on-wheels/details/cp72-remzone', async (req, res) => {
 });
 
 // ================== DRR WT PORTAL ==================
-const WT_REPAIR_ZONES = ['REPASS','REPPS','REPWS','REPLK','REPSHORT','REPELEC','REPNOISE'];
-const WT_TLTT_ZONE = 'TLTT';
-const WT_GRACE_MIN = 10; // минут после TS16
 
-// Хелпер: VIN + время прохода TS16 в окне
+// --- TS16 VIN (серая карточка, IoT) ---
 async function getTs16Vins(startTime, endTime) {
   const [rows] = await pool.query(`
     SELECT VIN, MIN(CREATION_TIME) AS TS16_TIME
@@ -9456,6 +9453,45 @@ async function getTs16Vins(startTime, endTime) {
     GROUP BY VIN
   `, [startTime, endTime]);
   return rows;
+}
+
+// --- TLTT = VIN с TLADAS в окне + TLTT позже последнего TLADAS ---
+async function getTlttVins(startTime, endTime) {
+  // последнее TLADAS по каждому VIN в окне
+  const [baseRows] = await mesPool.query(`
+    SELECT vin, MAX(gmt_create) AS last_tladas
+    FROM tm_vhc_test_line_movement
+    WHERE node_nature = 'TLADAS'
+      AND is_deleted = 0
+      AND gmt_create >= ? AND gmt_create <= ?
+    GROUP BY vin
+  `, [startTime, endTime]);
+
+  if (baseRows.length === 0) return new Set();
+
+  const lastTladasMap = new Map(
+    baseRows.map(r => [r.vin, new Date(r.last_tladas).getTime()])
+  );
+  const vins = baseRows.map(r => r.vin);
+  const ph = vins.map(() => '?').join(',');
+
+  const [tlttRows] = await mesPool.query(`
+    SELECT vin, gmt_create AS tltt_time
+    FROM tm_vhc_test_line_movement
+    WHERE vin IN (${ph})
+      AND node_nature = 'TLTT'
+      AND is_deleted = 0
+    ORDER BY vin, gmt_create
+  `, vins);
+
+  const tlttSet = new Set();
+  tlttRows.forEach(r => {
+    const lastTladas = lastTladasMap.get(r.vin);
+    const t = new Date(r.tltt_time).getTime();
+    if (t > lastTladas) tlttSet.add(r.vin);
+  });
+
+  return tlttSet;
 }
 
 // ---------- 1. Основной дашборд ----------
@@ -9468,44 +9504,12 @@ app.get('/api/drr-wt-portal', async (req, res) => {
 
     const ts16Rows = await getTs16Vins(startTime, endTime);
     const totalVins = ts16Rows.length;
-    if (totalVins === 0) {
-      return res.json({ totalVins: 0, tlttVins: 0, repVins: 0, tlttPercent: 0 });
-    }
 
-    const vins = ts16Rows.map(r => r.VIN);
-    const placeholders = vins.map(() => '?').join(',');
-    const ts16TimeMap = new Map(ts16Rows.map(r => [r.VIN, new Date(r.TS16_TIME).getTime()]));
+    const tlttSet = await getTlttVins(startTime, endTime);
+    const tlttVins = tlttSet.size;
 
-    const allZones = [WT_TLTT_ZONE, ...WT_REPAIR_ZONES];
-    const zonePlaceholders = allZones.map(() => '?').join(',');
-
-    // окно поиска MES-событий: [startTime; endTime + 24ч], чтобы поймать события после TS16
-    const [movementRows] = await mesPool.query(`
-      SELECT vin, node_nature AS zone, gmt_create AS event_time
-      FROM tm_vhc_test_line_movement
-      WHERE vin IN (${placeholders})
-        AND node_nature IN (${zonePlaceholders})
-        AND is_deleted = 0
-        AND gmt_create >= ?
-        AND gmt_create <= DATE_ADD(?, INTERVAL 24 HOUR)
-      ORDER BY gmt_create
-    `, [...vins, ...allZones, startTime, endTime]);
-
-    const tlttVinsSet = new Set();
-    const repVinsSet = new Set();
-
-    movementRows.forEach(row => {
-      const ts16Time = ts16TimeMap.get(row.vin);
-      if (!ts16Time) return;
-      const eventTime = new Date(row.event_time).getTime();
-      if (eventTime < ts16Time + WT_GRACE_MIN * 60 * 1000) return;
-
-      if (row.zone === WT_TLTT_ZONE) tlttVinsSet.add(row.vin);
-      else repVinsSet.add(row.vin);
-    });
-
-    const tlttVins = tlttVinsSet.size;
-    const repVins = repVinsSet.size;
+    // REP = TS16 - TLTT
+    const repVins = Math.max(0, totalVins - tlttVins);
     const tlttPercent = totalVins > 0 ? (tlttVins / totalVins) * 100 : 0;
 
     res.json({
@@ -9529,8 +9533,8 @@ app.get('/api/drr-wt-portal-vins', async (req, res) => {
     }
 
     const ts16Rows = await getTs16Vins(startTime, endTime);
-    if (ts16Rows.length === 0) return res.json([]);
 
+    // --- TS16: все VIN с TS16 ---
     if (status === 'TS16') {
       return res.json(
         ts16Rows
@@ -9539,51 +9543,49 @@ app.get('/api/drr-wt-portal-vins', async (req, res) => {
       );
     }
 
-    const ts16TimeMap = new Map(ts16Rows.map(r => [r.VIN, new Date(r.TS16_TIME).getTime()]));
-    const vins = ts16Rows.map(r => r.VIN);
-    const placeholders = vins.map(() => '?').join(',');
+    const tlttSet = await getTlttVins(startTime, endTime);
 
-    const zoneFilter = status === 'TLTT' ? [WT_TLTT_ZONE] : WT_REPAIR_ZONES;
-    const zonePlaceholders = zoneFilter.map(() => '?').join(',');
+    // --- TLTT: VIN с TLADAS→TLTT (дата = время TLTT) ---
+    if (status === 'TLTT') {
+      if (tlttSet.size === 0) return res.json([]);
+      const vins = [...tlttSet];
+      const ph = vins.map(() => '?').join(',');
+      const [rows] = await mesPool.query(`
+        SELECT vin, gmt_create AS event_time
+        FROM tm_vhc_test_line_movement
+        WHERE vin IN (${ph})
+          AND node_nature = 'TLTT'
+          AND is_deleted = 0
+        ORDER BY gmt_create
+      `, vins);
 
-    const [movementRows] = await mesPool.query(`
-      SELECT vin, node_nature AS zone, gmt_create AS event_time
-      FROM tm_vhc_test_line_movement
-      WHERE vin IN (${placeholders})
-        AND node_nature IN (${zonePlaceholders})
-        AND is_deleted = 0
-        AND gmt_create >= ?
-        AND gmt_create <= DATE_ADD(?, INTERVAL 24 HOUR)
-      ORDER BY gmt_create
-    `, [...vins, ...zoneFilter, startTime, endTime]);
+      const seen = new Set();
+      const result = [];
+      rows.forEach(r => {
+        if (seen.has(r.vin)) return;
+        seen.add(r.vin);
+        result.push({ vin: r.vin, model: '—', zone: 'TLTT', event_time: r.event_time });
+      });
+      return res.json(result);
+    }
 
-    // берём первое событие после TS16+10мин для каждого VIN
-    const vinEventMap = new Map();
-    movementRows.forEach(row => {
-      const ts16Time = ts16TimeMap.get(row.vin);
-      if (!ts16Time) return;
-      const eventTime = new Date(row.event_time).getTime();
-      if (eventTime < ts16Time + WT_GRACE_MIN * 60 * 1000) return;
-      if (!vinEventMap.has(row.vin)) {
-        vinEventMap.set(row.vin, {
-          vin: row.vin,
-          model: '—',
-          zone: row.zone,
-          event_time: row.event_time,
-        });
-      }
-    });
+    // --- REP: TS16 - TLTT (дата = время TS16) ---
+    if (status === 'REP') {
+      const result = ts16Rows
+        .filter(r => !tlttSet.has(r.VIN))
+        .map(r => ({ vin: r.VIN, model: '—', zone: 'REP', event_time: r.TS16_TIME }))
+        .sort((a, b) => new Date(a.event_time) - new Date(b.event_time));
+      return res.json(result);
+    }
 
-    res.json(
-      [...vinEventMap.values()].sort((a, b) => new Date(a.event_time) - new Date(b.event_time))
-    );
+    return res.status(400).json({ error: 'Неизвестный status' });
   } catch (err) {
     console.error('Ошибка /api/drr-wt-portal-vins:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---------- 3. Открытые дефекты для TS16 VIN ----------
+// ---------- 3. Открытые дефекты по TS16 VIN ----------
 app.get('/api/drr-wt-portal-defects', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
@@ -9606,15 +9608,12 @@ app.get('/api/drr-wt-portal-defects', async (req, res) => {
         AND (STATUS IS NULL OR LOWER(STATUS) != 'closed')
     `, vins);
 
-    // Группируем по (описание + класс), считаем количество
     const defectMap = new Map();
     defectRows.forEach(r => {
       const mpp = r.mpp || '—';
       const grade = r.grade || '—';
       const key = `${mpp}|${grade}`;
-      if (!defectMap.has(key)) {
-        defectMap.set(key, { mpp, grade, defectCount: 0 });
-      }
+      if (!defectMap.has(key)) defectMap.set(key, { mpp, grade, defectCount: 0 });
       defectMap.get(key).defectCount += 1;
     });
 
