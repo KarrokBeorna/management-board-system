@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 
+/* ===================== СТИЛИ ===================== */
 const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
@@ -126,8 +127,9 @@ const tdStyle = {
   fontSize: '1.6rem',
 };
 
-const PIE_COLORS = ['#10B981', '#E5E7EB'];
+const PIE_COLORS = ['#10B981', '#DC2626'];
 
+/* ===================== ХЕЛПЕРЫ ДЛЯ ВРЕМЕНИ ===================== */
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
 
 const getMoscowMinutes = () => {
@@ -215,6 +217,7 @@ const getCurrentShiftInfo = () => {
   return { weekNumber, shiftLetter, shiftType };
 };
 
+/* ===================== КОМПОНЕНТ ===================== */
 export default function DrrWtPortalPage() {
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
   const [isManualFilter, setIsManualFilter] = useState(false);
@@ -297,8 +300,8 @@ export default function DrrWtPortalPage() {
   }, [timeFilter]);
 
   const pieData = [
-    { name: 'TLTT', value: data.tlttPercent },
-    { name: 'Прочее', value: Math.max(0, 100 - data.tlttPercent) },
+    { name: 'Ушли на TLTT', value: data.tlttPercent },
+    { name: 'Отправлены в ремзону', value: Math.max(0, 100 - data.tlttPercent) },
   ];
 
   const handleFilterClick = (filter) => {
@@ -374,7 +377,13 @@ export default function DrrWtPortalPage() {
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value) => `${value.toFixed(1)}%`} contentStyle={{ fontSize: '1.8rem', borderRadius: '16px' }} />
+                  <Tooltip
+                    formatter={(value, name) => {
+                      const count = name === 'Ушли на TLTT' ? data.tlttVins : data.repVins;
+                      return [`${value.toFixed(1)}% (${count} VIN)`, name];
+                    }}
+                    contentStyle={{ fontSize: '1.8rem', borderRadius: '16px' }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
 
@@ -427,7 +436,7 @@ export default function DrrWtPortalPage() {
                 }}
                 onClick={() => loadVinList('REP')}
               >
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Ушли в REP</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Отправлены в ремзону</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }} />
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.repVins}</div>
               </div>
