@@ -25,6 +25,7 @@ import DefectElectronicsTopPage from './DefectElectronicsTopPage';
 import BrigadeReportPage from './BrigadeReportPage';
 import RemzoneWorkStatusPage from './RemzoneWorkStatusPage';
 import VehicleOnWheelsPage from './VehicleOnWheelsPage';
+import DrrWtPortalPage from './DrrWtPortalPage';
 
 import TestPage from './testpage'; // тестовая страница
 export default function App() {
@@ -54,6 +55,7 @@ export default function App() {
         <Route path="/brigade-report" element={<BrigadeReportPage />} />
         <Route path="/remzone-work-status" element={<RemzoneWorkStatusPage />} />
         <Route path="/vehicle-on-wheels" element={<VehicleOnWheelsPage />} />
+        <Route path="/drr-wt-portal" element={<DrrWtPortalPage />} />
 
         <Route path="/testpage" element={<TestPage />} />
       </Route>

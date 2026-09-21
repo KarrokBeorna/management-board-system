@@ -23,7 +23,8 @@ import DrrPIPDashboardPage from './assets/drrpip.png'; //
 import electronicsPreview from './assets/elec.png'; // 
 import brigPreview from './assets/briga.png';
 import RemPreview from './assets/remzs.png'; 
-import VehPreview from './assets/repai.png';// замените на реальное имя файла
+import VehPreview from './assets/repai.png';
+import drrWtPortalPreview from './assets/123.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -345,7 +346,8 @@ export default function HomePage() {
     { to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "PIP DRR Dashboard", accentColor: "#0EA5E9" },
     { to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Electronics Defects Top", accentColor: "#8B5CF6" },
     { to: "/remzone-work-status", imgSrc: RemPreview, caption: "Remzone Work Status", accentColor: "#8B5CF6" },
-    { to: "/vehicle-on-wheels", imgSrc: VehPreview, caption: "Vehicle on Wheels", accentColor: "#e22910" }
+    { to: "/vehicle-on-wheels", imgSrc: VehPreview, caption: "Vehicle on Wheels", accentColor: "#e22910" },
+    { to: "/drr-wt-portal", imgSrc: drrWtPortalPreview, caption: "DRR WT Портал", accentColor: "#0EA5E9" }
   ];
 
   const allServiceCards = [
