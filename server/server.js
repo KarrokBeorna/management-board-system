@@ -9605,6 +9605,14 @@ app.get('/api/drr-wt-portal-defects', async (req, res) => {
     const repVins = [...repSet];
     const placeholders = repVins.map(() => '?').join(',');
 
+    // Тот же список постов, что в DRR CPFinal
+    const defectPosts = [
+      'TLTT','CP8','TLADAS','TLWA','TLRT','CPA',
+      'CP8 Gate','CP8-gate','360','ADAS','ADAS+RB',
+      'TEST TRACK','TRACK','WA','WT','CP8 Touch Up'
+    ];
+    const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
+
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN,
@@ -9615,8 +9623,12 @@ app.get('/api/drr-wt-portal-defects', async (req, res) => {
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.VIN IN (${placeholders})
+        AND d.POST_NAME IN (${defectPostsStr})
+        AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
         AND (d.STATUS IS NULL OR LOWER(d.STATUS) != 'closed')
-    `, repVins);
+    `, [...repVins, startTime, endTime]);
+
+    if (defectRows.length === 0) return res.json([]);
 
     const defectMap = new Map();
     defectRows.forEach(r => {

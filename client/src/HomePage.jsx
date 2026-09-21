@@ -15,16 +15,16 @@ import warrantyPreview from './assets/waran.png';
 import tlMapPreview from './assets/tlmap.png';
 import HoldsSgpPage from './assets/hold.png';
 import sgpManagementPreview from './assets/cp8.png';
-import DrrCp7DashboardPage from './assets/cp7drr.png'; 
-import cp7historyPreview from './assets/cp7hist.png'; 
-import DrrCp8DashboardPage from './assets/cp8drr.png'; // 
+import DrrCp7DashboardPage from './assets/cp7drr.png';
+import cp7historyPreview from './assets/cp7hist.png';
+import DrrCp8DashboardPage from './assets/cp8drr.png';
 import drrTestlinePreview from './assets/tldrr.png';
-import DrrPIPDashboardPage from './assets/drrpip.png'; //
-import electronicsPreview from './assets/elec.png'; // 
+import DrrPIPDashboardPage from './assets/drrpip.png';
+import electronicsPreview from './assets/elec.png';
 import brigPreview from './assets/briga.png';
-import RemPreview from './assets/remzs.png'; 
+import RemPreview from './assets/remzs.png';
 import VehPreview from './assets/repai.png';
-import drrWtPortalPreview from './assets/123.png';
+import drrWtPortalPreview from './assets/cp8drr.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -330,6 +330,7 @@ export default function HomePage() {
 
   const showReports = activeTab === 'all' || activeTab === 'reports';
   const showServices = activeTab === 'all' || activeTab === 'services';
+  const showDrr = activeTab === 'all' || activeTab === 'drr';
 
   const allReportCards = [
     { to: "/report", imgSrc: tablePreview, caption: "Top DRR Board", accentColor: "#3B82F6" },
@@ -341,13 +342,13 @@ export default function HomePage() {
     { to: "/tl-map", imgSrc: tlMapPreview, caption: "TL Map", accentColor: "#14B8A6" },
     { to: "/drr-cp7-dashboard", imgSrc: DrrCp7DashboardPage, caption: "DRR CP7 Dashboard", accentColor: "#6366F1" },
     { to: "/drr-cp7-history", imgSrc: cp7historyPreview, caption: "DRR CP7 History", accentColor: "#6366F1" },
-    { to: "/drr-cp8-dashboard", imgSrc: DrrCp8DashboardPage, caption: "DRR CPFinal Dashboard", accentColor: "#8B5CF6" },
+    //{ to: "/drr-cp8-dashboard", imgSrc: DrrCp8DashboardPage, caption: "DRR CPFinal Dashboard", accentColor: "#8B5CF6" },
     { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR ADAS Dashboard", accentColor: "#0ea5e9" },
     { to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "PIP DRR Dashboard", accentColor: "#0EA5E9" },
+    { to: "/drr-wt-portal", imgSrc: drrWtPortalPreview, caption: "DRR CPFinal Dashboard", accentColor: "#0EA5E9" },//это ватер тест
     { to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Electronics Defects Top", accentColor: "#8B5CF6" },
     { to: "/remzone-work-status", imgSrc: RemPreview, caption: "Remzone Work Status", accentColor: "#8B5CF6" },
-    { to: "/vehicle-on-wheels", imgSrc: VehPreview, caption: "Vehicle on Wheels", accentColor: "#e22910" },
-    { to: "/drr-wt-portal", imgSrc: drrWtPortalPreview, caption: "DRR WT Портал", accentColor: "#0EA5E9" }
+    { to: "/vehicle-on-wheels", imgSrc: VehPreview, caption: "Vehicle on Wheels", accentColor: "#e22910" }
   ];
 
   const allServiceCards = [
@@ -361,18 +362,33 @@ export default function HomePage() {
     { to: "/brigade-report", imgSrc: brigPreview, caption: "Brigade Report Service", accentColor: "#3B82F6" }
   ];
 
+  // DRR-отчёты выносим в отдельную вкладку
+  const DRR_ROUTES = [
+    '/drr-cp7-dashboard',
+    '/drr-wt-portal',
+    '/drr-tl-dashboard',
+    '/vehicle-on-wheels'
+  ];
+
+  const allDrrCards = allReportCards.filter(card => DRR_ROUTES.includes(card.to));
+
   const filterCards = (cards) => {
     return cards.filter(card => card.caption.toLowerCase().includes(searchTerm.trim().toLowerCase()));
   };
 
-  const filteredReportCards = filterCards(allReportCards);
+  // Общие "Отчёты" без DRR-карточек (чтобы не было дублирования)
+  const filteredReportCards = filterCards(allReportCards)
+    .filter(card => !DRR_ROUTES.includes(card.to));
   const filteredServiceCards = filterCards(allServiceCards);
+  const filteredDrrCards = filterCards(allDrrCards);
+
   const favoriteReportCards = filteredReportCards.filter(card => favorites.includes(card.to));
   const favoriteServiceCards = filteredServiceCards.filter(card => favorites.includes(card.to));
+  const favoriteDrrCards = filteredDrrCards.filter(card => favorites.includes(card.to));
 
   return (
     <div style={{ padding: 40, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
-      
+
       {/* Табы */}
       <div style={tabBarStyle}>
         <button onClick={() => setActiveTab('all')} style={tabStyle(activeTab === 'all')}>
@@ -383,6 +399,9 @@ export default function HomePage() {
         </button>
         <button onClick={() => setActiveTab('services')} style={tabStyle(activeTab === 'services')}>
           🛠️ Сервисы
+        </button>
+        <button onClick={() => setActiveTab('drr')} style={tabStyle(activeTab === 'drr')}>
+          ⚙️ Отчеты DRR
         </button>
       </div>
 
@@ -407,7 +426,7 @@ export default function HomePage() {
       </div>
 
       {/* Избранное */}
-      {(favoriteReportCards.length > 0 || favoriteServiceCards.length > 0) && (
+      {(favoriteReportCards.length > 0 || favoriteServiceCards.length > 0 || favoriteDrrCards.length > 0) && (
         <AnimatedSection
           title="Избранное"
           icon="⭐"
@@ -416,6 +435,14 @@ export default function HomePage() {
           visible={true}
         >
           <div style={gridStyle}>
+            {favoriteDrrCards.map(card => (
+              <ReportCard
+                key={card.to}
+                {...card}
+                isFavorite={true}
+                onToggleFavorite={toggleFavorite}
+              />
+            ))}
             {favoriteReportCards.map(card => (
               <ReportCard
                 key={card.to}
@@ -436,7 +463,7 @@ export default function HomePage() {
         </AnimatedSection>
       )}
 
-      {/* Секция "Отчёты" */}
+      {/* Секция "Отчёты" (без DRR) */}
       <AnimatedSection
         title="Отчёты"
         icon="📊"
@@ -455,6 +482,31 @@ export default function HomePage() {
           ))}
         </div>
         {filteredReportCards.length === 0 && (
+          <p style={{ textAlign: 'center', color: '#6B7280', margin: '20px 0' }}>
+            Ничего не найдено
+          </p>
+        )}
+      </AnimatedSection>
+
+      {/* Секция "Отчеты DRR" */}
+      <AnimatedSection
+        title="Отчеты DRR"
+        icon="⚙️"
+        iconBg="#EDE9FE"
+        iconColor="#7C3AED"
+        visible={showDrr && filteredDrrCards.length > 0}
+      >
+        <div style={gridStyle}>
+          {filteredDrrCards.map(card => (
+            <ReportCard
+              key={card.to}
+              {...card}
+              isFavorite={favorites.includes(card.to)}
+              onToggleFavorite={toggleFavorite}
+            />
+          ))}
+        </div>
+        {filteredDrrCards.length === 0 && (
           <p style={{ textAlign: 'center', color: '#6B7280', margin: '20px 0' }}>
             Ничего не найдено
           </p>

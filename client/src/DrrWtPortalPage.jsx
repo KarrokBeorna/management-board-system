@@ -246,7 +246,7 @@ export default function DrrWtPortalPage() {
       const params = new URLSearchParams({ startTime: start, endTime: end });
 
       const mainRes = await fetch(`${API_BASE}/api/drr-wt-portal?${params.toString()}`);
-      if (!mainRes.ok) throw new Error('Ошибка загрузки DRR WT');
+      if (!mainRes.ok) throw new Error('Ошибка загрузки DRR CPFinal');
       const mainJson = await mainRes.json();
       setData({
         totalVins: mainJson.totalVins || 0,
@@ -313,7 +313,7 @@ export default function DrrWtPortalPage() {
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>
-        <h1 style={titleStyle}>DRR WT Портал</h1>
+        <h1 style={titleStyle}>DRR CPFinal</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
@@ -421,7 +421,7 @@ export default function DrrWtPortalPage() {
                   display: 'flex', flexDirection: 'column', justifyContent: 'center',
                   cursor: 'pointer',
                 }}
-                onClick={() => loadVinList('TLTT')}
+                onClick={() => loadVinList('DRR')}
               >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Ушли на TLTT</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }} />
