@@ -6432,21 +6432,6 @@ app.get('/api/drr-cp8-top-defects', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    // 1. VIN, прошедшие CP72 за период (MES)
-    const [cp72Rows] = await mesPool.query(`
-      SELECT vin, MIN(scan_time) AS cp72_time
-      FROM ti_mes_movement
-      WHERE uloc_no = 'CP72'
-        AND scan_time >= ? AND scan_time <= ?
-      GROUP BY vin
-    `, [startTime, endTime]);
-
-    if (cp72Rows.length === 0) return res.json([]);
-
-    const vins = cp72Rows.map(r => r.vin);
-    const placeholders = vins.map(() => '?').join(',');
-
-    // 2. Все дефекты на заданных постах для этих VIN (с учётом времени создания)
     const defectPosts = [
       'TLTT','CP8','TLADAS','TLWA','TLRT','CPA',
       'CP8 Gate','CP8-gate','360','ADAS','ADAS+RB',
@@ -6454,54 +6439,38 @@ app.get('/api/drr-cp8-top-defects', async (req, res) => {
     ];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
+    // Все незакрытые дефекты на этих постах за окно — без привязки к CP72
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN,
         wo.MODEL,
         d.PART_NAME,
         d.PROBLEM_TYPE,
-        d.PROBLEM_GRADE,
-        d.STATUS
+        d.PROBLEM_GRADE
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
-      WHERE d.VIN IN (${placeholders})
-        AND d.POST_NAME IN (${defectPostsStr})
+      WHERE d.POST_NAME IN (${defectPostsStr})
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
-    `, [...vins, startTime, endTime]);
+        AND (d.STATUS IS NULL OR LOWER(d.STATUS) != 'closed')
+    `, [startTime, endTime]);
 
-    // 3. Определяем NOK VIN (у которых есть хотя бы один незакрытый дефект)
-    const nokSet = new Set();
-    defectRows.forEach(row => {
-      if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
-        nokSet.add(row.VIN);
-      }
-    });
+    if (defectRows.length === 0) return res.json([]);
 
-    if (nokSet.size === 0) return res.json([]);
-
-    // 4. Группируем только незакрытые дефекты NOK VIN, считаем количество строк
+    // Группировка по MODEL + PART_NAME + PROBLEM_TYPE + grade
     const defectGroupMap = new Map();
     defectRows.forEach(row => {
-      if (!nokSet.has(row.VIN)) return; // только NOK VIN
-      if (row.STATUS && row.STATUS.toLowerCase() === 'closed') return; // пропускаем закрытые
-
-      const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
-      if (!defectGroupMap.has(mpp)) {
-        defectGroupMap.set(mpp, {
-          mpp,
-          grade: row.PROBLEM_GRADE || '-',
-          defectCount: 0,
-        });
+      const mpp = `${row.MODEL || '—'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`
+        .replace(/\s+/g, ' ')
+        .trim();
+      const grade = row.PROBLEM_GRADE || '—';
+      const key = `${mpp}|${grade}`;
+      if (!defectGroupMap.has(key)) {
+        defectGroupMap.set(key, { mpp, grade, defectCount: 0 });
       }
-      defectGroupMap.get(mpp).defectCount += 1;
+      defectGroupMap.get(key).defectCount += 1;
     });
 
-    const topDefects = Array.from(defectGroupMap.values())
-      .map(d => ({
-        mpp: d.mpp,
-        grade: d.grade,
-        defectCount: d.defectCount,
-      }))
+    const topDefects = [...defectGroupMap.values()]
       .sort((a, b) => b.defectCount - a.defectCount)
       .slice(0, 20);
 
