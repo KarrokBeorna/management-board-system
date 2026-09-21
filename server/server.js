@@ -9180,6 +9180,7 @@ app.get('/api/remzone-work-status/details', async (req, res) => {
 
 // ================== VEHICLE ON WHEELS ==================
 // ================== VEHICLE ON WHEELS ==================
+// ================== VEHICLE ON WHEELS ==================
 app.get('/api/vehicle-on-wheels', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
@@ -9215,8 +9216,8 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
     const cpaCount = greenCounts['CPA'] || 0;
     const cpaUnique = greenUnique['CPA'] || 0;
 
-    // ---------- 2. Таблица: CP72 → REP, БЕЗ тех, кто был в CPA ----------
-    // В подзапрос cp добавлен LEFT JOIN tm_ofm_order, чтобы получить модель (product)
+    // ---------- 2. Таблица: CP72 → REP (ВСЕ, включая ушедших в CPA) ----------
+    // Флаг went_to_cpa = 1, если VIN в этом же окне был в CPA.
     const [rows] = await mesPool.query(`
       SELECT
         cp.vin,
@@ -9225,7 +9226,8 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
         cp.TIME_CP72,
         TIMESTAMPDIFF(SECOND, cp.TIME_CP72, NOW()) AS elapsed_cp72_sec,
         z.TIME_ZONE,
-        TIMESTAMPDIFF(SECOND, z.TIME_ZONE, NOW()) AS elapsed_zone_sec
+        TIMESTAMPDIFF(SECOND, z.TIME_ZONE, NOW()) AS elapsed_zone_sec,
+        CASE WHEN cpa.vin IS NULL THEN 0 ELSE 1 END AS went_to_cpa
       FROM (
         SELECT
           tvv.vin,
@@ -9245,35 +9247,28 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
           AND tvtlm.is_deleted = 0
           AND tvtlm.gmt_create >= ? AND tvtlm.gmt_create <= ?
       ) AS z ON cp.vin = z.vin
-      WHERE cp.vin NOT IN (
+      LEFT JOIN (
         SELECT DISTINCT vin FROM tm_vhc_test_line_movement
         WHERE node_nature = 'CPA'
           AND gmt_create >= ? AND gmt_create <= ?
           AND is_deleted = 0
-      )
+      ) AS cpa ON cpa.vin = cp.vin
       ORDER BY z.zone, cp.vin
     `, [startTime, endTime, startTime, endTime, startTime, endTime]);
 
-    // Уникальные VIN в таблице (после фильтра CPA)
-    const tableVinsSet = new Set(rows.map(r => r.vin));
-    const uniqueVins = tableVinsSet.size;
+    // ---------- 3. Считаем показатели ----------
+    // Тёмная карточка «CP72 → Ремзона» — ВСЕ, кто прошёл CP72 и попал в REP
+    const allVinsSet = new Set(rows.map(r => r.vin));
+    const uniqueVins = allVinsSet.size;
 
-    // ---------- 3. VIN, которые были в CPA за тот же период ----------
-    const [cpaVinsRows] = await mesPool.query(`
-      SELECT DISTINCT vin
-      FROM tm_vhc_test_line_movement
-      WHERE node_nature = 'CPA'
-        AND gmt_create >= ? AND gmt_create <= ?
-        AND is_deleted = 0
-    `, [startTime, endTime]);
+    // Красная карточка «Записей в ремзону» — те, кто ещё НЕ ушёл в CPA
+    const stillInRepairVins = new Set(
+      rows.filter(r => Number(r.went_to_cpa) === 0).map(r => r.vin)
+    );
+    const repairTotal = stillInRepairVins.size;
+    const repairUnique = stillInRepairVins.size;
 
-    const cpaVinsSet = new Set(cpaVinsRows.map(r => r.vin));
-
-    // ---------- 4. Карточка «Записей в ремзону» = таблица (без CPA) ----------
-    const repairTotal = uniqueVins;
-    const repairUnique = uniqueVins;
-
-    // ---------- 5. Ответ ----------
+    // ---------- 4. Ответ ----------
     res.json({
       rows: rows.map(r => ({
         vin: r.vin,
@@ -9283,24 +9278,22 @@ app.get('/api/vehicle-on-wheels', async (req, res) => {
         elapsed_cp72_sec: r.elapsed_cp72_sec,
         time_zone: r.TIME_ZONE,
         elapsed_zone_sec: r.elapsed_zone_sec,
+        went_to_cpa: Number(r.went_to_cpa) === 1,
       })),
 
-      // Карточка «CP72 → Ремзона»
+      // Тёмная карточка: ВСЕ CP72 → REP
       uniqueVins,
 
       // Карточка «Ремонт ОК» + pie chart
       cpaCount,
       cpaUnique,
 
-      // Карточка «Записей в ремзону» (без CPA)
+      // Красная карточка: CP72 → REP, ещё не ушли в CPA
       repairTotal,
       repairUnique,
 
-      // Полные разбивки
       greenCounts,
       greenUnique,
-
-      // Цель для pie chart
       cpaTarget: 160,
     });
   } catch (err) {
