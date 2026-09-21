@@ -9438,22 +9438,22 @@ app.get('/api/vehicle-on-wheels/details/cp72-remzone', async (req, res) => {
 });
 
 // ================== DRR WT PORTAL ==================
+const WT_REPAIR_ZONES = ['REPASS','REPPS','REPWS','REPLK','REPSHORT','REPELEC','REPNOISE'];
 
-// --- TS16 VIN (серая карточка, IoT) ---
-async function getTs16Vins(startTime, endTime) {
-  const [rows] = await pool.query(`
-    SELECT VIN, MIN(CREATION_TIME) AS TS16_TIME
-    FROM at_qm_tracking_history
-    WHERE WC_NAME = 'TS16'
-      AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-    GROUP BY VIN
+// TLTT = все VIN с событием TLTT в окне
+async function getTlttVins(startTime, endTime) {
+  const [rows] = await mesPool.query(`
+    SELECT DISTINCT vin
+    FROM tm_vhc_test_line_movement
+    WHERE node_nature = 'TLTT'
+      AND is_deleted = 0
+      AND gmt_create >= ? AND gmt_create <= ?
   `, [startTime, endTime]);
-  return rows;
+  return new Set(rows.map(r => r.vin));
 }
 
-// --- TLTT = VIN с TLADAS в окне + TLTT позже последнего TLADAS ---
-async function getTlttVins(startTime, endTime) {
-  // последнее TLADAS по каждому VIN в окне
+// REP = VIN с TLADAS в окне + REP позже последнего TLADAS
+async function getRepVins(startTime, endTime) {
   const [baseRows] = await mesPool.query(`
     SELECT vin, MAX(gmt_create) AS last_tladas
     FROM tm_vhc_test_line_movement
@@ -9470,24 +9470,25 @@ async function getTlttVins(startTime, endTime) {
   );
   const vins = baseRows.map(r => r.vin);
   const ph = vins.map(() => '?').join(',');
+  const zonePH = WT_REPAIR_ZONES.map(() => '?').join(',');
 
-  const [tlttRows] = await mesPool.query(`
-    SELECT vin, gmt_create AS tltt_time
+  const [rows] = await mesPool.query(`
+    SELECT vin, gmt_create AS event_time
     FROM tm_vhc_test_line_movement
     WHERE vin IN (${ph})
-      AND node_nature = 'TLTT'
+      AND node_nature IN (${zonePH})
       AND is_deleted = 0
     ORDER BY vin, gmt_create
-  `, vins);
+  `, [...vins, ...WT_REPAIR_ZONES]);
 
-  const tlttSet = new Set();
-  tlttRows.forEach(r => {
+  const repSet = new Set();
+  rows.forEach(r => {
     const lastTladas = lastTladasMap.get(r.vin);
-    const t = new Date(r.tltt_time).getTime();
-    if (t > lastTladas) tlttSet.add(r.vin);
+    const t = new Date(r.event_time).getTime();
+    if (t > lastTladas) repSet.add(r.vin);
   });
 
-  return tlttSet;
+  return repSet;
 }
 
 // ---------- 1. Основной дашборд ----------
@@ -9498,18 +9499,18 @@ app.get('/api/drr-wt-portal', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    const ts16Rows = await getTs16Vins(startTime, endTime);
-    const totalVins = ts16Rows.length;
+    const [tlttSet, repSet] = await Promise.all([
+      getTlttVins(startTime, endTime),
+      getRepVins(startTime, endTime),
+    ]);
 
-    const tlttSet = await getTlttVins(startTime, endTime);
     const tlttVins = tlttSet.size;
-
-    // REP = TS16 - TLTT
-    const repVins = Math.max(0, totalVins - tlttVins);
+    const repVins = repSet.size;
+    const totalVins = tlttVins + repVins;
     const tlttPercent = totalVins > 0 ? (tlttVins / totalVins) * 100 : 0;
 
     res.json({
-      totalVins,
+      totalVins,          // TLTT + REP
       tlttVins,
       repVins,
       tlttPercent: Math.round(tlttPercent * 10) / 10,
@@ -9528,24 +9529,46 @@ app.get('/api/drr-wt-portal-vins', async (req, res) => {
       return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
     }
 
-    const ts16Rows = await getTs16Vins(startTime, endTime);
-
-    // --- TS16: все VIN с TS16 ---
+    // --- TS16 (= TLTT + REP): объединённый список ---
     if (status === 'TS16') {
-      return res.json(
-        ts16Rows
-          .map(r => ({ vin: r.VIN, model: '—', event_time: r.TS16_TIME }))
-          .sort((a, b) => new Date(a.event_time) - new Date(b.event_time))
-      );
+      const [tlttSet, repSet] = await Promise.all([
+        getTlttVins(startTime, endTime),
+        getRepVins(startTime, endTime),
+      ]);
+      const allVins = new Set([...tlttSet, ...repSet]);
+      if (allVins.size === 0) return res.json([]);
+
+      const vins = [...allVins];
+      const ph = vins.map(() => '?').join(',');
+      const allZones = ['TLTT', ...WT_REPAIR_ZONES];
+      const zonePH = allZones.map(() => '?').join(',');
+
+      const [rows] = await mesPool.query(`
+        SELECT vin, node_nature AS zone, gmt_create AS event_time
+        FROM tm_vhc_test_line_movement
+        WHERE vin IN (${ph})
+          AND node_nature IN (${zonePH})
+          AND is_deleted = 0
+        ORDER BY gmt_create
+      `, [...vins, ...allZones]);
+
+      const seen = new Set();
+      const result = [];
+      rows.forEach(r => {
+        if (seen.has(r.vin)) return;
+        seen.add(r.vin);
+        result.push({ vin: r.vin, model: '—', zone: r.zone, event_time: r.event_time });
+      });
+      return res.json(result);
     }
 
-    const tlttSet = await getTlttVins(startTime, endTime);
-
-    // --- TLTT: VIN с TLADAS→TLTT (дата = время TLTT) ---
+    // --- TLTT ---
     if (status === 'TLTT') {
+      const tlttSet = await getTlttVins(startTime, endTime);
       if (tlttSet.size === 0) return res.json([]);
       const vins = [...tlttSet];
       const ph = vins.map(() => '?').join(',');
+
       const [rows] = await mesPool.query(`
         SELECT vin, gmt_create AS event_time
         FROM tm_vhc_test_line_movement
@@ -9565,12 +9588,30 @@ app.get('/api/drr-wt-portal-vins', async (req, res) => {
       return res.json(result);
     }
 
-    // --- REP: TS16 - TLTT (дата = время TS16) ---
+    // --- REP ---
     if (status === 'REP') {
-      const result = ts16Rows
-        .filter(r => !tlttSet.has(r.VIN))
-        .map(r => ({ vin: r.VIN, model: '—', zone: 'REP', event_time: r.TS16_TIME }))
-        .sort((a, b) => new Date(a.event_time) - new Date(b.event_time));
+      const repSet = await getRepVins(startTime, endTime);
+      if (repSet.size === 0) return res.json([]);
+      const vins = [...repSet];
+      const ph = vins.map(() => '?').join(',');
+      const zonePH = WT_REPAIR_ZONES.map(() => '?').join(',');
+
+      const [rows] = await mesPool.query(`
+        SELECT vin, node_nature AS zone, gmt_create AS event_time
+        FROM tm_vhc_test_line_movement
+        WHERE vin IN (${ph})
+          AND node_nature IN (${zonePH})
+          AND is_deleted = 0
+        ORDER BY gmt_create
+      `, [...vins, ...WT_REPAIR_ZONES]);
+
+      const seen = new Set();
+      const result = [];
+      rows.forEach(r => {
+        if (seen.has(r.vin)) return;
+        seen.add(r.vin);
+        result.push({ vin: r.vin, model: '—', zone: r.zone, event_time: r.event_time });
+      });
       return res.json(result);
     }
 
@@ -9581,7 +9622,7 @@ app.get('/api/drr-wt-portal-vins', async (req, res) => {
   }
 });
 
-// ---------- 3. Открытые дефекты по TS16 VIN ----------
+// ---------- 3. Открытые дефекты по VIN из красного бокса (REP) ----------
 app.get('/api/drr-wt-portal-defects', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
@@ -9589,25 +9630,31 @@ app.get('/api/drr-wt-portal-defects', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    const ts16Rows = await getTs16Vins(startTime, endTime);
-    if (ts16Rows.length === 0) return res.json([]);
+    const repSet = await getRepVins(startTime, endTime);
+    if (repSet.size === 0) return res.json([]);
 
-    const vins = ts16Rows.map(r => r.VIN);
-    const placeholders = vins.map(() => '?').join(',');
+    const repVins = [...repSet];
+    const placeholders = repVins.map(() => '?').join(',');
 
     const [defectRows] = await pool.query(`
       SELECT
-        PROBLEM_DESCRIPTION AS mpp,
-        PROBLEM_GRADE AS grade
-      FROM at_qm_defect_info
-      WHERE VIN IN (${placeholders})
-        AND (STATUS IS NULL OR LOWER(STATUS) != 'closed')
-    `, vins);
+        d.VIN,
+        wo.MODEL,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.PROBLEM_GRADE
+      FROM at_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.VIN IN (${placeholders})
+        AND (d.STATUS IS NULL OR LOWER(d.STATUS) != 'closed')
+    `, repVins);
 
     const defectMap = new Map();
     defectRows.forEach(r => {
-      const mpp = r.mpp || '—';
-      const grade = r.grade || '—';
+      const mpp = `${r.MODEL || '—'} ${r.PART_NAME || ''} ${r.PROBLEM_TYPE || ''}`
+        .replace(/\s+/g, ' ')
+        .trim();
+      const grade = r.PROBLEM_GRADE || '—';
       const key = `${mpp}|${grade}`;
       if (!defectMap.has(key)) defectMap.set(key, { mpp, grade, defectCount: 0 });
       defectMap.get(key).defectCount += 1;
