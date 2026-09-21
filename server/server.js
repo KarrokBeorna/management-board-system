@@ -9320,7 +9320,15 @@ app.get('/api/vehicle-on-wheels/details/cpa', async (req, res) => {
         tvtlm.vin,
         tvtlm.node_nature AS zone,
         tvtlm.vhc_model AS model,
-        tvtlm.gmt_create AS event_time
+        tvtlm.gmt_create AS event_time,
+        (
+          SELECT MAX(t2.gmt_create)
+          FROM tm_vhc_test_line_movement t2
+          WHERE t2.vin = tvtlm.vin
+            AND t2.node_nature IN ('REPASS','REPPS','REPWS','REPLK','REPSHORT','REPELEC','REPNOISE')
+            AND t2.is_deleted = 0
+            AND t2.gmt_create <= tvtlm.gmt_create
+        ) AS rep_enter_time
       FROM tm_vhc_test_line_movement tvtlm
       WHERE tvtlm.node_nature = 'CPA'
         AND tvtlm.gmt_create >= ? AND tvtlm.gmt_create <= ?
@@ -9334,6 +9342,7 @@ app.get('/api/vehicle-on-wheels/details/cpa', async (req, res) => {
         model: r.model || '—',
         zone: r.zone || 'CPA',
         event_time: r.event_time,
+        zone_enter_time: r.rep_enter_time,   // ← новое поле: время входа в ремзону
       })),
     });
   } catch (err) {

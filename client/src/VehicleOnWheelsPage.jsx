@@ -335,8 +335,6 @@ export default function VehicleOnWheelsPage() {
   };
 
   // ---------- Открытие модалки ----------
-  // Для CP72 → Ремзона используем уже загруженные data.rows (без запросов к серверу).
-  // Для CPA и REP — запрос на сервер.
   const openDetails = async (type) => {
     const titleMap = {
       cp72: 'CP72 → Ремзона',
@@ -705,7 +703,10 @@ export default function VehicleOnWheelsPage() {
                           <th style={thStyle}>Время в зоне</th>
                         </>
                       ) : (
-                        <th style={thStyle}>Время события</th>
+                        <>
+                          <th style={thStyle}>Время события</th>
+                          {modalType === 'cpa' && <th style={thStyle}>Время в зоне</th>}
+                        </>
                       )}
                     </tr>
                   </thead>
@@ -734,7 +735,14 @@ export default function VehicleOnWheelsPage() {
                             <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{formatDateTime(r.zone_time)}</td>
                           </>
                         ) : (
-                          <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{formatDateTime(r.event_time)}</td>
+                          <>
+                            <td style={{ ...tdStyle, fontFamily: 'monospace' }}>{formatDateTime(r.event_time)}</td>
+                            {modalType === 'cpa' && (
+                              <td style={{ ...tdStyle, fontFamily: 'monospace' }}>
+                                {formatDateTime(r.zone_enter_time)}
+                              </td>
+                            )}
+                          </>
                         )}
                       </tr>
                     ))}
