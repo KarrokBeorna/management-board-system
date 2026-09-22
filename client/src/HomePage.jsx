@@ -367,7 +367,8 @@ export default function HomePage() {
     '/drr-cp7-dashboard',
     '/drr-wt-portal',
     '/drr-tl-dashboard',
-    '/vehicle-on-wheels'
+    '/vehicle-on-wheels',
+    '/drr-pip-dashboard'
   ];
 
   const allDrrCards = allReportCards.filter(card => DRR_ROUTES.includes(card.to));
