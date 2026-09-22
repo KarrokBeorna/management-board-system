@@ -446,7 +446,7 @@ export default function DrrWtPortalPage() {
 
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
-              <h2 style={tableTitleStyle}>Открытые дефекты по этим VIN</h2>
+              <h2 style={tableTitleStyle}>Дефекты по VIN ушедшим в REP</h2>
               <div style={tableScrollStyle}>
                 {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>

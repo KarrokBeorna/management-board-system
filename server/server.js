@@ -9589,7 +9589,7 @@ app.get('/api/drr-wt-portal-vins', async (req, res) => {
   }
 });
 
-// ---------- 3. Открытые дефекты по VIN из красного бокса (REP) ----------
+// ---------- 3. Все дефекты по VIN из красного бокса (REP) ----------
 app.get('/api/drr-wt-portal-defects', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
@@ -9623,7 +9623,6 @@ app.get('/api/drr-wt-portal-defects', async (req, res) => {
       WHERE d.VIN IN (${placeholders})
         AND d.POST_NAME IN (${defectPostsStr})
         AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
-        AND (d.STATUS IS NULL OR LOWER(d.STATUS) != 'closed')
     `, [...repVins, startTime, endTime]);
 
     if (defectRows.length === 0) return res.json([]);
