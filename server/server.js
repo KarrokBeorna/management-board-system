@@ -9607,7 +9607,7 @@ app.get('/api/drr-wt-portal-defects', async (req, res) => {
     const defectPosts = [
       'TLTT','CP8','TLADAS','TLWA','TLRT','CPA',
       'CP8 Gate','CP8-gate',
-      'TEST TRACK','TRACK','WT'
+      'TEST TRACK','TRACK','WT','REPAIR VERIFICATION'
     ];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
