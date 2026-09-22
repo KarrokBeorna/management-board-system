@@ -6707,7 +6707,7 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
     const defectPosts = [
       'REPAIR', 'REPAIR_Final',
       'CP8 Touch Up', '360', 'ADAS', 'ADAS+RB',
-      'TEST TRACK', 'TRACK', 'WA','WT'
+      'WA'
     ];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
