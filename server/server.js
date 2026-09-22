@@ -9606,8 +9606,8 @@ app.get('/api/drr-wt-portal-defects', async (req, res) => {
     // Тот же список постов, что в DRR CPFinal
     const defectPosts = [
       'TLTT','CP8','TLADAS','TLWA','TLRT','CPA',
-      'CP8 Gate','CP8-gate','360','ADAS','ADAS+RB',
-      'TEST TRACK','TRACK','WA','WT','CP8 Touch Up'
+      'CP8 Gate','CP8-gate',
+      'TEST TRACK','TRACK','WT'
     ];
     const defectPostsStr = defectPosts.map(p => `'${p}'`).join(',');
 
