@@ -16,6 +16,6 @@
     "mysql2": "^3.11.0",
     "node-cron": "^4.6.0",
     "node-opcua": "^2.182.2",
-    "nodemailer": "^9.0.5"
+    "nodemailer": "^9.1.1"
   }
 }
