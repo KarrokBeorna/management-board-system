@@ -10,7 +10,7 @@ const EXCHANGE_FROM_NAME = process.env.EXCHANGE_FROM_NAME || 'MBS Quality System
 // IT-спец дал только один, оставлю как базовый + пара фоллбэков
 const PORT_CONFIGS = [
   { port: 25,   secure: false, requireTLS: false },
-  { port: 587,  secure: false, requireTLS: true  },
+  { port: 46,  secure: false, requireTLS: true  },
   { port: 2525, secure: false, requireTLS: false },
 ];
 
