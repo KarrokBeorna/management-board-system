@@ -392,7 +392,7 @@ export default function DrrWtPortalPage() {
                 position: 'absolute', top: '50%', left: '50%',
                 transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none',
               }}>
-                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>TLTT</div>
+                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
                 <div style={{ fontSize: '6.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {data.tlttPercent.toFixed(1)}%
                 </div>
