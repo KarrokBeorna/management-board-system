@@ -1003,37 +1003,54 @@ export default function SgpAuditPage() {
     saveAs(new Blob([buf], { type: 'application/octet-stream' }), `${filename}.xlsx`);
   };
 
+  // ====== ИСПРАВЛЕННАЯ выгрузка в Excel ======
+  // Даты пишем как настоящие Date с форматом dd.mm.yyyy — Excel фильтрует по дате.
+  // Время — как Date с форматом hh:mm — фильтруется/сортируется как время.
   const exportTimePointsToExcel = () => {
     if (!filteredTimePointsData.length) return;
 
-    const exportData = filteredTimePointsData.map(row => {
-      const obj = {};
+    // Заголовки: для time-колонок — Дата + Время
+    const headers = timePointColumns.flatMap(col =>
+      col.isTime ? [`${col.label} Дата`, `${col.label} Время`] : [col.label]
+    );
+
+    const aoa = [headers];
+
+    filteredTimePointsData.forEach(row => {
+      const line = [];
       timePointColumns.forEach(col => {
         if (col.isTime) {
-          const dateTime = row[col.key] ? new Date(row[col.key]) : null;
-          if (dateTime && !isNaN(dateTime.getTime())) {
-            const dd = String(dateTime.getDate()).padStart(2, '0');
-            const mm = String(dateTime.getMonth() + 1).padStart(2, '0');
-            const hh = String(dateTime.getHours()).padStart(2, '0');
-            const min = String(dateTime.getMinutes()).padStart(2, '0');
-            obj[`${col.label} Дата`] = `${dd}.${mm}`;
-            obj[`${col.label} Время`] = `${hh}:${min}`;
-          } else {
-            obj[`${col.label} Дата`] = '';
-            obj[`${col.label} Время`] = '';
-          }
+          const raw = row[col.key];
+          const dt = raw ? new Date(raw) : null;
+          const valid = dt && !isNaN(dt.getTime());
+
+          // Дата — тип 'd' + формат dd.mm.yyyy (в Excel — фильтруется как дата)
+          line.push(valid
+            ? { v: dt, t: 'd', z: 'dd.mm.yyyy' }
+            : { v: '', t: 's' });
+
+          // Время — тип 'd' + формат hh:mm (в Excel — фильтруется как время/число)
+          line.push(valid
+            ? { v: dt, t: 'd', z: 'hh:mm' }
+            : { v: '', t: 's' });
         } else {
-          obj[col.label] = row[col.key] || '';
+          line.push(row[col.key] != null ? row[col.key] : '');
         }
       });
-      return obj;
+      aoa.push(line);
     });
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // Автоширина колонок
+    ws['!cols'] = headers.map(h => ({ wch: Math.max(12, String(h).length + 2) }));
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Time Points');
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    saveAs(new Blob([buf], { type: 'application/octet-stream' }), `time_points.xlsx`);
+
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    XLSX.writeFile(wb, `time_points_${dateStr}.xlsx`);
   };
 
   const exportWord = (data, filename) => {
