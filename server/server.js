@@ -8289,7 +8289,7 @@ app.get('/api/brigade-report/unassigned-defects', async (req, res) => {
 
       if (!groups.has(key)) {
         groups.set(key, {
-          mpp: `${r.MODEL || ''} ${r.PART_NAME || ''} ${r.PROBLEM_TYPE || ''}`.trim(),
+          mpp: `${r.MODEL || 'UNKNOWN'} ${r.PART_NAME || ''} ${r.PROBLEM_TYPE || ''}`,
           model: r.MODEL,
           part_name: r.PART_NAME,
           problem_type: r.PROBLEM_TYPE,

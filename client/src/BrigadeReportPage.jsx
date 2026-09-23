@@ -275,6 +275,32 @@ const mppTableStyles = {
     fontSize: 13,
     whiteSpace: 'nowrap',
   },
+  // === НОВЫЕ стили для ячеек «Ответственный» / «Действие» ===
+  noteCell: {
+    background: '#1F2937',
+    padding: '2px 4px',
+    border: '1px solid #4B5563',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  noteSelect: {
+    width: '100%',
+    padding: '2px 4px',
+    borderRadius: 4,
+    border: '1px solid #4B5563',
+    background: '#374151',
+    color: '#FFF',
+    fontSize: 11,
+    cursor: 'pointer',
+  },
+  noteDate: {
+    fontSize: 9,
+    color: '#9CA3AF',
+    textAlign: 'center',
+  },
 };
 
 /* ===================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ СМЕН ===================== */
@@ -294,7 +320,6 @@ const getWeekNumberMoscow = (date) => {
 const getShiftTimeRange = (shiftFilter, baseDate) => {
   if (!baseDate) return null;
 
-  // baseDate может быть строкой 'YYYY-MM-DD' или Date
   let dateObj;
   if (typeof baseDate === 'string') {
     dateObj = new Date(`${baseDate}T12:00:00`);
@@ -305,12 +330,10 @@ const getShiftTimeRange = (shiftFilter, baseDate) => {
 
   const dateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
 
-  // Сутки — календарные
   if (shiftFilter === 'all') {
     return { start: `${dateStr} 00:00:00`, end: `${dateStr} 23:59:59` };
   }
 
-  // Определяем тип смены по чётности ISO-недели
   const weekNumber = getWeekNumber(dateObj);
   const isEvenWeek = weekNumber % 2 === 0;
 
@@ -693,7 +716,10 @@ function VINModal({ defect, vins, loading, onClose }) {
 }
 
 /* ===================== ТАБЛИЦА ТОП MPP ПО БРИГАДЕ (14 ДНЕЙ) ===================== */
-function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
+function BrigadeMPPTable({ allMpps, onCellClick, metric, userNotes = {}, onNoteSave }) {
+  const responsibleOptions = ['', 'Сварка', 'Окраска', 'Сборка', 'Качество'];
+  const actionOptions = ['', 'На контроле', 'Устранено', 'Требует проверки'];
+
   const [sortDay, setSortDay] = useState(null);
   const [sortCW, setSortCW] = useState(null);
   const [carsCounts, setCarsCounts] = useState({});
@@ -876,7 +902,7 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'minmax(260px, 2fr) repeat(7, 60px) 60px repeat(7, 60px) 60px',
+        gridTemplateColumns: 'minmax(260px, 2fr) 130px 130px repeat(7, 60px) 60px repeat(7, 60px) 60px',
         border: '1px solid #4B5563',
         fontSize: 13,
         background: '#111827',
@@ -884,6 +910,8 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
         overflowX: 'auto',
       }}>
         <div style={mppTableStyles.dark}>Дефект (MPP)</div>
+        <div style={mppTableStyles.dark}>Ответственный</div>
+        <div style={mppTableStyles.dark}>Действие</div>
 
         {prevWeekDays.map((d, i) => {
           const isSorted = sortDay?.week === 'prev' && sortDay?.index === i;
@@ -963,9 +991,42 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
           }}>
             Нет данных за 14 дней
           </div>
-        ) : rows.map(row => (
+        ) : rows.map(row => {
+          const note = userNotes[row.mpp] || { responsible: '', action: '' };
+          return (
           <React.Fragment key={row.mpp}>
             <div style={mppTableStyles.name} title={row.mpp}>{row.mpp}</div>
+
+            {/* === НОВЫЕ ЯЧЕЙКИ: Ответственный / Действие === */}
+            <div style={mppTableStyles.noteCell}>
+              <select
+                value={note.responsible}
+                onChange={e => onNoteSave && onNoteSave(row.mpp, 'responsible', e.target.value)}
+                style={mppTableStyles.noteSelect}
+              >
+                {responsibleOptions.map(opt => <option key={opt} value={opt}>{opt || '—'}</option>)}
+              </select>
+              {note.updated_at && (
+                <div style={mppTableStyles.noteDate}>
+                  {new Date(note.updated_at).toLocaleDateString('ru-RU')}
+                </div>
+              )}
+            </div>
+
+            <div style={mppTableStyles.noteCell}>
+              <select
+                value={note.action}
+                onChange={e => onNoteSave && onNoteSave(row.mpp, 'action', e.target.value)}
+                style={mppTableStyles.noteSelect}
+              >
+                {actionOptions.map(opt => <option key={opt} value={opt}>{opt || '—'}</option>)}
+              </select>
+              {note.updated_at && (
+                <div style={mppTableStyles.noteDate}>
+                  {new Date(note.updated_at).toLocaleDateString('ru-RU')}
+                </div>
+              )}
+            </div>
 
             {row.cellsPrev.map((val, ci) => {
               const ds = toLocalDateStr(prevWeekDays[ci]);
@@ -1027,7 +1088,8 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric }) {
               {isDPU ? formatDPU(row.totalCurr) : row.totalCurr}
             </div>
           </React.Fragment>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1038,7 +1100,6 @@ const getCurrentShiftLetter = () => {
   const nowMoscow = new Date(Date.now() + 3 * 60 * 60 * 1000);
   const totalMinutes = nowMoscow.getUTCHours() * 60 + nowMoscow.getUTCMinutes();
 
-  // Определяем тип смены
   let shiftType;
   let shiftDate = new Date(nowMoscow);
 
@@ -1046,7 +1107,6 @@ const getCurrentShiftLetter = () => {
     shiftType = 'day';
   } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
     shiftType = 'evening';
-    // Вечерняя после полуночи относится к предыдущему дню
     if (totalMinutes <= 1 * 60 + 30) {
       shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
     }
@@ -1056,7 +1116,6 @@ const getCurrentShiftLetter = () => {
 
   if (shiftType === 'night') return 'C';
 
-  // ISO-номер недели
   const d = new Date(Date.UTC(shiftDate.getUTCFullYear(), shiftDate.getUTCMonth(), shiftDate.getUTCDate()));
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
@@ -1088,36 +1147,36 @@ function BrigadeReport({ brigades, password, executeWithPassword }) {
 
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
 
-    const loadData = async () => {
+  const loadData = async () => {
     setLoading(true);
     try {
-        const allSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
-        const checkpointParam = allSelected ? 'ALL' : selectedCheckpoints.join(',');
+      const allSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
+      const checkpointParam = allSelected ? 'ALL' : selectedCheckpoints.join(',');
 
-        const params = new URLSearchParams({
+      const params = new URLSearchParams({
         dateFrom,
         dateTo,
         checkpoint: checkpointParam,
         metric,
         defectType,
         shift: shiftFilter,
-        });
+      });
 
-        const res = await fetch(`${API_BASE}/api/brigade-report/data?${params}`);
-        if (!res.ok) throw new Error('Ошибка загрузки данных');
-        const data = await res.json();
-        setHistogramData(data.histogram);
-        setTotalCars(data.totalCars);
-        setTotalCarsShift(data.totalCarsShift || 0);   // ← тоже перестраховка
-        setUnassignedCount(data.unassignedCount);
-        setTotalDefects(data.totalDefects);
-        setTopBrigades(data.topBrigades || []);
+      const res = await fetch(`${API_BASE}/api/brigade-report/data?${params}`);
+      if (!res.ok) throw new Error('Ошибка загрузки данных');
+      const data = await res.json();
+      setHistogramData(data.histogram);
+      setTotalCars(data.totalCars);
+      setTotalCarsShift(data.totalCarsShift || 0);
+      setUnassignedCount(data.unassignedCount);
+      setTotalDefects(data.totalDefects);
+      setTopBrigades(data.topBrigades || []);
     } catch (err) {
-        alert(err.message);
+      alert(err.message);
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
-    };
+  };
 
   useEffect(() => {
     loadData();
@@ -1556,22 +1615,22 @@ function BrigadeReportByShift({ brigades, password, executeWithPassword }) {
         </div>
       </div>
 
-        {loading && !dataA && !dataB ? (
+      {loading && !dataA && !dataB ? (
         <div style={{ textAlign: 'center', padding: '30px', fontSize: '1.5rem' }}>Загрузка...</div>
-        ) : (
+      ) : (
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-            <div style={{
+          <div style={{
             display: 'flex',
             flexDirection: 'row',
             gap: 15,
             minHeight: '100%',
-            }}>
+          }}>
             {renderShiftBlock('Смена A', '#2563EB', dataA)}
             <div style={{ width: 1, background: BRAND.border, flexShrink: 0 }} />
             {renderShiftBlock('Смена B', '#F59E0B', dataB)}
-            </div>
+          </div>
         </div>
-        )}
+      )}
     </div>
   );
 }
@@ -1591,10 +1650,25 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
   const [vins, setVins] = useState([]);
   const [vinsLoading, setVinsLoading] = useState(false);
 
+  // === НОВОЕ: заметки «Ответственный» / «Действие» (общие с Контролем качества) ===
+  const [userNotes, setUserNotes] = useState({});
+
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
   const brigadesOptions = brigades.map(b => b.name).filter(name => name !== 'Бригада не найдена');
 
   const formatValue = (value) => metric === 'dpu' ? Number(value).toFixed(2) : value;
+
+  // Загрузка заметок один раз при монтировании
+  useEffect(() => {
+    fetch(`${API_BASE}/api/defect-notes`)
+      .then(res => res.json())
+      .then(data => {
+        const map = {};
+        data.forEach(n => { map[n.mpp] = n; });
+        setUserNotes(map);
+      })
+      .catch(() => {});
+  }, []);
 
   const buildCommonParams = () => {
     const allSelected = selectedCheckpoints.length === 0 || selectedCheckpoints.length === availableCheckpoints.length;
@@ -1699,6 +1773,34 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
     setVins([]);
   };
 
+  // === НОВОЕ: сохранение заметки (Ответственный / Действие) ===
+  const handleNoteSave = async (mpp, field, value) => {
+    const current = userNotes[mpp] || { responsible: '', action: '' };
+    const updated = { ...current, [field]: value };
+    setUserNotes(prev => ({ ...prev, [mpp]: updated }));
+
+    try {
+      const res = await fetch(`${API_BASE}/api/defect-notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mpp,
+          responsible: updated.responsible || '',
+          action: updated.action || ''
+        }),
+      });
+      const json = await res.json();
+      if (json.success && json.note) {
+        setUserNotes(prev => ({
+          ...prev,
+          [mpp]: { ...prev[mpp], updated_at: json.note.updated_at }
+        }));
+      }
+    } catch (err) {
+      console.error('Ошибка сохранения:', err);
+    }
+  };
+
   const renderBrigadeCard = (brigadeName, data) => {
     if (!data) return null;
 
@@ -1793,7 +1895,13 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
           </div>
         </div>
 
-        <BrigadeMPPTable allMpps={topMpps} onCellClick={handleCellClick} metric={metric} />
+        <BrigadeMPPTable
+          allMpps={topMpps}
+          onCellClick={handleCellClick}
+          metric={metric}
+          userNotes={userNotes}
+          onNoteSave={handleNoteSave}
+        />
       </div>
     );
   };
