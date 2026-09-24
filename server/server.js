@@ -6705,7 +6705,6 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
     // 4. Дефекты для NOK VIN на указанных постах, БЕЗ фильтра по времени создания
     const nokPlaceholders = [...nokVinsSet].map(() => '?').join(',');
     const defectPosts = [
-      'REPAIR', 'REPAIR_Final',
       'CP8 Touch Up', '360', 'ADAS', 'ADAS+RB',
       'WA'
     ];
