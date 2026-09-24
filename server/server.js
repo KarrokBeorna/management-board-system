@@ -9633,181 +9633,205 @@ app.get('/api/drr-wt-portal-defects', async (req, res) => {
 
 
 
-app.get('/api/drr-cp7-dashboard-test', async (req, res) => {
-  try {
-    const { filter = 'all', startTime, endTime } = req.query;
 
-    let rangeStart, rangeEnd;
-    if (startTime && endTime) {
-      rangeStart = startTime;
-      rangeEnd = endTime;
+
+
+
+/* ====================================================================== */
+/* ===================== DRR CPFinal ==================================== */
+/* ====================================================================== */
+
+// Посты для дефектов — как в DRR WT
+const CPFINAL_DEFECT_POSTS = [
+  'TLTT', 'CP8', 'TLADAS', 'TLWA', 'TLRT', 'CPA',
+  'CP8 Gate', 'CP8-gate',
+  'TEST TRACK', 'TRACK', 'WT', 'REPAIR VERIFICATION'
+];
+const CPFINAL_DEFECT_POSTS_STR = CPFINAL_DEFECT_POSTS.map(p => `'${p}'`).join(',');
+
+/* ---------------------------------------------------------------------- */
+/* Хелпер: VIN + два времени TLTT (MIN для сравнения, MAX для показа)     */
+/* ---------------------------------------------------------------------- */
+async function getCpFinalTlttVins(startTime, endTime) {
+  const [rows] = await mesPool.query(`
+    SELECT
+      vin,
+      MIN(gmt_create) AS tltt_first_time,
+      MAX(gmt_create) AS tltt_last_time
+    FROM tm_vhc_test_line_movement
+    WHERE node_nature = 'TLTT'
+      AND is_deleted = 0
+      AND gmt_create >= ? AND gmt_create <= ?
+    GROUP BY vin
+  `, [startTime, endTime]);
+  return rows.map(r => ({
+    vin: r.vin,
+    tltt_first_time: r.tltt_first_time, // для сравнения с LAST_MODIFIED_TIME
+    tltt_last_time:  r.tltt_last_time,  // для отображения (серый блок, модалка)
+  }));
+}
+
+/* ---------------------------------------------------------------------- */
+/* Хелпер: классификация VIN (OK / NOK)                                   */
+/* Правило:                                                               */
+/*   - нет дефектов вообще               → OK                             */
+/*   - дефект с LAST_MODIFIED_TIME ≤ MIN TLTT   → OK                      */
+/*   - дефект с LAST_MODIFIED_TIME >  MIN TLTT  → NOK                     */
+/*   - LAST_MODIFIED_TIME пуст и CLOSED         → OK                      */
+/*   - LAST_MODIFIED_TIME пуст и не CLOSED      → NOK                     */
+/* VIN попадает в NOK, если хотя бы один его дефект NOK.                  */
+/* ---------------------------------------------------------------------- */
+async function classifyCpFinalVins(tlttRows) {
+  const okSet = new Set();
+  const nokSet = new Set();
+  const vins = tlttRows.map(r => r.vin);
+
+  // По умолчанию все OK (в т.ч. VIN без единого дефекта)
+  vins.forEach(v => okSet.add(v));
+
+  if (vins.length === 0) return { okSet, nokSet };
+
+  const firstTlttByVin = new Map(tlttRows.map(r => [r.vin, r.tltt_first_time]));
+  const ph = vins.map(() => '?').join(',');
+
+  const [defectRows] = await pool.query(`
+    SELECT
+      VIN,
+      STATUS,
+      LAST_MODIFIED_TIME
+    FROM at_qm_defect_info
+    WHERE VIN IN (${ph})
+      AND POST_NAME IN (${CPFINAL_DEFECT_POSTS_STR})
+  `, vins);
+
+  defectRows.forEach(d => {
+    const tlttFirst = firstTlttByVin.get(d.VIN);
+    if (!tlttFirst) return;
+
+    const tlttMs = new Date(tlttFirst).getTime();
+    const reworkMs = d.LAST_MODIFIED_TIME ? new Date(d.LAST_MODIFIED_TIME).getTime() : null;
+    const isClosed = d.STATUS && d.STATUS.toUpperCase() === 'CLOSED';
+
+    let isNok = false;
+    if (reworkMs !== null) {
+      if (reworkMs > tlttMs) isNok = true;
     } else {
-      const now = new Date();
-      const y = now.getFullYear();
-      const m = String(now.getMonth() + 1).padStart(2, '0');
-      const d = String(now.getDate()).padStart(2, '0');
-      rangeStart = `${y}-${m}-${d} 00:00:00`;
-      rangeEnd = `${y}-${m}-${d} 23:59:59`;
+      if (!isClosed) isNok = true;
     }
 
-    // Посты без REPAIR / REPAIR_Final
-    const postLists = {
-      all: [
-        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
-      ],
-      cp7: [
-        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
-        'EXT1', 'PIP9'
-      ],
-      pip: [
-        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
-      ]
-    };
-    const postList = postLists[filter] || postLists.all;
-    const postListStr = postList.map(p => `'${p}'`).join(',');
+    if (isNok) {
+      nokSet.add(d.VIN);
+      okSet.delete(d.VIN);
+    }
+  });
 
-    // 1) VIN + CP72_TIME
-    const [cp72Rows] = await pool.query(`
-      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'CP72'
-        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-      GROUP BY VIN
-    `, [rangeStart, rangeEnd]);
+  return { okSet, nokSet };
+}
 
-    const totalVins = cp72Rows.length;
+/* ====================================================================== */
+/* ЭНДПОИНТ 1: главные цифры                                              */
+/* ====================================================================== */
+app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
+  try {
+    const { startTime, endTime } = req.query;
+    if (!startTime || !endTime) {
+      return res.status(400).json({ error: 'startTime и endTime обязательны' });
+    }
+
+    const tlttRows = await getCpFinalTlttVins(startTime, endTime);
+    const totalVins = tlttRows.length;
+
     if (totalVins === 0) {
-      return res.json({
-        totalVins: 0, closedVins: 0, nokVins: 0, drrPercent: 0,
-        debug: {
-          notClosedDefects: 0,
-          closedLateDefects: 0,
-          ignoredAfterCp72: 0,
-          graceMinutes: 20
-        }
-      });
+      return res.json({ totalVins: 0, okVins: 0, nokVins: 0, drrPercent: 0 });
     }
 
-    const vins = cp72Rows.map(r => r.VIN);
-    const placeholders = vins.map(() => '?').join(',');
-    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
-
-    // 2) Все дефекты этих VIN
-    const [defectRows] = await pool.query(`
-      SELECT d.VIN, d.STATUS, d.CREATION_TIME, d.LAST_MODIFIED_TIME
-      FROM at_qm_defect_info d
-      WHERE d.VIN IN (${placeholders})
-        AND d.POST_NAME IN (${postListStr})
-    `, vins);
-
-    const GRACE_MS = 20 * 60 * 1000; // 20 минут
-    const vinHasNok = new Map();
-
-    let notClosedDefects = 0;
-    let closedLateDefects = 0;
-    let ignoredAfterCp72 = 0;
-
-    defectRows.forEach(row => {
-      const cp72TimeStr = cp72TimeMap.get(row.VIN);
-      if (!cp72TimeStr) return;
-      const cp72Ms = new Date(cp72TimeStr).getTime();
-      const createdMs = new Date(row.CREATION_TIME).getTime();
-
-      // Отсечка: дефект создан позже CP72 + 20 мин — не влияет
-      if (createdMs > cp72Ms + GRACE_MS) {
-        ignoredAfterCp72 += 1;
-        return;
-      }
-
-      const isClosed = row.STATUS && row.STATUS.toUpperCase() === 'CLOSED';
-
-      if (!isClosed) {
-        vinHasNok.set(row.VIN, true);
-        notClosedDefects += 1;
-        return;
-      }
-
-      if (!row.LAST_MODIFIED_TIME) {
-        vinHasNok.set(row.VIN, true);
-        notClosedDefects += 1;
-        return;
-      }
-
-      const closedMs = new Date(row.LAST_MODIFIED_TIME).getTime();
-      if (closedMs > cp72Ms + GRACE_MS) {
-        vinHasNok.set(row.VIN, true);
-        closedLateDefects += 1;
-      }
-    });
-
-    let closedVins = 0;
-    cp72Rows.forEach(row => {
-      if (!vinHasNok.get(row.VIN)) closedVins += 1;
-    });
-
-    const nokVins = totalVins - closedVins;
-    const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
+    const { okSet, nokSet } = await classifyCpFinalVins(tlttRows);
+    const okVins = okSet.size;
+    const nokVins = nokSet.size;
+    const drrPercent = totalVins > 0 ? (okVins / totalVins) * 100 : 0;
 
     res.json({
-      totalVins,
-      closedVins,
-      nokVins,
+      totalVins,          // «Прошли TLTT»
+      okVins,             // OK
+      nokVins,            // NOK
       drrPercent: Math.round(drrPercent * 10) / 10,
-      debug: {
-        notClosedDefects,
-        closedLateDefects,
-        ignoredAfterCp72,
-        graceMinutes: 20
-      }
     });
   } catch (err) {
-    console.error('Ошибка DRR CP7 Dashboard TEST:', err.message);
+    console.error('Ошибка /api/drr-cpfinal-dashboard:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/api/drr-cp7-top-defects-test', async (req, res) => {
+/* ====================================================================== */
+/* ЭНДПОИНТ 2: список VIN для модалки (status: ALL | OK | NOK)            */
+/* ====================================================================== */
+app.get('/api/drr-cpfinal-vins', async (req, res) => {
   try {
-    const { filter = 'all', startTime, endTime } = req.query;
-
-    let rangeStart, rangeEnd;
-    if (startTime && endTime) {
-      rangeStart = startTime;
-      rangeEnd = endTime;
-    } else {
-      const now = new Date();
-      const y = now.getFullYear();
-      const m = String(now.getMonth() + 1).padStart(2, '0');
-      const d = String(now.getDate()).padStart(2, '0');
-      rangeStart = `${y}-${m}-${d} 00:00:00`;
-      rangeEnd = `${y}-${m}-${d} 23:59:59`;
+    const { startTime, endTime, status } = req.query;
+    if (!startTime || !endTime || !status) {
+      return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
     }
 
-    const postLists = {
-      all: ['CP7','CP7 Audit','CP7 Gate','CP7-gate','EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9'],
-      cp7: ['CP7','CP7 Audit','CP7 Gate','CP7-gate','EXT1','PIP9'],
-      pip: ['EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9']
-    };
-    const postList = postLists[filter] || postLists.all;
-    const postListStr = postList.map(p => `'${p}'`).join(',');
+    const tlttRows = await getCpFinalTlttVins(startTime, endTime);
+    if (tlttRows.length === 0) return res.json([]);
 
-    // 1) VIN + CP72_TIME
-    const [cp72Rows] = await pool.query(`
-      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'CP72'
-        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-      GROUP BY VIN
-    `, [rangeStart, rangeEnd]);
+    // Время отображения — самое позднее TLTT
+    const lastTlttByVin = new Map(tlttRows.map(r => [r.vin, r.tltt_last_time]));
 
-    if (cp72Rows.length === 0) return res.json([]);
+    const { okSet, nokSet } = await classifyCpFinalVins(tlttRows);
 
-    const vins = cp72Rows.map(r => r.VIN);
-    const placeholders = vins.map(() => '?').join(',');
-    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
+    let vins;
+    if (status === 'ALL') {
+      vins = tlttRows.map(r => r.vin);
+    } else if (status === 'OK') {
+      vins = [...okSet];
+    } else if (status === 'NOK') {
+      vins = [...nokSet];
+    } else {
+      return res.status(400).json({ error: 'Неизвестный status' });
+    }
 
-    // 2) Все дефекты
+    if (vins.length === 0) return res.json([]);
+
+    const ph = vins.map(() => '?').join(',');
+    const [modelRows] = await pool.query(`
+      SELECT VIN, MODEL FROM work_order WHERE VIN IN (${ph})
+    `, vins);
+    const modelByVin = new Map(modelRows.map(r => [r.VIN, r.MODEL || '—']));
+
+    const result = vins.map(vin => ({
+      vin,
+      model: modelByVin.get(vin) || '—',
+      tltt_time: lastTlttByVin.get(vin) || null,
+    })).sort((a, b) => new Date(a.tltt_time) - new Date(b.tltt_time));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка /api/drr-cpfinal-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ====================================================================== */
+/* ЭНДПОИНТ 3: топ дефектов у NOK VIN                                     */
+/* ====================================================================== */
+app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
+  try {
+    const { startTime, endTime } = req.query;
+    if (!startTime || !endTime) {
+      return res.status(400).json({ error: 'startTime и endTime обязательны' });
+    }
+
+    const tlttRows = await getCpFinalTlttVins(startTime, endTime);
+    if (tlttRows.length === 0) return res.json([]);
+
+    const firstTlttByVin = new Map(tlttRows.map(r => [r.vin, r.tltt_first_time]));
+    const { nokSet } = await classifyCpFinalVins(tlttRows);
+    const nokVins = [...nokSet];
+
+    if (nokVins.length === 0) return res.json([]);
+
+    const ph = nokVins.map(() => '?').join(',');
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN,
@@ -9816,157 +9840,49 @@ app.get('/api/drr-cp7-top-defects-test', async (req, res) => {
         d.PROBLEM_TYPE,
         d.PROBLEM_GRADE,
         d.STATUS,
-        d.CREATION_TIME,
         d.LAST_MODIFIED_TIME
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
-      WHERE d.POST_NAME IN (${postListStr})
-        AND d.VIN IN (${placeholders})
-    `, [...vins]);
+      WHERE d.VIN IN (${ph})
+        AND d.POST_NAME IN (${CPFINAL_DEFECT_POSTS_STR})
+    `, nokVins);
 
-    const GRACE_MS = 20 * 60 * 1000;
-    const defectGroupMap = new Map();
+    const map = new Map();
+    defectRows.forEach(d => {
+      const tlttFirst = firstTlttByVin.get(d.VIN);
+      if (!tlttFirst) return;
+      const tlttMs = new Date(tlttFirst).getTime();
+      const reworkMs = d.LAST_MODIFIED_TIME ? new Date(d.LAST_MODIFIED_TIME).getTime() : null;
+      const isClosed = d.STATUS && d.STATUS.toUpperCase() === 'CLOSED';
 
-    defectRows.forEach(row => {
-      const cp72TimeStr = cp72TimeMap.get(row.VIN);
-      if (!cp72TimeStr) return;
-      const cp72Ms = new Date(cp72TimeStr).getTime();
-      const createdMs = new Date(row.CREATION_TIME).getTime();
-
-      // Отсечка: дефект создан позже CP72 + 20 мин — не учитываем
-      if (createdMs > cp72Ms + GRACE_MS) return;
-
-      const isClosed = row.STATUS && row.STATUS.toUpperCase() === 'CLOSED';
-
-      let isNokDefect = false;
-      if (!isClosed) {
-        isNokDefect = true;
-      } else if (!row.LAST_MODIFIED_TIME) {
-        isNokDefect = true;
+      let isNok = false;
+      if (reworkMs !== null) {
+        if (reworkMs > tlttMs) isNok = true;
       } else {
-        const closedMs = new Date(row.LAST_MODIFIED_TIME).getTime();
-        if (closedMs > cp72Ms + GRACE_MS) isNokDefect = true;
+        if (!isClosed) isNok = true;
       }
+      if (!isNok) return;
 
-      if (!isNokDefect) return;
-
-      const mpp = `${row.MODEL || '-'} ${row.PART_NAME || ''} ${row.PROBLEM_TYPE || ''}`.trim();
-      if (!defectGroupMap.has(mpp)) {
-        defectGroupMap.set(mpp, {
-          mpp,
-          grade: row.PROBLEM_GRADE || '-',
-          defectCount: 0,
-          statuses: {}
-        });
-      }
-      const g = defectGroupMap.get(mpp);
-      g.defectCount += 1;
-      g.statuses[row.STATUS] = (g.statuses[row.STATUS] || 0) + 1;
+      const mpp = `${d.MODEL || '—'} ${d.PART_NAME || ''} ${d.PROBLEM_TYPE || ''}`
+        .replace(/\s+/g, ' ').trim();
+      const grade = d.PROBLEM_GRADE || '—';
+      const key = `${mpp}|${grade}`;
+      if (!map.has(key)) map.set(key, { mpp, grade, defectCount: 0 });
+      map.get(key).defectCount += 1;
     });
 
-    const topDefects = Array.from(defectGroupMap.values())
+    const result = [...map.values()]
       .sort((a, b) => b.defectCount - a.defectCount)
       .slice(0, 20);
 
-    res.json(topDefects);
-  } catch (err) {
-    console.error('Ошибка DRR CP7 Top Defects TEST:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/drr-cp7-vins-test', async (req, res) => {
-  try {
-    const { filter = 'all', startTime, endTime, status } = req.query;
-    if (!startTime || !endTime || !status) {
-      return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
-    }
-
-    const postLists = {
-      all: ['CP7','CP7 Audit','CP7 Gate','CP7-gate','EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9'],
-      cp7: ['CP7','CP7 Audit','CP7 Gate','CP7-gate','EXT1','PIP9'],
-      pip: ['EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9']
-    };
-    const postList = postLists[filter] || postLists.all;
-    const postListStr = postList.map(p => `'${p}'`).join(',');
-
-    // VIN + CP72_TIME
-    const [cp72Rows] = await pool.query(`
-      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'CP72'
-        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-      GROUP BY VIN
-    `, [startTime, endTime]);
-
-    if (cp72Rows.length === 0) return res.json([]);
-
-    const vins = cp72Rows.map(r => r.VIN);
-    const placeholders = vins.map(() => '?').join(',');
-    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
-
-    // Все дефекты
-    const [defectRows] = await pool.query(`
-      SELECT d.VIN, d.STATUS, d.CREATION_TIME, d.LAST_MODIFIED_TIME
-      FROM at_qm_defect_info d
-      WHERE d.VIN IN (${placeholders})
-        AND d.POST_NAME IN (${postListStr})
-    `, vins);
-
-    const GRACE_MS = 20 * 60 * 1000;
-    const nokSet = new Set();
-
-    defectRows.forEach(row => {
-      const cp72TimeStr = cp72TimeMap.get(row.VIN);
-      if (!cp72TimeStr) return;
-      const cp72Ms = new Date(cp72TimeStr).getTime();
-      const createdMs = new Date(row.CREATION_TIME).getTime();
-
-      // Отсечка
-      if (createdMs > cp72Ms + GRACE_MS) return;
-
-      const isClosed = row.STATUS && row.STATUS.toUpperCase() === 'CLOSED';
-
-      if (!isClosed) {
-        nokSet.add(row.VIN);
-        return;
-      }
-      if (!row.LAST_MODIFIED_TIME) {
-        nokSet.add(row.VIN);
-        return;
-      }
-      const closedMs = new Date(row.LAST_MODIFIED_TIME).getTime();
-      if (closedMs > cp72Ms + GRACE_MS) {
-        nokSet.add(row.VIN);
-      }
-    });
-
-    // Модели
-    const [modelRows] = await pool.query(`
-      SELECT VIN, MODEL FROM work_order WHERE VIN IN (${placeholders})
-    `, vins);
-    const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
-
-    const result = cp72Rows
-      .filter(row => {
-        const isNok = nokSet.has(row.VIN);
-        if (status === 'NOK') return isNok;
-        if (status === 'OK') return !isNok;
-        return false;
-      })
-      .map(row => ({
-        vin: row.VIN,
-        model: modelMap.get(row.VIN) || '-',
-        cp72_time: row.CP72_TIME,
-      }))
-      .sort((a, b) => new Date(a.cp72_time) - new Date(b.cp72_time));
-
     res.json(result);
   } catch (err) {
-    console.error('Ошибка drr-cp7-vins TEST:', err.message);
+    console.error('Ошибка /api/drr-cpfinal-top-defects:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+
 
 
 

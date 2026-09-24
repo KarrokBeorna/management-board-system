@@ -3,17 +3,17 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 
+/* ===================== СТИЛИ ===================== */
 const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
   width: '100%',
-  height: '125vh',
+  height: '100vh',
   boxSizing: 'border-box',
   backgroundColor: '#F8FAFC',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
-  zoom: 0.8,
 };
 
 const headerStyle = {
@@ -79,7 +79,6 @@ const rightColumnStyle = {
   display: 'flex',
   flexDirection: 'column',
   minHeight: 0,
-  gap: '20px',
 };
 
 const tableCardStyle = {
@@ -91,14 +90,6 @@ const tableCardStyle = {
   flexDirection: 'column',
   boxShadow: '0 8px 30px rgba(0,0,0,0.05)',
   minHeight: 0,
-};
-
-const debugCardStyle = {
-  backgroundColor: '#FFFFFF',
-  borderRadius: '24px',
-  padding: '24px',
-  boxShadow: '0 8px 30px rgba(0,0,0,0.05)',
-  border: '2px solid #FCD34D',
 };
 
 const tableTitleStyle = {
@@ -138,6 +129,7 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
+/* ===================== ХЕЛПЕРЫ ДЛЯ ВРЕМЕНИ ===================== */
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
 
 const getMoscowMinutes = () => {
@@ -225,17 +217,16 @@ const getCurrentShiftInfo = () => {
   return { weekNumber, shiftLetter, shiftType };
 };
 
-export default function DrrCp7DashboardTestPage() {
-  const [filter, setFilter] = useState('all');
+/* ===================== КОМПОНЕНТ ===================== */
+export default function DrrCpFinalPage() {
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
   const [isManualFilter, setIsManualFilter] = useState(false);
   const [shiftInfo, setShiftInfo] = useState(getCurrentShiftInfo());
-  const [drrData, setDrrData] = useState({
+  const [data, setData] = useState({
     totalVins: 0,
-    closedVins: 0,
+    okVins: 0,
     nokVins: 0,
     drrPercent: 0,
-    debug: { notClosedDefects: 0, closedLateDefects: 0, ignoredAfterCp72: 0, graceMinutes: 20 },
   });
   const [topDefects, setTopDefects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -251,28 +242,25 @@ export default function DrrCp7DashboardTestPage() {
     setError(null);
     try {
       const { start, end } = getTimeRange(timeFilter);
+      const params = new URLSearchParams({ startTime: start, endTime: end });
 
-      const drrParams = new URLSearchParams({
-        filter,
-        startTime: start,
-        endTime: end,
+      const mainRes = await fetch(`${API_BASE}/api/drr-cpfinal-dashboard?${params.toString()}`);
+      if (!mainRes.ok) throw new Error('Ошибка загрузки DRR CPFinal');
+      const mainJson = await mainRes.json();
+      setData({
+        totalVins: mainJson.totalVins || 0,
+        okVins: mainJson.okVins || 0,
+        nokVins: mainJson.nokVins || 0,
+        drrPercent: mainJson.drrPercent || 0,
       });
-      const drrRes = await fetch(`${API_BASE}/api/drr-cp7-dashboard-test?${drrParams.toString()}`);
-      if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
-      const drrJson = await drrRes.json();
-      setDrrData(drrJson);
 
-      const defectsParams = new URLSearchParams({
-        filter,
-        startTime: start,
-        endTime: end,
-      });
-      const defectsRes = await fetch(`${API_BASE}/api/drr-cp7-top-defects-test?${defectsParams.toString()}`);
-      if (!defectsRes.ok) throw new Error('Ошибка загрузки топа дефектов');
+      const defectsRes = await fetch(`${API_BASE}/api/drr-cpfinal-top-defects?${params.toString()}`);
+      if (!defectsRes.ok) throw new Error('Ошибка загрузки дефектов');
       const defectsJson = await defectsRes.json();
       setTopDefects(defectsJson);
     } catch (err) {
       setError(err.message);
+      setTopDefects([]);
     } finally {
       setLoading(false);
     }
@@ -282,8 +270,8 @@ export default function DrrCp7DashboardTestPage() {
     setVinModalLoading(true);
     try {
       const { start, end } = getTimeRange(timeFilter);
-      const params = new URLSearchParams({ filter, startTime: start, endTime: end, status });
-      const res = await fetch(`${API_BASE}/api/drr-cp7-vins-test?${params.toString()}`);
+      const params = new URLSearchParams({ startTime: start, endTime: end, status });
+      const res = await fetch(`${API_BASE}/api/drr-cpfinal-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки списка VIN');
       const json = await res.json();
       setVinList(json);
@@ -296,18 +284,12 @@ export default function DrrCp7DashboardTestPage() {
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, [filter, timeFilter]);
+  useEffect(() => { loadData(); }, [timeFilter]);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const newShiftInfo = getCurrentShiftInfo();
-      setShiftInfo(newShiftInfo);
-      if (!isManualFilter) {
-        const defaultFilter = getDefaultTimeFilter();
-        setTimeFilter(defaultFilter);
-      }
+      setShiftInfo(getCurrentShiftInfo());
+      if (!isManualFilter) setTimeFilter(getDefaultTimeFilter());
     }, 60000);
     return () => clearInterval(interval);
   }, [isManualFilter]);
@@ -315,42 +297,28 @@ export default function DrrCp7DashboardTestPage() {
   useEffect(() => {
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
-  }, [filter, timeFilter]);
-
-  const nokVins = drrData.nokVins ?? (drrData.totalVins - drrData.closedVins);
+  }, [timeFilter]);
 
   const pieData = [
-    { name: 'DRR', value: drrData.drrPercent },
-    { name: 'Не прямой сход', value: Math.max(0, 100 - drrData.drrPercent) },
+    { name: 'DRR (OK)', value: data.drrPercent },
+    { name: 'NOK', value: Math.max(0, 100 - data.drrPercent) },
   ];
 
-  const handleFilterClick = (f) => {
+  const handleFilterClick = (filter) => {
     setIsManualFilter(true);
-    setTimeFilter(f);
+    setTimeFilter(filter);
   };
-
-  const { start, end } = getTimeRange(timeFilter);
 
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <h1 style={titleStyle}>DRR CP7 Dashboard (TEST)</h1>
-          <span style={{ fontSize: '1.1rem', color: '#64748B', fontWeight: 600 }}>
-            Логика: LAST_MODIFIED_TIME ≤ CP72 + {drrData.debug?.graceMinutes ?? 20} мин · окно: {start} — {end}
-          </span>
-        </div>
+        <h1 style={titleStyle}>DRR CPFinal</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
-              background: '#FFFFFF',
-              borderRadius: '20px',
-              padding: '12px 28px',
-              boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
-              border: '3px solid #fdfeff',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
+              background: '#FFFFFF', borderRadius: '20px', padding: '12px 28px',
+              boxShadow: '0 6px 18px rgba(0,0,0,0.12)', border: '3px solid #fdfeff',
+              display: 'flex', alignItems: 'center', gap: '12px',
             }}>
               <span style={{ fontSize: '1.8rem', color: '#64748B', fontWeight: 800 }}>CW</span>
               <span style={{ fontSize: '3rem', fontWeight: 900, color: '#1E293B', letterSpacing: '2px', lineHeight: 1 }}>
@@ -358,30 +326,14 @@ export default function DrrCp7DashboardTestPage() {
               </span>
             </div>
             <div style={{
-              width: '80px',
-              height: '80px',
-              borderRadius: '20px',
-              background: '#ffffff',
-              color: '#1E293B',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 900,
-              fontSize: '3.5rem',
-              lineHeight: 1,
-              boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
-              border: '4px solid #FFFFFF',
+              width: '80px', height: '80px', borderRadius: '20px',
+              background: '#FFFFFF', color: '#1E293B',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 900, fontSize: '3.5rem', lineHeight: 1,
+              boxShadow: '0 8px 20px rgba(0,0,0,0.2)', border: '4px solid #FFFFFF',
             }}>
               {shiftInfo.shiftLetter}
             </div>
-          </div>
-
-          <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
-
-          <div style={filterGroupStyle}>
-            <button style={filterButtonStyle(filter === 'all')} onClick={() => setFilter('all')}>Все</button>
-            <button style={filterButtonStyle(filter === 'cp7')} onClick={() => setFilter('cp7')}>CP7</button>
-            <button style={filterButtonStyle(filter === 'pip')} onClick={() => setFilter('pip')}>PIP</button>
           </div>
 
           <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
@@ -406,7 +358,7 @@ export default function DrrCp7DashboardTestPage() {
       ) : (
         <div style={dashboardGridStyle}>
           <div style={chartColumnStyle}>
-            <div style={{ position: 'relative', width: '100%', height: '500px' }}>
+            <div style={{ position: 'relative', width: '100%', height: '600px' }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -426,92 +378,74 @@ export default function DrrCp7DashboardTestPage() {
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(value) => `${value.toFixed(1)}%`}
+                    formatter={(value, name) => {
+                      const count = name === 'DRR (OK)' ? data.okVins : data.nokVins;
+                      return [`${value.toFixed(1)}% (${count} VIN)`, name];
+                    }}
                     contentStyle={{ fontSize: '1.8rem', borderRadius: '16px' }}
                   />
                 </PieChart>
               </ResponsiveContainer>
 
               <div style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                textAlign: 'center',
-                pointerEvents: 'none',
+                position: 'absolute', top: '50%', left: '50%',
+                transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none',
               }}>
                 <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
                 <div style={{ fontSize: '6.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
-                  {drrData.drrPercent.toFixed(1)}%
+                  {data.drrPercent.toFixed(1)}%
                 </div>
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Всего авто</div>
-                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
-                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalVins}</div>
-              </div>
               <div
-                style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                style={{
+                  flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px',
+                  textAlign: 'center', color: '#FFFFFF', minHeight: '140px',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
+                onClick={() => loadVinList('ALL')}
+              >
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Прошли TLTT</div>
+                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }} />
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.totalVins}</div>
+              </div>
+
+              <div
+                style={{
+                  flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px',
+                  textAlign: 'center', color: '#FFFFFF', minHeight: '140px',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
                 onClick={() => loadVinList('OK')}
               >
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
-                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
-                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.closedVins}</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK</div>
+                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }} />
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.okVins}</div>
               </div>
+
               <div
-                style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                style={{
+                  flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px',
+                  textAlign: 'center', color: '#FFFFFF', minHeight: '140px',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
                 onClick={() => loadVinList('NOK')}
               >
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK Авто</div>
-                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
-                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{nokVins}</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK</div>
+                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }} />
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.nokVins}</div>
               </div>
             </div>
           </div>
 
           <div style={rightColumnStyle}>
-            {/* === DEBUG PANEL === */}
-            <div style={debugCardStyle}>
-              <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#92400E', margin: '0 0 16px 0', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                🧪 Debug: как считался DRR
-              </h2>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                <div style={{ backgroundColor: '#FEF3C7', borderRadius: 12, padding: '14px 18px', border: '1px solid #FCD34D' }}>
-                  <div style={{ fontSize: '1.1rem', color: '#78350F', fontWeight: 600 }}>Всего авто (CP72)</div>
-                  <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#78350F' }}>{drrData.totalVins}</div>
-                </div>
-                <div style={{ backgroundColor: '#D1FAE5', borderRadius: 12, padding: '14px 18px', border: '1px solid #6EE7B7' }}>
-                  <div style={{ fontSize: '1.1rem', color: '#065F46', fontWeight: 600 }}>OK (закрыты вовремя)</div>
-                  <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#065F46' }}>{drrData.closedVins}</div>
-                </div>
-                <div style={{ backgroundColor: '#FEE2E2', borderRadius: 12, padding: '14px 18px', border: '1px solid #FCA5A5' }}>
-                  <div style={{ fontSize: '1.1rem', color: '#991B1B', fontWeight: 600 }}>Не закрыты вообще (NOK)</div>
-                  <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#991B1B' }}>{drrData.debug?.notClosedDefects ?? 0}</div>
-                </div>
-                <div style={{ backgroundColor: '#FFE4E6', borderRadius: 12, padding: '14px 18px', border: '1px solid #FDA4AF' }}>
-                  <div style={{ fontSize: '1.1rem', color: '#9F1239', fontWeight: 600 }}>
-                    Закрыты позже CP72+{drrData.debug?.graceMinutes ?? 20}м (NOK)
-                  </div>
-                  <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#9F1239' }}>{drrData.debug?.closedLateDefects ?? 0}</div>
-                </div>
-                <div style={{ backgroundColor: '#E0E7FF', borderRadius: 12, padding: '14px 18px', border: '1px solid #A5B4FC', gridColumn: '1 / -1' }}>
-                  <div style={{ fontSize: '1.1rem', color: '#3730A3', fontWeight: 600 }}>
-                    Игнорируется (создан после CP72 + {drrData.debug?.graceMinutes ?? 20} мин)
-                  </div>
-                  <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#3730A3' }}>{drrData.debug?.ignoredAfterCp72 ?? 0}</div>
-                </div>
-              </div>
-              <div style={{ marginTop: 14, fontSize: '1.1rem', color: '#78350F', backgroundColor: '#FFFBEB', borderRadius: 8, padding: '10px 14px', border: '1px dashed #FCD34D' }}>
-                <b>Проверка:</b> OK + NOK = {drrData.closedVins + nokVins} = Всего авто = {drrData.totalVins}{' '}
-                {(drrData.closedVins + nokVins) === drrData.totalVins ? '✅' : '❌ РАСХОЖДЕНИЕ!'}
-              </div>
-            </div>
-
             <div style={tableCardStyle}>
-              <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP7</h2>
+              <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CPFinal</h2>
               <div style={tableScrollStyle}>
                 {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -519,15 +453,13 @@ export default function DrrCp7DashboardTestPage() {
                       <tr>
                         <th style={thStyle}>Описание дефекта (MPP)</th>
                         <th style={thStyle}>Класс</th>
-                        <th style={thStyle}>Кол-во дефектов</th>
+                        <th style={thStyle}>Кол-во</th>
                       </tr>
                     </thead>
                     <tbody>
                       {topDefects.map((defect, idx) => (
                         <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
-                          <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none' }}>
-                            {defect.mpp}
-                          </td>
+                          <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none' }}>{defect.mpp}</td>
                           <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
                           <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '2rem', color: idx < 3 ? '#DC2626' : '#1E293B' }}>
                             {defect.defectCount}
@@ -546,28 +478,23 @@ export default function DrrCp7DashboardTestPage() {
       )}
 
       {showVinModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 2000,
-        }} onClick={() => setShowVinModal(false)}>
-          <div style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 16,
-            padding: 24,
-            width: '90%',
-            maxWidth: 600,
-            maxHeight: '80vh',
-            display: 'flex',
-            flexDirection: 'column',
-          }} onClick={(e) => e.stopPropagation()}>
+        <div
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 2000,
+          }}
+          onClick={() => setShowVinModal(false)}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24,
+              width: '90%', maxWidth: 700, maxHeight: '80vh',
+              display: 'flex', flexDirection: 'column',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
                 VIN ({vinListStatus}) — {vinList.length} шт.
@@ -583,7 +510,7 @@ export default function DrrCp7DashboardTestPage() {
                     <tr>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>VIN</th>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Модель</th>
-                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>CP72</th>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>TLTT</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -591,7 +518,9 @@ export default function DrrCp7DashboardTestPage() {
                       <tr key={idx}>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.cp72_time ? new Date(item.cp72_time).toLocaleString('ru-RU') : ''}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>
+                          {item.tltt_time ? new Date(item.tltt_time).toLocaleString('ru-RU') : '—'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

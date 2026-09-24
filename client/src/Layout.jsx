@@ -69,6 +69,7 @@ export default function Layout() {
   location.pathname === '/remzone-work-status' ||
   location.pathname === '/vehicle-on-wheels' ||
   location.pathname === '/drr-wt-portal' ||
+  location.pathname === '/drr-cpfinal' ||
   location.pathname === '/brigade-report';
 
   return (
