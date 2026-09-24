@@ -223,7 +223,8 @@ export default function DrrCpFinalPage() {
   const [isManualFilter, setIsManualFilter] = useState(false);
   const [shiftInfo, setShiftInfo] = useState(getCurrentShiftInfo());
   const [data, setData] = useState({
-    totalVins: 0,
+    totalRecords: 0,   // ← НОВОЕ: все записи TLTT
+    totalVins: 0,      // уникальные VIN
     okVins: 0,
     nokVins: 0,
     drrPercent: 0,
@@ -248,6 +249,7 @@ export default function DrrCpFinalPage() {
       if (!mainRes.ok) throw new Error('Ошибка загрузки DRR CPFinal');
       const mainJson = await mainRes.json();
       setData({
+        totalRecords: mainJson.totalRecords || 0,
         totalVins: mainJson.totalVins || 0,
         okVins: mainJson.okVins || 0,
         nokVins: mainJson.nokVins || 0,
@@ -399,6 +401,7 @@ export default function DrrCpFinalPage() {
             </div>
 
             <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
+              {/* === СЕРЫЙ БЛОК: большая цифра — все записи TLTT, подпись — уникальные VIN === */}
               <div
                 style={{
                   flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px',
@@ -410,7 +413,10 @@ export default function DrrCpFinalPage() {
               >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Прошли TLTT</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }} />
-                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.totalVins}</div>
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.totalRecords}</div>
+                <div style={{ fontSize: '0.75rem', opacity: 0.75, marginTop: 6 }}>
+                  Уник. VIN: {data.totalVins}
+                </div>
               </div>
 
               <div

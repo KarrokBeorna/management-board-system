@@ -9647,7 +9647,7 @@ const CPFINAL_DEFECT_POSTS = [
 const CPFINAL_DEFECT_POSTS_STR = CPFINAL_DEFECT_POSTS.map(p => `'${p}'`).join(',');
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: VIN + два времени TLTT (MIN для сравнения, MAX для показа)     */
+/* Хелпер: VIN + два времени TLTT + общее число записей TLTT              */
 /* ---------------------------------------------------------------------- */
 async function getCpFinalTlttVins(startTime, endTime) {
   const [rows] = await mesPool.query(`
@@ -9661,11 +9661,25 @@ async function getCpFinalTlttVins(startTime, endTime) {
       AND gmt_create >= ? AND gmt_create <= ?
     GROUP BY vin
   `, [startTime, endTime]);
-  return rows.map(r => ({
+
+  // Общее число записей прохождения TLTT (без уникальности)
+  const [countRows] = await mesPool.query(`
+    SELECT COUNT(*) AS total_records
+    FROM tm_vhc_test_line_movement
+    WHERE node_nature = 'TLTT'
+      AND is_deleted = 0
+      AND gmt_create >= ? AND gmt_create <= ?
+  `, [startTime, endTime]);
+
+  const totalRecords = Number(countRows[0]?.total_records) || 0;
+
+  const vins = rows.map(r => ({
     vin: r.vin,
-    tltt_first_time: r.tltt_first_time, // для сравнения с LAST_MODIFIED_TIME
-    tltt_last_time:  r.tltt_last_time,  // для отображения (серый блок, модалка)
+    tltt_first_time: r.tltt_first_time,
+    tltt_last_time:  r.tltt_last_time,
   }));
+
+  return { vins, totalRecords };
 }
 
 /* ---------------------------------------------------------------------- */
@@ -9735,11 +9749,17 @@ app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    const tlttRows = await getCpFinalTlttVins(startTime, endTime);
+    const { vins: tlttRows, totalRecords } = await getCpFinalTlttVins(startTime, endTime);
     const totalVins = tlttRows.length;
 
     if (totalVins === 0) {
-      return res.json({ totalVins: 0, okVins: 0, nokVins: 0, drrPercent: 0 });
+      return res.json({
+        totalRecords,
+        totalVins: 0,
+        okVins: 0,
+        nokVins: 0,
+        drrPercent: 0,
+      });
     }
 
     const { okSet, nokSet } = await classifyCpFinalVins(tlttRows);
@@ -9748,9 +9768,10 @@ app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
     const drrPercent = totalVins > 0 ? (okVins / totalVins) * 100 : 0;
 
     res.json({
-      totalVins,          // «Прошли TLTT»
-      okVins,             // OK
-      nokVins,            // NOK
+      totalRecords,                        // ← НОВОЕ: все записи TLTT
+      totalVins,                           // уникальные VIN
+      okVins,
+      nokVins,
       drrPercent: Math.round(drrPercent * 10) / 10,
     });
   } catch (err) {
@@ -9769,7 +9790,7 @@ app.get('/api/drr-cpfinal-vins', async (req, res) => {
       return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
     }
 
-    const tlttRows = await getCpFinalTlttVins(startTime, endTime);
+    const { vins: tlttRows } = await getCpFinalTlttVins(startTime, endTime);
     if (tlttRows.length === 0) return res.json([]);
 
     // Время отображения — самое позднее TLTT
@@ -9819,7 +9840,7 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    const tlttRows = await getCpFinalTlttVins(startTime, endTime);
+    const { vins: tlttRows } = await getCpFinalTlttVins(startTime, endTime);
     if (tlttRows.length === 0) return res.json([]);
 
     const firstTlttByVin = new Map(tlttRows.map(r => [r.vin, r.tltt_first_time]));
