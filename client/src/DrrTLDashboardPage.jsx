@@ -128,7 +128,6 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
-// Вспомогательные функции для времени
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
 const getMoscowMinutes = () => {
   const moscow = getMoscowTime();
@@ -219,12 +218,17 @@ export default function DrrTLDashboardPage() {
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
   const [isManualFilter, setIsManualFilter] = useState(false);
   const [shiftInfo, setShiftInfo] = useState(getCurrentShiftInfo());
-  const [drrData, setDrrData] = useState({ totalVins: 0, closedVins: 0, drrPercent: 0 });
+  const [drrData, setDrrData] = useState({
+    totalRecords: 0,
+    totalVins: 0,
+    closedVins: 0,
+    nokVins: 0,
+    drrPercent: 0,
+  });
   const [topDefects, setTopDefects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Состояния для модального окна списка VIN
   const [vinList, setVinList] = useState([]);
   const [vinListStatus, setVinListStatus] = useState('');
   const [showVinModal, setShowVinModal] = useState(false);
@@ -240,7 +244,13 @@ export default function DrrTLDashboardPage() {
       const drrRes = await fetch(`${API_BASE}/api/drr-tl-dashboard?${params.toString()}`);
       if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
       const drrJson = await drrRes.json();
-      setDrrData(drrJson);
+      setDrrData({
+        totalRecords: drrJson.totalRecords || 0,
+        totalVins: drrJson.totalVins || 0,
+        closedVins: drrJson.closedVins || 0,
+        nokVins: drrJson.nokVins || 0,
+        drrPercent: drrJson.drrPercent || 0,
+      });
 
       const defectsRes = await fetch(`${API_BASE}/api/drr-tl-top-defects?${params.toString()}`);
       if (!defectsRes.ok) throw new Error('Ошибка загрузки топ дефектов');
@@ -292,7 +302,7 @@ export default function DrrTLDashboardPage() {
     return () => clearInterval(interval);
   }, [timeFilter]);
 
-  const nokVins = drrData.totalVins - drrData.closedVins;
+  const nokVins = drrData.nokVins ?? (drrData.totalVins - drrData.closedVins);
   const pieData = [
     { name: 'DRR', value: drrData.drrPercent },
     { name: 'Не прямой сход', value: Math.max(0, 100 - drrData.drrPercent) },
@@ -328,7 +338,7 @@ export default function DrrTLDashboardPage() {
               width: '80px',
               height: '80px',
               borderRadius: '20px',
-              background: shiftInfo.shiftLetter === 'A' ? '#ffffff' : shiftInfo.shiftLetter === 'B' ? '#ffffff' : '#ffffff',
+              background: '#ffffff',
               color: '#1E293B',
               display: 'flex',
               alignItems: 'center',
@@ -404,13 +414,16 @@ export default function DrrTLDashboardPage() {
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip 
-                    formatter={(value) => `${value.toFixed(1)}%`}
+                  <Tooltip
+                    formatter={(value, name) => {
+                      const count = name === 'DRR' ? drrData.closedVins : nokVins;
+                      return [`${value.toFixed(1)}% (${count} VIN)`, name];
+                    }}
                     contentStyle={{ fontSize: '1.8rem', borderRadius: '16px' }}
                   />
                 </PieChart>
               </ResponsiveContainer>
-              
+
               <div style={{
                 position: 'absolute',
                 top: '50%',
@@ -427,12 +440,20 @@ export default function DrrTLDashboardPage() {
             </div>
 
             <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Всего авто</div>
+              {/* Серый блок: большая цифра = все записи TLADAS, подпись = уникальные VIN */}
+              <div
+                style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                onClick={() => loadVinList('ALL')}
+              >
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Прошли TLADAS</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
-                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalVins}</div>
+                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalRecords}</div>
+                <div style={{ fontSize: '0.75rem', opacity: 0.75, marginTop: 6 }}>
+                  Уник. VIN: {drrData.totalVins}
+                </div>
               </div>
-              <div 
+
+              <div
                 style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
                 onClick={() => loadVinList('OK')}
               >
@@ -440,7 +461,8 @@ export default function DrrTLDashboardPage() {
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.closedVins}</div>
               </div>
-              <div 
+
+              <div
                 style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
                 onClick={() => loadVinList('NOK')}
               >
@@ -487,7 +509,6 @@ export default function DrrTLDashboardPage() {
         </div>
       )}
 
-      {/* Модальное окно списка VIN */}
       {showVinModal && (
         <div style={{
           position: 'fixed',
@@ -513,7 +534,7 @@ export default function DrrTLDashboardPage() {
           }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
-                VIN ({vinListStatus})
+                VIN ({vinListStatus}) — {vinList.length} шт.
               </h3>
               <button onClick={() => setShowVinModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }}>×</button>
             </div>
@@ -535,7 +556,7 @@ export default function DrrTLDashboardPage() {
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>
-                            {item.tlad_time ? new Date(item.tlad_time).toLocaleString('ru-RU') : ''}
+                          {item.tlad_time ? new Date(item.tlad_time).toLocaleString('ru-RU') : ''}
                         </td>
                       </tr>
                     ))}
