@@ -25,7 +25,7 @@ import brigPreview from './assets/briga.png';
 import RemPreview from './assets/remzs.png';
 import VehPreview from './assets/repai.png';
 import drrWtPortalPreview from './assets/cp8drr.png';
-import drrCp6Preview from './assets/cp8drr.png'; // временно можно взять любую, потом заменить на свою
+import drrCp6Preview from './assets/drrcp6.png'; // временно можно взять любую, потом заменить на свою
 
 // ====== СТИЛИ ======
 const sectionStyle = {
