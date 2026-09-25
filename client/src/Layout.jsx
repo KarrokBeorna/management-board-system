@@ -70,7 +70,11 @@ export default function Layout() {
   location.pathname === '/vehicle-on-wheels' ||
   location.pathname === '/drr-wt-portal-old' ||
   location.pathname === '/drr-wt-portal' ||
+  location.pathname === '//drr-cp6' ||
   location.pathname === '/brigade-report';
+
+
+
 
   return (
     <>
