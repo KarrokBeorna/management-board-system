@@ -28,6 +28,7 @@ import VehicleOnWheelsPage from './VehicleOnWheelsPage';
 import DrrWtPortalPage from './DrrWtPortalPage';
 import DrrCpFinalPage from './DrrCpFinalPage';
 import DrrCp6Page from './DrrCp6Page';
+import DrrCp5Page from './DrrCp5Page';
 
 export default function App() {
   return (
@@ -59,6 +60,7 @@ export default function App() {
         <Route path="/drr-wt-portal-old" element={<DrrWtPortalPage />} />
         <Route path="/drr-wt-portal" element={<DrrCpFinalPage />} />
         <Route path="/drr-cp6" element={<DrrCp6Page />} />
+        <Route path="/drr-cp5" element={<DrrCp5Page />} />
       </Route>
     </Routes>
   );

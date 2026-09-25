@@ -25,7 +25,8 @@ import brigPreview from './assets/briga.png';
 import RemPreview from './assets/remzs.png';
 import VehPreview from './assets/repai.png';
 import drrWtPortalPreview from './assets/cp8drr.png';
-import drrCp6Preview from './assets/drrcp6.png'; // временно можно взять любую, потом заменить на свою
+import drrCp6Preview from './assets/drrcp6.png';
+import drrCp5Preview from './assets/cp8drr.png'; // временно
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -350,7 +351,8 @@ export default function HomePage() {
     { to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Electronics Defects Top", accentColor: "#8B5CF6" },
     { to: "/remzone-work-status", imgSrc: RemPreview, caption: "Remzone Work Status", accentColor: "#8B5CF6" },
     { to: "/vehicle-on-wheels", imgSrc: VehPreview, caption: "Vehicle on Wheels", accentColor: "#e22910" },
-    { to: "/drr-cp6", imgSrc: drrCp6Preview, caption: "DRR CP6 Dashboard", accentColor: "#0EA5E9" }
+    { to: "/drr-cp6", imgSrc: drrCp6Preview, caption: "DRR CP6 Dashboard", accentColor: "#0EA5E9" },
+    { to: "/drr-cp5", imgSrc: drrCp5Preview, caption: "DRR CP5 Dashboard", accentColor: "#8B5CF6" }
   ];
 
   const allServiceCards = [
@@ -371,7 +373,8 @@ export default function HomePage() {
     '/drr-tl-dashboard',
     '/vehicle-on-wheels',
     '/drr-pip-dashboard',
-    '/drr-cp6'
+    '/drr-cp6',
+    '/drr-cp5'
   ];
 
   const allDrrCards = allReportCards.filter(card => DRR_ROUTES.includes(card.to));

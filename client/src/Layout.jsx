@@ -71,8 +71,8 @@ export default function Layout() {
   location.pathname === '/drr-wt-portal-old' ||
   location.pathname === '/drr-wt-portal' ||
   location.pathname === '/drr-cp6' ||
+  location.pathname === '/drr-cp5' ||
   location.pathname === '/brigade-report';
-
 
 
 
