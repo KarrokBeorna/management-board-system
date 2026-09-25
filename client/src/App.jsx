@@ -27,6 +27,7 @@ import RemzoneWorkStatusPage from './RemzoneWorkStatusPage';
 import VehicleOnWheelsPage from './VehicleOnWheelsPage';
 import DrrWtPortalPage from './DrrWtPortalPage';
 import DrrCpFinalPage from './DrrCpFinalPage';
+import DrrCp6Page from './DrrCp6Page';
 
 export default function App() {
   return (
@@ -57,6 +58,7 @@ export default function App() {
         <Route path="/vehicle-on-wheels" element={<VehicleOnWheelsPage />} />
         <Route path="/drr-wt-portal-old" element={<DrrWtPortalPage />} />
         <Route path="/drr-wt-portal" element={<DrrCpFinalPage />} />
+        <Route path="/drr-cp6" element={<DrrCp6Page />} />
       </Route>
     </Routes>
   );
