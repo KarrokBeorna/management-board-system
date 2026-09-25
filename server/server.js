@@ -9846,8 +9846,15 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
       }
       if (!isNok) return;
 
-      const mpp = `${d.MODEL || '—'} ${d.PART_NAME || ''} ${d.PROBLEM_TYPE || ''}`
-        .replace(/\s+/g, ' ').trim();
+      // === MPP: если нет и детали, и дефекта — используем фиксированный текст ===
+      const model = d.MODEL || '—';
+      const part = (d.PART_NAME || '').trim();
+      const problem = (d.PROBLEM_TYPE || '').trim();
+
+      const mpp = (!part && !problem)
+        ? `${model} TS02 WA EC Tool - NG`
+        : `${model} ${part} ${problem}`.replace(/\s+/g, ' ').trim();
+
       const grade = d.PROBLEM_GRADE || '—';
       const key = `${mpp}|${grade}`;
       if (!map.has(key)) map.set(key, { mpp, grade, defectCount: 0 });
