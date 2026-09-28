@@ -223,11 +223,16 @@ export default function DrrPipDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Снимки смен
+  const [snapshots, setSnapshots] = useState([]);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState('live');
+
   const [vinList, setVinList] = useState([]);
   const [vinListStatus, setVinListStatus] = useState('');
   const [showVinModal, setShowVinModal] = useState(false);
   const [vinModalLoading, setVinModalLoading] = useState(false);
 
+  // ---------- LIVE-загрузка ----------
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -238,12 +243,16 @@ export default function DrrPipDashboardPage() {
       const drrRes = await fetch(`${API_BASE}/api/drr-pip-dashboard?${params.toString()}`);
       if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
       const drrJson = await drrRes.json();
-      setDrrData(drrJson);
+      setDrrData({
+        totalVins: drrJson.totalVins || 0,
+        closedVins: drrJson.closedVins || 0,
+        drrPercent: drrJson.drrPercent || 0,
+      });
 
       const defectsRes = await fetch(`${API_BASE}/api/drr-pip-top-defects?${params.toString()}`);
       if (!defectsRes.ok) throw new Error('Ошибка загрузки топ дефектов');
       const defectsJson = await defectsRes.json();
-      setTopDefects(defectsJson);
+      setTopDefects(Array.isArray(defectsJson) ? defectsJson : []);
     } catch (err) {
       setError(err.message);
       setTopDefects([]);
@@ -252,7 +261,70 @@ export default function DrrPipDashboardPage() {
     }
   };
 
+  // ---------- Загрузка снимка ----------
+  const loadSnapshot = async (id) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/drr-pip-snapshot/${id}`);
+      if (!res.ok) throw new Error('Ошибка загрузки снимка');
+      const json = await res.json();
+      setDrrData({
+        totalVins: json.totalVins || 0,
+        closedVins: json.closedVins || 0,
+        drrPercent: json.drrPercent || 0,
+      });
+      setTopDefects(Array.isArray(json.topDefects) ? json.topDefects : []);
+    } catch (err) {
+      setError(err.message);
+      setTopDefects([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ---------- Загрузка списка снимков ----------
+  useEffect(() => {
+    fetch(`${API_BASE}/api/drr-pip-snapshots?days=14`)
+      .then(res => res.json())
+      .then(json => setSnapshots(Array.isArray(json) ? json : []))
+      .catch(() => setSnapshots([]));
+  }, []);
+
+  // ---------- Реакция на смену snapshot ----------
+  useEffect(() => {
+    if (selectedSnapshotId === 'live') {
+      loadData();
+    } else {
+      loadSnapshot(selectedSnapshotId);
+    }
+  }, [selectedSnapshotId, timeFilter]);
+
+  // ---------- Автообновление смены/фильтра (раз в минуту) ----------
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const newShiftInfo = getCurrentShiftInfo();
+      setShiftInfo(newShiftInfo);
+      if (!isManualFilter && selectedSnapshotId === 'live') {
+        setTimeFilter(getDefaultTimeFilter());
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [isManualFilter, selectedSnapshotId]);
+
+  // ---------- Автообновление данных (30 секунд, только live) ----------
+  useEffect(() => {
+    if (selectedSnapshotId !== 'live') return;
+    const interval = setInterval(loadData, 30000);
+    return () => clearInterval(interval);
+  }, [timeFilter, selectedSnapshotId]);
+
+  // ---------- VIN-модалка ----------
   const loadVinList = async (status) => {
+    if (selectedSnapshotId !== 'live') {
+      alert('В архиве список VIN недоступен — переключитесь на «Сейчас (live)».');
+      return;
+    }
     setVinModalLoading(true);
     try {
       const { start, end } = getTimeRange(timeFilter);
@@ -260,7 +332,7 @@ export default function DrrPipDashboardPage() {
       const res = await fetch(`${API_BASE}/api/drr-pip-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки списка VIN');
       const json = await res.json();
-      setVinList(json);
+      setVinList(Array.isArray(json) ? json : []);
       setVinListStatus(status);
       setShowVinModal(true);
     } catch (err) {
@@ -269,26 +341,6 @@ export default function DrrPipDashboardPage() {
       setVinModalLoading(false);
     }
   };
-
-  useEffect(() => {
-    loadData();
-  }, [timeFilter]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const newShiftInfo = getCurrentShiftInfo();
-      setShiftInfo(newShiftInfo);
-      if (!isManualFilter) {
-        setTimeFilter(getDefaultTimeFilter());
-      }
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [isManualFilter]);
-
-  useEffect(() => {
-    const interval = setInterval(loadData, 30000);
-    return () => clearInterval(interval);
-  }, [timeFilter]);
 
   const nokVins = drrData.totalVins - drrData.closedVins;
   const pieData = [
@@ -300,6 +352,8 @@ export default function DrrPipDashboardPage() {
     setIsManualFilter(true);
     setTimeFilter(filter);
   };
+
+  const isArchive = selectedSnapshotId !== 'live';
 
   return (
     <div style={containerStyle}>
@@ -326,7 +380,7 @@ export default function DrrPipDashboardPage() {
               width: '80px',
               height: '80px',
               borderRadius: '20px',
-              background: shiftInfo.shiftLetter === 'A' ? '#fffffe' : shiftInfo.shiftLetter === 'B' ? '#ffffff' : '#ffffff',
+              background: '#FFFFFF',
               color: '#1E293B',
               display: 'flex',
               alignItems: 'center',
@@ -345,29 +399,61 @@ export default function DrrPipDashboardPage() {
 
           <div style={filterGroupStyle}>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')}
-              onClick={() => handleFilterClick('all')}
+              style={{ ...timeFilterButtonStyle(timeFilter === 'all', '#6B7280'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('all'); }}
+              disabled={isArchive}
             >
               Сутки
             </button>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')}
-              onClick={() => handleFilterClick('day')}
+              style={{ ...timeFilterButtonStyle(timeFilter === 'day', '#F59E0B'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('day'); }}
+              disabled={isArchive}
             >
               День
             </button>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')}
-              onClick={() => handleFilterClick('evening')}
+              style={{ ...timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('evening'); }}
+              disabled={isArchive}
             >
               Вечер
             </button>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')}
-              onClick={() => handleFilterClick('night')}
+              style={{ ...timeFilterButtonStyle(timeFilter === 'night', '#1F2937'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('night'); }}
+              disabled={isArchive}
             >
               Ночь
             </button>
+
+            <select
+              value={selectedSnapshotId}
+              onChange={(e) => setSelectedSnapshotId(e.target.value)}
+              style={{
+                padding: '12px 16px',
+                borderRadius: '12px',
+                border: '1px solid #D1D5DB',
+                fontSize: '1.2rem',
+                fontWeight: 600,
+                background: '#FFFFFF',
+                cursor: 'pointer',
+                minWidth: 220,
+              }}
+            >
+              <option value="live">Сейчас (live)</option>
+              {snapshots.map(s => {
+                const shiftLabel = s.shift === 'day' ? 'День' : s.shift === 'evening' ? 'Вечер' : 'Ночь';
+                const dateObj = new Date(s.shiftDate + 'T12:00:00');
+                const dd = String(dateObj.getDate()).padStart(2, '0');
+                const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                return (
+                  <option key={s.id} value={s.id}>
+                    {dd}.{mm} · {shiftLabel} ({s.drrPercent}%)
+                  </option>
+                );
+              })}
+            </select>
           </div>
         </div>
       </div>
@@ -402,13 +488,13 @@ export default function DrrPipDashboardPage() {
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip 
+                  <Tooltip
                     formatter={(value) => `${value.toFixed(1)}%`}
                     contentStyle={{ fontSize: '1.8rem', borderRadius: '16px' }}
                   />
                 </PieChart>
               </ResponsiveContainer>
-              
+
               <div style={{
                 position: 'absolute',
                 top: '50%',
@@ -417,7 +503,9 @@ export default function DrrPipDashboardPage() {
                 textAlign: 'center',
                 pointerEvents: 'none',
               }}>
-                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
+                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>
+                  DRR{isArchive && ' · архив'}
+                </div>
                 <div style={{ fontSize: '6.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {drrData.drrPercent.toFixed(1)}%
                 </div>
@@ -430,16 +518,16 @@ export default function DrrPipDashboardPage() {
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalVins}</div>
               </div>
-              <div 
-                style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+              <div
+                style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: isArchive ? 'not-allowed' : 'pointer', opacity: isArchive ? 0.6 : 1 }}
                 onClick={() => loadVinList('OK')}
               >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.closedVins}</div>
               </div>
-              <div 
-                style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+              <div
+                style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: isArchive ? 'not-allowed' : 'pointer', opacity: isArchive ? 0.6 : 1 }}
                 onClick={() => loadVinList('NOK')}
               >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK Авто</div>
@@ -451,7 +539,7 @@ export default function DrrPipDashboardPage() {
 
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
-              <h2 style={tableTitleStyle}>Топ дефектов PIP</h2>
+              <h2 style={tableTitleStyle}>Топ дефектов PIP{isArchive && ' (архив)'}</h2>
               <div style={tableScrollStyle}>
                 {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -510,7 +598,7 @@ export default function DrrPipDashboardPage() {
           }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
-                VIN ({vinListStatus})
+                VIN ({vinListStatus}) — {vinList.length} шт.
               </h3>
               <button onClick={() => setShowVinModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }}>×</button>
             </div>
@@ -532,7 +620,7 @@ export default function DrrPipDashboardPage() {
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>
-                          {item.pip9_time ? new Date(item.pip9_time).toLocaleString('ru-RU') : ''}
+                          {item.pip9_time ? new Date(item.pip9_time).toLocaleString('ru-RU') : '—'}
                         </td>
                       </tr>
                     ))}
