@@ -5986,6 +5986,285 @@ app.get('/api/drr-cp7-vins', async (req, res) => {
   }
 });
 
+
+/* ====================================================================== */
+/* ================== DRR CP7 — СНИМКИ СМЕН ============================= */
+/* ====================================================================== */
+
+const CP7_SNAPSHOT_POST_LISTS = {
+  all: ['CP7','CP7 Audit','CP7 Gate','CP7-gate','EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9'],
+  cp7: ['CP7','CP7 Audit','CP7 Gate','CP7-gate','EXT1','PIP9'],
+  pip: ['EXT1','PIP1','PIP2','PIP4','PIP5','PIP6','PIP8','PIP9'],
+};
+
+// Инициализация таблицы
+async function initDrrCp7SnapshotsTable() {
+  try {
+    await notesPool.query(`
+      CREATE TABLE IF NOT EXISTS drr_cp7_snapshots (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        shift_date DATE NOT NULL,
+        shift VARCHAR(20) NOT NULL,
+        filter_name VARCHAR(20) NOT NULL DEFAULT 'all',
+        snapshot_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        total_vins INT NOT NULL DEFAULT 0,
+        closed_vins INT NOT NULL DEFAULT 0,
+        nok_vins INT NOT NULL DEFAULT 0,
+        drr_percent DECIMAL(5,1) NOT NULL DEFAULT 0,
+        top_defects JSON,
+        UNIQUE KEY uniq_shift (shift_date, shift, filter_name)
+      )
+    `);
+    console.log('Таблица drr_cp7_snapshots готова');
+  } catch (err) {
+    console.error('Ошибка создания таблицы drr_cp7_snapshots:', err.message);
+  }
+}
+initDrrCp7SnapshotsTable();
+
+// Определение последней завершённой смены (МСК)
+function getLastCompletedShiftCp7() {
+  const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(now.getUTCDate()).padStart(2, '0');
+  const todayStr = `${y}-${m}-${d}`;
+
+  const yest = new Date(now);
+  yest.setUTCDate(yest.getUTCDate() - 1);
+  const yesterdayStr = `${yest.getUTCFullYear()}-${String(yest.getUTCMonth() + 1).padStart(2, '0')}-${String(yest.getUTCDate()).padStart(2, '0')}`;
+
+  const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+
+  if (mins >= 91 && mins < 470) return { shiftDate: yesterdayStr, shift: 'evening' };
+  if (mins >= 471 && mins < 1001) return { shiftDate: todayStr, shift: 'night' };
+  return { shiftDate: todayStr, shift: 'day' };
+}
+
+// Временные границы смены (та же логика)
+function getShiftRangeCp7(shiftDate, shift) {
+  if (shift === 'day') return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
+  if (shift === 'night') return { start: `${shiftDate} 01:31:00`, end: `${shiftDate} 07:50:00` };
+  if (shift === 'evening') {
+    const next = new Date(`${shiftDate}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    const nextStr = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+    return { start: `${shiftDate} 16:41:00`, end: `${nextStr} 01:30:00` };
+  }
+  return null;
+}
+
+// Снимок по одному фильтру
+async function saveDrrCp7Snapshot(shiftDate, shift, filterName) {
+  try {
+    const range = getShiftRangeCp7(shiftDate, shift);
+    if (!range) return;
+
+    const postList = CP7_SNAPSHOT_POST_LISTS[filterName] || CP7_SNAPSHOT_POST_LISTS.all;
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    // 1. VIN + CP72_TIME
+    const [cp72Rows] = await pool.query(`
+      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
+      GROUP BY VIN
+    `, [range.start, range.end]);
+
+    const totalVins = cp72Rows.length;
+    let closedVins = 0;
+    let nokVins = 0;
+    let drrPercent = 0;
+    let topDefects = [];
+
+    if (totalVins > 0) {
+      const vins = cp72Rows.map(r => r.VIN);
+      const ph = vins.map(() => '?').join(',');
+      const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
+
+      const [defectRows] = await pool.query(`
+        SELECT
+          d.VIN,
+          d.STATUS,
+          d.CREATION_TIME,
+          wo.MODEL,
+          d.PART_NAME,
+          d.PROBLEM_TYPE,
+          d.PROBLEM_GRADE
+        FROM at_qm_defect_info d
+        LEFT JOIN work_order wo ON wo.VIN = d.VIN
+        WHERE d.VIN IN (${ph})
+          AND d.POST_NAME IN (${postListStr})
+      `, vins);
+
+      const GRACE_MS = 20 * 60 * 1000;
+      const vinDefectMap = new Map();
+      const defectGroupMap = new Map();
+
+      defectRows.forEach(d => {
+        const cp72TimeStr = cp72TimeMap.get(d.VIN);
+        if (!cp72TimeStr) return;
+
+        const cp72Ms = new Date(cp72TimeStr).getTime();
+        const defectMs = new Date(d.CREATION_TIME).getTime();
+        if (defectMs > cp72Ms + GRACE_MS) return;
+
+        if (!vinDefectMap.has(d.VIN)) vinDefectMap.set(d.VIN, { total: 0, closed: 0 });
+        const stat = vinDefectMap.get(d.VIN);
+        stat.total += 1;
+
+        const isClosed = d.STATUS && d.STATUS.toLowerCase() === 'closed';
+        if (isClosed) stat.closed += 1;
+
+        if (!isClosed) {
+          const mpp = `${d.MODEL || '-'} ${d.PART_NAME || ''} ${d.PROBLEM_TYPE || ''}`.trim();
+          const key = `${mpp}|${d.PROBLEM_GRADE || '-'}`;
+          if (!defectGroupMap.has(key)) {
+            defectGroupMap.set(key, { mpp, grade: d.PROBLEM_GRADE || '-', defectCount: 0 });
+          }
+          defectGroupMap.get(key).defectCount += 1;
+        }
+      });
+
+      let okCount = 0;
+      cp72Rows.forEach(r => {
+        const stat = vinDefectMap.get(r.VIN);
+        if (!stat || stat.total === stat.closed) okCount++;
+      });
+      closedVins = okCount;
+      nokVins = totalVins - closedVins;
+      drrPercent = totalVins > 0 ? Math.round((closedVins / totalVins) * 1000) / 10 : 0;
+
+      topDefects = Array.from(defectGroupMap.values())
+        .sort((a, b) => b.defectCount - a.defectCount)
+        .slice(0, 20);
+    }
+
+    await notesPool.query(`
+      INSERT INTO drr_cp7_snapshots
+        (shift_date, shift, filter_name, total_vins, closed_vins, nok_vins, drr_percent, top_defects)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        snapshot_time = CURRENT_TIMESTAMP,
+        total_vins = VALUES(total_vins),
+        closed_vins = VALUES(closed_vins),
+        nok_vins = VALUES(nok_vins),
+        drr_percent = VALUES(drr_percent),
+        top_defects = VALUES(top_defects)
+    `, [shiftDate, shift, filterName, totalVins, closedVins, nokVins, drrPercent, JSON.stringify(topDefects)]);
+
+    console.log(`[DRR CP7 snapshot] ${shiftDate} ${shift} ${filterName} → ${drrPercent}% (${closedVins}/${totalVins})`);
+  } catch (err) {
+    console.error('[DRR CP7 snapshot] ошибка сохранения:', err.message);
+  }
+}
+
+// Сохранение для всех трёх фильтров сразу
+async function saveAllDrrCp7Snapshots(shiftDate, shift) {
+  await saveDrrCp7Snapshot(shiftDate, shift, 'all');
+  await saveDrrCp7Snapshot(shiftDate, shift, 'cp7');
+  await saveDrrCp7Snapshot(shiftDate, shift, 'pip');
+}
+
+// Проверка и сохранение
+async function checkAndSaveDrrCp7Snapshot() {
+  try {
+    const { shiftDate, shift } = getLastCompletedShiftCp7();
+    const [existing] = await notesPool.query(
+      `SELECT COUNT(*) AS cnt FROM drr_cp7_snapshots WHERE shift_date = ? AND shift = ?`,
+      [shiftDate, shift]
+    );
+    if (Number(existing[0]?.cnt || 0) < 3) {
+      await saveAllDrrCp7Snapshots(shiftDate, shift);
+    }
+  } catch (err) {
+    console.error('[DRR CP7 snapshot] ошибка проверки:', err.message);
+  }
+}
+
+setInterval(checkAndSaveDrrCp7Snapshot, 60 * 1000);
+checkAndSaveDrrCp7Snapshot();
+
+/* ====================================================================== */
+/* ЭНДПОИНТ: список снимков                                               */
+/* ====================================================================== */
+app.get('/api/drr-cp7-snapshots', async (req, res) => {
+  try {
+    const { days = 14, filter = 'all' } = req.query;
+    const limitDays = Math.min(parseInt(days, 10) || 14, 60);
+
+    const [rows] = await notesPool.query(`
+      SELECT id, shift_date, shift, filter_name, snapshot_time,
+             total_vins, closed_vins, nok_vins, drr_percent
+      FROM drr_cp7_snapshots
+      WHERE shift_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+        AND filter_name = ?
+      ORDER BY shift_date DESC,
+        FIELD(shift, 'evening', 'day', 'night')
+    `, [limitDays, filter]);
+
+    res.json(rows.map(r => ({
+      id: r.id,
+      shiftDate: String(r.shift_date).slice(0, 10),
+      shift: r.shift,
+      filter: r.filter_name,
+      snapshotTime: r.snapshot_time,
+      totalVins: r.total_vins,
+      closedVins: r.closed_vins,
+      nokVins: r.nok_vins,
+      drrPercent: Number(r.drr_percent),
+    })));
+  } catch (err) {
+    console.error('Ошибка /api/drr-cp7-snapshots:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ====================================================================== */
+/* ЭНДПОИНТ: один снимок с top_defects                                    */
+/* ====================================================================== */
+app.get('/api/drr-cp7-snapshot/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [rows] = await notesPool.query(
+      'SELECT * FROM drr_cp7_snapshots WHERE id = ?',
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Снимок не найден' });
+
+    const r = rows[0];
+    let topDefects = [];
+    try {
+      topDefects = r.top_defects
+        ? (typeof r.top_defects === 'string' ? JSON.parse(r.top_defects) : r.top_defects)
+        : [];
+    } catch { topDefects = []; }
+
+    res.json({
+      id: r.id,
+      shiftDate: String(r.shift_date).slice(0, 10),
+      shift: r.shift,
+      filter: r.filter_name,
+      snapshotTime: r.snapshot_time,
+      totalVins: r.total_vins,
+      closedVins: r.closed_vins,
+      nokVins: r.nok_vins,
+      drrPercent: Number(r.drr_percent),
+      topDefects,
+    });
+  } catch (err) {
+    console.error('Ошибка /api/drr-cp7-snapshot/:id:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
+
+
+
 // ================== EMAIL SETTINGS ==================
 
 // Создание таблицы, если её ещё нет

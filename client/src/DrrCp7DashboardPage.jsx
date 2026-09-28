@@ -7,13 +7,13 @@ const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
   width: '100%',
-  height: '125vh',      // ← было 100vh, теперь 125vh (100 / 0.8)
+  height: '125vh',
   boxSizing: 'border-box',
   backgroundColor: '#F8FAFC',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
-  zoom: 0.8,            // ← добавить эту строку
+  zoom: 0.8,
 };
 
 const headerStyle = {
@@ -221,9 +221,9 @@ const getOpcValueColor = (value) => {
   if (value === null || value === undefined) return '#94A3B8';
   const num = Number(value);
   if (Number.isNaN(num)) return '#94A3B8';
-  if (num >= 8) return '#DC2626'; // красный
-  if (num === 7) return '#F59E0B'; // оранжевый
-  return '#059669'; // зелёный
+  if (num >= 8) return '#DC2626';
+  if (num === 7) return '#F59E0B';
+  return '#059669';
 };
 
 // ============== OPC UA виджет ==============
@@ -299,45 +299,117 @@ export default function DrrCp7DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Снимки смен
+  const [snapshots, setSnapshots] = useState([]);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState('live');
+
   // Состояния для модального окна VIN
   const [vinList, setVinList] = useState([]);
   const [vinListStatus, setVinListStatus] = useState('');
   const [showVinModal, setShowVinModal] = useState(false);
   const [vinModalLoading, setVinModalLoading] = useState(false);
 
+  // ---------- LIVE-загрузка ----------
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
       const { start, end } = getTimeRange(timeFilter);
 
-      const drrParams = new URLSearchParams({
-        filter,
-        startTime: start,
-        endTime: end,
-      });
+      const drrParams = new URLSearchParams({ filter, startTime: start, endTime: end });
       const drrRes = await fetch(`${API_BASE}/api/drr-cp7-dashboard?${drrParams.toString()}`);
       if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
       const drrJson = await drrRes.json();
-      setDrrData(drrJson);
-
-      const defectsParams = new URLSearchParams({
-        filter,
-        startTime: start,
-        endTime: end,
+      setDrrData({
+        totalVins: drrJson.totalVins || 0,
+        closedVins: drrJson.closedVins || 0,
+        drrPercent: drrJson.drrPercent || 0,
       });
+
+      const defectsParams = new URLSearchParams({ filter, startTime: start, endTime: end });
       const defectsRes = await fetch(`${API_BASE}/api/drr-cp7-top-defects?${defectsParams.toString()}`);
       if (!defectsRes.ok) throw new Error('Ошибка загрузки топа дефектов');
       const defectsJson = await defectsRes.json();
-      setTopDefects(defectsJson);
+      setTopDefects(Array.isArray(defectsJson) ? defectsJson : []);
     } catch (err) {
       setError(err.message);
+      setTopDefects([]);
     } finally {
       setLoading(false);
     }
   };
 
+  // ---------- Загрузка снимка ----------
+  const loadSnapshot = async (id) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/drr-cp7-snapshot/${id}`);
+      if (!res.ok) throw new Error('Ошибка загрузки снимка');
+      const json = await res.json();
+      setDrrData({
+        totalVins: json.totalVins || 0,
+        closedVins: json.closedVins || 0,
+        drrPercent: json.drrPercent || 0,
+      });
+      setTopDefects(Array.isArray(json.topDefects) ? json.topDefects : []);
+    } catch (err) {
+      setError(err.message);
+      setTopDefects([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ---------- Загрузка списка снимков (зависит от filter) ----------
+  useEffect(() => {
+    fetch(`${API_BASE}/api/drr-cp7-snapshots?days=14&filter=${filter}`)
+      .then(res => res.json())
+      .then(json => {
+        const list = Array.isArray(json) ? json : [];
+        setSnapshots(list);
+        // если выбранный снимок не из текущего фильтра — сброс в live
+        if (selectedSnapshotId !== 'live' && !list.some(s => String(s.id) === String(selectedSnapshotId))) {
+          setSelectedSnapshotId('live');
+        }
+      })
+      .catch(() => setSnapshots([]));
+  }, [filter]);
+
+  // ---------- Реакция на смену snapshot / filter / timeFilter ----------
+  useEffect(() => {
+    if (selectedSnapshotId === 'live') {
+      loadData();
+    } else {
+      loadSnapshot(selectedSnapshotId);
+    }
+  }, [selectedSnapshotId, filter, timeFilter]);
+
+  // ---------- Автообновление смены/фильтра (раз в минуту, только live) ----------
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const newShiftInfo = getCurrentShiftInfo();
+      setShiftInfo(newShiftInfo);
+      if (!isManualFilter && selectedSnapshotId === 'live') {
+        setTimeFilter(getDefaultTimeFilter());
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [isManualFilter, selectedSnapshotId]);
+
+  // ---------- Автообновление данных (30 секунд, только live) ----------
+  useEffect(() => {
+    if (selectedSnapshotId !== 'live') return;
+    const interval = setInterval(loadData, 30000);
+    return () => clearInterval(interval);
+  }, [filter, timeFilter, selectedSnapshotId]);
+
+  // ---------- VIN-модалка ----------
   const loadVinList = async (status) => {
+    if (selectedSnapshotId !== 'live') {
+      alert('В архиве список VIN недоступен — переключитесь на «Сейчас (live)».');
+      return;
+    }
     setVinModalLoading(true);
     try {
       const { start, end } = getTimeRange(timeFilter);
@@ -345,7 +417,7 @@ export default function DrrCp7DashboardPage() {
       const res = await fetch(`${API_BASE}/api/drr-cp7-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки списка VIN');
       const json = await res.json();
-      setVinList(json);
+      setVinList(Array.isArray(json) ? json : []);
       setVinListStatus(status);
       setShowVinModal(true);
     } catch (err) {
@@ -354,29 +426,6 @@ export default function DrrCp7DashboardPage() {
       setVinModalLoading(false);
     }
   };
-
-  useEffect(() => {
-    loadData();
-  }, [filter, timeFilter]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const newShiftInfo = getCurrentShiftInfo();
-      setShiftInfo(newShiftInfo);
-
-      if (!isManualFilter) {
-        const defaultFilter = getDefaultTimeFilter();
-        setTimeFilter(defaultFilter);
-      }
-    }, 60000);
-
-    return () => clearInterval(interval);
-  }, [isManualFilter]);
-
-  useEffect(() => {
-    const interval = setInterval(loadData, 30000);
-    return () => clearInterval(interval);
-  }, [filter, timeFilter]);
 
   const nokVins = drrData.totalVins - drrData.closedVins;
 
@@ -389,6 +438,8 @@ export default function DrrCp7DashboardPage() {
     setIsManualFilter(true);
     setTimeFilter(filter);
   };
+
+  const isArchive = selectedSnapshotId !== 'live';
 
   return (
     <div style={containerStyle}>
@@ -436,39 +487,85 @@ export default function DrrCp7DashboardPage() {
 
           {/* Фильтры типа */}
           <div style={filterGroupStyle}>
-            <button style={filterButtonStyle(filter === 'all')} onClick={() => setFilter('all')}>Все</button>
-            <button style={filterButtonStyle(filter === 'cp7')} onClick={() => setFilter('cp7')}>CP7</button>
-            <button style={filterButtonStyle(filter === 'pip')} onClick={() => setFilter('pip')}>PIP</button>
+            <button
+              style={{ ...filterButtonStyle(filter === 'all'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) setFilter('all'); }}
+              disabled={isArchive}
+            >Все</button>
+            <button
+              style={{ ...filterButtonStyle(filter === 'cp7'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) setFilter('cp7'); }}
+              disabled={isArchive}
+            >CP7</button>
+            <button
+              style={{ ...filterButtonStyle(filter === 'pip'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) setFilter('pip'); }}
+              disabled={isArchive}
+            >PIP</button>
           </div>
 
           <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
 
-          {/* Фильтры времени */}
+          {/* Фильтры времени + селект снимков */}
           <div style={filterGroupStyle}>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')}
-              onClick={() => handleFilterClick('all')}
-            >
-              Сутки
-            </button>
+              style={{ ...timeFilterButtonStyle(timeFilter === 'all', '#6B7280'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('all'); }}
+              disabled={isArchive}
+            >Сутки</button>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')}
-              onClick={() => handleFilterClick('day')}
-            >
-              День
-            </button>
+              style={{ ...timeFilterButtonStyle(timeFilter === 'day', '#F59E0B'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('day'); }}
+              disabled={isArchive}
+            >День</button>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')}
-              onClick={() => handleFilterClick('evening')}
-            >
-              Вечер
-            </button>
+              style={{ ...timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('evening'); }}
+              disabled={isArchive}
+            >Вечер</button>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')}
-              onClick={() => handleFilterClick('night')}
+              style={{ ...timeFilterButtonStyle(timeFilter === 'night', '#1F2937'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('night'); }}
+              disabled={isArchive}
+            >Ночь</button>
+
+            <select
+              value={selectedSnapshotId}
+              onChange={(e) => setSelectedSnapshotId(e.target.value)}
+              style={{
+                padding: '12px 24px',
+                borderRadius: '12px',
+                border: 'none',
+                fontWeight: 700,
+                fontSize: '1.4rem',
+                background: '#FFFFFF',
+                color: '#64748B',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                minWidth: 220,
+                appearance: 'none',
+                WebkitAppearance: 'none',
+                MozAppearance: 'none',
+                backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 16px center',
+                paddingRight: '44px',
+                transition: 'all 0.2s',
+              }}
             >
-              Ночь
-            </button>
+              <option value="live">Сейчас (live)</option>
+              {snapshots.map(s => {
+                const shiftLabel = s.shift === 'day' ? 'День' : s.shift === 'evening' ? 'Вечер' : 'Ночь';
+                const dateObj = new Date(s.shiftDate + 'T12:00:00');
+                const dd = String(dateObj.getDate()).padStart(2, '0');
+                const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                return (
+                  <option key={s.id} value={s.id}>
+                    {dd}.{mm} · {shiftLabel} ({s.drrPercent}%)
+                  </option>
+                );
+              })}
+            </select>
           </div>
         </div>
       </div>
@@ -529,7 +626,9 @@ export default function DrrCp7DashboardPage() {
                 textAlign: 'center',
                 pointerEvents: 'none',
               }}>
-                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
+                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>
+                  DRR{isArchive && ' · архив'}
+                </div>
                 <div style={{ fontSize: '6.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {drrData.drrPercent.toFixed(1)}%
                 </div>
@@ -543,7 +642,7 @@ export default function DrrCp7DashboardPage() {
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalVins}</div>
               </div>
               <div
-                style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: isArchive ? 'not-allowed' : 'pointer', opacity: isArchive ? 0.6 : 1 }}
                 onClick={() => loadVinList('OK')}
               >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
@@ -551,7 +650,7 @@ export default function DrrCp7DashboardPage() {
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.closedVins}</div>
               </div>
               <div
-                style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: isArchive ? 'not-allowed' : 'pointer', opacity: isArchive ? 0.6 : 1 }}
                 onClick={() => loadVinList('NOK')}
               >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK Авто</div>
@@ -563,7 +662,7 @@ export default function DrrCp7DashboardPage() {
 
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
-              <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP7</h2>
+              <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP7{isArchive && ' (архив)'}</h2>
               <div style={tableScrollStyle}>
                 {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -623,7 +722,7 @@ export default function DrrCp7DashboardPage() {
           }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
-                VIN ({vinListStatus})
+                VIN ({vinListStatus}) — {vinList.length} шт.
               </h3>
               <button onClick={() => setShowVinModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }}>×</button>
             </div>
@@ -644,7 +743,9 @@ export default function DrrCp7DashboardPage() {
                       <tr key={idx}>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.cp72_time ? new Date(item.cp72_time).toLocaleString('ru-RU') : ''}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>
+                          {item.cp72_time ? new Date(item.cp72_time).toLocaleString('ru-RU') : '—'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
