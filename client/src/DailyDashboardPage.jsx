@@ -98,7 +98,7 @@ export default function DailyDashboardPage() {
       const monday = new Date(d);
       monday.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
       const sunday = new Date(monday);
-      sunday.setDate(monday.getDate() + 6);          // ← воскресенье
+      sunday.setDate(monday.getDate() + 6);
       const weekNum = (() => {
         const target = new Date(monday);
         const dayNr = (target.getDay() + 6) % 7;
@@ -277,7 +277,7 @@ export default function DailyDashboardPage() {
         </div>
       </div>
 
-      {/* Основная таблица DRR/DPU/DPU OFF */}
+      {/* Основная таблица DRR/DPU */}
       <div style={{ ...cardStyle, marginBottom: 20 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12, color: '#1F2937' }}>
           CW{weekData.weekNumber}{' '}
@@ -307,18 +307,13 @@ export default function DailyDashboardPage() {
               </tr>
               <tr>
                 <td style={{ ...tdStyle, fontWeight: 600 }}>DPU</td>
-                <td style={tdStyle}>{weekData.weekDpu}</td>
-                {weekData.dpu.map((val, i) => <td key={i} style={tdStyle}>{val}</td>)}
+                <td style={tdStyle}>{weekData.weekDpuOff}</td>
+                {(weekData.dpuOff || []).map((val, i) => <td key={i} style={tdStyle}>{val}</td>)}
               </tr>
               <tr style={{ backgroundColor: '#F9FAFB' }}>
                 <td style={{ ...tdStyle, fontWeight: 600 }}>Target DPU</td>
                 <td style={tdStyle}>0.4</td>
                 {dayLabels.map((_, i) => <td key={i} style={tdStyle}>0.4</td>)}
-              </tr>
-              <tr>
-                <td style={{ ...tdStyle, fontWeight: 600 }}>DPU OFF</td>
-                <td style={tdStyle}>{weekData.weekDpuOff}</td>
-                {(weekData.dpuOff || []).map((val, i) => <td key={i} style={tdStyle}>{val}</td>)}
               </tr>
             </tbody>
           </table>
