@@ -8,12 +8,11 @@ const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
   width: '100%',
-  height: '100vh',
+  minHeight: '100vh',
   boxSizing: 'border-box',
   backgroundColor: '#F8FAFC',
   display: 'flex',
   flexDirection: 'column',
-  overflow: 'hidden',
 };
 
 const headerStyle = {
@@ -50,14 +49,12 @@ const timeFilterButtonStyle = (active, activeColor) => ({
   transition: 'all 0.2s',
 });
 
+// 3 карточки в ряд
 const gridStyle = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+  gridTemplateColumns: 'repeat(3, 1fr)',
   gap: '20px',
-  flex: 1,
-  minHeight: 0,
-  overflowY: 'auto',
-  paddingRight: 4,
+  width: '100%',
 };
 
 const cardStyle = {
@@ -68,7 +65,6 @@ const cardStyle = {
   flexDirection: 'column',
   boxShadow: '0 8px 30px rgba(0,0,0,0.05)',
   border: '1px solid #F1F5F9',
-  minHeight: 0,
 };
 
 const cardTitleStyle = {
@@ -87,14 +83,21 @@ const centerLabelStyle = {
   pointerEvents: 'none',
 };
 
-const tableWrapperStyle = {
-  flex: 1,
-  minHeight: 160,
-  maxHeight: 320,
-  overflowY: 'auto',
+// Отдельный белый бокс под таблицу
+const tableBoxStyle = {
   marginTop: 14,
-  border: '1px solid #E2E8F0',
+  backgroundColor: '#FFFFFF',
   borderRadius: 12,
+  border: '1px solid #E2E8F0',
+  overflow: 'hidden',
+  display: 'flex',
+  flexDirection: 'column',
+  maxHeight: 260,
+};
+
+const tableScrollStyle = {
+  overflowY: 'auto',
+  width: '100%',
 };
 
 const tableStyle = {
@@ -103,31 +106,33 @@ const tableStyle = {
 };
 
 const th2 = {
-  padding: '10px 12px',
+  padding: '6px 10px',
   textAlign: 'left',
-  fontSize: '0.85rem',
+  fontSize: '0.72rem',
   fontWeight: 700,
-  color: '#475569',
+  color: '#64748B',
   background: '#F8FAFC',
-  borderBottom: '2px solid #E2E8F0',
+  borderBottom: '1px solid #E2E8F0',
   position: 'sticky',
   top: 0,
   zIndex: 2,
   textTransform: 'uppercase',
+  letterSpacing: 0.3,
 };
 
 const td2 = {
-  padding: '8px 12px',
-  fontSize: '0.9rem',
+  padding: '5px 10px',
+  fontSize: '0.78rem',
   color: '#1E293B',
   borderBottom: '1px solid #F1F5F9',
+  lineHeight: 1.25,
 };
 
 const emptyStyle = {
   textAlign: 'center',
-  padding: 24,
+  padding: 20,
   color: '#94A3B8',
-  fontSize: '0.95rem',
+  fontSize: '0.85rem',
 };
 
 /* ===================== КОНФИГ ВСЕХ DRR ===================== */
@@ -136,42 +141,42 @@ const DRR_CONFIGS = [
     key: 'cp5',
     title: 'DRR CP5',
     dashboardUrl: '/api/drr-cp5-dashboard',
-    vinsUrl: '/api/drr-cp5-vins',
+    topDefectsUrl: '/api/drr-cp5-top-defects',
     extra: { filter: 'all' },
   },
   {
     key: 'cp6',
     title: 'DRR CP6',
     dashboardUrl: '/api/drr-cp6-dashboard',
-    vinsUrl: '/api/drr-cp6-vins',
+    topDefectsUrl: '/api/drr-cp6-top-defects',
     extra: {},
   },
   {
     key: 'pip',
     title: 'DRR PIP',
     dashboardUrl: '/api/drr-pip-dashboard',
-    vinsUrl: '/api/drr-pip-vins',
+    topDefectsUrl: '/api/drr-pip-top-defects',
     extra: {},
   },
   {
     key: 'cp7',
     title: 'DRR CP7',
     dashboardUrl: '/api/drr-cp7-dashboard',
-    vinsUrl: '/api/drr-cp7-vins',
+    topDefectsUrl: '/api/drr-cp7-top-defects',
     extra: { filter: 'all' },
   },
   {
     key: 'adas',
     title: 'DRR ADAS',
     dashboardUrl: '/api/drr-tl-dashboard',
-    vinsUrl: '/api/drr-tl-vins',
+    topDefectsUrl: '/api/drr-tl-top-defects',
     extra: {},
   },
   {
     key: 'cpfinal',
     title: 'DRR CPFinal',
     dashboardUrl: '/api/drr-cpfinal-dashboard',
-    vinsUrl: '/api/drr-cpfinal-vins',
+    topDefectsUrl: '/api/drr-cpfinal-top-defects',
     extra: {},
   },
 ];
@@ -179,8 +184,8 @@ const DRR_CONFIGS = [
 /* ===================== ХЕЛПЕРЫ ВРЕМЕНИ ===================== */
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
 const getMoscowMinutes = () => {
-  const moscow = getMoscowTime();
-  return moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+  const m = getMoscowTime();
+  return m.getUTCHours() * 60 + m.getUTCMinutes();
 };
 
 const getDefaultTimeFilter = () => {
@@ -253,10 +258,10 @@ const getCurrentShiftInfo = () => {
   return { weekNumber, shiftLetter, shiftType };
 };
 
-/* ===================== КОМПОНЕНТ КАРТОЧКИ ===================== */
-function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
+/* ===================== КАРТОЧКА ===================== */
+function DrrCard({ title, dashboardUrl, topDefectsUrl, extra = {}, timeRange }) {
   const [data, setData] = useState({ total: 0, ok: 0, nok: 0, drrPercent: 0 });
-  const [rows, setRows] = useState([]);
+  const [topDefects, setTopDefects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -269,21 +274,15 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
 
     (async () => {
       try {
-        const baseParams = new URLSearchParams({
+        const params = new URLSearchParams({
           startTime: timeRange.start,
           endTime: timeRange.end,
-          ...extra,
-        });
-        const vinsParams = new URLSearchParams({
-          startTime: timeRange.start,
-          endTime: timeRange.end,
-          status: 'NOK',
           ...extra,
         });
 
-        const [dRes, vRes] = await Promise.all([
-          fetch(`${API_BASE}${dashboardUrl}?${baseParams.toString()}`).then(r => r.json()),
-          fetch(`${API_BASE}${vinsUrl}?${vinsParams.toString()}`).then(r => r.json()),
+        const [dRes, tRes] = await Promise.all([
+          fetch(`${API_BASE}${dashboardUrl}?${params.toString()}`).then(r => r.json()),
+          fetch(`${API_BASE}${topDefectsUrl}?${params.toString()}`).then(r => r.json()),
         ]);
 
         if (!alive) return;
@@ -294,18 +293,7 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
         const drrPercent = typeof dRes.drrPercent === 'number' ? dRes.drrPercent : 0;
 
         setData({ total, ok, nok, drrPercent });
-
-        const grouped = {};
-        (Array.isArray(vRes) ? vRes : []).forEach(v => {
-          const key = v.material_desc || v.model || '—';
-          grouped[key] = (grouped[key] || 0) + 1;
-        });
-
-        const result = Object.entries(grouped)
-          .map(([name, count]) => ({ name, count }))
-          .sort((a, b) => b.count - a.count);
-
-        setRows(result);
+        setTopDefects(Array.isArray(tRes) ? tRes.slice(0, 3) : []);
       } catch (err) {
         if (alive) setError(err.message);
       } finally {
@@ -314,7 +302,7 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
     })();
 
     return () => { alive = false; };
-  }, [timeRange.start, timeRange.end, dashboardUrl, vinsUrl, extraKey]);
+  }, [timeRange.start, timeRange.end, dashboardUrl, topDefectsUrl, extraKey]);
 
   const pieData = [
     { name: 'DRR', value: data.drrPercent },
@@ -337,18 +325,16 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
   const blockLabel = { fontSize: '0.72rem', fontWeight: 600, opacity: 0.9, lineHeight: 1 };
   const blockValue = { fontSize: '1.6rem', fontWeight: 900, lineHeight: 1.1 };
 
-  const top3 = rows.slice(0, 3);
-
   return (
     <div style={cardStyle}>
       <h3 style={cardTitleStyle}>{title}</h3>
 
-      {/* === Пончик === */}
-      <div style={{ position: 'relative', width: '100%', height: 220, flexShrink: 0 }}>
+      {/* Пончик */}
+      <div style={{ position: 'relative', width: '100%', height: 200, flexShrink: 0 }}>
         {loading ? (
-          <div style={{ ...emptyStyle, paddingTop: 90 }}>Загрузка...</div>
+          <div style={{ ...emptyStyle, paddingTop: 80 }}>Загрузка...</div>
         ) : error ? (
-          <div style={{ ...emptyStyle, paddingTop: 90, color: '#DC2626' }}>Ошибка</div>
+          <div style={{ ...emptyStyle, paddingTop: 80, color: '#DC2626' }}>Ошибка</div>
         ) : (
           <>
             <ResponsiveContainer width="100%" height="100%">
@@ -370,13 +356,13 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
                     const count = name === 'DRR' ? data.ok : data.nok;
                     return [`${value.toFixed(1)}% (${count} VIN)`, name];
                   }}
-                  contentStyle={{ fontSize: '0.9rem', borderRadius: 10 }}
+                  contentStyle={{ fontSize: '0.85rem', borderRadius: 10 }}
                 />
               </PieChart>
             </ResponsiveContainer>
 
             <div style={centerLabelStyle}>
-              <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
+              <div style={{ fontSize: '2.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                 {data.drrPercent.toFixed(1)}%
               </div>
             </div>
@@ -384,8 +370,8 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
         )}
       </div>
 
-      {/* === 3 блока: Всего / OK / NOK === */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 4, marginBottom: 14 }}>
+      {/* 3 блока */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 4, marginBottom: 4 }}>
         <div style={{ ...blockBase, backgroundColor: '#1E293B' }}>
           <div style={blockLabel}>Всего</div>
           <div style={blockValue}>{data.total}</div>
@@ -400,31 +386,37 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
         </div>
       </div>
 
-      {/* === Таблица (топ-3) === */}
-      <div style={tableWrapperStyle}>
+      {/* Таблица в отдельном белом боксе */}
+      <div style={tableBoxStyle}>
         {loading ? (
           <div style={emptyStyle}>Загрузка...</div>
-        ) : top3.length === 0 ? (
+        ) : topDefects.length === 0 ? (
           <div style={emptyStyle}>Нет данных</div>
         ) : (
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={th2}>Модель</th>
-                <th style={{ ...th2, textAlign: 'right' }}>NOK</th>
-              </tr>
-            </thead>
-            <tbody>
-              {top3.map((row, idx) => (
-                <tr key={row.name} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
-                  <td style={td2}>{row.name}</td>
-                  <td style={{ ...td2, textAlign: 'right', fontWeight: 700, color: '#DC2626' }}>
-                    {row.count}
-                  </td>
+          <div style={tableScrollStyle}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={th2}>MPP</th>
+                  <th style={{ ...th2, width: 60, textAlign: 'center' }}>Класс</th>
+                  <th style={{ ...th2, width: 50, textAlign: 'right' }}>Кол-во</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {topDefects.map((d, idx) => (
+                  <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                    <td style={{ ...td2, fontWeight: 500 }} title={d.mpp}>{d.mpp}</td>
+                    <td style={{ ...td2, textAlign: 'center', color: '#475569', fontWeight: 600 }}>
+                      {d.grade || '—'}
+                    </td>
+                    <td style={{ ...td2, textAlign: 'right', fontWeight: 700, color: '#DC2626' }}>
+                      {d.defectCount}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
@@ -458,7 +450,6 @@ export default function AllDrrDashboardPage() {
         <h1 style={titleStyle}>All DRR Dashboard</h1>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* CW + смена */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
               background: '#FFFFFF', borderRadius: 20, padding: '12px 28px',
@@ -483,7 +474,6 @@ export default function AllDrrDashboardPage() {
 
           <div style={{ width: 1, height: 60, backgroundColor: '#D1D5DB' }} />
 
-          {/* Фильтры */}
           <div style={filterGroupStyle}>
             <button style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')} onClick={() => handleFilterClick('all')}>Сутки</button>
             <button style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')} onClick={() => handleFilterClick('day')}>День</button>
@@ -499,7 +489,7 @@ export default function AllDrrDashboardPage() {
             key={cfg.key}
             title={cfg.title}
             dashboardUrl={cfg.dashboardUrl}
-            vinsUrl={cfg.vinsUrl}
+            topDefectsUrl={cfg.topDefectsUrl}
             extra={cfg.extra}
             timeRange={timeRange}
           />
