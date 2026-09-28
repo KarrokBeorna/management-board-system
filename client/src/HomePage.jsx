@@ -27,7 +27,7 @@ import VehPreview from './assets/repai.png';
 import drrWtPortalPreview from './assets/cp8drr.png';
 import drrCp6Preview from './assets/drrcp6.png';
 import drrCp5Preview from './assets/drrcp5.png';
-import allDrrPreview from './assets/cp8drr.png'; // временно
+import allDrrPreview from './assets/alldrrcomp.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {

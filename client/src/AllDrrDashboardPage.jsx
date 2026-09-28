@@ -397,7 +397,7 @@ function DrrCard({ title, dashboardUrl, topDefectsUrl, extra = {}, timeRange }) 
             <table style={tableStyle}>
               <thead>
                 <tr>
-                  <th style={th2}>MPP</th>
+                  <th style={th2}>Top-3 MPP</th>
                   <th style={{ ...th2, width: 60, textAlign: 'center' }}>Класс</th>
                   <th style={{ ...th2, width: 50, textAlign: 'right' }}>Кол-во</th>
                 </tr>
