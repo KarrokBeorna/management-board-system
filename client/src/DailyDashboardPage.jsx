@@ -27,6 +27,13 @@ const tdStyle = {
   color: '#1F2937',
 };
 
+const inputStyle = {
+  padding: '6px 10px',
+  borderRadius: 6,
+  border: '1px solid #D1D5DB',
+  fontSize: 13,
+};
+
 const translationCache = new Map();
 async function translateText(text, from = 'ru', to = 'en') {
   if (!text || !text.trim()) return text;
@@ -39,7 +46,7 @@ async function translateText(text, from = 'ru', to = 'en') {
     const translated = json.responseData?.translatedText || text;
     translationCache.set(cacheKey, translated);
     return translated;
-  } catch (err) {
+  } catch {
     return text;
   }
 }
@@ -50,6 +57,7 @@ export default function DailyDashboardPage() {
   const [weekData, setWeekData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedWeekOffset, setSelectedWeekOffset] = useState(0);
+  const [shiftFilter, setShiftFilter] = useState('all');
 
   const yesterday = useMemo(() => {
     const d = new Date();
@@ -57,22 +65,28 @@ export default function DailyDashboardPage() {
     return d.toISOString().split('T')[0];
   }, []);
 
-  // DRR TOP 3
+  // ---------- DRR TOP 3 (диапазон) ----------
   const [showTop3Filter, setShowTop3Filter] = useState(false);
-  const [top3Date, setTop3Date] = useState(yesterday);
+  const [top3DateFrom, setTop3DateFrom] = useState(yesterday);
+  const [top3DateTo, setTop3DateTo] = useState(yesterday);
   const [top3RawData, setTop3RawData] = useState([]);
   const [top3Translated, setTop3Translated] = useState([]);
   const [top3Loading, setTop3Loading] = useState(false);
 
-  // A/B/C Calls
+  // ---------- TOP 5 A/B (диапазон) ----------
   const [selectedGrades, setSelectedGrades] = useState(['A', 'B', 'A1', 'B1']);
   const [availableGrades, setAvailableGrades] = useState([]);
   const [showGradeFilter, setShowGradeFilter] = useState(false);
   const [showTop5Filter, setShowTop5Filter] = useState(false);
-  const [top5Date, setTop5Date] = useState(yesterday);
+  const [top5DateFrom, setTop5DateFrom] = useState(yesterday);
+  const [top5DateTo, setTop5DateTo] = useState(yesterday);
   const [top5RawData, setTop5RawData] = useState([]);
   const [top5Translated, setTop5Translated] = useState([]);
   const [top5Loading, setTop5Loading] = useState(false);
+
+  // ---------- DRR TOP 3 WEEK ----------
+  const [weekTop3Data, setWeekTop3Data] = useState([]);
+  const [weekTop3Loading, setWeekTop3Loading] = useState(false);
 
   const weekOptions = useMemo(() => {
     const options = [];
@@ -83,8 +97,8 @@ export default function DailyDashboardPage() {
       const day = d.getDay();
       const monday = new Date(d);
       monday.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
-      const saturday = new Date(monday);
-      saturday.setDate(monday.getDate() + 5);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);          // ← воскресенье
       const weekNum = (() => {
         const target = new Date(monday);
         const dayNr = (target.getDay() + 6) % 7;
@@ -96,9 +110,9 @@ export default function DailyDashboardPage() {
       })();
       options.push({
         value: i,
-        label: `CW${weekNum} (${monday.toISOString().split('T')[0]} – ${saturday.toISOString().split('T')[0]})`,
+        label: `CW${weekNum} (${monday.toISOString().split('T')[0]} – ${sunday.toISOString().split('T')[0]})`,
         start: monday.toISOString().split('T')[0],
-        end: saturday.toISOString().split('T')[0],
+        end: sunday.toISOString().split('T')[0],
       });
     }
     return options;
@@ -119,6 +133,7 @@ export default function DailyDashboardPage() {
     const params = new URLSearchParams({
       weekStart: currentWeek.start,
       weekEnd: currentWeek.end,
+      shift: shiftFilter,
     });
     fetch(`${API_BASE}/api/daily-dashboard-week?${params.toString()}`)
       .then(res => res.json())
@@ -130,13 +145,14 @@ export default function DailyDashboardPage() {
         console.error(err);
         setLoading(false);
       });
-  }, [selectedWeekOffset, currentWeek.start, currentWeek.end]);
+  }, [selectedWeekOffset, currentWeek.start, currentWeek.end, shiftFilter]);
 
-  // Загрузка Top 3
   const loadTop3 = () => {
-    if (!top3Date) return;
     setTop3Loading(true);
-    const params = new URLSearchParams({ date: top3Date });
+    const params = new URLSearchParams({
+      dateFrom: top3DateFrom,
+      dateTo: top3DateTo,
+    });
     fetch(`${API_BASE}/api/daily-dashboard-top3?${params.toString()}`)
       .then(res => res.json())
       .then(json => {
@@ -146,11 +162,12 @@ export default function DailyDashboardPage() {
       .catch(() => setTop3Loading(false));
   };
 
-  // Загрузка Top 5
   const loadTop5 = () => {
-    if (!top5Date) return;
     setTop5Loading(true);
-    const params = new URLSearchParams({ date: top5Date });
+    const params = new URLSearchParams({
+      dateFrom: top5DateFrom,
+      dateTo: top5DateTo,
+    });
     if (selectedGrades.length > 0) {
       params.append('grades', selectedGrades.join(','));
     }
@@ -162,6 +179,22 @@ export default function DailyDashboardPage() {
       })
       .catch(() => setTop5Loading(false));
   };
+
+  // Загрузка DRR TOP 3 WEEK
+  useEffect(() => {
+    if (!currentWeek) return;
+    setWeekTop3Loading(true);
+    const params = new URLSearchParams({
+      dateFrom: currentWeek.start,
+      dateTo: currentWeek.end,
+      shift: shiftFilter,
+    });
+    fetch(`${API_BASE}/api/daily-dashboard-week-top3?${params.toString()}`)
+      .then(res => res.json())
+      .then(json => setWeekTop3Data(json || []))
+      .catch(() => setWeekTop3Data([]))
+      .finally(() => setWeekTop3Loading(false));
+  }, [currentWeek.start, currentWeek.end, shiftFilter]);
 
   // Первоначальная загрузка топов
   useEffect(() => {
@@ -186,9 +219,8 @@ export default function DailyDashboardPage() {
     } else setTop5Translated([]);
   }, [useEnglish, top5RawData]);
 
-  // При изменении даты или классов
-  useEffect(() => { loadTop3(); }, [top3Date]);
-  useEffect(() => { loadTop5(); }, [top5Date, selectedGrades]);
+  useEffect(() => { loadTop3(); }, [top3DateFrom, top3DateTo]);
+  useEffect(() => { loadTop5(); }, [top5DateFrom, top5DateTo, selectedGrades]);
 
   const handleGradeToggle = (grade) => {
     setSelectedGrades(prev => prev.includes(grade) ? prev.filter(g => g !== grade) : [...prev, grade]);
@@ -215,13 +247,22 @@ export default function DailyDashboardPage() {
     );
   }
 
-  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   return (
     <div style={{ padding: 30, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30, flexWrap: 'wrap', gap: 12 }}>
         <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, margin: 0 }}>QUALITY DAILY REPORT</h1>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select value={shiftFilter} onChange={e => setShiftFilter(e.target.value)} style={{
+            padding: '8px 16px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14,
+            background: '#FFFFFF', fontWeight: 500,
+          }}>
+            <option value="all">Сутки</option>
+            <option value="day">День</option>
+            <option value="evening">Вечер</option>
+            <option value="night">Ночь</option>
+          </select>
           <button onClick={() => setUseEnglish(!useEnglish)} style={{
             padding: '8px 16px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14,
             background: useEnglish ? '#2563EB' : '#FFFFFF', color: useEnglish ? '#FFFFFF' : '#374151',
@@ -236,7 +277,7 @@ export default function DailyDashboardPage() {
         </div>
       </div>
 
-      {/* Основная таблица DRR/DPU */}
+      {/* Основная таблица DRR/DPU/DPU OFF */}
       <div style={{ ...cardStyle, marginBottom: 20 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12, color: '#1F2937' }}>
           CW{weekData.weekNumber}{' '}
@@ -274,6 +315,11 @@ export default function DailyDashboardPage() {
                 <td style={tdStyle}>0.4</td>
                 {dayLabels.map((_, i) => <td key={i} style={tdStyle}>0.4</td>)}
               </tr>
+              <tr>
+                <td style={{ ...tdStyle, fontWeight: 600 }}>DPU OFF</td>
+                <td style={tdStyle}>{weekData.weekDpuOff}</td>
+                {(weekData.dpuOff || []).map((val, i) => <td key={i} style={tdStyle}>{val}</td>)}
+              </tr>
             </tbody>
           </table>
         </div>
@@ -291,9 +337,11 @@ export default function DailyDashboardPage() {
             }}>{showTop3Filter ? 'Скрыть фильтр' : 'Фильтр'}</button>
           </div>
           {showTop3Filter && (
-            <div style={{ marginBottom: 12 }}>
-              <input type="date" value={top3Date} onChange={e => setTop3Date(e.target.value)}
-                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }} />
+            <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, color: '#6B7280' }}>с</span>
+              <input type="date" value={top3DateFrom} onChange={e => setTop3DateFrom(e.target.value)} style={inputStyle} />
+              <span style={{ fontSize: 12, color: '#6B7280' }}>по</span>
+              <input type="date" value={top3DateTo} onChange={e => setTop3DateTo(e.target.value)} style={inputStyle} />
             </div>
           )}
           {top3Loading ? <p style={{ color: '#6B7280', textAlign: 'center', padding: 10 }}>Загрузка...</p> : (
@@ -311,7 +359,7 @@ export default function DailyDashboardPage() {
           )}
         </div>
 
-        {/* CP7 - CP8 A/B/C CALLS TOP 5 */}
+        {/* TOP 5 A/B */}
         <div style={{ ...cardStyle, flex: 1, minWidth: 300 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1F2937', margin: 0 }}>TOP 5 A/B дефектов на CP7 и CP8</h2>
@@ -327,9 +375,11 @@ export default function DailyDashboardPage() {
             </div>
           </div>
           {showTop5Filter && (
-            <div style={{ marginBottom: 12 }}>
-              <input type="date" value={top5Date} onChange={e => setTop5Date(e.target.value)}
-                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }} />
+            <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, color: '#6B7280' }}>с</span>
+              <input type="date" value={top5DateFrom} onChange={e => setTop5DateFrom(e.target.value)} style={inputStyle} />
+              <span style={{ fontSize: 12, color: '#6B7280' }}>по</span>
+              <input type="date" value={top5DateTo} onChange={e => setTop5DateTo(e.target.value)} style={inputStyle} />
             </div>
           )}
           {showGradeFilter && (
@@ -356,6 +406,36 @@ export default function DailyDashboardPage() {
             </table>
           )}
         </div>
+      </div>
+
+      {/* DRR TOP 3 WEEK */}
+      <div style={{ ...cardStyle }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1F2937', margin: '0 0 12px 0' }}>
+          DRR TOP 3 — неделя CW{weekData.weekNumber}
+          <span style={{ fontSize: 14, fontWeight: 400, color: '#6B7280', marginLeft: 8 }}>
+            ({weekData.weekStart} – {weekData.weekEnd})
+          </span>
+        </h2>
+        {weekTop3Loading ? <p style={{ color: '#6B7280', textAlign: 'center', padding: 10 }}>Загрузка...</p> : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>DEFECT</th>
+                <th style={{ ...thStyle, width: 120 }}>COUNT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {weekTop3Data.length === 0 ? (
+                <tr><td colSpan={2} style={{ ...tdStyle, color: '#94A3B8' }}>Нет данных</td></tr>
+              ) : weekTop3Data.map((item, idx) => (
+                <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#F9FAFB' : 'white' }}>
+                  <td style={{ ...tdStyle, textAlign: 'left' }}>{item.defect}</td>
+                  <td style={tdStyle}>{item.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
