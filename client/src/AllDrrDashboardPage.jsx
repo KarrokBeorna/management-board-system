@@ -295,7 +295,6 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
 
         setData({ total, ok, nok, drrPercent });
 
-        // Группировка NOK VIN по комплектации (material_desc) или модели
         const grouped = {};
         (Array.isArray(vRes) ? vRes : []).forEach(v => {
           const key = v.material_desc || v.model || '—';
@@ -304,8 +303,7 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
 
         const result = Object.entries(grouped)
           .map(([name, count]) => ({ name, count }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 15);
+          .sort((a, b) => b.count - a.count);
 
         setRows(result);
       } catch (err) {
@@ -323,10 +321,29 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
     { name: 'NOK', value: Math.max(0, 100 - data.drrPercent) },
   ];
 
+  const blockBase = {
+    flex: 1,
+    borderRadius: 10,
+    padding: '10px 6px',
+    textAlign: 'center',
+    color: '#FFFFFF',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 2,
+  };
+
+  const blockLabel = { fontSize: '0.72rem', fontWeight: 600, opacity: 0.9, lineHeight: 1 };
+  const blockValue = { fontSize: '1.6rem', fontWeight: 900, lineHeight: 1.1 };
+
+  const top3 = rows.slice(0, 3);
+
   return (
     <div style={cardStyle}>
       <h3 style={cardTitleStyle}>{title}</h3>
 
+      {/* === Пончик === */}
       <div style={{ position: 'relative', width: '100%', height: 220, flexShrink: 0 }}>
         {loading ? (
           <div style={{ ...emptyStyle, paddingTop: 90 }}>Загрузка...</div>
@@ -362,18 +379,32 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
               <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                 {data.drrPercent.toFixed(1)}%
               </div>
-              <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: 4 }}>
-                {data.ok} / {data.total}
-              </div>
             </div>
           </>
         )}
       </div>
 
+      {/* === 3 блока: Всего / OK / NOK === */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 4, marginBottom: 14 }}>
+        <div style={{ ...blockBase, backgroundColor: '#1E293B' }}>
+          <div style={blockLabel}>Всего</div>
+          <div style={blockValue}>{data.total}</div>
+        </div>
+        <div style={{ ...blockBase, backgroundColor: '#059669' }}>
+          <div style={blockLabel}>OK</div>
+          <div style={blockValue}>{data.ok}</div>
+        </div>
+        <div style={{ ...blockBase, backgroundColor: '#DC2626' }}>
+          <div style={blockLabel}>NOK</div>
+          <div style={blockValue}>{data.nok}</div>
+        </div>
+      </div>
+
+      {/* === Таблица (топ-3) === */}
       <div style={tableWrapperStyle}>
         {loading ? (
           <div style={emptyStyle}>Загрузка...</div>
-        ) : rows.length === 0 ? (
+        ) : top3.length === 0 ? (
           <div style={emptyStyle}>Нет данных</div>
         ) : (
           <table style={tableStyle}>
@@ -384,7 +415,7 @@ function DrrCard({ title, dashboardUrl, vinsUrl, extra = {}, timeRange }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, idx) => (
+              {top3.map((row, idx) => (
                 <tr key={row.name} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
                   <td style={td2}>{row.name}</td>
                   <td style={{ ...td2, textAlign: 'right', fontWeight: 700, color: '#DC2626' }}>
