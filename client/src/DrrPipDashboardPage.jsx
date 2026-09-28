@@ -428,31 +428,41 @@ export default function DrrPipDashboardPage() {
             </button>
 
             <select
-              value={selectedSnapshotId}
-              onChange={(e) => setSelectedSnapshotId(e.target.value)}
-              style={{
-                padding: '12px 16px',
-                borderRadius: '12px',
-                border: '1px solid #D1D5DB',
-                fontSize: '1.2rem',
-                fontWeight: 600,
-                background: '#FFFFFF',
-                cursor: 'pointer',
-                minWidth: 220,
-              }}
-            >
-              <option value="live">Сейчас (live)</option>
-              {snapshots.map(s => {
-                const shiftLabel = s.shift === 'day' ? 'День' : s.shift === 'evening' ? 'Вечер' : 'Ночь';
-                const dateObj = new Date(s.shiftDate + 'T12:00:00');
-                const dd = String(dateObj.getDate()).padStart(2, '0');
-                const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-                return (
-                  <option key={s.id} value={s.id}>
-                    {dd}.{mm} · {shiftLabel} ({s.drrPercent}%)
-                  </option>
-                );
-              })}
+                value={selectedSnapshotId}
+                onChange={(e) => setSelectedSnapshotId(e.target.value)}
+                style={{
+                    padding: '12px 24px',
+                    borderRadius: '12px',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: '1.4rem',
+                    background: '#FFFFFF',
+                    color: '#64748B',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                    minWidth: 220,
+                    appearance: 'none',
+                    WebkitAppearance: 'none',
+                    MozAppearance: 'none',
+                    backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>")`,
+                    backgroundRepeat: 'no-repeat',
+                    backgroundPosition: 'right 16px center',
+                    paddingRight: '44px',
+                    transition: 'all 0.2s',
+                }}
+                >
+                <option value="live">Сейчас (live)</option>
+                {snapshots.map(s => {
+                    const shiftLabel = s.shift === 'day' ? 'День' : s.shift === 'evening' ? 'Вечер' : 'Ночь';
+                    const dateObj = new Date(s.shiftDate + 'T12:00:00');
+                    const dd = String(dateObj.getDate()).padStart(2, '0');
+                    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    return (
+                    <option key={s.id} value={s.id}>
+                        {dd}.{mm} · {shiftLabel} ({s.drrPercent}%)
+                    </option>
+                    );
+                })}
             </select>
           </div>
         </div>
