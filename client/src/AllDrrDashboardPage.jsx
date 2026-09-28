@@ -259,7 +259,7 @@ const getCurrentShiftInfo = () => {
 };
 
 /* ===================== КАРТОЧКА ===================== */
-function DrrCard({ title, dashboardUrl, topDefectsUrl, extra = {}, timeRange }) {
+function DrrCard({ title, dashboardUrl, topDefectsUrl, extra = {}, timeRange, refreshTick }) {
   const [data, setData] = useState({ total: 0, ok: 0, nok: 0, drrPercent: 0 });
   const [topDefects, setTopDefects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -302,7 +302,7 @@ function DrrCard({ title, dashboardUrl, topDefectsUrl, extra = {}, timeRange }) 
     })();
 
     return () => { alive = false; };
-  }, [timeRange.start, timeRange.end, dashboardUrl, topDefectsUrl, extraKey]);
+  }, [timeRange.start, timeRange.end, dashboardUrl, topDefectsUrl, extraKey, refreshTick]);
 
   const pieData = [
     { name: 'DRR', value: data.drrPercent },
@@ -428,7 +428,9 @@ export default function AllDrrDashboardPage() {
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
   const [isManualFilter, setIsManualFilter] = useState(false);
   const [shiftInfo, setShiftInfo] = useState(getCurrentShiftInfo());
+  const [refreshTick, setRefreshTick] = useState(0);
 
+  // Проверка смены и автосмена фильтра раз в минуту
   useEffect(() => {
     const interval = setInterval(() => {
       setShiftInfo(getCurrentShiftInfo());
@@ -436,6 +438,14 @@ export default function AllDrrDashboardPage() {
     }, 60000);
     return () => clearInterval(interval);
   }, [isManualFilter]);
+
+  // Авто-обновление данных каждые 30 секунд
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRefreshTick(t => t + 1);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleFilterClick = (f) => {
     setIsManualFilter(true);
@@ -492,6 +502,7 @@ export default function AllDrrDashboardPage() {
             topDefectsUrl={cfg.topDefectsUrl}
             extra={cfg.extra}
             timeRange={timeRange}
+            refreshTick={refreshTick}
           />
         ))}
       </div>
