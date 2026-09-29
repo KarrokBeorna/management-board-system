@@ -10756,16 +10756,22 @@ app.get('/api/drr-cpfinal-snapshot/:id', async (req, res) => {
 
 
 /* ====================================================================== */
-/* ===================== DRR CP6 (PSOUT/PSIN) =========================== */
+/* ===================== DRR CP6 (PSIN/PSOUT/BUFFER) ==================== */
 /* ====================================================================== */
 
-const CP6_PSOUT_ULOC = 'AGMPS01002';
-const CP6_PSIN_ULOC  = 'AGMPS01001';
+// Точки
+const CP6_PSIN_ULOC    = 'AGMPS01001';   // PSIN — вход в покраску (база NOK)
+const CP6_PSOUT_ULOC   = 'AGMPS01002';   // PSOUT — выход из покраски (база OK/DRR)
+const CP6_BUFFER_ENTER = 'AGMPS01003';   // PBSIN — вход в буфер
+const CP6_BUFFER_EXIT  = 'AGMPS01004';   // PBSOUT — выход из буфера
+
+// Порог «застрявших» VIN (совпадает с продакшн-отчётом)
+const BUFFER_MAX_AGE_DAYS = 14;
 
 const CP6_DEFECT_CLOSED_STATUSES = new Set(['CLOSED']);
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: VIN + времена PSOUT за период                                  */
+/* Хелпер: VIN + времена PSOUT за период (база для OK / DRR)               */
 /* ---------------------------------------------------------------------- */
 async function getCp6PsoutVins(startTime, endTime) {
   const [rows] = await mesPool.query(`
@@ -10796,7 +10802,7 @@ async function getCp6PsoutVins(startTime, endTime) {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: VIN + времена PSIN за период                                   */
+/* Хелпер: VIN + времена PSIN за период (база для NOK)                     */
 /* ---------------------------------------------------------------------- */
 async function getCp6PsinVins(startTime, endTime) {
   const [rows] = await mesPool.query(`
@@ -10815,11 +10821,13 @@ async function getCp6PsinVins(startTime, endTime) {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: активные на покраске — последний PSIN позже последнего PSOUT    */
+/* Хелпер: активные на покраске                                            */
+/* Последний PSIN (AGMPS01001) > последнего PSOUT (AGMPS01002),           */
+/* PBSIN был не старше BUFFER_MAX_AGE_DAYS дней                           */
 /* ---------------------------------------------------------------------- */
 async function getCp6ActiveAtPaint() {
   const [rows] = await mesPool.query(`
-    SELECT psin.vin, psin.last_psin
+    SELECT psin.vin, psin.last_psin AS active_enter_time
     FROM (
       SELECT vin, MAX(scan_time) AS last_psin
       FROM ti_mes_movement
@@ -10832,14 +10840,43 @@ async function getCp6ActiveAtPaint() {
       WHERE uloc_no = ? AND is_deleted = 0
       GROUP BY vin
     ) psout ON psout.vin = psin.vin
-    WHERE psout.vin IS NULL OR psin.last_psin > psout.last_psout
-  `, [CP6_PSIN_ULOC, CP6_PSOUT_ULOC]);
-  return rows.map(r => ({ vin: r.vin, last_psin: r.last_psin }));
+    WHERE (psout.vin IS NULL OR psin.last_psin > psout.last_psout)
+      AND psin.last_psin >= DATE_SUB(NOW(), INTERVAL ? DAY)
+    ORDER BY psin.last_psin DESC
+  `, [CP6_PSIN_ULOC, CP6_PSOUT_ULOC, BUFFER_MAX_AGE_DAYS]);
+  return rows;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Хелпер: VIN в буфере                                                    */
+/* Последний PBSIN (AGMPS01003) > последнего PBSOUT (AGMPS01004),         */
+/* PBSIN был не старше BUFFER_MAX_AGE_DAYS дней                           */
+/* ---------------------------------------------------------------------- */
+async function getCp6BufferVins() {
+  const [rows] = await mesPool.query(`
+    SELECT psin.vin, psin.last_psin AS buffer_enter_time
+    FROM (
+      SELECT vin, MAX(scan_time) AS last_psin
+      FROM ti_mes_movement
+      WHERE uloc_no = ? AND is_deleted = 0
+      GROUP BY vin
+    ) psin
+    LEFT JOIN (
+      SELECT vin, MAX(scan_time) AS last_psout
+      FROM ti_mes_movement
+      WHERE uloc_no = ? AND is_deleted = 0
+      GROUP BY vin
+    ) psout ON psout.vin = psin.vin
+    WHERE (psout.vin IS NULL OR psin.last_psin > psout.last_psout)
+      AND psin.last_psin >= DATE_SUB(NOW(), INTERVAL ? DAY)
+    ORDER BY psin.last_psin DESC
+  `, [CP6_BUFFER_ENTER, CP6_BUFFER_EXIT, BUFFER_MAX_AGE_DAYS]);
+  return rows;
 }
 
 /* ---------------------------------------------------------------------- */
 /* Хелпер: классификация дефекта (Spot / Перекрас / other)                 */
-/* Только REPAIR_MEASURE и REPAIR_MEASURE1. Buffer-safe.                   */
+/* Только REPAIR_MEASURE и REPAIR_MEASURE1. Buffer-safe + Unicode-safe.   */
 /* ---------------------------------------------------------------------- */
 function classifyCp6DefectCategory(d) {
   const toStr = (v) => {
@@ -10861,27 +10898,26 @@ function classifyCp6DefectCategory(d) {
 /* ---------------------------------------------------------------------- */
 /* Хелпер: расширенная классификация VIN                                  */
 /*                                                                        */
-/* БЛОКИ (Spot / Перекрас / Остальные) — ЭКСКЛЮЗИВНО с приоритетом:        */
+/* OK  — PSOUT VIN'ы без открытых дефектов (формула DRR не меняется)       */
+/* NOK — PSIN VIN'ы с хотя бы одним открытым дефектом                     */
+/*                                                                        */
+/* Блоки Spot / Перекрас / Остальные — эксклюзивно, приоритет:              */
 /*   VIN имеет хотя бы 1 Spot → в spotSet                                */
 /*   иначе имеет хотя бы 1 Перекрас → в repaintSet                        */
 /*   иначе → в otherSet                                                  */
-/*   Сумма spotSet + repaintSet + otherSet = NOK.                         */
 /*                                                                        */
-/* ТАБЛИЦЫ (spotDefectVins / repaintDefectVins) — ИНКЛЮЗИВНО:              */
-/*   VIN попадает в spotDefectVins, если у него есть ≥1 spot-дефект        */
-/*   VIN попадает в repaintDefectVins, если у него есть ≥1 repaint-дефект  */
-/*   VIN может быть одновременно в обеих таблицах.                        */
+/* Таблицы — инклюзивно:                                                  */
+/*   spotDefectVins / repaintDefectVins — по наличию хоть одного дефекта   */
+/*   нужной категории (VIN может быть в обеих)                            */
 /* ---------------------------------------------------------------------- */
 async function classifyCp6VinsExtended(psoutRows, psinRows) {
   const okSet = new Set();
   const nokSet = new Set();
 
-  // для блоков (эксклюзивно)
   const spotSet = new Set();
   const repaintSet = new Set();
   const otherSet = new Set();
 
-  // для таблиц (инклюзивно)
   const spotDefectVins = new Set();
   const repaintDefectVins = new Set();
 
@@ -10902,7 +10938,7 @@ async function classifyCp6VinsExtended(psoutRows, psinRows) {
     WHERE VIN IN (${ph})
   `, allVins);
 
-  const vinCategories = new Map(); // VIN -> Set категорий
+  const vinCategories = new Map();
 
   defectRows.forEach(d => {
     const status = (d.STATUS || '').toUpperCase();
@@ -10920,7 +10956,6 @@ async function classifyCp6VinsExtended(psoutRows, psinRows) {
     else if (cat === 'repaint') repaintDefectVins.add(d.VIN);
   });
 
-  // Блоки — эксклюзивно, с приоритетом spot > repaint > other
   nokSet.forEach(v => {
     const cats = vinCategories.get(v) || new Set(['other']);
     if (cats.has('spot')) spotSet.add(v);
@@ -10997,14 +11032,16 @@ app.get('/api/drr-cp6-dashboard', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    const [{ vins: psoutRows, totalRecords }, psinRows, activeRows] = await Promise.all([
+    const [{ vins: psoutRows, totalRecords }, psinRows, activeRows, bufferRows] = await Promise.all([
       getCp6PsoutVins(startTime, endTime),
       getCp6PsinVins(startTime, endTime),
       getCp6ActiveAtPaint(),
+      getCp6BufferVins(),
     ]);
 
     const totalVins = psoutRows.length;
     const activeAtPaint = activeRows.length;
+    const bufferCount = bufferRows.length;
     const psinVins = psinRows.length;
 
     if (totalVins === 0 && psinVins === 0) {
@@ -11018,6 +11055,7 @@ app.get('/api/drr-cp6-dashboard', async (req, res) => {
         repaintVins: 0,
         otherVins: 0,
         activeAtPaint,
+        bufferCount,
         psinVins: 0,
       });
     }
@@ -11039,6 +11077,7 @@ app.get('/api/drr-cp6-dashboard', async (req, res) => {
       repaintVins: repaintSet.size,
       otherVins:   otherSet.size,
       activeAtPaint,
+      bufferCount,
       psinVins,
     });
   } catch (err) {
@@ -11136,11 +11175,6 @@ app.get('/api/drr-cp6-top-defects', async (req, res) => {
 
 /* ====================================================================== */
 /* ЭНДПОИНТ 4: дефекты для таблиц Spot / Перекрас                         */
-/*                                                                        */
-/* Таблицы построечные, категория определяется по каждому дефекту.         */
-/* VIN может присутствовать и в Spot, и в Перекрас, если у него есть       */
-/* дефекты обоих категорий — там будут показаны только дефекты             */
-/* соответствующей категории.                                             */
 /* ====================================================================== */
 app.get('/api/drr-cp6-spot-repaint-vins', async (req, res) => {
   try {
@@ -11159,7 +11193,6 @@ app.get('/api/drr-cp6-spot-repaint-vins', async (req, res) => {
 
     if (psinRows.length === 0) return res.json([]);
 
-    // Для таблиц — инклюзивные наборы VIN
     const { spotDefectVins, repaintDefectVins } = await classifyCp6VinsExtended(psoutRows, psinRows);
     const targetSet = category === 'spot' ? spotDefectVins : repaintDefectVins;
     const targetVins = [...targetSet];
@@ -11218,7 +11251,149 @@ app.get('/api/drr-cp6-spot-repaint-vins', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* DEBUG: распределение дефектов по категориям для CP6                    */
+/* ЭНДПОИНТ 5: список VIN в буфере (последние 14 дней)                     */
+/* ====================================================================== */
+app.get('/api/drr-cp6-buffer-vins', async (req, res) => {
+  try {
+    const rows = await getCp6BufferVins();
+    if (rows.length === 0) return res.json([]);
+
+    const vins = rows.map(r => r.vin);
+    const ph = vins.map(() => '?').join(',');
+
+    const [mesRows] = await mesPool.query(`
+      SELECT
+        too.vin,
+        too.material_no      AS material_code,
+        tvv.sequence_number  AS sequence_number,
+        too.product          AS model,
+        tbmr.material_desc   AS material_desc
+      FROM tm_ofm_order too
+        LEFT JOIN tm_vhc_vehicle tvv ON tvv.vin = too.vin
+        LEFT JOIN tm_bas_material_relation tbmr
+          ON tbmr.material_no = too.material_no AND tbmr.is_deleted = 0
+      WHERE too.is_deleted = 0 AND too.vin IN (${ph})
+    `, vins);
+
+    const mesByVin = new Map();
+    mesRows.forEach(r => mesByVin.set(r.vin, r));
+
+    const [iotRows] = await pool.query(`
+      SELECT vin, batch_num FROM work_order WHERE vin IN (${ph})
+    `, vins);
+    const batchByVin = new Map();
+    iotRows.forEach(r => batchByVin.set(r.vin, r.batch_num));
+
+    const result = rows.map(r => {
+      const m = mesByVin.get(r.vin) || {};
+      return {
+        vin: r.vin,
+        buffer_enter_time: r.buffer_enter_time,
+        batch_num:       batchByVin.get(r.vin) || '—',
+        sequence_number: m.sequence_number || '—',
+        model:           m.model || '—',
+        material_code:   m.material_code || '—',
+        material_desc:   m.material_desc || '—',
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка /api/drr-cp6-buffer-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ====================================================================== */
+/* DEBUG по конкретному VIN — что видит бэкенд                            */
+/* Использование: /api/drr-cp6-debug-vin/EDXDB21B5TG041953                */
+/* ====================================================================== */
+app.get('/api/drr-cp6-debug-vin/:vin', async (req, res) => {
+  try {
+    const { vin } = req.params;
+    if (!vin) return res.status(400).json({ error: 'vin обязателен' });
+
+    const info = { vin };
+
+    const [movements] = await mesPool.query(`
+      SELECT uloc_no, scan_time
+      FROM ti_mes_movement
+      WHERE vin = ?
+        AND uloc_no IN (?, ?, ?, ?)
+        AND is_deleted = 0
+      ORDER BY scan_time
+    `, [vin, CP6_PSIN_ULOC, CP6_PSOUT_ULOC, CP6_BUFFER_ENTER, CP6_BUFFER_EXIT]);
+    info.movements = movements;
+
+    info.hasPSIN    = movements.some(m => m.uloc_no === CP6_PSIN_ULOC);
+    info.hasPSOUT   = movements.some(m => m.uloc_no === CP6_PSOUT_ULOC);
+    info.hasBufferEnter = movements.some(m => m.uloc_no === CP6_BUFFER_ENTER);
+    info.hasBufferExit  = movements.some(m => m.uloc_no === CP6_BUFFER_EXIT);
+
+    const [defects] = await pool.query(`
+      SELECT
+        ID, STATUS, CREATION_TIME,
+        REPAIR_MEASURE, REPAIR_MEASURE1,
+        HEX(REPAIR_MEASURE)  AS hex_measure,
+        HEX(REPAIR_MEASURE1) AS hex_measure1
+      FROM at_paint_qm_defect_info
+      WHERE VIN = ?
+      ORDER BY CREATION_TIME DESC
+    `, [vin]);
+
+    info.defects = defects.map(d => {
+      const toStr = (v) => {
+        if (v === null || v === undefined) return '';
+        if (Buffer.isBuffer(v)) return v.toString('utf8');
+        return String(v);
+      };
+      const classKey = { ...d };
+      return {
+        ID: d.ID,
+        STATUS: d.STATUS,
+        CREATION_TIME: d.CREATION_TIME,
+        REPAIR_MEASURE: {
+          value: toStr(d.REPAIR_MEASURE),
+          typeof: typeof d.REPAIR_MEASURE,
+          isBuffer: Buffer.isBuffer(d.REPAIR_MEASURE),
+          hex: d.hex_measure,
+        },
+        REPAIR_MEASURE1: {
+          value: toStr(d.REPAIR_MEASURE1),
+          typeof: typeof d.REPAIR_MEASURE1,
+          isBuffer: Buffer.isBuffer(d.REPAIR_MEASURE1),
+          hex: d.hex_measure1,
+        },
+        classified: classifyCp6DefectCategory(classKey),
+      };
+    });
+
+    const openDefects = defects.filter(d => {
+      const s = (d.STATUS || '').toUpperCase();
+      return !CP6_DEFECT_CLOSED_STATUSES.has(s);
+    });
+
+    info.openDefectsCount = openDefects.length;
+
+    const categories = new Set(openDefects.map(d => classifyCp6DefectCategory(d)));
+    info.categories = [...categories];
+    info.block =
+      categories.has('spot') ? 'Spot' :
+      categories.has('repaint') ? 'Перекрас' :
+      openDefects.length > 0 ? 'Остальные' : null;
+
+    info.willBeInNOK = info.hasPSIN && openDefects.length > 0;
+    info.willBeInOK  = info.hasPSOUT && openDefects.length === 0;
+
+    res.json(info);
+  } catch (err) {
+    console.error('Ошибка debug-vin:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ====================================================================== */
+/* DEBUG: общая статистика классификации за период                        */
 /* ====================================================================== */
 app.get('/api/drr-cp6-classify-debug', async (req, res) => {
   try {
@@ -11264,8 +11439,8 @@ app.get('/api/drr-cp6-classify-debug', async (req, res) => {
           STATUS: d.STATUS,
           REPAIR_MEASURE_RAW:  d.REPAIR_MEASURE,
           REPAIR_MEASURE1_RAW: d.REPAIR_MEASURE1,
-          isBuffer: Buffer.isBuffer(d.REPAIR_MEASURE1),
-          typeofME: typeof d.REPAIR_MEASURE1,
+          isBufferME: Buffer.isBuffer(d.REPAIR_MEASURE),
+          isBufferME1: Buffer.isBuffer(d.REPAIR_MEASURE1),
           classified_as: cat,
         });
       }

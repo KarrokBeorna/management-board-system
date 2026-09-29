@@ -130,7 +130,23 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
-/* ===================== ХЕЛПЕРЫ ВРЕМЕНИ ===================== */
+const LABEL_SECTION_HEIGHT = 42;
+const VALUE_SECTION_HEIGHT = 62;
+
+const subBlockStyle = {
+  backgroundColor: 'rgba(255,255,255,0.20)',
+  borderRadius: 8,
+  padding: '6px 4px',
+  textAlign: 'center',
+  border: '1px solid rgba(255,255,255,0.18)',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 2,
+};
+
+/* ===================== ХЕЛПЕРЫ ===================== */
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
 
 const getMoscowMinutes = () => {
@@ -208,7 +224,6 @@ const getCurrentShiftInfo = () => {
   return { weekNumber, shiftLetter, shiftType };
 };
 
-/* ===================== ФОРМАТТЕРЫ ===================== */
 const formatDuration = (sec) => {
   if (sec === null || sec === undefined || sec < 0) return '—';
   const d = Math.floor(sec / 86400);
@@ -225,25 +240,6 @@ const formatDateTime = (str) => {
   } catch {
     return String(str);
   }
-};
-
-/* ===================== СТИЛИ БЛОКОВ (единые) ===================== */
-// Высота секции с label + разделителем — фиксированная
-const LABEL_SECTION_HEIGHT = 42;
-// Высота секции с большим числом — фиксированная
-const VALUE_SECTION_HEIGHT = 62;
-
-const subBlockStyle = {
-  backgroundColor: 'rgba(255,255,255,0.20)',
-  borderRadius: 8,
-  padding: '6px 4px',
-  textAlign: 'center',
-  border: '1px solid rgba(255,255,255,0.18)',
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 2,
 };
 
 /* ===================== КОМПОНЕНТ ===================== */
@@ -321,6 +317,22 @@ export default function DrrCp6Page() {
       const json = await res.json();
       setVinList(Array.isArray(json) ? json : []);
       setVinListStatus(status);
+      setShowVinModal(true);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setVinModalLoading(false);
+    }
+  };
+
+  const loadBufferList = async () => {
+    setVinModalLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/drr-cp6-buffer-vins`);
+      if (!res.ok) throw new Error('Ошибка загрузки списка VIN (Buffer)');
+      const json = await res.json();
+      setVinList(Array.isArray(json) ? json : []);
+      setVinListStatus('BUFFER');
       setShowVinModal(true);
     } catch (err) {
       alert(err.message);
@@ -448,7 +460,7 @@ export default function DrrCp6Page() {
             {/* ============ Нижний ряд: Все / Buffer / NOK ============ */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'nowrap', alignItems: 'stretch' }}>
 
-              {/* === Все — узкий === */}
+              {/* === Все: активные между AGMPS01001 и AGMPS01002 (14 дней) === */}
               <div style={{
                 flex: '0 0 20%',
                 backgroundColor: '#1E293B',
@@ -460,25 +472,22 @@ export default function DrrCp6Page() {
                 flexDirection: 'column',
                 boxSizing: 'border-box',
               }}>
-                {/* label + divider */}
                 <div style={{ textAlign: 'center', height: LABEL_SECTION_HEIGHT, flexShrink: 0 }}>
                   <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>Все</div>
                   <div style={{ width: '55%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto', borderRadius: 1 }} />
                 </div>
-                {/* number */}
                 <div style={{
                   height: VALUE_SECTION_HEIGHT,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.activeAtPaint}</div>
                 </div>
-                {/* footnote */}
                 <div style={{ fontSize: '0.68rem', opacity: 0.75, fontWeight: 600, textAlign: 'center', marginTop: 'auto' }}>
                   Прошли PSOUT: {data.totalVins}
                 </div>
               </div>
 
-              {/* === Buffer — узкий === */}
+              {/* === Buffer: между AGMPS01003 и AGMPS01004 (14 дней) === */}
               <div
                 style={{
                   flex: '0 0 20%',
@@ -492,7 +501,7 @@ export default function DrrCp6Page() {
                   cursor: 'pointer',
                   boxSizing: 'border-box',
                 }}
-                onClick={() => loadVinList('OK')}
+                onClick={loadBufferList}
               >
                 <div style={{ textAlign: 'center', height: LABEL_SECTION_HEIGHT, flexShrink: 0 }}>
                   <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>Buffer</div>
@@ -504,9 +513,12 @@ export default function DrrCp6Page() {
                 }}>
                   <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.bufferCount}</div>
                 </div>
+                <div style={{ fontSize: '0.68rem', opacity: 0.85, fontWeight: 600, textAlign: 'center', marginTop: 'auto' }}>
+                  Прошли OK: {data.okVins}
+                </div>
               </div>
 
-              {/* === NOK — растянут === */}
+              {/* === NOK === */}
               <div
                 style={{
                   flex: 1,
@@ -522,12 +534,10 @@ export default function DrrCp6Page() {
                 }}
                 onClick={() => loadVinList('NOK')}
               >
-                {/* label + divider — высота такая же, как у Все и Buffer */}
                 <div style={{ textAlign: 'center', height: LABEL_SECTION_HEIGHT, flexShrink: 0 }}>
                   <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>NOK</div>
                   <div style={{ width: '30%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto', borderRadius: 1 }} />
                 </div>
-                {/* number + sub-blocks — высота такая же, как number-секция у Все/Buffer */}
                 <div style={{
                   height: VALUE_SECTION_HEIGHT,
                   display: 'flex', alignItems: 'center', gap: 12,
@@ -574,9 +584,7 @@ export default function DrrCp6Page() {
                         <th style={thStyle}>MPP</th>
                         <th style={thStyle}>Статус</th>
                         <th style={thStyle}>PSIN</th>
-                        <th style={{ ...thStyle, textAlign: 'right' }}>
-                          Продолжительность (д чч:мм)
-                        </th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>Продолжительность (д чч:мм)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -584,13 +592,9 @@ export default function DrrCp6Page() {
                         <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
                           <td style={{ ...tdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{r.vin}</td>
                           <td style={tdStyle}>{r.mpp}</td>
-                          <td style={{ ...tdStyle, fontWeight: 700, color: '#DC2626', fontSize: '0.72rem' }}>
-                            {r.status}
-                          </td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: '#DC2626', fontSize: '0.72rem' }}>{r.status}</td>
                           <td style={{ ...tdStyle, fontSize: '0.75rem' }}>{formatDateTime(r.psin_time)}</td>
-                          <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'right' }}>
-                            {formatDuration(r.duration_sec)}
-                          </td>
+                          <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'right' }}>{formatDuration(r.duration_sec)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -618,9 +622,7 @@ export default function DrrCp6Page() {
                         <th style={thStyle}>MPP</th>
                         <th style={thStyle}>Статус</th>
                         <th style={thStyle}>PSIN</th>
-                        <th style={{ ...thStyle, textAlign: 'right' }}>
-                          Продолжительность (д чч:мм)
-                        </th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>Продолжительность (д чч:мм)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -628,13 +630,9 @@ export default function DrrCp6Page() {
                         <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
                           <td style={{ ...tdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{r.vin}</td>
                           <td style={tdStyle}>{r.mpp}</td>
-                          <td style={{ ...tdStyle, fontWeight: 700, color: '#DC2626', fontSize: '0.72rem' }}>
-                            {r.status}
-                          </td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: '#DC2626', fontSize: '0.72rem' }}>{r.status}</td>
                           <td style={{ ...tdStyle, fontSize: '0.75rem' }}>{formatDateTime(r.psin_time)}</td>
-                          <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'right' }}>
-                            {formatDuration(r.duration_sec)}
-                          </td>
+                          <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'right' }}>{formatDuration(r.duration_sec)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -686,8 +684,14 @@ export default function DrrCp6Page() {
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Модель</th>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Код материала</th>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Описание материала</th>
-                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>PSIN</th>
-                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>PSOUT</th>
+                      {vinListStatus === 'BUFFER' ? (
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }} colSpan={2}>Заход в буфер</th>
+                      ) : (
+                        <>
+                          <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>PSIN</th>
+                          <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>PSOUT</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -699,8 +703,16 @@ export default function DrrCp6Page() {
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.material_code}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.material_desc}</td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: '0.85rem' }}>{formatDateTime(item.psin_time)}</td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: '0.85rem' }}>{formatDateTime(item.psout_time)}</td>
+                        {vinListStatus === 'BUFFER' ? (
+                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: '0.85rem' }} colSpan={2}>
+                            {formatDateTime(item.buffer_enter_time)}
+                          </td>
+                        ) : (
+                          <>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: '0.85rem' }}>{formatDateTime(item.psin_time)}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: '0.85rem' }}>{formatDateTime(item.psout_time)}</td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
