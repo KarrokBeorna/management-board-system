@@ -10765,7 +10765,7 @@ const CP6_PSIN_ULOC  = 'AGMPS01001';
 const CP6_DEFECT_CLOSED_STATUSES = new Set(['CLOSED']);
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: VIN + времена PSOUT за период (база для OK / DRR)               */
+/* Хелпер: VIN + времена PSOUT за период                                  */
 /* ---------------------------------------------------------------------- */
 async function getCp6PsoutVins(startTime, endTime) {
   const [rows] = await mesPool.query(`
@@ -10796,7 +10796,7 @@ async function getCp6PsoutVins(startTime, endTime) {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: VIN + времена PSIN за период (база для NOK)                     */
+/* Хелпер: VIN + времена PSIN за период                                   */
 /* ---------------------------------------------------------------------- */
 async function getCp6PsinVins(startTime, endTime) {
   const [rows] = await mesPool.query(`
@@ -10816,7 +10816,6 @@ async function getCp6PsinVins(startTime, endTime) {
 
 /* ---------------------------------------------------------------------- */
 /* Хелпер: активные на покраске — последний PSIN позже последнего PSOUT    */
-/* (за всё время)                                                         */
 /* ---------------------------------------------------------------------- */
 async function getCp6ActiveAtPaint() {
   const [rows] = await mesPool.query(`
@@ -10861,25 +10860,40 @@ function classifyCp6DefectCategory(d) {
 
 /* ---------------------------------------------------------------------- */
 /* Хелпер: расширенная классификация VIN                                  */
-/*   OK  — из PSOUT-VIN'ов без незакрытых дефектов                        */
-/*   NOK — из PSIN-VIN'ов с незакрытым дефектом (не важно, вышли или нет)  */
-/*   NOK разбит на Spot / Перекрас / Остальные (приоритет spot > repaint) */
+/*                                                                        */
+/* БЛОКИ (Spot / Перекрас / Остальные) — ЭКСКЛЮЗИВНО с приоритетом:        */
+/*   VIN имеет хотя бы 1 Spot → в spotSet                                */
+/*   иначе имеет хотя бы 1 Перекрас → в repaintSet                        */
+/*   иначе → в otherSet                                                  */
+/*   Сумма spotSet + repaintSet + otherSet = NOK.                         */
+/*                                                                        */
+/* ТАБЛИЦЫ (spotDefectVins / repaintDefectVins) — ИНКЛЮЗИВНО:              */
+/*   VIN попадает в spotDefectVins, если у него есть ≥1 spot-дефект        */
+/*   VIN попадает в repaintDefectVins, если у него есть ≥1 repaint-дефект  */
+/*   VIN может быть одновременно в обеих таблицах.                        */
 /* ---------------------------------------------------------------------- */
 async function classifyCp6VinsExtended(psoutRows, psinRows) {
   const okSet = new Set();
   const nokSet = new Set();
+
+  // для блоков (эксклюзивно)
   const spotSet = new Set();
   const repaintSet = new Set();
   const otherSet = new Set();
 
+  // для таблиц (инклюзивно)
+  const spotDefectVins = new Set();
+  const repaintDefectVins = new Set();
+
   const psoutVins = psoutRows.map(r => r.vin);
   const psinVins  = psinRows.map(r => r.vin);
 
-  // по умолчанию все PSOUT VIN — OK, пока не найдём открытые дефекты
   psoutVins.forEach(v => okSet.add(v));
 
   const allVins = [...new Set([...psoutVins, ...psinVins])];
-  if (allVins.length === 0) return { okSet, nokSet, spotSet, repaintSet, otherSet };
+  if (allVins.length === 0) {
+    return { okSet, nokSet, spotSet, repaintSet, otherSet, spotDefectVins, repaintDefectVins };
+  }
 
   const ph = allVins.map(() => '?').join(',');
   const [defectRows] = await pool.query(`
@@ -10888,45 +10902,40 @@ async function classifyCp6VinsExtended(psoutRows, psinRows) {
     WHERE VIN IN (${ph})
   `, allVins);
 
-  const vinToCategory = new Map();
-  const vinHasOpenDefect = new Set();
+  const vinCategories = new Map(); // VIN -> Set категорий
 
   defectRows.forEach(d => {
     const status = (d.STATUS || '').toUpperCase();
     if (CP6_DEFECT_CLOSED_STATUSES.has(status)) return;
 
-    vinHasOpenDefect.add(d.VIN);
+    nokSet.add(d.VIN);
+    okSet.delete(d.VIN);
 
     const cat = classifyCp6DefectCategory(d);
-    const prev = vinToCategory.get(d.VIN);
 
-    if (prev === 'spot') return;
-    if (prev === 'repaint' && cat !== 'spot') return;
-    vinToCategory.set(d.VIN, cat);
+    if (!vinCategories.has(d.VIN)) vinCategories.set(d.VIN, new Set());
+    vinCategories.get(d.VIN).add(cat);
+
+    if (cat === 'spot') spotDefectVins.add(d.VIN);
+    else if (cat === 'repaint') repaintDefectVins.add(d.VIN);
   });
 
-  // OK: PSOUT VIN'ы без открытых дефектов
-  psoutVins.forEach(v => {
-    if (vinHasOpenDefect.has(v)) okSet.delete(v);
-  });
-
-  // NOK: PSIN VIN'ы с открытыми дефектами
-  psinVins.forEach(v => {
-    if (!vinHasOpenDefect.has(v)) return;
-
-    nokSet.add(v);
-    const cat = vinToCategory.get(v) || 'other';
-    if (cat === 'spot') spotSet.add(v);
-    else if (cat === 'repaint') repaintSet.add(v);
+  // Блоки — эксклюзивно, с приоритетом spot > repaint > other
+  nokSet.forEach(v => {
+    const cats = vinCategories.get(v) || new Set(['other']);
+    if (cats.has('spot')) spotSet.add(v);
+    else if (cats.has('repaint')) repaintSet.add(v);
     else otherSet.add(v);
   });
 
   console.log(
     `[DRR CP6 classify] psout=${psoutVins.length} psin=${psinVins.length} defects=${defectRows.length} ` +
-    `ok=${okSet.size} nok=${nokSet.size} spot=${spotSet.size} repaint=${repaintSet.size} other=${otherSet.size}`
+    `ok=${okSet.size} nok=${nokSet.size} ` +
+    `blocks: spot=${spotSet.size} repaint=${repaintSet.size} other=${otherSet.size} | ` +
+    `tables: spotVins=${spotDefectVins.size} repaintVins=${repaintDefectVins.size}`
   );
 
-  return { okSet, nokSet, spotSet, repaintSet, otherSet };
+  return { okSet, nokSet, spotSet, repaintSet, otherSet, spotDefectVins, repaintDefectVins };
 }
 
 /* ---------------------------------------------------------------------- */
@@ -11126,7 +11135,12 @@ app.get('/api/drr-cp6-top-defects', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* ЭНДПОИНТ 4: дефекты для таблиц Spot / Перекрас (база — PSIN)            */
+/* ЭНДПОИНТ 4: дефекты для таблиц Spot / Перекрас                         */
+/*                                                                        */
+/* Таблицы построечные, категория определяется по каждому дефекту.         */
+/* VIN может присутствовать и в Spot, и в Перекрас, если у него есть       */
+/* дефекты обоих категорий — там будут показаны только дефекты             */
+/* соответствующей категории.                                             */
 /* ====================================================================== */
 app.get('/api/drr-cp6-spot-repaint-vins', async (req, res) => {
   try {
@@ -11145,8 +11159,9 @@ app.get('/api/drr-cp6-spot-repaint-vins', async (req, res) => {
 
     if (psinRows.length === 0) return res.json([]);
 
-    const { spotSet, repaintSet } = await classifyCp6VinsExtended(psoutRows, psinRows);
-    const targetSet = category === 'spot' ? spotSet : repaintSet;
+    // Для таблиц — инклюзивные наборы VIN
+    const { spotDefectVins, repaintDefectVins } = await classifyCp6VinsExtended(psoutRows, psinRows);
+    const targetSet = category === 'spot' ? spotDefectVins : repaintDefectVins;
     const targetVins = [...targetSet];
     if (targetVins.length === 0) return res.json([]);
 
