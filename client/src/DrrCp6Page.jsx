@@ -37,23 +37,17 @@ const filterGroupStyle = {
   gap: '10px',
 };
 
-const filterButtonStyle = (active) => ({
+const timeFilterButtonStyle = (active, activeColor) => ({
   padding: '12px 24px',
   borderRadius: '12px',
   border: 'none',
   fontWeight: 700,
   fontSize: '1.4rem',
-  background: active ? '#2563EB' : '#FFFFFF',
+  background: active ? activeColor : '#FFFFFF',
   color: active ? '#FFFFFF' : '#64748B',
   cursor: 'pointer',
   boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
   transition: 'all 0.2s',
-});
-
-const timeFilterButtonStyle = (active, activeColor) => ({
-  ...filterButtonStyle(active),
-  background: active ? activeColor : '#FFFFFF',
-  color: active ? '#FFFFFF' : '#64748B',
 });
 
 const dashboardGridStyle = {
@@ -64,7 +58,7 @@ const dashboardGridStyle = {
 };
 
 const chartColumnStyle = {
-  flex: '0 0 40%',
+  flex: '0 0 42%',
   backgroundColor: '#FFFFFF',
   borderRadius: '24px',
   padding: '24px',
@@ -79,13 +73,14 @@ const rightColumnStyle = {
   display: 'flex',
   flexDirection: 'column',
   minHeight: 0,
+  gap: 14,
 };
 
 const tableCardStyle = {
   flex: 1,
   backgroundColor: '#FFFFFF',
-  borderRadius: '24px',
-  padding: '24px',
+  borderRadius: '20px',
+  padding: '16px',
   display: 'flex',
   flexDirection: 'column',
   boxShadow: '0 8px 30px rgba(0,0,0,0.05)',
@@ -93,81 +88,83 @@ const tableCardStyle = {
 };
 
 const tableTitleStyle = {
-  fontSize: '2rem',
+  fontSize: '1.3rem',
   fontWeight: 800,
   color: '#1E293B',
-  margin: '0 0 16px 0',
+  margin: '0 0 10px 0',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  flexShrink: 0,
 };
 
 const tableScrollStyle = {
   flex: 1,
   overflowY: 'auto',
   border: '1px solid #E2E8F0',
-  borderRadius: '12px',
+  borderRadius: '10px',
+  minHeight: 0,
 };
 
 const thStyle = {
-  padding: '18px 24px',
+  padding: '8px 10px',
   textAlign: 'left',
-  fontWeight: 800,
+  fontWeight: 700,
   color: '#475569',
-  borderBottom: '3px solid #E2E8F0',
+  borderBottom: '2px solid #E2E8F0',
   background: '#F8FAFC',
-  fontSize: '1.6rem',
+  fontSize: '0.75rem',
   textTransform: 'uppercase',
   position: 'sticky',
   top: 0,
   zIndex: 10,
+  whiteSpace: 'nowrap',
 };
 
 const tdStyle = {
-  padding: '14px 24px',
+  padding: '6px 10px',
   borderBottom: '1px solid #F1F5F9',
   color: '#1E293B',
-  fontSize: '1.6rem',
+  fontSize: '0.82rem',
 };
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
 /* ===================== ХЕЛПЕРЫ ВРЕМЕНИ ===================== */
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
+
 const getMoscowMinutes = () => {
-  const moscow = getMoscowTime();
-  return moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+  const m = getMoscowTime();
+  return m.getUTCHours() * 60 + m.getUTCMinutes();
 };
 
 const getDefaultTimeFilter = () => {
-  const totalMinutes = getMoscowMinutes();
-  if (totalMinutes >= 1 * 60 + 31 && totalMinutes < 7 * 60 + 50) return 'night';
-  if (totalMinutes >= 7 * 60 + 50 && totalMinutes < 16 * 60 + 41) return 'day';
+  const t = getMoscowMinutes();
+  if (t >= 1 * 60 + 31 && t < 7 * 60 + 50) return 'night';
+  if (t >= 7 * 60 + 50 && t < 16 * 60 + 41) return 'day';
   return 'evening';
 };
 
 const getTimeRange = (timeFilter) => {
-  const nowMoscow = getMoscowTime();
-  const year = nowMoscow.getUTCFullYear();
-  const month = String(nowMoscow.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(nowMoscow.getUTCDate()).padStart(2, '0');
-  const todayStr = `${year}-${month}-${day}`;
+  const now = getMoscowTime();
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(now.getUTCDate()).padStart(2, '0');
+  const todayStr = `${y}-${m}-${d}`;
 
-  const yesterday = new Date(nowMoscow);
-  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const yestYear = yesterday.getUTCFullYear();
-  const yestMonth = String(yesterday.getUTCMonth() + 1).padStart(2, '0');
-  const yestDay = String(yesterday.getUTCDate()).padStart(2, '0');
-  const yesterdayStr = `${yestYear}-${yestMonth}-${yestDay}`;
+  const yest = new Date(now);
+  yest.setUTCDate(yest.getUTCDate() - 1);
+  const yesterdayStr = `${yest.getUTCFullYear()}-${String(yest.getUTCMonth() + 1).padStart(2, '0')}-${String(yest.getUTCDate()).padStart(2, '0')}`;
 
-  const totalMinutes = getMoscowMinutes();
+  const t = getMoscowMinutes();
 
-  if (timeFilter === 'all') {
-    return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
-  }
+  if (timeFilter === 'all') return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
   if (timeFilter === 'day') {
-    const dateToUse = totalMinutes >= 7 * 60 + 50 ? todayStr : yesterdayStr;
+    const dateToUse = t >= 7 * 60 + 50 ? todayStr : yesterdayStr;
     return { start: `${dateToUse} 07:50:00`, end: `${dateToUse} 16:40:00` };
   }
   if (timeFilter === 'evening') {
-    const dateToUse = totalMinutes >= 16 * 60 + 41 ? todayStr : yesterdayStr;
+    const dateToUse = t >= 16 * 60 + 41 ? todayStr : yesterdayStr;
     const startDateObj = new Date(`${dateToUse}T00:00:00Z`);
     const endDateObj = new Date(startDateObj);
     endDateObj.setUTCDate(endDateObj.getUTCDate() + 1);
@@ -175,7 +172,7 @@ const getTimeRange = (timeFilter) => {
     return { start: `${dateToUse} 16:41:00`, end: `${endStr} 01:30:00` };
   }
   if (timeFilter === 'night') {
-    const dateToUse = totalMinutes >= 1 * 60 + 31 ? todayStr : yesterdayStr;
+    const dateToUse = t >= 1 * 60 + 31 ? todayStr : yesterdayStr;
     return { start: `${dateToUse} 01:31:00`, end: `${dateToUse} 07:50:00` };
   }
   return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
@@ -191,20 +188,15 @@ const getWeekNumber = (date) => {
 
 const getCurrentShiftInfo = () => {
   const nowMoscow = getMoscowTime();
-  const totalMinutes = getMoscowMinutes();
+  const t = getMoscowMinutes();
   let shiftDate = new Date(nowMoscow);
   let shiftType = 'night';
 
-  if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
-    shiftType = 'day';
-  } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
+  if (t >= 7 * 60 + 50 && t <= 16 * 60 + 40) shiftType = 'day';
+  else if (t >= 16 * 60 + 41 || t <= 1 * 60 + 30) {
     shiftType = 'evening';
-    if (totalMinutes <= 1 * 60 + 30) {
-      shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
-    }
-  } else {
-    shiftType = 'night';
-  }
+    if (t <= 1 * 60 + 30) shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
+  } else shiftType = 'night';
 
   const weekNumber = getWeekNumber(shiftDate);
   const isEvenWeek = weekNumber % 2 === 0;
@@ -216,19 +208,45 @@ const getCurrentShiftInfo = () => {
   return { weekNumber, shiftLetter, shiftType };
 };
 
+/* ===================== ФОРМАТТЕРЫ ===================== */
+const formatDuration = (sec) => {
+  if (sec === null || sec === undefined || sec < 0) return '—';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return `${d}д ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
+const formatDateTime = (str) => {
+  if (!str) return '—';
+  try {
+    return new Date(str).toLocaleString('ru-RU');
+  } catch {
+    return String(str);
+  }
+};
+
 /* ===================== КОМПОНЕНТ ===================== */
 export default function DrrCp6Page() {
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
   const [isManualFilter, setIsManualFilter] = useState(false);
   const [shiftInfo, setShiftInfo] = useState(getCurrentShiftInfo());
+
   const [data, setData] = useState({
     totalRecords: 0,
     totalVins: 0,
     okVins: 0,
     nokVins: 0,
     drrPercent: 0,
+    spotVins: 0,
+    repaintVins: 0,
+    otherVins: 0,
+    activeAtPaint: 0,
   });
   const [topDefects, setTopDefects] = useState([]);
+  const [spotRows, setSpotRows] = useState([]);
+  const [repaintRows, setRepaintRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -244,24 +262,33 @@ export default function DrrCp6Page() {
       const { start, end } = getTimeRange(timeFilter);
       const params = new URLSearchParams({ startTime: start, endTime: end });
 
-      const mainRes = await fetch(`${API_BASE}/api/drr-cp6-dashboard?${params.toString()}`);
-      if (!mainRes.ok) throw new Error('Ошибка загрузки DRR CP6');
-      const mainJson = await mainRes.json();
+      const [mainRes, spotRes, repaintRes, defectsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/drr-cp6-dashboard?${params.toString()}`).then(r => r.json()),
+        fetch(`${API_BASE}/api/drr-cp6-spot-repaint-vins?${params.toString()}&category=spot`).then(r => r.json()),
+        fetch(`${API_BASE}/api/drr-cp6-spot-repaint-vins?${params.toString()}&category=repaint`).then(r => r.json()),
+        fetch(`${API_BASE}/api/drr-cp6-top-defects?${params.toString()}`).then(r => r.json()),
+      ]);
+
       setData({
-        totalRecords: mainJson.totalRecords || 0,
-        totalVins: mainJson.totalVins || 0,
-        okVins: mainJson.okVins || 0,
-        nokVins: mainJson.nokVins || 0,
-        drrPercent: mainJson.drrPercent || 0,
+        totalRecords: mainRes.totalRecords || 0,
+        totalVins: mainRes.totalVins || 0,
+        okVins: mainRes.okVins || 0,
+        nokVins: mainRes.nokVins || 0,
+        drrPercent: mainRes.drrPercent || 0,
+        spotVins: mainRes.spotVins || 0,
+        repaintVins: mainRes.repaintVins || 0,
+        otherVins: mainRes.otherVins || 0,
+        activeAtPaint: mainRes.activeAtPaint || 0,
       });
 
-      const defectsRes = await fetch(`${API_BASE}/api/drr-cp6-top-defects?${params.toString()}`);
-      if (!defectsRes.ok) throw new Error('Ошибка загрузки топ дефектов');
-      const defectsJson = await defectsRes.json();
-      setTopDefects(defectsJson);
+      setSpotRows(Array.isArray(spotRes) ? spotRes : []);
+      setRepaintRows(Array.isArray(repaintRes) ? repaintRes : []);
+      setTopDefects(Array.isArray(defectsRes) ? defectsRes : []);
     } catch (err) {
       setError(err.message);
       setTopDefects([]);
+      setSpotRows([]);
+      setRepaintRows([]);
     } finally {
       setLoading(false);
     }
@@ -275,7 +302,7 @@ export default function DrrCp6Page() {
       const res = await fetch(`${API_BASE}/api/drr-cp6-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки списка VIN');
       const json = await res.json();
-      setVinList(json);
+      setVinList(Array.isArray(json) ? json : []);
       setVinListStatus(status);
       setShowVinModal(true);
     } catch (err) {
@@ -310,16 +337,8 @@ export default function DrrCp6Page() {
     setTimeFilter(filter);
   };
 
-  const formatDateTime = (str) => {
-    if (!str) return '—';
-    try {
-      const d = new Date(str);
-      if (isNaN(d.getTime())) return String(str);
-      return d.toLocaleString('ru-RU');
-    } catch {
-      return String(str);
-    }
-  };
+  const uniqueSpotVins = new Set(spotRows.map(r => r.vin)).size;
+  const uniqueRepaintVins = new Set(repaintRows.map(r => r.vin)).size;
 
   return (
     <div style={containerStyle}>
@@ -369,14 +388,14 @@ export default function DrrCp6Page() {
         </div>
       ) : (
         <div style={dashboardGridStyle}>
+          {/* ============ ЛЕВАЯ КОЛОНКА: пончик + блоки ============ */}
           <div style={chartColumnStyle}>
-            <div style={{ position: 'relative', width: '100%', height: '600px' }}>
+            <div style={{ position: 'relative', width: '100%', height: '460px', flexShrink: 0 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={pieData}
-                    dataKey="value"
-                    nameKey="name"
+                    dataKey="value" nameKey="name"
                     cx="50%" cy="50%"
                     innerRadius="75%" outerRadius="98%"
                     paddingAngle={4} stroke="#FFFFFF" strokeWidth={4}
@@ -390,7 +409,7 @@ export default function DrrCp6Page() {
                       const count = name === 'DRR (OK)' ? data.okVins : data.nokVins;
                       return [`${value.toFixed(1)}% (${count} VIN)`, name];
                     }}
-                    contentStyle={{ fontSize: '1.8rem', borderRadius: '16px' }}
+                    contentStyle={{ fontSize: '1.5rem', borderRadius: '16px' }}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -399,73 +418,198 @@ export default function DrrCp6Page() {
                 position: 'absolute', top: '50%', left: '50%',
                 transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none',
               }}>
-                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
-                <div style={{ fontSize: '6.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
+                <div style={{ fontSize: '2rem', fontWeight: 800, color: '#1E293B', marginBottom: '6px' }}>DRR</div>
+                <div style={{ fontSize: '5.4rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {data.drrPercent.toFixed(1)}%
                 </div>
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
+            {/* === Нижний ряд: Все / Buffer / NOK (со 3 подблоками) === */}
+            <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'nowrap' }}>
+              {/* Все — активные на покраске */}
               <div
-                style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
-                onClick={() => loadVinList('ALL')}
+                style={{
+                  flex: '0 0 22%', backgroundColor: '#1E293B', borderRadius: '12px', padding: '12px 10px',
+                  textAlign: 'center', color: '#FFFFFF', minHeight: '140px',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                }}
               >
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Прошли PSOUT</div>
-                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }} />
-                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.totalRecords}</div>
-                <div style={{ fontSize: '0.75rem', opacity: 0.75, marginTop: 6 }}>
-                  Уник. VIN: {data.totalVins}
+                <div style={{ fontSize: '1rem', fontWeight: 600, opacity: 0.9 }}>Все</div>
+                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '8px auto' }} />
+                <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>
+                  {data.activeAtPaint}
+                </div>
+                <div style={{ fontSize: '0.68rem', opacity: 0.75, marginTop: 6 }}>
+                  В знаменателе: {data.totalVins}
                 </div>
               </div>
 
+              {/* Buffer — OK авто */}
               <div
-                style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                style={{
+                  flex: '0 0 22%', backgroundColor: '#059669', borderRadius: '12px', padding: '12px 10px',
+                  textAlign: 'center', color: '#FFFFFF', minHeight: '140px',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
                 onClick={() => loadVinList('OK')}
               >
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK</div>
-                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }} />
-                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.okVins}</div>
+                <div style={{ fontSize: '1rem', fontWeight: 600, opacity: 0.9 }}>Buffer</div>
+                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '8px auto' }} />
+                <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.okVins}</div>
               </div>
 
+              {/* NOK — растянут вширь, содержит 3 подблока */}
               <div
-                style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                style={{
+                  flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '10px 12px',
+                  color: '#FFFFFF', minHeight: '140px',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
                 onClick={() => loadVinList('NOK')}
               >
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK</div>
-                <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }} />
-                <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{data.nokVins}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: '1rem', fontWeight: 600, opacity: 0.9 }}>NOK</span>
+                  <span style={{ fontSize: '2.2rem', fontWeight: 900, lineHeight: 1 }}>{data.nokVins}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 8, padding: '6px 4px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: 600, opacity: 0.9 }}>Spot</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 900, lineHeight: 1.1 }}>{data.spotVins}</div>
+                  </div>
+                  <div style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 8, padding: '6px 4px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: 600, opacity: 0.9 }}>Перекрас</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 900, lineHeight: 1.1 }}>{data.repaintVins}</div>
+                  </div>
+                  <div style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 8, padding: '6px 4px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: 600, opacity: 0.9 }}>Остальные</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 900, lineHeight: 1.1 }}>{data.otherVins}</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
+          {/* ============ ПРАВАЯ КОЛОНКА: 3 таблицы ============ */}
           <div style={rightColumnStyle}>
+            {/* Топ дефектов */}
             <div style={tableCardStyle}>
-              <h2 style={tableTitleStyle}>Топ дефектов, повлиявших на DRR CP6</h2>
+              <h2 style={tableTitleStyle}>
+                <span>Топ дефектов DRR CP6</span>
+                <span style={{ fontSize: '0.85rem', color: '#64748B', fontWeight: 600 }}>
+                  {topDefects.length} строк
+                </span>
+              </h2>
               <div style={tableScrollStyle}>
                 {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr>
-                        <th style={thStyle}>Описание дефекта (MPP)</th>
-                        <th style={thStyle}>Класс</th>
-                        <th style={thStyle}>Кол-во</th>
+                        <th style={thStyle}>MPP</th>
+                        <th style={{ ...thStyle, width: 70, textAlign: 'center' }}>Класс</th>
+                        <th style={{ ...thStyle, width: 70, textAlign: 'right' }}>Кол-во</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {topDefects.map((defect, idx) => (
+                      {topDefects.map((d, idx) => (
                         <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
-                          <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none' }}>{defect.mpp}</td>
-                          <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
-                          <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '2rem', color: idx < 3 ? '#DC2626' : '#1E293B' }}>
-                            {defect.defectCount}
+                          <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 8px 0 0 #EF4444' : 'none' }}>{d.mpp}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: '#475569', textAlign: 'center' }}>{d.grade}</td>
+                          <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 900, color: idx < 3 ? '#DC2626' : '#1E293B' }}>
+                            {d.defectCount}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 ) : (
-                  <p style={{ textAlign: 'center', padding: '40px', color: '#64748B', fontSize: '2rem' }}>Нет данных</p>
+                  <p style={{ textAlign: 'center', padding: '20px', color: '#64748B' }}>Нет данных</p>
+                )}
+              </div>
+            </div>
+
+            {/* Spot */}
+            <div style={tableCardStyle}>
+              <h2 style={tableTitleStyle}>
+                <span>Spot</span>
+                <span style={{ fontSize: '0.85rem', color: '#64748B', fontWeight: 600 }}>
+                  Уник. VIN: {uniqueSpotVins} · строк: {spotRows.length}
+                </span>
+              </h2>
+              <div style={tableScrollStyle}>
+                {spotRows.length > 0 ? (
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>VIN</th>
+                        <th style={thStyle}>MPP</th>
+                        <th style={thStyle}>Статус</th>
+                        <th style={thStyle}>PSIN</th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>Продолжительность</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {spotRows.map((r, idx) => (
+                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                          <td style={{ ...tdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{r.vin}</td>
+                          <td style={tdStyle}>{r.mpp}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: '#DC2626', fontSize: '0.72rem' }}>
+                            {r.status}
+                          </td>
+                          <td style={{ ...tdStyle, fontSize: '0.75rem' }}>{formatDateTime(r.psin_time)}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'right' }}>
+                            {formatDuration(r.duration_sec)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p style={{ textAlign: 'center', padding: '20px', color: '#64748B' }}>Нет данных</p>
+                )}
+              </div>
+            </div>
+
+            {/* Перекрас */}
+            <div style={tableCardStyle}>
+              <h2 style={tableTitleStyle}>
+                <span>Перекрас</span>
+                <span style={{ fontSize: '0.85rem', color: '#64748B', fontWeight: 600 }}>
+                  Уник. VIN: {uniqueRepaintVins} · строк: {repaintRows.length}
+                </span>
+              </h2>
+              <div style={tableScrollStyle}>
+                {repaintRows.length > 0 ? (
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>VIN</th>
+                        <th style={thStyle}>MPP</th>
+                        <th style={thStyle}>Статус</th>
+                        <th style={thStyle}>PSIN</th>
+                        <th style={{ ...thStyle, textAlign: 'right' }}>Продолжительность</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {repaintRows.map((r, idx) => (
+                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                          <td style={{ ...tdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{r.vin}</td>
+                          <td style={tdStyle}>{r.mpp}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: '#DC2626', fontSize: '0.72rem' }}>
+                            {r.status}
+                          </td>
+                          <td style={{ ...tdStyle, fontSize: '0.75rem' }}>{formatDateTime(r.psin_time)}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'right' }}>
+                            {formatDuration(r.duration_sec)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p style={{ textAlign: 'center', padding: '20px', color: '#64748B' }}>Нет данных</p>
                 )}
               </div>
             </div>
@@ -473,6 +617,7 @@ export default function DrrCp6Page() {
         </div>
       )}
 
+      {/* ============ Модалка VIN ============ */}
       {showVinModal && (
         <div
           style={{
@@ -510,7 +655,7 @@ export default function DrrCp6Page() {
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Модель</th>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Код материала</th>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Описание материала</th>
-                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Время</th>
+                      <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Время PSOUT</th>
                     </tr>
                   </thead>
                   <tbody>

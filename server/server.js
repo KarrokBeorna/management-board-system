@@ -10755,20 +10755,17 @@ app.get('/api/drr-cpfinal-snapshot/:id', async (req, res) => {
 
 
 
-
 /* ====================================================================== */
-/* ===================== DRR CP6 (PSOUT = AGMPS01002) =================== */
+/* ===================== DRR CP6 (PSOUT/PSIN) =========================== */
 /* ====================================================================== */
 
 const CP6_PSOUT_ULOC = 'AGMPS01002';
+const CP6_PSIN_ULOC  = 'AGMPS01001';   // ← если PSIN называется иначе — поменять здесь
 
-// Статусы дефектов, при которых дефект считается ЗАКРЫТЫМ.
-// Из SQL-выгрузки: CLOSED, OFFLINE_RECHECK, OFFLINE_REWORK, REWORK, RECHECK.
-// Закрытым считаем только CLOSED.
 const CP6_DEFECT_CLOSED_STATUSES = new Set(['CLOSED']);
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: VIN + времена PSOUT + общее число записей PSOUT                */
+/* Хелпер: VIN + времена PSOUT за период                                  */
 /* ---------------------------------------------------------------------- */
 async function getCp6PsoutVins(startTime, endTime) {
   const [rows] = await mesPool.query(`
@@ -10792,52 +10789,118 @@ async function getCp6PsoutVins(startTime, endTime) {
     vins: rows.map(r => ({
       vin: r.vin,
       psout_first_time: r.psout_first_time,
-      psout_last_time: r.psout_last_time,
+      psout_last_time:  r.psout_last_time,
     })),
     totalRecords: Number(countRows[0]?.total_records) || 0,
   };
 }
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: классификация VIN (OK / NOK) по дефектам at_paint_qm_defect_info */
-/*   - нет дефектов           → OK                                        */
-/*   - все дефекты CLOSED     → OK                                        */
-/*   - хотя бы один не CLOSED → NOK                                       */
+/* Хелпер: активные на покраске — прошли PSIN, но не прошли PSOUT          */
+/* (за всё время)                                                         */
 /* ---------------------------------------------------------------------- */
-async function classifyCp6Vins(psoutRows) {
+async function getCp6ActiveAtPaint() {
+  const [rows] = await mesPool.query(`
+    SELECT psin.vin, psin.first_psin
+    FROM (
+      SELECT vin, MIN(scan_time) AS first_psin
+      FROM ti_mes_movement
+      WHERE uloc_no = ? AND is_deleted = 0
+      GROUP BY vin
+    ) psin
+    LEFT JOIN (
+      SELECT vin, MAX(scan_time) AS last_psout
+      FROM ti_mes_movement
+      WHERE uloc_no = ? AND is_deleted = 0
+      GROUP BY vin
+    ) psout ON psout.vin = psin.vin
+    WHERE psout.vin IS NULL OR psout.last_psout < psin.first_psin
+  `, [CP6_PSIN_ULOC, CP6_PSOUT_ULOC]);
+  return rows.map(r => ({ vin: r.vin, first_psin: r.first_psin }));
+}
+
+/* ---------------------------------------------------------------------- */
+/* Хелпер: классификация дефекта по категории (Spot / Перекрас / other)    */
+/* Смотрим ТОЛЬКО REPAIR_MEASURE и REPAIR_MEASURE1.                        */
+/*   содержит 'spot'                            → 'spot'                   */
+/*   содержит 'перекрас'/'repaint'/'re-paint'   → 'repaint'                */
+/*   иначе / оба поля пусты                     → 'other'                  */
+/* ---------------------------------------------------------------------- */
+function classifyCp6DefectCategory(d) {
+  const text = [d.REPAIR_MEASURE, d.REPAIR_MEASURE1]
+    .filter(Boolean)
+    .map(s => String(s).trim().toLowerCase())
+    .join(' | ');
+
+  if (!text) return 'other';
+  if (text.includes('spot')) return 'spot';
+  if (text.includes('перекрас') || text.includes('repaint') || text.includes('re-paint')) return 'repaint';
+  return 'other';
+}
+
+/* ---------------------------------------------------------------------- */
+/* Хелпер: расширенная классификация VIN                                  */
+/* OK/NOK — как раньше. NOK разбиваем на 3 категории с приоритетом:        */
+/*   VIN имеет хотя бы 1 Spot-дефект → Spot                              */
+/*   иначе хотя бы 1 Перекрас        → Перекрас                           */
+/*   иначе                            → Остальные                         */
+/* ---------------------------------------------------------------------- */
+async function classifyCp6VinsExtended(psoutRows) {
   const okSet = new Set();
   const nokSet = new Set();
+  const spotSet = new Set();
+  const repaintSet = new Set();
+  const otherSet = new Set();
+
   const vins = psoutRows.map(r => r.vin);
   vins.forEach(v => okSet.add(v));
-  if (vins.length === 0) return { okSet, nokSet };
+  if (vins.length === 0) return { okSet, nokSet, spotSet, repaintSet, otherSet };
 
   const ph = vins.map(() => '?').join(',');
   const [defectRows] = await pool.query(`
-    SELECT VIN, STATUS
+    SELECT
+      VIN, STATUS,
+      REPAIR_MEASURE, REPAIR_MEASURE1
     FROM at_paint_qm_defect_info
     WHERE VIN IN (${ph})
   `, vins);
 
+  // VIN -> 'spot' | 'repaint' | 'other' (с приоритетом spot > repaint > other)
+  const vinToCategory = new Map();
+
   defectRows.forEach(d => {
     const status = (d.STATUS || '').toUpperCase();
     const isClosed = CP6_DEFECT_CLOSED_STATUSES.has(status);
-    if (!isClosed) {
-      nokSet.add(d.VIN);
-      okSet.delete(d.VIN);
-    }
+    if (isClosed) return;
+
+    nokSet.add(d.VIN);
+    okSet.delete(d.VIN);
+
+    const cat = classifyCp6DefectCategory(d);
+    const prev = vinToCategory.get(d.VIN);
+
+    if (prev === 'spot') return;
+    if (prev === 'repaint' && cat !== 'spot') return;
+    vinToCategory.set(d.VIN, cat);
   });
 
-  return { okSet, nokSet };
+  nokSet.forEach(vin => {
+    const cat = vinToCategory.get(vin) || 'other';
+    if (cat === 'spot') spotSet.add(vin);
+    else if (cat === 'repaint') repaintSet.add(vin);
+    else otherSet.add(vin);
+  });
+
+  return { okSet, nokSet, spotSet, repaintSet, otherSet };
 }
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: обогащение VIN метаданными                                     */
+/* Хелпер: обогащение VIN метаданными (для модалки ALL)                    */
 /* ---------------------------------------------------------------------- */
 async function enrichCp6Vins(vins, lastPsoutByVin) {
   if (vins.length === 0) return [];
   const ph = vins.map(() => '?').join(',');
 
-  // MES: material_code, sequence, model, material_desc
   const [mesRows] = await mesPool.query(`
     SELECT
       too.vin,
@@ -10855,11 +10918,9 @@ async function enrichCp6Vins(vins, lastPsoutByVin) {
   const mesByVin = new Map();
   mesRows.forEach(r => mesByVin.set(r.vin, r));
 
-  // IoT: batch_num из work_order
   const [iotRows] = await pool.query(`
     SELECT vin, batch_num FROM work_order WHERE vin IN (${ph})
   `, vins);
-
   const batchByVin = new Map();
   iotRows.forEach(r => batchByVin.set(r.vin, r.batch_num));
 
@@ -10867,12 +10928,12 @@ async function enrichCp6Vins(vins, lastPsoutByVin) {
     const m = mesByVin.get(vin) || {};
     return {
       vin,
-      batch_num:     batchByVin.get(vin) || '—',
+      batch_num:       batchByVin.get(vin) || '—',
       sequence_number: m.sequence_number || '—',
-      model:         m.model || '—',
-      material_code: m.material_code || '—',
-      material_desc: m.material_desc || '—',
-      psout_time:    lastPsoutByVin.get(vin) || null,
+      model:           m.model || '—',
+      material_code:   m.material_code || '—',
+      material_desc:   m.material_desc || '—',
+      psout_time:      lastPsoutByVin.get(vin) || null,
     };
   }).sort((a, b) => new Date(a.psout_time) - new Date(b.psout_time));
 }
@@ -10887,14 +10948,32 @@ app.get('/api/drr-cp6-dashboard', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    const { vins: psoutRows, totalRecords } = await getCp6PsoutVins(startTime, endTime);
+    // параллельно: PSOUT за период + активные на покраске за всё время
+    const [{ vins: psoutRows, totalRecords }, activeRows] = await Promise.all([
+      getCp6PsoutVins(startTime, endTime),
+      getCp6ActiveAtPaint(),
+    ]);
+
     const totalVins = psoutRows.length;
+    const activeAtPaint = activeRows.length;
 
     if (totalVins === 0) {
-      return res.json({ totalRecords, totalVins: 0, okVins: 0, nokVins: 0, drrPercent: 0 });
+      return res.json({
+        totalRecords,
+        totalVins: 0,
+        okVins: 0,
+        nokVins: 0,
+        drrPercent: 0,
+        spotVins: 0,
+        repaintVins: 0,
+        otherVins: 0,
+        activeAtPaint,
+      });
     }
 
-    const { okSet, nokSet } = await classifyCp6Vins(psoutRows);
+    const { okSet, nokSet, spotSet, repaintSet, otherSet } =
+      await classifyCp6VinsExtended(psoutRows);
+
     const okVins = okSet.size;
     const nokVins = nokSet.size;
     const drrPercent = totalVins > 0 ? (okVins / totalVins) * 100 : 0;
@@ -10905,6 +10984,10 @@ app.get('/api/drr-cp6-dashboard', async (req, res) => {
       okVins,
       nokVins,
       drrPercent: Math.round(drrPercent * 10) / 10,
+      spotVins:    spotSet.size,
+      repaintVins: repaintSet.size,
+      otherVins:   otherSet.size,
+      activeAtPaint,
     });
   } catch (err) {
     console.error('Ошибка /api/drr-cp6-dashboard:', err.message);
@@ -10913,7 +10996,7 @@ app.get('/api/drr-cp6-dashboard', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* ЭНДПОИНТ 2: список VIN для модалки (status: ALL | OK | NOK)            */
+/* ЭНДПОИНТ 2: список VIN для модалки (ALL | OK | NOK)                    */
 /* ====================================================================== */
 app.get('/api/drr-cp6-vins', async (req, res) => {
   try {
@@ -10926,7 +11009,7 @@ app.get('/api/drr-cp6-vins', async (req, res) => {
     if (psoutRows.length === 0) return res.json([]);
 
     const lastPsoutByVin = new Map(psoutRows.map(r => [r.vin, r.psout_last_time]));
-    const { okSet, nokSet } = await classifyCp6Vins(psoutRows);
+    const { okSet, nokSet } = await classifyCp6VinsExtended(psoutRows);
 
     let vins;
     if (status === 'ALL') vins = psoutRows.map(r => r.vin);
@@ -10957,19 +11040,13 @@ app.get('/api/drr-cp6-top-defects', async (req, res) => {
     const { vins: psoutRows } = await getCp6PsoutVins(startTime, endTime);
     if (psoutRows.length === 0) return res.json([]);
 
-    const { nokSet } = await classifyCp6Vins(psoutRows);
+    const { nokSet } = await classifyCp6VinsExtended(psoutRows);
     const nokVins = [...nokSet];
     if (nokVins.length === 0) return res.json([]);
 
     const ph = nokVins.map(() => '?').join(',');
     const [defectRows] = await pool.query(`
-      SELECT
-        d.VIN,
-        wo.MODEL,
-        d.PART_NAME,
-        d.PROBLEM_TYPE,
-        d.PROBLEM_GRADE,
-        d.STATUS
+      SELECT d.VIN, wo.MODEL, d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE, d.STATUS
       FROM at_paint_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.VIN IN (${ph})
@@ -10995,6 +11072,94 @@ app.get('/api/drr-cp6-top-defects', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Ошибка /api/drr-cp6-top-defects:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ====================================================================== */
+/* ЭНДПОИНТ 4: дефекты для таблиц Spot / Перекрас                         */
+/* category: 'spot' | 'repaint'                                          */
+/* ---------------------------------------------------------------------- */
+/* Возвращает [{ vin, model, mpp, part_name, problem_type, grade, status, */
+/*              psin_time, duration_sec }]                                */
+/* ---------------------------------------------------------------------- */
+app.get('/api/drr-cp6-spot-repaint-vins', async (req, res) => {
+  try {
+    const { startTime, endTime, category } = req.query;
+    if (!startTime || !endTime || !category) {
+      return res.status(400).json({ error: 'startTime, endTime и category обязательны' });
+    }
+    if (category !== 'spot' && category !== 'repaint') {
+      return res.status(400).json({ error: 'category: spot | repaint' });
+    }
+
+    const { vins: psoutRows } = await getCp6PsoutVins(startTime, endTime);
+    if (psoutRows.length === 0) return res.json([]);
+
+    // 1. NOK VIN с их категориями
+    const { spotSet, repaintSet } = await classifyCp6VinsExtended(psoutRows);
+    const targetSet = category === 'spot' ? spotSet : repaintSet;
+    const targetVins = [...targetSet];
+    if (targetVins.length === 0) return res.json([]);
+
+    // 2. Дефекты этих VIN
+    const ph = targetVins.map(() => '?').join(',');
+    const [defectRows] = await pool.query(`
+      SELECT
+        d.VIN, wo.MODEL, d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE, d.STATUS,
+        d.REPAIR_MEASURE, d.REPAIR_MEASURE1
+      FROM at_paint_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.VIN IN (${ph})
+    `, targetVins);
+
+    // 3. Время PSIN для каждого VIN
+    const [psinRows] = await mesPool.query(`
+      SELECT vin, MIN(scan_time) AS psin_time
+      FROM ti_mes_movement
+      WHERE uloc_no = ? AND is_deleted = 0 AND vin IN (${ph})
+      GROUP BY vin
+    `, [CP6_PSIN_ULOC, ...targetVins]);
+
+    const psinByVin = new Map(psinRows.map(r => [r.vin, r.psin_time]));
+    const nowMs = Date.now();
+
+    // 4. Формируем строки только для дефектов нужной категории
+    const rows = [];
+    defectRows.forEach(d => {
+      const status = (d.STATUS || '').toUpperCase();
+      if (CP6_DEFECT_CLOSED_STATUSES.has(status)) return;
+
+      const cat = classifyCp6DefectCategory(d);
+      if (cat !== category) return;
+
+      const psinTime = psinByVin.get(d.VIN) || null;
+      const durationSec = psinTime
+        ? Math.max(0, Math.floor((nowMs - new Date(psinTime).getTime()) / 1000))
+        : null;
+
+      const mpp = `${d.MODEL || '—'} ${d.PART_NAME || ''} ${d.PROBLEM_TYPE || ''}`
+        .replace(/\s+/g, ' ').trim();
+
+      rows.push({
+        vin: d.VIN,
+        model: d.MODEL || '—',
+        mpp,
+        part_name: d.PART_NAME || '',
+        problem_type: d.PROBLEM_TYPE || '',
+        grade: d.PROBLEM_GRADE || '—',
+        status: d.STATUS || '—',
+        psin_time: psinTime,
+        duration_sec: durationSec,
+      });
+    });
+
+    // сортируем по убыванию продолжительности (более старые сверху)
+    rows.sort((a, b) => (b.duration_sec || 0) - (a.duration_sec || 0));
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка /api/drr-cp6-spot-repaint-vins:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
