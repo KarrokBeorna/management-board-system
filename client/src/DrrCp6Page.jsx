@@ -209,7 +209,6 @@ const getCurrentShiftInfo = () => {
 };
 
 /* ===================== ФОРМАТТЕРЫ ===================== */
-// Формат: если ≥ 1 дня → "5д 03:15", иначе → "03:15"
 const formatDuration = (sec) => {
   if (sec === null || sec === undefined || sec < 0) return '—';
   const d = Math.floor(sec / 86400);
@@ -226,6 +225,25 @@ const formatDateTime = (str) => {
   } catch {
     return String(str);
   }
+};
+
+/* ===================== СТИЛИ БЛОКОВ (единые) ===================== */
+// Высота секции с label + разделителем — фиксированная
+const LABEL_SECTION_HEIGHT = 42;
+// Высота секции с большим числом — фиксированная
+const VALUE_SECTION_HEIGHT = 62;
+
+const subBlockStyle = {
+  backgroundColor: 'rgba(255,255,255,0.20)',
+  borderRadius: 8,
+  padding: '6px 4px',
+  textAlign: 'center',
+  border: '1px solid rgba(255,255,255,0.18)',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 2,
 };
 
 /* ===================== КОМПОНЕНТ ===================== */
@@ -390,7 +408,7 @@ export default function DrrCp6Page() {
         </div>
       ) : (
         <div style={dashboardGridStyle}>
-          {/* ============ ЛЕВАЯ КОЛОНКА: пончик + блоки ============ */}
+          {/* ============ ЛЕВАЯ КОЛОНКА ============ */}
           <div style={chartColumnStyle}>
             <div style={{ position: 'relative', width: '100%', height: '440px', flexShrink: 0 }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -430,7 +448,7 @@ export default function DrrCp6Page() {
             {/* ============ Нижний ряд: Все / Buffer / NOK ============ */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'nowrap', alignItems: 'stretch' }}>
 
-              {/* Все — узкий */}
+              {/* === Все — узкий === */}
               <div style={{
                 flex: '0 0 20%',
                 backgroundColor: '#1E293B',
@@ -440,20 +458,27 @@ export default function DrrCp6Page() {
                 minHeight: 150,
                 display: 'flex',
                 flexDirection: 'column',
-                justifyContent: 'space-between',
                 boxSizing: 'border-box',
               }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 8 }}>Все</div>
-                  <div style={{ width: '55%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto 10px', borderRadius: 1 }} />
+                {/* label + divider */}
+                <div style={{ textAlign: 'center', height: LABEL_SECTION_HEIGHT, flexShrink: 0 }}>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>Все</div>
+                  <div style={{ width: '55%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto', borderRadius: 1 }} />
+                </div>
+                {/* number */}
+                <div style={{
+                  height: VALUE_SECTION_HEIGHT,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
                   <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.activeAtPaint}</div>
                 </div>
-                <div style={{ fontSize: '0.68rem', opacity: 0.75, fontWeight: 600, textAlign: 'center' }}>
+                {/* footnote */}
+                <div style={{ fontSize: '0.68rem', opacity: 0.75, fontWeight: 600, textAlign: 'center', marginTop: 'auto' }}>
                   Прошли PSOUT: {data.totalVins}
                 </div>
               </div>
 
-              {/* Buffer — узкий */}
+              {/* === Buffer — узкий === */}
               <div
                 style={{
                   flex: '0 0 20%',
@@ -464,20 +489,24 @@ export default function DrrCp6Page() {
                   minHeight: 150,
                   display: 'flex',
                   flexDirection: 'column',
-                  justifyContent: 'flex-start',
                   cursor: 'pointer',
                   boxSizing: 'border-box',
                 }}
                 onClick={() => loadVinList('OK')}
               >
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 8 }}>Buffer</div>
-                  <div style={{ width: '55%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto 10px', borderRadius: 1 }} />
+                <div style={{ textAlign: 'center', height: LABEL_SECTION_HEIGHT, flexShrink: 0 }}>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>Buffer</div>
+                  <div style={{ width: '55%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto', borderRadius: 1 }} />
+                </div>
+                <div style={{
+                  height: VALUE_SECTION_HEIGHT,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
                   <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.bufferCount}</div>
                 </div>
               </div>
 
-              {/* NOK — растянут, число и 3 подблока в одной строке */}
+              {/* === NOK — растянут === */}
               <div
                 style={{
                   flex: 1,
@@ -493,42 +522,29 @@ export default function DrrCp6Page() {
                 }}
                 onClick={() => loadVinList('NOK')}
               >
-                {/* Верхняя часть — label + divider */}
-                <div style={{ textAlign: 'center', marginBottom: 8 }}>
-                  <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 8 }}>NOK</div>
+                {/* label + divider — высота такая же, как у Все и Buffer */}
+                <div style={{ textAlign: 'center', height: LABEL_SECTION_HEIGHT, flexShrink: 0 }}>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>NOK</div>
                   <div style={{ width: '30%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto', borderRadius: 1 }} />
                 </div>
-
-                {/* Нижняя часть — большая цифра слева, подблоки справа */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
-                  <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1, minWidth: 70, textAlign: 'center' }}>
+                {/* number + sub-blocks — высота такая же, как number-секция у Все/Buffer */}
+                <div style={{
+                  height: VALUE_SECTION_HEIGHT,
+                  display: 'flex', alignItems: 'center', gap: 12,
+                }}>
+                  <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1, minWidth: 60, textAlign: 'center' }}>
                     {data.nokVins}
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, flex: 1 }}>
-                    <div style={{
-                      backgroundColor: 'rgba(255,255,255,0.20)',
-                      borderRadius: 8, padding: '8px 4px',
-                      textAlign: 'center', border: '1px solid rgba(255,255,255,0.18)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
-                    }}>
+                    <div style={subBlockStyle}>
                       <div style={{ fontSize: '0.68rem', fontWeight: 700, opacity: 0.95, letterSpacing: 0.2, lineHeight: 1.1 }}>Spot</div>
                       <div style={{ fontSize: '1.35rem', fontWeight: 900, lineHeight: 1.1 }}>{data.spotVins}</div>
                     </div>
-                    <div style={{
-                      backgroundColor: 'rgba(255,255,255,0.20)',
-                      borderRadius: 8, padding: '8px 4px',
-                      textAlign: 'center', border: '1px solid rgba(255,255,255,0.18)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
-                    }}>
+                    <div style={subBlockStyle}>
                       <div style={{ fontSize: '0.68rem', fontWeight: 700, opacity: 0.95, letterSpacing: 0.2, lineHeight: 1.1 }}>Перекрас</div>
                       <div style={{ fontSize: '1.35rem', fontWeight: 900, lineHeight: 1.1 }}>{data.repaintVins}</div>
                     </div>
-                    <div style={{
-                      backgroundColor: 'rgba(255,255,255,0.20)',
-                      borderRadius: 8, padding: '8px 4px',
-                      textAlign: 'center', border: '1px solid rgba(255,255,255,0.18)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
-                    }}>
+                    <div style={subBlockStyle}>
                       <div style={{ fontSize: '0.68rem', fontWeight: 700, opacity: 0.95, letterSpacing: 0.2, lineHeight: 1.1 }}>Остальные</div>
                       <div style={{ fontSize: '1.35rem', fontWeight: 900, lineHeight: 1.1 }}>{data.otherVins}</div>
                     </div>
@@ -538,7 +554,7 @@ export default function DrrCp6Page() {
             </div>
           </div>
 
-          {/* ============ ПРАВАЯ КОЛОНКА: 2 таблицы ============ */}
+          {/* ============ ПРАВАЯ КОЛОНКА ============ */}
           <div style={rightColumnStyle}>
 
             {/* Spot */}
