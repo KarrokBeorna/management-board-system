@@ -130,99 +130,6 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
-/* ===================== СТИЛИ БЛОКОВ ВНИЗУ ===================== */
-// Общая база для блоков «Все», «Buffer», «NOK»
-const blockBaseStyle = {
-  borderRadius: 12,
-  padding: '14px 12px',
-  color: '#FFFFFF',
-  minHeight: 200,
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'stretch',
-  boxSizing: 'border-box',
-};
-
-// Верхняя секция с фиксированной высотой — гарантирует, что label, divider и число
-// во всех трёх блоках находятся на одном уровне
-const blockTopSectionStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'flex-start',
-  height: 118,
-  flexShrink: 0,
-};
-
-const blockLabelStyle = {
-  fontSize: '1rem',
-  fontWeight: 700,
-  opacity: 0.95,
-  lineHeight: 1.2,
-  minHeight: 20,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  marginBottom: 8,
-  textAlign: 'center',
-};
-
-const blockDividerStyle = {
-  width: '60%',
-  height: '2px',
-  backgroundColor: 'rgba(255,255,255,0.30)',
-  borderRadius: 1,
-  marginBottom: 12,
-  flexShrink: 0,
-};
-
-const blockValueStyle = {
-  fontSize: '3rem',
-  fontWeight: 900,
-  lineHeight: 1,
-  textAlign: 'center',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
-const blockFootnoteStyle = {
-  fontSize: '0.68rem',
-  opacity: 0.75,
-  fontWeight: 600,
-  textAlign: 'center',
-  marginTop: 'auto',
-};
-
-// Подблоки внутри NOK (Spot / Перекрас / Остальные)
-const innerSubBlockStyle = {
-  backgroundColor: 'rgba(255,255,255,0.20)',
-  borderRadius: 8,
-  padding: '8px 4px',
-  textAlign: 'center',
-  border: '1px solid rgba(255,255,255,0.18)',
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 2,
-};
-
-const innerSubLabelStyle = {
-  fontSize: '0.68rem',
-  fontWeight: 700,
-  opacity: 0.95,
-  letterSpacing: 0.2,
-  lineHeight: 1.1,
-};
-
-const innerSubValueStyle = {
-  fontSize: '1.35rem',
-  fontWeight: 900,
-  lineHeight: 1.1,
-  color: '#FFFFFF',
-};
-
 /* ===================== ХЕЛПЕРЫ ВРЕМЕНИ ===================== */
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
 
@@ -303,7 +210,6 @@ const getCurrentShiftInfo = () => {
 
 /* ===================== ФОРМАТТЕРЫ ===================== */
 // Формат: если ≥ 1 дня → "5д 03:15", иначе → "03:15"
-// Заголовок таблицы: «д чч:мм»
 const formatDuration = (sec) => {
   if (sec === null || sec === undefined || sec < 0) return '—';
   const d = Math.floor(sec / 86400);
@@ -524,52 +430,108 @@ export default function DrrCp6Page() {
             {/* ============ Нижний ряд: Все / Buffer / NOK ============ */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'nowrap', alignItems: 'stretch' }}>
 
-              {/* Все — активные на покраске */}
-              <div style={{ ...blockBaseStyle, backgroundColor: '#1E293B', flex: '0 0 24%' }}>
-                <div style={blockTopSectionStyle}>
-                  <div style={blockLabelStyle}>Все</div>
-                  <div style={blockDividerStyle} />
-                  <div style={blockValueStyle}>{data.activeAtPaint}</div>
+              {/* Все — узкий */}
+              <div style={{
+                flex: '0 0 20%',
+                backgroundColor: '#1E293B',
+                borderRadius: 12,
+                padding: '14px 12px',
+                color: '#FFFFFF',
+                minHeight: 150,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                boxSizing: 'border-box',
+              }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 8 }}>Все</div>
+                  <div style={{ width: '55%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto 10px', borderRadius: 1 }} />
+                  <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.activeAtPaint}</div>
                 </div>
-                <div style={blockFootnoteStyle}>
+                <div style={{ fontSize: '0.68rem', opacity: 0.75, fontWeight: 600, textAlign: 'center' }}>
                   Прошли PSOUT: {data.totalVins}
                 </div>
               </div>
 
-              {/* Buffer — количество VIN, прошедших AGMPS01003 и не прошедших AGMPS01004 */}
+              {/* Buffer — узкий */}
               <div
-                style={{ ...blockBaseStyle, backgroundColor: '#059669', flex: '0 0 24%', cursor: 'pointer' }}
+                style={{
+                  flex: '0 0 20%',
+                  backgroundColor: '#059669',
+                  borderRadius: 12,
+                  padding: '14px 12px',
+                  color: '#FFFFFF',
+                  minHeight: 150,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'flex-start',
+                  cursor: 'pointer',
+                  boxSizing: 'border-box',
+                }}
                 onClick={() => loadVinList('OK')}
               >
-                <div style={blockTopSectionStyle}>
-                  <div style={blockLabelStyle}>Buffer</div>
-                  <div style={blockDividerStyle} />
-                  <div style={blockValueStyle}>{data.bufferCount}</div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 8 }}>Buffer</div>
+                  <div style={{ width: '55%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto 10px', borderRadius: 1 }} />
+                  <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.bufferCount}</div>
                 </div>
               </div>
 
-              {/* NOK — с 3 подблоками */}
+              {/* NOK — растянут, число и 3 подблока в одной строке */}
               <div
-                style={{ ...blockBaseStyle, backgroundColor: '#DC2626', flex: 1, cursor: 'pointer' }}
+                style={{
+                  flex: 1,
+                  backgroundColor: '#DC2626',
+                  borderRadius: 12,
+                  padding: '14px 16px',
+                  color: '#FFFFFF',
+                  minHeight: 150,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  cursor: 'pointer',
+                  boxSizing: 'border-box',
+                }}
                 onClick={() => loadVinList('NOK')}
               >
-                <div style={blockTopSectionStyle}>
-                  <div style={blockLabelStyle}>NOK</div>
-                  <div style={blockDividerStyle} />
-                  <div style={blockValueStyle}>{data.nokVins}</div>
+                {/* Верхняя часть — label + divider */}
+                <div style={{ textAlign: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 8 }}>NOK</div>
+                  <div style={{ width: '30%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto', borderRadius: 1 }} />
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 'auto' }}>
-                  <div style={innerSubBlockStyle}>
-                    <div style={innerSubLabelStyle}>Spot</div>
-                    <div style={innerSubValueStyle}>{data.spotVins}</div>
+
+                {/* Нижняя часть — большая цифра слева, подблоки справа */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
+                  <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1, minWidth: 70, textAlign: 'center' }}>
+                    {data.nokVins}
                   </div>
-                  <div style={innerSubBlockStyle}>
-                    <div style={innerSubLabelStyle}>Перекрас</div>
-                    <div style={innerSubValueStyle}>{data.repaintVins}</div>
-                  </div>
-                  <div style={innerSubBlockStyle}>
-                    <div style={innerSubLabelStyle}>Остальные</div>
-                    <div style={innerSubValueStyle}>{data.otherVins}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, flex: 1 }}>
+                    <div style={{
+                      backgroundColor: 'rgba(255,255,255,0.20)',
+                      borderRadius: 8, padding: '8px 4px',
+                      textAlign: 'center', border: '1px solid rgba(255,255,255,0.18)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+                    }}>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 700, opacity: 0.95, letterSpacing: 0.2, lineHeight: 1.1 }}>Spot</div>
+                      <div style={{ fontSize: '1.35rem', fontWeight: 900, lineHeight: 1.1 }}>{data.spotVins}</div>
+                    </div>
+                    <div style={{
+                      backgroundColor: 'rgba(255,255,255,0.20)',
+                      borderRadius: 8, padding: '8px 4px',
+                      textAlign: 'center', border: '1px solid rgba(255,255,255,0.18)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+                    }}>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 700, opacity: 0.95, letterSpacing: 0.2, lineHeight: 1.1 }}>Перекрас</div>
+                      <div style={{ fontSize: '1.35rem', fontWeight: 900, lineHeight: 1.1 }}>{data.repaintVins}</div>
+                    </div>
+                    <div style={{
+                      backgroundColor: 'rgba(255,255,255,0.20)',
+                      borderRadius: 8, padding: '8px 4px',
+                      textAlign: 'center', border: '1px solid rgba(255,255,255,0.18)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+                    }}>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 700, opacity: 0.95, letterSpacing: 0.2, lineHeight: 1.1 }}>Остальные</div>
+                      <div style={{ fontSize: '1.35rem', fontWeight: 900, lineHeight: 1.1 }}>{data.otherVins}</div>
+                    </div>
                   </div>
                 </div>
               </div>
