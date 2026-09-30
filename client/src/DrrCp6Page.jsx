@@ -457,10 +457,10 @@ export default function DrrCp6Page() {
               </div>
             </div>
 
-            {/* ============ Нижний ряд: Все / Buffer / NOK ============ */}
+            {/* ============ Нижний ряд: System Fill / Buffer / NOK ============ */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'nowrap', alignItems: 'stretch' }}>
 
-              {/* === Все: активные между AGMPS01001 и AGMPS01002 (14 дней) === */}
+              {/* === System Fill: активные между AGMPS01001 и AGMPS01002 (14 дней) === */}
               <div style={{
                 flex: '0 0 20%',
                 backgroundColor: '#1E293B',
@@ -482,7 +482,7 @@ export default function DrrCp6Page() {
                 }}>
                   <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>
                     {Math.max(0, data.activeAtPaint - 4)}
-                    </div>
+                  </div>
                 </div>
                 <div style={{ fontSize: '0.68rem', opacity: 0.75, fontWeight: 600, textAlign: 'center', marginTop: 'auto' }}>
                   Прошли PSOUT: {data.totalVins}
