@@ -473,14 +473,16 @@ export default function DrrCp6Page() {
                 boxSizing: 'border-box',
               }}>
                 <div style={{ textAlign: 'center', height: LABEL_SECTION_HEIGHT, flexShrink: 0 }}>
-                  <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>Все</div>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>System Fill</div>
                   <div style={{ width: '55%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto', borderRadius: 1 }} />
                 </div>
                 <div style={{
                   height: VALUE_SECTION_HEIGHT,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                  <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.activeAtPaint}</div>
+                  <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>
+                    {Math.max(0, data.activeAtPaint - 4)}
+                    </div>
                 </div>
                 <div style={{ fontSize: '0.68rem', opacity: 0.75, fontWeight: 600, textAlign: 'center', marginTop: 'auto' }}>
                   Прошли PSOUT: {data.totalVins}
