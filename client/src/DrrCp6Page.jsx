@@ -257,7 +257,7 @@ export default function DrrCp6Page() {
     spotVins: 0,
     repaintVins: 0,
     otherVins: 0,
-    bufferCount: 0,
+    transitCount: 0,
     activeAtPaint: 0,
   });
   const [spotRows, setSpotRows] = useState([]);
@@ -292,7 +292,7 @@ export default function DrrCp6Page() {
         spotVins: mainRes.spotVins || 0,
         repaintVins: mainRes.repaintVins || 0,
         otherVins: mainRes.otherVins || 0,
-        bufferCount: mainRes.bufferCount || 0,
+        transitCount: mainRes.transitCount || 0,
         activeAtPaint: mainRes.activeAtPaint || 0,
       });
 
@@ -325,14 +325,14 @@ export default function DrrCp6Page() {
     }
   };
 
-  const loadBufferList = async () => {
+  const loadTransitList = async () => {
     setVinModalLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/drr-cp6-buffer-vins`);
-      if (!res.ok) throw new Error('Ошибка загрузки списка VIN (Buffer)');
+      const res = await fetch(`${API_BASE}/api/drr-cp6-transit-vins`);
+      if (!res.ok) throw new Error('Ошибка загрузки списка VIN (переход)');
       const json = await res.json();
       setVinList(Array.isArray(json) ? json : []);
-      setVinListStatus('BUFFER');
+      setVinListStatus('TRANSIT');
       setShowVinModal(true);
     } catch (err) {
       alert(err.message);
@@ -460,7 +460,7 @@ export default function DrrCp6Page() {
             {/* ============ Нижний ряд: System Fill / Buffer / NOK ============ */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'nowrap', alignItems: 'stretch' }}>
 
-              {/* === System Fill: активные между AGMPS01001 и AGMPS01002 (14 дней) === */}
+              {/* === System Fill: активные между AGMPS01001 и AGMPS01002 === */}
               <div style={{
                 flex: '0 0 20%',
                 backgroundColor: '#1E293B',
@@ -489,7 +489,7 @@ export default function DrrCp6Page() {
                 </div>
               </div>
 
-              {/* === Buffer: между AGMPS01003 и AGMPS01004 (14 дней) === */}
+              {/* === Buffer: между AGMPS01004 и AGMAS01001 (30 дней) === */}
               <div
                 style={{
                   flex: '0 0 20%',
@@ -503,7 +503,7 @@ export default function DrrCp6Page() {
                   cursor: 'pointer',
                   boxSizing: 'border-box',
                 }}
-                onClick={loadBufferList}
+                onClick={loadTransitList}
               >
                 <div style={{ textAlign: 'center', height: LABEL_SECTION_HEIGHT, flexShrink: 0 }}>
                   <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>Buffer</div>
@@ -513,7 +513,7 @@ export default function DrrCp6Page() {
                   height: VALUE_SECTION_HEIGHT,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                  <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.bufferCount}</div>
+                  <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.transitCount}</div>
                 </div>
                 <div style={{ fontSize: '0.68rem', opacity: 0.85, fontWeight: 600, textAlign: 'center', marginTop: 'auto' }}>
                   Прошли OK: {data.okVins}
@@ -686,8 +686,8 @@ export default function DrrCp6Page() {
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Модель</th>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Код материала</th>
                       <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>Описание материала</th>
-                      {vinListStatus === 'BUFFER' ? (
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }} colSpan={2}>Заход в буфер</th>
+                      {vinListStatus === 'TRANSIT' ? (
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }} colSpan={2}>PBSOUT (выход из покраски)</th>
                       ) : (
                         <>
                           <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #E5E7EB' }}>PSIN</th>
@@ -705,9 +705,9 @@ export default function DrrCp6Page() {
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.material_code}</td>
                         <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.material_desc}</td>
-                        {vinListStatus === 'BUFFER' ? (
+                        {vinListStatus === 'TRANSIT' ? (
                           <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontSize: '0.85rem' }} colSpan={2}>
-                            {formatDateTime(item.buffer_enter_time)}
+                            {formatDateTime(item.pbsout_time)}
                           </td>
                         ) : (
                           <>
