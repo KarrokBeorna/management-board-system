@@ -11175,6 +11175,10 @@ app.get('/api/drr-cp6-top-defects', async (req, res) => {
 
 /* ====================================================================== */
 /* ЭНДПОИНТ 4: дефекты для таблиц Spot / Перекрас                         */
+/*                                                                        */
+/* Время захода (PSIN) берётся за всё время по VIN:                        */
+/*   приоритет — AGMPS01001, если нет — AGMPS01003 (PBSIN).                */
+/* Период фильтра влияет только на ОТБОР VIN, не на отображение времени.   */
 /* ====================================================================== */
 app.get('/api/drr-cp6-spot-repaint-vins', async (req, res) => {
   try {
@@ -11198,9 +11202,32 @@ app.get('/api/drr-cp6-spot-repaint-vins', async (req, res) => {
     const targetVins = [...targetSet];
     if (targetVins.length === 0) return res.json([]);
 
-    const psinTimeByVin = new Map(psinRows.map(r => [r.vin, r.psin_last_time]));
-
     const ph = targetVins.map(() => '?').join(',');
+
+    // Реальное время захода — последний PSIN или, если его нет, PBSIN.
+    // Без ограничения по периоду — берём последний из всей истории.
+    const [psinHistoryRows] = await mesPool.query(`
+      SELECT vin, uloc_no, MAX(scan_time) AS last_time
+      FROM ti_mes_movement
+      WHERE vin IN (${ph})
+        AND uloc_no IN (?, ?)
+        AND is_deleted = 0
+      GROUP BY vin, uloc_no
+    `, [...targetVins, CP6_PSIN_ULOC, CP6_BUFFER_ENTER]);
+
+    const psinTimeByVin = new Map();
+    const pbsinTimeByVin = new Map();
+    psinHistoryRows.forEach(r => {
+      if (r.uloc_no === CP6_PSIN_ULOC) psinTimeByVin.set(r.vin, r.last_time);
+      else if (r.uloc_no === CP6_BUFFER_ENTER) pbsinTimeByVin.set(r.vin, r.last_time);
+    });
+    targetVins.forEach(v => {
+      if (!psinTimeByVin.has(v) && pbsinTimeByVin.has(v)) {
+        psinTimeByVin.set(v, pbsinTimeByVin.get(v));
+      }
+    });
+
+    // Дефекты этих VIN
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN, wo.MODEL, d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE, d.STATUS,
