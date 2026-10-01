@@ -341,6 +341,7 @@ export default function HoldsSgpPage() {
     }
   }, [activeTab]);
 
+  // ====== КЛИК ПО VIN — batch режим ======
   const handleVinClick = async (model, issueDesc, date) => {
     setVinLoading(true);
     setShowVinModal(true);
@@ -356,9 +357,56 @@ export default function HoldsSgpPage() {
       const res = await fetch(`${API_BASE}/api/holds-sgp-retrospective-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки VIN');
       const vins = await res.json();
-      setVinList(vins);
+      setVinList(Array.isArray(vins) ? vins : []);
     } catch (err) {
       console.error('Ошибка загрузки VIN:', err);
+      setVinList([]);
+    } finally {
+      setVinLoading(false);
+    }
+  };
+
+  // ====== КЛИК ПО VIN — aggregated режим ======
+  // Находим все "сырые" issue_desc в retroData, которые после aggregateReason дают ту же причину,
+  // запрашиваем VIN-ы по каждому, объединяем и убираем дубли.
+  const handleAggregatedVinClick = async (model, reason, date) => {
+    setVinLoading(true);
+    setShowVinModal(true);
+    setVinModalTitle(`${model} - ${reason} (${formatShortDate(date)})`);
+
+    try {
+      // Все сырые строки, соответствующие агрегированной причине
+      const matched = retroData.filter(
+        (r) => r.model === model && aggregateReason(r.issue_desc) === reason
+      );
+
+      const uniqueVins = new Set();
+
+      await Promise.all(
+        matched.map(async (r) => {
+          try {
+            const params = new URLSearchParams({
+              model: r.model,
+              issue_desc: r.issue_desc,
+              date,
+            });
+            const res = await fetch(
+              `${API_BASE}/api/holds-sgp-retrospective-vins?${params.toString()}`
+            );
+            if (!res.ok) return;
+            const vins = await res.json();
+            if (Array.isArray(vins)) {
+              vins.forEach((v) => uniqueVins.add(v));
+            }
+          } catch (err) {
+            console.error('VIN fetch error:', r.model, r.issue_desc, err);
+          }
+        })
+      );
+
+      setVinList(Array.from(uniqueVins).sort());
+    } catch (err) {
+      console.error('Ошибка загрузки агрегированных VIN:', err);
       setVinList([]);
     } finally {
       setVinLoading(false);
@@ -473,7 +521,6 @@ export default function HoldsSgpPage() {
   const handleExport = async () => {
     const data = reportView === 'batch' ? filteredData : filteredDataAggregated;
 
-    // ============ ЛИСТ 1: ОТЧЁТ ============
     const exportData = data.map(d => ({
       'Модель': d.model,
       'Описание': d.issue_desc,
@@ -557,12 +604,10 @@ export default function HoldsSgpPage() {
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
     // ============ ЛИСТ 2: VIN СПИСОК ============
-    // ВАЖНО: всегда используем СЫРЫЕ строки (filteredData), т.к. в БД issue_desc хранится как есть.
-    // В агрегированном виде issue_desc обрезан, и API не найдёт совпадений.
     const todayStr = new Date().toISOString().split('T')[0];
     const vinRows = [];
     const rows = filteredData;
-    const CONCURRENCY = 10; // ограничиваем параллельные запросы
+    const CONCURRENCY = 10;
 
     for (let i = 0; i < rows.length; i += CONCURRENCY) {
       const chunk = rows.slice(i, i + CONCURRENCY);
@@ -605,19 +650,11 @@ export default function HoldsSgpPage() {
         }
       }
       ws2['!cols'] = [
-        { wch: 25 }, // VIN
-        { wch: 15 }, // Модель
-        { wch: 60 }, // Причина
-        { wch: 15 }, // Статус
-        { wch: 16 }, // Дата
-        { wch: 16 }, // Ответственный
+        { wch: 25 }, { wch: 15 }, { wch: 60 }, { wch: 15 }, { wch: 16 }, { wch: 16 },
       ];
       XLSX.utils.book_append_sheet(wb, ws2, 'VIN список');
-    } else {
-      console.warn('VIN список пуст — второй лист не создан');
     }
 
-    // ============ СКАЧИВАНИЕ ============
     const today = new Date();
     const enDate = today.toLocaleDateString('en-GB', { day: '2-digit', month: 'long' });
     XLSX.writeFile(wb, `Compound Quality Holds_${enDate}.xlsx`);
@@ -977,11 +1014,15 @@ export default function HoldsSgpPage() {
                                 transition: 'all 0.2s',
                               }}
                               onClick={() => {
-                                if (val > 0 && analyticsView === 'batch') {
-                                  handleVinClick(row.model, row.issue_desc, date);
+                                if (val > 0) {
+                                  if (analyticsView === 'batch') {
+                                    handleVinClick(row.model, row.issue_desc, date);
+                                  } else {
+                                    handleAggregatedVinClick(row.model, row.issue_desc, date);
+                                  }
                                 }
                               }}
-                              title={val > 0 && analyticsView === 'batch' ? 'Нажмите для просмотра VIN' : ''}
+                              title={val > 0 ? 'Нажмите для просмотра VIN' : ''}
                             >
                               {val || ''}
                             </td>
@@ -1043,7 +1084,7 @@ export default function HoldsSgpPage() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1F2937' }}>
-                VIN номера
+                VIN номера {vinList.length > 0 && `(${vinList.length})`}
               </h3>
               <button
                 onClick={() => setShowVinModal(false)}
