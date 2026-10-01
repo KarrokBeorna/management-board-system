@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style'; // <-- Изменен импорт
 
 const API_BASE = '';
 
@@ -486,17 +486,21 @@ export default function HoldsSgpPage() {
   const handleExport = () => {
     const data = reportView === 'batch' ? filteredData : filteredDataAggregated;
 
+    // Формируем данные для Excel согласно колонкам на скриншоте
     const exportData = data.map(d => ({
       'Модель': d.model,
       'Описание': d.issue_desc,
       'Количество': d.quantity,
       'Дата постановки на Холд': formatDate(d.hold_date),
       'Дней ожидания': d.days_waiting,
-      'Ответственный': '',
+      'Ответственный': d.responsible || '',
+      'Действия': d.actions || '',
       'Плановая дата': formatDate(d.planned_date),
       'Статус': d.status || 'В процессе',
+      'Комментарий': d.comment || '',
     }));
 
+    // Добавляем строку "Общий итог"
     const totalQuantity = data.reduce((sum, d) => sum + (d.quantity || 0), 0);
     exportData.push({
       'Модель': 'Общий итог',
@@ -505,22 +509,106 @@ export default function HoldsSgpPage() {
       'Дата постановки на Холд': '',
       'Дней ожидания': '',
       'Ответственный': '',
+      'Действия': '',
       'Плановая дата': '',
       'Статус': '',
+      'Комментарий': '',
     });
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    const sheetName = reportView === 'batch' ? 'Holds SGP' : 'Агрегированные холды';
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    const ws = XLSX.utils.json_to_sheet(exportData, { origin: 'A1' });
+    const range = XLSX.utils.decode_range(ws['!ref']);
+
+    // === НАСТРОЙКА СТИЛЕЙ ===
+    const borderStyle = { style: 'thin', color: { rgb: "D3D3D3" } };
+    const border = { top: borderStyle, bottom: borderStyle, left: borderStyle, right: borderStyle };
+
+    // Стиль для заголовков (синий фон, белый жирный текст, выравнивание по центру)
+    const headerStyle = {
+      font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
+      fill: { fgColor: { rgb: "4F81BD" } },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border
+    };
+
+    // Обычный стиль для ячеек (границы, выравнивание по левому краю/центру)
+    const cellStyle = {
+      font: { sz: 11, color: { rgb: "000000" } },
+      alignment: { horizontal: "left", vertical: "center", wrapText: true },
+      border
+    };
+
+    const centerCellStyle = {
+      ...cellStyle,
+      alignment: { horizontal: "center", vertical: "center" }
+    };
+
+    // Стиль для строки "Общий итог" (серый фон, жирный текст)
+    const totalStyle = {
+      font: { bold: true, sz: 11 },
+      fill: { fgColor: { rgb: "E9E9E9" } },
+      alignment: { horizontal: "left", vertical: "center" },
+      border
+    };
+
+    const totalCenterStyle = {
+      ...totalStyle,
+      alignment: { horizontal: "center", vertical: "center" }
+    };
+
+    // Применяем стили ко всем ячейкам
+    for (let R = range.s.r; R <= range.e.r; ++R) {
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cellAddress = { c: C, r: R };
+        const cellRef = XLSX.utils.encode_cell(cellAddress);
+        const cell = ws[cellRef];
+        if (!cell) continue;
+
+        if (R === 0) {
+          // Заголовки
+          cell.s = headerStyle;
+        } else if (R === range.e.r) {
+          // Строка "Общий итог" (последняя строка)
+          if (C === 0 || C === 2) { // "Общий итог" и "Количество"
+            cell.s = totalCenterStyle;
+          } else {
+            cell.s = totalStyle;
+          }
+        } else {
+          // Данные (колонки Количество=2 и Дней ожидания=4 выравниваем по центру)
+          if (C === 2 || C === 4) {
+            cell.s = centerCellStyle;
+          } else {
+            cell.s = cellStyle;
+          }
+        }
+      }
+    }
+
+    // === НАСТРОЙКА ШИРИНЫ КОЛОНОК ===
     ws['!cols'] = [
-      { wch: 20 }, { wch: 60 }, { wch: 10 }, { wch: 18 },
-      { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 15 },
+      { wch: 15 }, // Модель
+      { wch: 60 }, // Описание
+      { wch: 12 }, // Количество
+      { wch: 22 }, // Дата постановки
+      { wch: 14 }, // Дней ожидания
+      { wch: 16 }, // Ответственный
+      { wch: 15 }, // Действия
+      { wch: 15 }, // Плановая дата
+      { wch: 15 }, // Статус
+      { wch: 25 }, // Комментарий
     ];
-    const now = new Date();
-    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const suffix = reportView === 'batch' ? 'batches' : 'aggregated';
-    XLSX.writeFile(wb, `Holds_SGP_${suffix}_${dateStr}.xlsx`);
+
+    const wb = XLSX.utils.book_new();
+    const sheetName = reportView === 'batch' ? 'Compound Quality Holds' : 'Агрегированные холды';
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+    // === ГЕНЕРАЦИЯ ИМЕНИ ФАЙЛА ===
+    // Формируем дату на английском, например "01 October"
+    const today = new Date();
+    const enDate = today.toLocaleDateString('en-GB', { day: '2-digit', month: 'long' });
+    
+    // Название файла: Compound Quality Holds_01 October.xlsx
+    XLSX.writeFile(wb, `Compound Quality Holds_${enDate}.xlsx`);
   };
 
   // ====== ЭКСПОРТ РЕТРОСПЕКТИВЫ (учитывает текущий под-таб) ======
