@@ -244,7 +244,6 @@ const aggregateReason = (desc) => {
 export default function HoldsSgpPage() {
   const [activeTab, setActiveTab] = useState('report');
 
-  // Отчет
   const [rawData, setRawData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -253,7 +252,6 @@ export default function HoldsSgpPage() {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [reportView, setReportView] = useState('batch');
 
-  // Аналитика
   const [retroData, setRetroData] = useState([]);
   const [retroLoading, setRetroLoading] = useState(false);
   const [showRetroModelFilter, setShowRetroModelFilter] = useState(false);
@@ -261,7 +259,6 @@ export default function HoldsSgpPage() {
   const [retroDates, setRetroDates] = useState([]);
   const [analyticsView, setAnalyticsView] = useState('batch');
 
-  // Модальное окно для VIN
   const [showVinModal, setShowVinModal] = useState(false);
   const [vinModalTitle, setVinModalTitle] = useState('');
   const [vinList, setVinList] = useState([]);
@@ -472,11 +469,11 @@ export default function HoldsSgpPage() {
     );
   };
 
-  // ====== ЭКСПОРТ ОТЧЁТА С ДОБАВЛЕНИЕМ ЛИСТА VIN ======
+  // ====== ЭКСПОРТ ОТЧЁТА + ВТОРОЙ ЛИСТ С VIN ======
   const handleExport = async () => {
     const data = reportView === 'batch' ? filteredData : filteredDataAggregated;
 
-    // Формируем данные для первого листа
+    // ============ ЛИСТ 1: ОТЧЁТ ============
     const exportData = data.map(d => ({
       'Модель': d.model,
       'Описание': d.issue_desc,
@@ -507,7 +504,6 @@ export default function HoldsSgpPage() {
     const ws = XLSX.utils.json_to_sheet(exportData, { origin: 'A1' });
     const range = XLSX.utils.decode_range(ws['!ref']);
 
-    // Стили (как раньше)
     const borderStyle = { style: 'thin', color: { rgb: "D3D3D3" } };
     const border = { top: borderStyle, bottom: borderStyle, left: borderStyle, right: borderStyle };
     const headerStyle = {
@@ -538,24 +534,15 @@ export default function HoldsSgpPage() {
 
     for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
-        const cellAddress = { c: C, r: R };
-        const cellRef = XLSX.utils.encode_cell(cellAddress);
+        const cellRef = XLSX.utils.encode_cell({ c: C, r: R });
         const cell = ws[cellRef];
         if (!cell) continue;
         if (R === 0) {
           cell.s = headerStyle;
         } else if (R === range.e.r) {
-          if (C === 0 || C === 2) {
-            cell.s = totalCenterStyle;
-          } else {
-            cell.s = totalStyle;
-          }
+          cell.s = (C === 0 || C === 2) ? totalCenterStyle : totalStyle;
         } else {
-          if (C === 2 || C === 4) {
-            cell.s = centerCellStyle;
-          } else {
-            cell.s = cellStyle;
-          }
+          cell.s = (C === 2 || C === 4) ? centerCellStyle : cellStyle;
         }
       }
     }
@@ -569,12 +556,17 @@ export default function HoldsSgpPage() {
     const sheetName = reportView === 'batch' ? 'Compound Quality Holds' : 'Агрегированные холды';
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
-    // === ВТОРОЙ ЛИСТ: VIN СПИСОК (только для batch) ===
-    if (reportView === 'batch') {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const vinRows = [];
+    // ============ ЛИСТ 2: VIN СПИСОК ============
+    // ВАЖНО: всегда используем СЫРЫЕ строки (filteredData), т.к. в БД issue_desc хранится как есть.
+    // В агрегированном виде issue_desc обрезан, и API не найдёт совпадений.
+    const todayStr = new Date().toISOString().split('T')[0];
+    const vinRows = [];
+    const rows = filteredData;
+    const CONCURRENCY = 10; // ограничиваем параллельные запросы
 
-      const fetchPromises = data.map(async (row) => {
+    for (let i = 0; i < rows.length; i += CONCURRENCY) {
+      const chunk = rows.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(chunk.map(async (row) => {
         try {
           const params = new URLSearchParams({
             model: row.model,
@@ -584,53 +576,48 @@ export default function HoldsSgpPage() {
           const res = await fetch(`${API_BASE}/api/holds-sgp-retrospective-vins?${params.toString()}`);
           if (!res.ok) return [];
           const vins = await res.json();
+          if (!Array.isArray(vins)) return [];
           return vins.map(vin => ({
             'VIN': vin,
             'Модель': row.model,
-            'Описание': row.issue_desc,
+            'Причина холда': row.issue_desc,
             'Статус': row.status || 'В процессе',
+            'Дата постановки': formatDate(row.hold_date),
             'Ответственный': row.responsible || '',
           }));
         } catch (err) {
-          console.error('Ошибка загрузки VIN для', row.model, row.issue_desc, err);
+          console.error('VIN fetch error:', row.model, row.issue_desc, err);
           return [];
         }
-      });
-
-      const results = await Promise.all(fetchPromises);
+      }));
       results.forEach(arr => vinRows.push(...arr));
-
-      if (vinRows.length > 0) {
-        const ws2 = XLSX.utils.json_to_sheet(vinRows, { origin: 'A1' });
-        const range2 = XLSX.utils.decode_range(ws2['!ref']);
-
-        for (let R = range2.s.r; R <= range2.e.r; ++R) {
-          for (let C = range2.s.c; C <= range2.e.c; ++C) {
-            const cellAddress = { c: C, r: R };
-            const cellRef = XLSX.utils.encode_cell(cellAddress);
-            const cell = ws2[cellRef];
-            if (!cell) continue;
-            if (R === 0) {
-              cell.s = headerStyle;
-            } else {
-              cell.s = cellStyle;
-            }
-          }
-        }
-
-        ws2['!cols'] = [
-          { wch: 25 }, // VIN
-          { wch: 15 }, // Модель
-          { wch: 60 }, // Описание
-          { wch: 15 }, // Статус
-          { wch: 16 }, // Ответственный
-        ];
-
-        XLSX.utils.book_append_sheet(wb, ws2, 'VIN список');
-      }
     }
 
-    // Генерация имени файла
+    if (vinRows.length > 0) {
+      const ws2 = XLSX.utils.json_to_sheet(vinRows, { origin: 'A1' });
+      const range2 = XLSX.utils.decode_range(ws2['!ref']);
+      for (let R = range2.s.r; R <= range2.e.r; ++R) {
+        for (let C = range2.s.c; C <= range2.e.c; ++C) {
+          const cellRef = XLSX.utils.encode_cell({ c: C, r: R });
+          const cell = ws2[cellRef];
+          if (!cell) continue;
+          cell.s = (R === 0) ? headerStyle : cellStyle;
+        }
+      }
+      ws2['!cols'] = [
+        { wch: 25 }, // VIN
+        { wch: 15 }, // Модель
+        { wch: 60 }, // Причина
+        { wch: 15 }, // Статус
+        { wch: 16 }, // Дата
+        { wch: 16 }, // Ответственный
+      ];
+      XLSX.utils.book_append_sheet(wb, ws2, 'VIN список');
+    } else {
+      console.warn('VIN список пуст — второй лист не создан');
+    }
+
+    // ============ СКАЧИВАНИЕ ============
     const today = new Date();
     const enDate = today.toLocaleDateString('en-GB', { day: '2-digit', month: 'long' });
     XLSX.writeFile(wb, `Compound Quality Holds_${enDate}.xlsx`);
