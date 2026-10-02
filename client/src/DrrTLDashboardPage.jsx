@@ -229,11 +229,16 @@ export default function DrrTLDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Снимки смен
+  const [snapshots, setSnapshots] = useState([]);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState('live');
+
   const [vinList, setVinList] = useState([]);
   const [vinListStatus, setVinListStatus] = useState('');
   const [showVinModal, setShowVinModal] = useState(false);
   const [vinModalLoading, setVinModalLoading] = useState(false);
 
+  // ---------- LIVE ----------
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -264,7 +269,72 @@ export default function DrrTLDashboardPage() {
     }
   };
 
+  // ---------- Снимок ----------
+  const loadSnapshot = async (id) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/drr-tl-snapshot/${id}`);
+      if (!res.ok) throw new Error('Ошибка загрузки снимка');
+      const json = await res.json();
+      setDrrData({
+        totalRecords: json.totalRecords || 0,
+        totalVins: json.totalVins || 0,
+        closedVins: json.closedVins || 0,
+        nokVins: json.nokVins || 0,
+        drrPercent: json.drrPercent || 0,
+      });
+      setTopDefects(Array.isArray(json.topDefects) ? json.topDefects : []);
+    } catch (err) {
+      setError(err.message);
+      setTopDefects([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ---------- Загрузка списка снимков ----------
+  useEffect(() => {
+    fetch(`${API_BASE}/api/drr-tl-snapshots?days=14`)
+      .then(res => res.json())
+      .then(json => setSnapshots(Array.isArray(json) ? json : []))
+      .catch(() => setSnapshots([]));
+  }, []);
+
+  // ---------- Реакция на смену snapshot / timeFilter ----------
+  useEffect(() => {
+    if (selectedSnapshotId === 'live') {
+      loadData();
+    } else {
+      loadSnapshot(selectedSnapshotId);
+    }
+  }, [selectedSnapshotId, timeFilter]);
+
+  // ---------- Автообновление смены/фильтра ----------
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const newShiftInfo = getCurrentShiftInfo();
+      setShiftInfo(newShiftInfo);
+      if (!isManualFilter && selectedSnapshotId === 'live') {
+        setTimeFilter(getDefaultTimeFilter());
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [isManualFilter, selectedSnapshotId]);
+
+  // ---------- Автообновление данных (30 с, только live) ----------
+  useEffect(() => {
+    if (selectedSnapshotId !== 'live') return;
+    const interval = setInterval(loadData, 30000);
+    return () => clearInterval(interval);
+  }, [timeFilter, selectedSnapshotId]);
+
+  // ---------- VIN ----------
   const loadVinList = async (status) => {
+    if (selectedSnapshotId !== 'live') {
+      alert('В архиве список VIN недоступен — переключитесь на «Сейчас (live)».');
+      return;
+    }
     setVinModalLoading(true);
     try {
       const { start, end } = getTimeRange(timeFilter);
@@ -282,26 +352,6 @@ export default function DrrTLDashboardPage() {
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, [timeFilter]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const newShiftInfo = getCurrentShiftInfo();
-      setShiftInfo(newShiftInfo);
-      if (!isManualFilter) {
-        setTimeFilter(getDefaultTimeFilter());
-      }
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [isManualFilter]);
-
-  useEffect(() => {
-    const interval = setInterval(loadData, 30000);
-    return () => clearInterval(interval);
-  }, [timeFilter]);
-
   const nokVins = drrData.nokVins ?? (drrData.totalVins - drrData.closedVins);
   const pieData = [
     { name: 'DRR', value: drrData.drrPercent },
@@ -312,6 +362,8 @@ export default function DrrTLDashboardPage() {
     setIsManualFilter(true);
     setTimeFilter(filter);
   };
+
+  const isArchive = selectedSnapshotId !== 'live';
 
   return (
     <div style={containerStyle}>
@@ -357,29 +409,71 @@ export default function DrrTLDashboardPage() {
 
           <div style={filterGroupStyle}>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')}
-              onClick={() => handleFilterClick('all')}
+              style={{ ...timeFilterButtonStyle(timeFilter === 'all', '#6B7280'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('all'); }}
+              disabled={isArchive}
             >
               Сутки
             </button>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')}
-              onClick={() => handleFilterClick('day')}
+              style={{ ...timeFilterButtonStyle(timeFilter === 'day', '#F59E0B'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('day'); }}
+              disabled={isArchive}
             >
               День
             </button>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')}
-              onClick={() => handleFilterClick('evening')}
+              style={{ ...timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('evening'); }}
+              disabled={isArchive}
             >
               Вечер
             </button>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')}
-              onClick={() => handleFilterClick('night')}
+              style={{ ...timeFilterButtonStyle(timeFilter === 'night', '#1F2937'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
+              onClick={() => { if (!isArchive) handleFilterClick('night'); }}
+              disabled={isArchive}
             >
               Ночь
             </button>
+
+            <select
+              value={selectedSnapshotId}
+              onChange={(e) => setSelectedSnapshotId(e.target.value)}
+              style={{
+                padding: '12px 24px',
+                borderRadius: '12px',
+                border: 'none',
+                fontWeight: 700,
+                fontSize: '1.4rem',
+                background: '#FFFFFF',
+                color: '#64748B',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                minWidth: 220,
+                appearance: 'none',
+                WebkitAppearance: 'none',
+                MozAppearance: 'none',
+                backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 16px center',
+                paddingRight: '44px',
+                transition: 'all 0.2s',
+              }}
+            >
+              <option value="live">Сейчас (live)</option>
+              {snapshots.map(s => {
+                const shiftLabel = s.shift === 'day' ? 'День' : s.shift === 'evening' ? 'Вечер' : 'Ночь';
+                const dateObj = new Date(s.shiftDate + 'T12:00:00');
+                const dd = String(dateObj.getDate()).padStart(2, '0');
+                const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                return (
+                  <option key={s.id} value={s.id}>
+                    {dd}.{mm} · {shiftLabel} ({s.drrPercent}%)
+                  </option>
+                );
+              })}
+            </select>
           </div>
         </div>
       </div>
@@ -432,7 +526,9 @@ export default function DrrTLDashboardPage() {
                 textAlign: 'center',
                 pointerEvents: 'none',
               }}>
-                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
+                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>
+                  DRR{isArchive && ' · архив'}
+                </div>
                 <div style={{ fontSize: '6.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {drrData.drrPercent.toFixed(1)}%
                 </div>
@@ -441,7 +537,12 @@ export default function DrrTLDashboardPage() {
 
             <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
               <div
-                style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                style={{
+                  flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px',
+                  textAlign: 'center', color: '#FFFFFF', minHeight: '140px',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                  cursor: isArchive ? 'not-allowed' : 'pointer', opacity: isArchive ? 0.6 : 1,
+                }}
                 onClick={() => loadVinList('ALL')}
               >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>Прошли TLADAS</div>
@@ -453,7 +554,12 @@ export default function DrrTLDashboardPage() {
               </div>
 
               <div
-                style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                style={{
+                  flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px',
+                  textAlign: 'center', color: '#FFFFFF', minHeight: '140px',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                  cursor: isArchive ? 'not-allowed' : 'pointer', opacity: isArchive ? 0.6 : 1,
+                }}
                 onClick={() => loadVinList('OK')}
               >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
@@ -462,7 +568,12 @@ export default function DrrTLDashboardPage() {
               </div>
 
               <div
-                style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
+                style={{
+                  flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px',
+                  textAlign: 'center', color: '#FFFFFF', minHeight: '140px',
+                  display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                  cursor: isArchive ? 'not-allowed' : 'pointer', opacity: isArchive ? 0.6 : 1,
+                }}
                 onClick={() => loadVinList('NOK')}
               >
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK Авто</div>
@@ -474,7 +585,7 @@ export default function DrrTLDashboardPage() {
 
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
-              <h2 style={tableTitleStyle}>Топ дефектов NOK авто</h2>
+              <h2 style={tableTitleStyle}>Топ дефектов NOK авто{isArchive && ' (архив)'}</h2>
               <div style={tableScrollStyle}>
                 {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
