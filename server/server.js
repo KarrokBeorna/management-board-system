@@ -6022,22 +6022,39 @@ async function initDrrCp7SnapshotsTable() {
 }
 initDrrCp7SnapshotsTable();
 
-// Определение последней завершённой смены (МСК)
+
+// Определение последней ЗАВЕРШЁННОЙ смены (МСК)
 function getLastCompletedShiftCp7() {
-  const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(now.getUTCDate()).padStart(2, '0');
-  const todayStr = `${y}-${m}-${d}`;
-
-  const yest = new Date(now);
-  yest.setUTCDate(yest.getUTCDate() - 1);
-  const yesterdayStr = `${yest.getUTCFullYear()}-${String(yest.getUTCMonth() + 1).padStart(2, '0')}-${String(yest.getUTCDate()).padStart(2, '0')}`;
-
+  const now = new Date(Date.now() + 3 * 60 * 60 * 1000); // МСК
   const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
 
-  if (mins >= 91 && mins < 470) return { shiftDate: yesterdayStr, shift: 'evening' };
-  if (mins >= 471 && mins < 1001) return { shiftDate: todayStr, shift: 'night' };
+  const fmt = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+
+  const todayStr = fmt(now);
+  const yest = new Date(now);
+  yest.setUTCDate(yest.getUTCDate() - 1);
+  const yesterdayStr = fmt(yest);
+
+  // 00:00–01:30 — идёт ВЕЧЕРНЯЯ смена (перешла со вчерашнего дня).
+  // Последняя завершённая = ВЧЕРАШНИЙ ДЕНЬ (закончился вчера в 16:40).
+  if (mins < 91) {
+    return { shiftDate: yesterdayStr, shift: 'day' };
+  }
+
+  // 01:31–07:49 — идёт НОЧНАЯ смена.
+  // Последняя завершённая = ВЧЕРАШНИЙ ВЕЧЕР (закончился в 01:30).
+  if (mins < 470) {
+    return { shiftDate: yesterdayStr, shift: 'evening' };
+  }
+
+  // 07:50–16:40 — идёт ДНЕВНАЯ смена.
+  // Последняя завершённая = СЕГОДНЯШНЯЯ НОЧЬ (закончилась в 07:50).
+  if (mins < 1001) {
+    return { shiftDate: todayStr, shift: 'night' };
+  }
+
+  // 16:41–23:59 — идёт ВЕЧЕРНЯЯ смена.
+  // Последняя завершённая = СЕГОДНЯШНИЙ ДЕНЬ (закончился в 16:40).
   return { shiftDate: todayStr, shift: 'day' };
 }
 
@@ -10446,7 +10463,7 @@ app.get('/api/drr-cpfinal-vins', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* ЭНДПОИНТ 3: топ дефектов у NOK VIN                                     */
+/* ЭНДПОИНТ 3: топ дефектов у NOK VIN (без класса)                        */
 /* ====================================================================== */
 app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
   try {
@@ -10505,10 +10522,9 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
         ? `${model} TS02 WA EC Tool - NG`
         : `${model} ${part} ${problem}`.replace(/\s+/g, ' ').trim();
 
-      const grade = d.PROBLEM_GRADE || '—';
-      const key = `${mpp}|${grade}`;
-      if (!map.has(key)) map.set(key, { mpp, grade, defectCount: 0 });
-      map.get(key).defectCount += 1;
+      // Группируем ТОЛЬКО по mpp (без grade)
+      if (!map.has(mpp)) map.set(mpp, { mpp, defectCount: 0 });
+      map.get(mpp).defectCount += 1;
     });
 
     const result = [...map.values()]
@@ -10550,21 +10566,38 @@ async function initDrrCpFinalSnapshotsTable() {
 }
 initDrrCpFinalSnapshotsTable();
 
+// Определение последней ЗАВЕРШЁННОЙ смены (МСК)
 function getLastCompletedShiftCpFinal() {
-  const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(now.getUTCDate()).padStart(2, '0');
-  const todayStr = `${y}-${m}-${d}`;
-
-  const yest = new Date(now);
-  yest.setUTCDate(yest.getUTCDate() - 1);
-  const yesterdayStr = `${yest.getUTCFullYear()}-${String(yest.getUTCMonth() + 1).padStart(2, '0')}-${String(yest.getUTCDate()).padStart(2, '0')}`;
-
+  const now = new Date(Date.now() + 3 * 60 * 60 * 1000); // МСК
   const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
 
-  if (mins >= 91 && mins < 470) return { shiftDate: yesterdayStr, shift: 'evening' };
-  if (mins >= 471 && mins < 1001) return { shiftDate: todayStr, shift: 'night' };
+  const fmt = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+
+  const todayStr = fmt(now);
+  const yest = new Date(now);
+  yest.setUTCDate(yest.getUTCDate() - 1);
+  const yesterdayStr = fmt(yest);
+
+  // 00:00–01:30 — идёт ВЕЧЕРНЯЯ смена (перешла со вчерашнего дня).
+  // Последняя завершённая = ВЧЕРАШНИЙ ДЕНЬ (закончился вчера в 16:40).
+  if (mins < 91) {
+    return { shiftDate: yesterdayStr, shift: 'day' };
+  }
+
+  // 01:31–07:49 — идёт НОЧНАЯ смена.
+  // Последняя завершённая = ВЧЕРАШНИЙ ВЕЧЕР (закончился в 01:30).
+  if (mins < 470) {
+    return { shiftDate: yesterdayStr, shift: 'evening' };
+  }
+
+  // 07:50–16:40 — идёт ДНЕВНАЯ смена.
+  // Последняя завершённая = СЕГОДНЯШНЯЯ НОЧЬ (закончилась в 07:50).
+  if (mins < 1001) {
+    return { shiftDate: todayStr, shift: 'night' };
+  }
+
+  // 16:41–23:59 — идёт ВЕЧЕРНЯЯ смена.
+  // Последняя завершённая = СЕГОДНЯШНИЙ ДЕНЬ (закончился в 16:40).
   return { shiftDate: todayStr, shift: 'day' };
 }
 
@@ -10628,11 +10661,12 @@ async function saveDrrCpFinalSnapshot(shiftDate, shift) {
           const mpp = (!part && !problem)
             ? `${model} TS02 WA EC Tool - NG`
             : `${model} ${part} ${problem}`.replace(/\s+/g, ' ').trim();
-          const grade = d.PROBLEM_GRADE || '—';
-          const key = `${mpp}|${grade}`;
-          if (!map.has(key)) map.set(key, { mpp, grade, defectCount: 0 });
-          map.get(key).defectCount += 1;
+
+          // Группируем ТОЛЬКО по mpp (без grade)
+          if (!map.has(mpp)) map.set(mpp, { mpp, defectCount: 0 });
+          map.get(mpp).defectCount += 1;
         });
+
         topDefects = [...map.values()]
           .sort((a, b) => b.defectCount - a.defectCount)
           .slice(0, 20);

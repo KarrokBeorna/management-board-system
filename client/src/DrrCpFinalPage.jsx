@@ -566,15 +566,15 @@ export default function DrrCpFinalPage() {
                     <thead>
                       <tr>
                         <th style={thStyle}>Описание дефекта (MPP)</th>
-                        <th style={thStyle}>Класс</th>
-                        <th style={thStyle}>Кол-во</th>
+                        <th style={{ ...thStyle, textAlign: 'center', width: '220px' }}>Кол-во</th>
                       </tr>
                     </thead>
                     <tbody>
                       {topDefects.map((defect, idx) => (
                         <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
-                          <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none' }}>{defect.mpp}</td>
-                          <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
+                          <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none' }}>
+                            {defect.mpp}
+                          </td>
                           <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '2rem', color: idx < 3 ? '#DC2626' : '#1E293B' }}>
                             {defect.defectCount}
                           </td>
