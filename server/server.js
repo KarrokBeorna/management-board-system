@@ -7668,26 +7668,34 @@ app.get('/api/drr-pip-vins', async (req, res) => {
 /* Хелпер: определение последней завершённой смены (МСК) */
 function getLastCompletedShift() {
   const now = new Date(Date.now() + 3 * 60 * 60 * 1000); // МСК
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(now.getUTCDate()).padStart(2, '0');
-  const todayStr = `${y}-${m}-${d}`;
-
-  const yest = new Date(now);
-  yest.setUTCDate(yest.getUTCDate() - 1);
-  const yesterdayStr = `${yest.getUTCFullYear()}-${String(yest.getUTCMonth() + 1).padStart(2, '0')}-${String(yest.getUTCDate()).padStart(2, '0')}`;
-
   const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
 
-  // 01:31–07:50 — только что закончилась вечерняя (вчерашняя)
-  if (mins >= 91 && mins < 470) {
+  const fmt = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  const todayStr = fmt(now);
+  const yest = new Date(now);
+  yest.setUTCDate(yest.getUTCDate() - 1);
+  const yesterdayStr = fmt(yest);
+
+  // 00:00–01:30 — идёт ВЕЧЕРНЯЯ смена (перешла со вчерашнего дня).
+  // Последняя завершённая = ВЧЕРАШНИЙ ДЕНЬ (закончился вчера в 16:40).
+  if (mins < 91) {
+    return { shiftDate: yesterdayStr, shift: 'day' };
+  }
+
+  // 01:31–07:49 — идёт НОЧНАЯ смена.
+  // Последняя завершённая = ВЧЕРАШНИЙ ВЕЧЕР (закончился в 01:30).
+  if (mins < 470) {
     return { shiftDate: yesterdayStr, shift: 'evening' };
   }
-  // 07:51–16:41 — только что закончилась ночная (сегодня)
-  if (mins >= 471 && mins < 1001) {
+
+  // 07:50–16:40 — идёт ДНЕВНАЯ смена.
+  // Последняя завершённая = СЕГОДНЯШНЯЯ НОЧЬ (закончилась в 07:50).
+  if (mins < 1001) {
     return { shiftDate: todayStr, shift: 'night' };
   }
-  // остальное — дневная сегодня
+
+  // 16:41–23:59 — идёт ВЕЧЕРНЯЯ смена.
+  // Последняя завершённая = СЕГОДНЯШНИЙ ДЕНЬ (закончился в 16:40).
   return { shiftDate: todayStr, shift: 'day' };
 }
 
@@ -7757,6 +7765,7 @@ async function saveDrrPipSnapshot(shiftDate, shift) {
         const isClosed = d.STATUS && d.STATUS.toLowerCase() === 'closed';
         if (!isClosed) {
           nokSet.add(d.VIN);
+          // Класс оставлен: группируем по mpp + grade
           const mpp = `${d.MODEL || '-'} ${d.PART_NAME || ''} ${d.PROBLEM_TYPE || ''}`.trim();
           const key = `${mpp}|${d.PROBLEM_GRADE || '-'}`;
           if (!defectGroupMap.has(key)) {
@@ -7816,7 +7825,6 @@ async function checkAndSaveDrrPipSnapshot() {
 
 /* Автозапуск: проверка раз в минуту */
 setInterval(checkAndSaveDrrPipSnapshot, 60 * 1000);
-// И сразу при старте — на случай, если сервер был выключен в момент конца смены
 checkAndSaveDrrPipSnapshot();
 
 /* ====================================================================== */
