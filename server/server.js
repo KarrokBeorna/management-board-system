@@ -7172,7 +7172,7 @@ app.get('/api/drr-tl-vins', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* ЭНДПОИНТ 3: топ дефектов у NOK VIN                                     */
+/* ЭНДПОИНТ 3: топ дефектов у NOK VIN (без класса)                        */
 /* ====================================================================== */
 app.get('/api/drr-tl-top-defects', async (req, res) => {
   try {
@@ -7224,10 +7224,10 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
 
       const mpp = `${d.MODEL || '—'} ${d.PART_NAME || ''} ${d.PROBLEM_TYPE || ''}`
         .replace(/\s+/g, ' ').trim();
-      const grade = d.PROBLEM_GRADE || '—';
-      const key = `${mpp}|${grade}`;
-      if (!map.has(key)) map.set(key, { mpp, grade, defectCount: 0 });
-      map.get(key).defectCount += 1;
+
+      // Группируем ТОЛЬКО по mpp (без grade)
+      if (!map.has(mpp)) map.set(mpp, { mpp, defectCount: 0 });
+      map.get(mpp).defectCount += 1;
     });
 
     const result = [...map.values()]

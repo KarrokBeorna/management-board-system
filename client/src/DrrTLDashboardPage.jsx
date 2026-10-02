@@ -440,7 +440,6 @@ export default function DrrTLDashboardPage() {
             </div>
 
             <div style={{ display: 'flex', gap: '15px', marginTop: '20px', flexWrap: 'wrap' }}>
-              {/* Серый блок: большая цифра = все записи TLADAS, подпись = уникальные VIN */}
               <div
                 style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }}
                 onClick={() => loadVinList('ALL')}
@@ -482,8 +481,7 @@ export default function DrrTLDashboardPage() {
                     <thead>
                       <tr>
                         <th style={thStyle}>Описание дефекта (MPP)</th>
-                        <th style={thStyle}>Класс</th>
-                        <th style={thStyle}>Кол-во дефектов</th>
+                        <th style={{ ...thStyle, textAlign: 'center', width: '220px' }}>Кол-во дефектов</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -492,7 +490,6 @@ export default function DrrTLDashboardPage() {
                           <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none' }}>
                             {defect.mpp}
                           </td>
-                          <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
                           <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '2rem', color: idx < 3 ? '#DC2626' : '#1E293B' }}>
                             {defect.defectCount}
                           </td>
