@@ -73,6 +73,7 @@ export default function Layout() {
   location.pathname === '/drr-cp6' ||
   location.pathname === '/drr-cp5' ||
   location.pathname === '/all-drr-dashboard' ||
+  location.pathname === '/vrt-report' ||
   location.pathname === '/brigade-report';
 
 
