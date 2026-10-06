@@ -29,6 +29,7 @@ import drrCp6Preview from './assets/drrcp6.png';
 import drrCp5Preview from './assets/drrcp5.png';
 import allDrrPreview from './assets/alldrrcomp.png';
 import vrtPreview from './assets/briga.png'; // или своя
+import drrShiftPreview from './assets/123.png'; // или своя картинка
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -355,7 +356,8 @@ export default function HomePage() {
     { to: "/vehicle-on-wheels", imgSrc: VehPreview, caption: "Vehicle on Wheels", accentColor: "#e22910" },
     { to: "/drr-cp6", imgSrc: drrCp6Preview, caption: "DRR CP6 Dashboard", accentColor: "#0EA5E9" },
     { to: "/drr-cp5", imgSrc: drrCp5Preview, caption: "DRR CP5 Dashboard", accentColor: "#8B5CF6" },
-    { to: "/all-drr-dashboard", imgSrc: allDrrPreview, caption: "All DRR Dashboard", accentColor: "#0EA5E9" }
+    { to: "/all-drr-dashboard", imgSrc: allDrrPreview, caption: "All DRR Dashboard", accentColor: "#0EA5E9" },
+    { to: "/drr-shift-dashboard", imgSrc: drrShiftPreview, caption: "DRR Shift Dashboard", accentColor: "#7C3AED" }
   ];
 
   const allServiceCards = [
@@ -367,7 +369,7 @@ export default function HomePage() {
     { to: "/holds-sgp", imgSrc: HoldsSgpPage, caption: "Holds СГП", accentColor: "#EF4444" },
     { to: "http://10.27.195.16/reports/024", imgSrc: externalReportPreview, caption: "DRR по заводу", accentColor: "#EF4444" },
     { to: "/brigade-report", imgSrc: brigPreview, caption: "Brigade Report Service", accentColor: "#3B82F6" },
-    //{ to: "/vrt-report", imgSrc: vrtPreview, caption: "VRT Report Service", accentColor: "#7C3AED" },
+    { to: "/vrt-report", imgSrc: vrtPreview, caption: "VRT Report Service", accentColor: "#7C3AED" }
   ];
 
   // DRR-отчёты выносим в отдельную вкладку
