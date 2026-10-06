@@ -600,8 +600,12 @@ function ReportBlock({
           totalVins={blockData.dash.totalVins}
         />
         <div style={{
-          flex: 1, minWidth: 0, maxHeight: 220, overflowY: 'auto',
-          border: '1px solid #F1F5F9', borderRadius: 8,
+          flex: 1,
+            minWidth: 0,
+            height: 320,
+            overflowY: 'auto',
+            border: '1px solid #F1F5F9',
+            borderRadius: 8,
         }}>
           <DefectsTable
             topDefects={blockData.top}
