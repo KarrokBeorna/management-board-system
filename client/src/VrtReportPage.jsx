@@ -896,9 +896,11 @@ function VRTOwnersManager({ executeWithPassword, manageUnlocked, onRequestPasswo
   const [dictionaryData, setDictionaryData] = useState([]);
   const [models, setModels] = useState([]);
   const [vrtList, setVrtList] = useState([]);
+  const [zones, setZones] = useState([]);
   const [unassignedDefects, setUnassignedDefects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [rowVrts, setRowVrts] = useState({});
+  const [rowZones, setRowZones] = useState({});
 
   const [filterModel, setFilterModel] = useState('ALL');
   const [filterVrt, setFilterVrt] = useState('ALL');
@@ -921,6 +923,9 @@ function VRTOwnersManager({ executeWithPassword, manageUnlocked, onRequestPasswo
   const loadVrts = async () => {
     try { const r = await fetch(`${API_BASE}/api/vrt-report/vrts`); if (r.ok) setVrtList(await r.json()); } catch {}
   };
+  const loadZones = async () => {
+    try { const r = await fetch(`${API_BASE}/api/vrt-report/zones`); if (r.ok) setZones(await r.json()); } catch {}
+  };
 
   const loadUnassigned = async () => {
     setLoading(true);
@@ -932,20 +937,29 @@ function VRTOwnersManager({ executeWithPassword, manageUnlocked, onRequestPasswo
     } catch {} finally { setLoading(false); }
   };
 
-  useEffect(() => { loadDictionary(); loadModels(); loadVrts(); loadUnassigned(); }, []);
-  useEffect(() => { loadDictionary(); loadModels(); loadVrts(); }, [refreshTrigger]);
+  useEffect(() => { loadDictionary(); loadModels(); loadVrts(); loadZones(); loadUnassigned(); }, []);
+  useEffect(() => { loadDictionary(); loadModels(); loadVrts(); loadZones(); }, [refreshTrigger]);
 
   const handleRefresh = () => { setRefreshTrigger(p => p + 1); loadUnassigned(); };
 
   const handleAssign = (defect) => {
     const key = `${defect.model}|${defect.bom_name}|${defect.defect_name}`;
     const vrtName = rowVrts[key] || '';
+    const zone = (rowZones[key] || '').trim();
     if (!vrtName) { alert('Выберите VRT из списка'); return; }
+    if (!zone) { alert('Выберите зону детали'); return; }
     executeWithPassword(async (pwd) => {
       try {
         const res = await fetch(`${API_BASE}/api/vrt-report/assign-owner`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: defect.model, bom_name: defect.bom_name, defect_name: defect.defect_name, vrtName, password: pwd }),
+          body: JSON.stringify({
+            model: defect.model,
+            bom_name: defect.bom_name,
+            defect_name: defect.defect_name,
+            vrtName,
+            zone,
+            password: pwd,
+          }),
         });
         if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Ошибка назначения'); }
         handleRefresh();
@@ -1094,15 +1108,20 @@ function VRTOwnersManager({ executeWithPassword, manageUnlocked, onRequestPasswo
       {subTab === 'assign' && (
         <div style={cardStyle}>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: BRAND.text, marginBottom: 10 }}>Дефекты без владельца (сегодня)</h2>
-          <p style={{ fontSize: '0.9rem', color: BRAND.textSecondary, marginTop: 0, marginBottom: 10 }}>Выберите VRT для каждого дефекта и нажмите «Назначить».</p>
+          <p style={{ fontSize: '0.9rem', color: BRAND.textSecondary, marginTop: 0, marginBottom: 10 }}>Выберите зону, VRT для каждого дефекта и нажмите «Назначить».</p>
           <div style={{ flex: 1, overflowY: 'auto', border: `1px solid ${BRAND.border}`, borderRadius: BRAND.radiusSmall }}>
             {loading ? <p style={{ textAlign: 'center', padding: 20 }}>Загрузка...</p>
               : unassignedDefects.length > 0 ? (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      <th style={thStyle}>Модель</th><th style={thStyle}>BOM</th><th style={thStyle}>Дефект</th>
-                      <th style={thStyle}>Кол-во</th><th style={thStyle}>VRT</th><th style={thStyle}></th>
+                      <th style={thStyle}>Модель</th>
+                      <th style={thStyle}>BOM</th>
+                      <th style={thStyle}>Дефект</th>
+                      <th style={thStyle}>Кол-во</th>
+                      <th style={thStyle}>Зона детали</th>
+                      <th style={thStyle}>VRT</th>
+                      <th style={thStyle}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1114,6 +1133,15 @@ function VRTOwnersManager({ executeWithPassword, manageUnlocked, onRequestPasswo
                           <td style={tdStyle}>{d.bom_name}</td>
                           <td style={tdStyle}>{d.defect_name}</td>
                           <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700 }}>{d.count}</td>
+                          <td style={tdStyle}>
+                            <select value={rowZones[key] || ''} onChange={(e) => setRowZones((p) => ({ ...p, [key]: e.target.value }))}
+                              style={{ width: '100%', maxWidth: 160, padding: 6, fontSize: '0.9rem', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}>
+                              <option value="">Выберите...</option>
+                              {zones.map(z => (
+                                <option key={z} value={z}>{z}</option>
+                              ))}
+                            </select>
+                          </td>
                           <td style={tdStyle}>
                             <select value={rowVrts[key] || ''} onChange={(e) => setRowVrts((p) => ({ ...p, [key]: e.target.value }))}
                               style={{ width: '100%', maxWidth: 200, padding: 6, fontSize: '0.9rem', borderRadius: BRAND.radiusSmall, border: `1px solid ${BRAND.border}` }}>
