@@ -29,7 +29,7 @@ import drrCp6Preview from './assets/drrcp6.png';
 import drrCp5Preview from './assets/drrcp5.png';
 import allDrrPreview from './assets/alldrrcomp.png';
 import vrtPreview from './assets/vrt.png';
-import drrShiftPreview from './assets/123.png'; // или своя картинка
+import drrShiftPreview from './assets/drrshift.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {
