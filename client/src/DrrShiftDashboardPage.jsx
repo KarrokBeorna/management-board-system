@@ -353,12 +353,63 @@ function DefectsTable({ topDefects, markKeyPrefix, marks, onToggleMark }) {
   );
 }
 
+function PhotoLightbox({ url, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(15,23,42,0.85)',
+        backdropFilter: 'blur(6px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 5000, padding: 24,
+      }}
+    >
+      <img
+        src={url}
+        alt="Просмотр"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: '95vw', maxHeight: '95vh',
+          borderRadius: 12,
+          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.6)',
+          objectFit: 'contain',
+        }}
+      />
+      <button
+        onClick={onClose}
+        style={{
+          position: 'fixed', top: 20, right: 24,
+          width: 44, height: 44, borderRadius: '50%',
+          border: 'none',
+          background: 'rgba(255,255,255,0.15)',
+          color: '#FFFFFF', fontSize: 24,
+          cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+        title="Закрыть (Esc)"
+      >×</button>
+    </div>
+  );
+}
+
 function PhotoArea({ photoKey, photos, onPhotosChange }) {
   const fileInputRef = useRef(null);
   const items = photos[photoKey] || [];
   const canAdd = items.length < MAX_PHOTOS_PER_BLOCK;
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState(null);
 
   const uploadFiles = async (files) => {
     if (!files || files.length === 0) return;
@@ -449,57 +500,64 @@ function PhotoArea({ photoKey, photos, onPhotosChange }) {
       </div>
 
       {items.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {items.map((it) => (
             <div
               key={it.id}
+              onClick={() => setLightboxUrl(`${API_BASE}${it.url}`)}
               style={{
                 position: 'relative',
-                width: 96,
-                height: 96,
-                borderRadius: 10,
+                width: 140,
+                height: 140,
+                borderRadius: 12,
                 overflow: 'hidden',
                 border: '1px solid #E2E8F0',
-                background: '#F8FAFC',
+                background: '#F1F5F9',
+                cursor: 'zoom-in',
+                transition: 'transform 0.15s, box-shadow 0.15s',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
               }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'scale(1.03)';
+                e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.12)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.06)';
+              }}
+              title="Нажмите для увеличения"
             >
               <img
                 src={`${API_BASE}${it.url}`}
                 alt="Фото"
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                  if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex';
+                style={{
+                  width: '100%', height: '100%',
+                  objectFit: 'cover',
+                  display: 'block',
                 }}
-                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', cursor: 'pointer' }}
-                onClick={() => window.open(`${API_BASE}${it.url}`, '_blank')}
               />
-              <div style={{
-                display: 'none', position: 'absolute', inset: 0,
-                alignItems: 'center', justifyContent: 'center',
-                color: '#94A3B8', fontSize: 11, textAlign: 'center', padding: 6,
-              }}>
-                Не загрузилось
-              </div>
               <button
                 onClick={(e) => { e.stopPropagation(); handleDelete(it.id); }}
                 title="Удалить фото"
                 style={{
                   position: 'absolute',
-                  top: 4, right: 4,
-                  width: 22, height: 22, borderRadius: '50%',
+                  top: 6, right: 6,
+                  width: 24, height: 24, borderRadius: '50%',
                   border: 'none',
                   background: 'rgba(220,38,38,0.9)',
                   color: '#FFFFFF',
-                  fontWeight: 700, fontSize: 12,
+                  fontWeight: 700, fontSize: 13,
                   cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}
-              >
-                ×
-              </button>
+              >×</button>
             </div>
           ))}
         </div>
+      )}
+
+      {lightboxUrl && (
+        <PhotoLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
       )}
     </div>
   );
@@ -576,7 +634,7 @@ function ShiftColumn({
           <ReportBlock
             title="DRR CP7"
             blockData={shiftInfo.data.cp7}
-            markKeyPrefix={`${letterKey}_cp7`}
+            markKeyPrefix={`${baseDate}_${letterKey}_cp7`}
             photoKey={`${baseDate}_${letterKey}_cp7`}
             marks={marks}
             onToggleMark={onToggleMark}
@@ -586,7 +644,7 @@ function ShiftColumn({
           <ReportBlock
             title="DRR ADAS"
             blockData={shiftInfo.data.adas}
-            markKeyPrefix={`${letterKey}_adas`}
+            markKeyPrefix={`${baseDate}_${letterKey}_adas`}
             photoKey={`${baseDate}_${letterKey}_adas`}
             marks={marks}
             onToggleMark={onToggleMark}
@@ -596,7 +654,7 @@ function ShiftColumn({
           <ReportBlock
             title="DRR CPFinal"
             blockData={shiftInfo.data.cpfinal}
-            markKeyPrefix={`${letterKey}_cpfinal`}
+            markKeyPrefix={`${baseDate}_${letterKey}_cpfinal`}
             photoKey={`${baseDate}_${letterKey}_cpfinal`}
             marks={marks}
             onToggleMark={onToggleMark}
@@ -623,7 +681,7 @@ export default function DrrShiftDashboardPage() {
   const [marks, setMarks] = useState({});
   const [photos, setPhotos] = useState({});
 
-  // ---------- МЕТКИ (с сервера) ----------
+  // ---------- МЕТКИ ----------
   const loadMarks = async (baseDate) => {
     try {
       const res = await fetch(`${API_BASE}/api/drr-shift-marks?prefix=${encodeURIComponent(baseDate + '_')}`);
@@ -638,7 +696,6 @@ export default function DrrShiftDashboardPage() {
   };
 
   const onToggleMark = async (key) => {
-    // Оптимистично переключаем
     setMarks(prev => {
       const next = { ...prev };
       if (next[key]) delete next[key];
@@ -672,7 +729,6 @@ export default function DrrShiftDashboardPage() {
     }
   };
 
-  // Загружаем метки и фото при смене даты
   useEffect(() => {
     const bd = periodMode === 'live' ? todayMoscowStr() : selectedDate;
     loadMarks(bd);
@@ -720,7 +776,6 @@ export default function DrrShiftDashboardPage() {
 
   useEffect(() => { loadData(); }, [periodMode, selectedDate, viewType]);
 
-  // Автообновление данных (60 сек) + метки/фото раз в 5 мин
   useEffect(() => {
     if (periodMode !== 'live') return;
     const id = setInterval(loadData, 60000);
@@ -745,15 +800,11 @@ export default function DrrShiftDashboardPage() {
           <button
             style={filterButtonStyle(periodMode === 'live', '#2563EB')}
             onClick={() => setPeriodMode('live')}
-          >
-            Live
-          </button>
+          >Live</button>
           <button
             style={filterButtonStyle(periodMode === 'archive', '#2563EB')}
             onClick={() => setPeriodMode('archive')}
-          >
-            Архив
-          </button>
+          >Архив</button>
 
           {periodMode === 'archive' && (
             <select
@@ -772,15 +823,11 @@ export default function DrrShiftDashboardPage() {
           <button
             style={filterButtonStyle(viewType === 'shifts', '#7C3AED')}
             onClick={() => setViewType('shifts')}
-          >
-            Смены A / B
-          </button>
+          >Смены A / B</button>
           <button
             style={filterButtonStyle(viewType === 'all', '#6B7280')}
             onClick={() => setViewType('all')}
-          >
-            Сутки
-          </button>
+          >Сутки</button>
         </div>
       </div>
 
@@ -799,7 +846,7 @@ export default function DrrShiftDashboardPage() {
               <ReportBlock
                 title="DRR CP7"
                 blockData={allData.cp7}
-                markKeyPrefix="ALL_cp7"
+                markKeyPrefix={`${allData.date}_ALL_cp7`}
                 photoKey={`${allData.date}_ALL_cp7`}
                 marks={marks}
                 onToggleMark={onToggleMark}
@@ -809,7 +856,7 @@ export default function DrrShiftDashboardPage() {
               <ReportBlock
                 title="DRR ADAS"
                 blockData={allData.adas}
-                markKeyPrefix="ALL_adas"
+                markKeyPrefix={`${allData.date}_ALL_adas`}
                 photoKey={`${allData.date}_ALL_adas`}
                 marks={marks}
                 onToggleMark={onToggleMark}
@@ -819,7 +866,7 @@ export default function DrrShiftDashboardPage() {
               <ReportBlock
                 title="DRR CPFinal"
                 blockData={allData.cpfinal}
-                markKeyPrefix="ALL_cpfinal"
+                markKeyPrefix={`${allData.date}_ALL_cpfinal`}
                 photoKey={`${allData.date}_ALL_cpfinal`}
                 marks={marks}
                 onToggleMark={onToggleMark}
