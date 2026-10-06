@@ -7100,7 +7100,7 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
 /* ====================================================================== */
 
 const ADAS_DEFECT_POSTS = [
-  '360', 'ADAS', 'ADAS+RB', 'WA', 'CP8 Touch Up'
+  '360', 'ADAS', 'ADAS+RB', 'WA'
 ];
 const ADAS_DEFECT_POSTS_STR = ADAS_DEFECT_POSTS.map(p => `'${p}'`).join(',');
 
