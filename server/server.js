@@ -10619,7 +10619,6 @@ async function getCpFinalTlttVins(startTime, endTime) {
     GROUP BY vin
   `, [startTime, endTime]);
 
-  // Общее число записей прохождения TLTT (без уникальности)
   const [countRows] = await mesPool.query(`
     SELECT COUNT(*) AS total_records
     FROM tm_vhc_test_line_movement
@@ -10641,20 +10640,12 @@ async function getCpFinalTlttVins(startTime, endTime) {
 
 /* ---------------------------------------------------------------------- */
 /* Хелпер: классификация VIN (OK / NOK)                                   */
-/* Правило:                                                               */
-/*   - нет дефектов вообще               → OK                             */
-/*   - дефект с LAST_MODIFIED_TIME ≤ MIN TLTT   → OK                      */
-/*   - дефект с LAST_MODIFIED_TIME >  MIN TLTT  → NOK                     */
-/*   - LAST_MODIFIED_TIME пуст и CLOSED         → OK                      */
-/*   - LAST_MODIFIED_TIME пуст и не CLOSED      → NOK                     */
-/* VIN попадает в NOK, если хотя бы один его дефект NOK.                  */
 /* ---------------------------------------------------------------------- */
 async function classifyCpFinalVins(tlttRows) {
   const okSet = new Set();
   const nokSet = new Set();
   const vins = tlttRows.map(r => r.vin);
 
-  // По умолчанию все OK (в т.ч. VIN без единого дефекта)
   vins.forEach(v => okSet.add(v));
 
   if (vins.length === 0) return { okSet, nokSet };
@@ -10725,8 +10716,8 @@ app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
     const drrPercent = totalVins > 0 ? (okVins / totalVins) * 100 : 0;
 
     res.json({
-      totalRecords,                        // ← НОВОЕ: все записи TLTT
-      totalVins,                           // уникальные VIN
+      totalRecords,
+      totalVins,
       okVins,
       nokVins,
       drrPercent: Math.round(drrPercent * 10) / 10,
@@ -10750,7 +10741,6 @@ app.get('/api/drr-cpfinal-vins', async (req, res) => {
     const { vins: tlttRows } = await getCpFinalTlttVins(startTime, endTime);
     if (tlttRows.length === 0) return res.json([]);
 
-    // Время отображения — самое позднее TLTT
     const lastTlttByVin = new Map(tlttRows.map(r => [r.vin, r.tltt_last_time]));
 
     const { okSet, nokSet } = await classifyCpFinalVins(tlttRows);
@@ -10788,7 +10778,8 @@ app.get('/api/drr-cpfinal-vins', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* ЭНДПОИНТ 3: топ дефектов у NOK VIN (без класса)                        */
+/* ЭНДПОИНТ 3: топ дефектов у NOK VIN                                     */
+/* — теперь возвращаем model / part_name / problem_type для фильтра VIN'ов */
 /* ====================================================================== */
 app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
   try {
@@ -10838,7 +10829,6 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
       }
       if (!isNok) return;
 
-      // === MPP: если нет и детали, и дефекта — используем фиксированный текст ===
       const model = d.MODEL || '—';
       const part = (d.PART_NAME || '').trim();
       const problem = (d.PROBLEM_TYPE || '').trim();
@@ -10847,8 +10837,15 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
         ? `${model} TS02 WA EC Tool - NG`
         : `${model} ${part} ${problem}`.replace(/\s+/g, ' ').trim();
 
-      // Группируем ТОЛЬКО по mpp (без grade)
-      if (!map.has(mpp)) map.set(mpp, { mpp, defectCount: 0 });
+      if (!map.has(mpp)) {
+        map.set(mpp, {
+          mpp,
+          model: model,
+          part_name: part,
+          problem_type: problem,
+          defectCount: 0,
+        });
+      }
       map.get(mpp).defectCount += 1;
     });
 
@@ -10864,71 +10861,118 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
 });
 
 /* ====================================================================== */
+/* ЭНДПОИНТ 4: VIN'ы по конкретному MPP                                   */
+/* ====================================================================== */
+app.get('/api/drr-cpfinal-mpp-vins', async (req, res) => {
+  try {
+    const { startTime, endTime, model, part_name = '', problem_type = '' } = req.query;
+
+    if (!startTime || !endTime || !model) {
+      return res.status(400).json({ error: 'startTime, endTime и model обязательны' });
+    }
+
+    const { vins: tlttRows } = await getCpFinalTlttVins(startTime, endTime);
+    if (tlttRows.length === 0) return res.json([]);
+
+    const firstTlttByVin = new Map(tlttRows.map(r => [r.vin, r.tltt_first_time]));
+    const lastTlttByVin = new Map(tlttRows.map(r => [r.vin, r.tltt_last_time]));
+    const { nokSet } = await classifyCpFinalVins(tlttRows);
+    const nokVins = [...nokSet];
+
+    if (nokVins.length === 0) return res.json([]);
+
+    const ph = nokVins.map(() => '?').join(',');
+
+    // Фильтр: model + part_name + problem_type.
+    // Для fallback-строки (TS02 WA EC Tool - NG) part и problem пустые — ищем дефекты без PART_NAME/PROBLEM_TYPE.
+    let whereClause = `d.VIN IN (${ph}) AND d.POST_NAME IN (${CPFINAL_DEFECT_POSTS_STR}) AND wo.MODEL = ?`;
+    const params = [...nokVins, model];
+
+    if (part_name === '' && problem_type === '') {
+      whereClause += ` AND (d.PART_NAME IS NULL OR TRIM(d.PART_NAME) = '') AND (d.PROBLEM_TYPE IS NULL OR TRIM(d.PROBLEM_TYPE) = '')`;
+    } else {
+      whereClause += ` AND d.PART_NAME = ? AND d.PROBLEM_TYPE = ?`;
+      params.push(part_name, problem_type);
+    }
+
+    const [defectRows] = await pool.query(`
+      SELECT
+        d.VIN,
+        wo.MODEL,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.PROBLEM_GRADE,
+        d.STATUS,
+        d.LAST_MODIFIED_TIME
+      FROM at_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE ${whereClause}
+    `, params);
+
+    // Только NOK VIN'ы этого MPP
+    const vinMap = new Map();
+    defectRows.forEach(d => {
+      const tlttFirst = firstTlttByVin.get(d.VIN);
+      if (!tlttFirst) return;
+      const tlttMs = new Date(tlttFirst).getTime();
+      const reworkMs = d.LAST_MODIFIED_TIME ? new Date(d.LAST_MODIFIED_TIME).getTime() : null;
+      const isClosed = d.STATUS && d.STATUS.toUpperCase() === 'CLOSED';
+
+      let isNok = false;
+      if (reworkMs !== null) { if (reworkMs > tlttMs) isNok = true; }
+      else { if (!isClosed) isNok = true; }
+      if (!isNok) return;
+
+      const existing = vinMap.get(d.VIN);
+      const reworkTimeMs = reworkMs || 0;
+      if (!existing || reworkTimeMs > existing._reworkMs) {
+        vinMap.set(d.VIN, {
+          vin: d.VIN,
+          model: d.MODEL || '—',
+          grade: d.PROBLEM_GRADE || '—',
+          status: d.STATUS || '',
+          last_modified: d.LAST_MODIFIED_TIME || null,
+          tltt_time: lastTlttByVin.get(d.VIN) || null,
+          _reworkMs: reworkTimeMs,
+        });
+      }
+    });
+
+    const result = Array.from(vinMap.values())
+      .map(({ _reworkMs, ...v }) => v)
+      .sort((a, b) => new Date(a.tltt_time) - new Date(b.tltt_time));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка /api/drr-cpfinal-mpp-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ====================================================================== */
 /* ============== DRR CPFINAL — СНИМКИ СМЕН ============================ */
 /* ====================================================================== */
 
-async function initDrrCpFinalSnapshotsTable() {
-  try {
-    await notesPool.query(`
-      CREATE TABLE IF NOT EXISTS drr_cpfinal_snapshots (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        shift_date DATE NOT NULL,
-        shift VARCHAR(20) NOT NULL,
-        snapshot_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        total_records INT NOT NULL DEFAULT 0,
-        total_vins INT NOT NULL DEFAULT 0,
-        ok_vins INT NOT NULL DEFAULT 0,
-        nok_vins INT NOT NULL DEFAULT 0,
-        drr_percent DECIMAL(5,1) NOT NULL DEFAULT 0,
-        top_defects JSON,
-        UNIQUE KEY uniq_shift (shift_date, shift)
-      )
-    `);
-    console.log('Таблица drr_cpfinal_snapshots готова');
-  } catch (err) {
-    console.error('Ошибка создания таблицы drr_cpfinal_snapshots:', err.message);
-  }
-}
-initDrrCpFinalSnapshotsTable();
-
-// Определение последней ЗАВЕРШЁННОЙ смены (МСК)
 function getLastCompletedShiftCpFinal() {
-  const now = new Date(Date.now() + 3 * 60 * 60 * 1000); // МСК
+  const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
   const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
 
   const fmt = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-
   const todayStr = fmt(now);
   const yest = new Date(now);
   yest.setUTCDate(yest.getUTCDate() - 1);
   const yesterdayStr = fmt(yest);
 
-  // 00:00–01:30 — идёт ВЕЧЕРНЯЯ смена (перешла со вчерашнего дня).
-  // Последняя завершённая = ВЧЕРАШНИЙ ДЕНЬ (закончился вчера в 16:40).
-  if (mins < 91) {
-    return { shiftDate: yesterdayStr, shift: 'day' };
-  }
-
-  // 01:31–07:49 — идёт НОЧНАЯ смена.
-  // Последняя завершённая = ВЧЕРАШНИЙ ВЕЧЕР (закончился в 01:30).
-  if (mins < 470) {
-    return { shiftDate: yesterdayStr, shift: 'evening' };
-  }
-
-  // 07:50–16:40 — идёт ДНЕВНАЯ смена.
-  // Последняя завершённая = СЕГОДНЯШНЯЯ НОЧЬ (закончилась в 07:50).
-  if (mins < 1001) {
-    return { shiftDate: todayStr, shift: 'night' };
-  }
-
-  // 16:41–23:59 — идёт ВЕЧЕРНЯЯ смена.
-  // Последняя завершённая = СЕГОДНЯШНИЙ ДЕНЬ (закончился в 16:40).
+  if (mins < 91) return { shiftDate: yesterdayStr, shift: 'day' };
+  if (mins < 470) return { shiftDate: yesterdayStr, shift: 'evening' };
+  if (mins < 1001) return { shiftDate: todayStr, shift: 'night' };
   return { shiftDate: todayStr, shift: 'day' };
 }
 
 function getShiftRangeCpFinal(shiftDate, shift) {
-  if (shift === 'day') return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
-  if (shift === 'night') return { start: `${shiftDate} 01:31:00`, end: `${shiftDate} 07:50:00` };
+  if (shift === 'all')     return { start: `${shiftDate} 00:00:00`, end: `${shiftDate} 23:59:59` };
+  if (shift === 'day')     return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
+  if (shift === 'night')   return { start: `${shiftDate} 01:31:00`, end: `${shiftDate} 07:50:00` };
   if (shift === 'evening') {
     const next = new Date(`${shiftDate}T12:00:00Z`);
     next.setUTCDate(next.getUTCDate() + 1);
@@ -10942,6 +10986,9 @@ async function saveDrrCpFinalSnapshot(shiftDate, shift) {
   try {
     const range = getShiftRangeCpFinal(shiftDate, shift);
     if (!range) return;
+
+    const weekNumber = getWeekNumberForDate(shiftDate);
+    const shiftLetter = getShiftLetterForSnapshot(shift, weekNumber);
 
     const { vins: tlttRows, totalRecords } = await getCpFinalTlttVins(range.start, range.end);
     const totalVins = tlttRows.length;
@@ -10987,8 +11034,9 @@ async function saveDrrCpFinalSnapshot(shiftDate, shift) {
             ? `${model} TS02 WA EC Tool - NG`
             : `${model} ${part} ${problem}`.replace(/\s+/g, ' ').trim();
 
-          // Группируем ТОЛЬКО по mpp (без grade)
-          if (!map.has(mpp)) map.set(mpp, { mpp, defectCount: 0 });
+          if (!map.has(mpp)) {
+            map.set(mpp, { mpp, model, part_name: part, problem_type: problem, defectCount: 0 });
+          }
           map.get(mpp).defectCount += 1;
         });
 
@@ -11000,19 +11048,23 @@ async function saveDrrCpFinalSnapshot(shiftDate, shift) {
 
     await notesPool.query(`
       INSERT INTO drr_cpfinal_snapshots
-        (shift_date, shift, total_records, total_vins, ok_vins, nok_vins, drr_percent, top_defects)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (shift_date, week_number, shift, shift_letter,
+         total_records, total_vins, ok_vins, nok_vins, drr_percent, top_defects)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         snapshot_time = CURRENT_TIMESTAMP,
+        week_number = VALUES(week_number),
+        shift_letter = VALUES(shift_letter),
         total_records = VALUES(total_records),
         total_vins = VALUES(total_vins),
         ok_vins = VALUES(ok_vins),
         nok_vins = VALUES(nok_vins),
         drr_percent = VALUES(drr_percent),
         top_defects = VALUES(top_defects)
-    `, [shiftDate, shift, totalRecords, totalVins, okVins, nokVins, drrPercent, JSON.stringify(topDefects)]);
+    `, [shiftDate, weekNumber, shift, shiftLetter,
+        totalRecords, totalVins, okVins, nokVins, drrPercent, JSON.stringify(topDefects)]);
 
-    console.log(`[DRR CPFinal snapshot] ${shiftDate} ${shift} → ${drrPercent}% (${okVins}/${totalVins})`);
+    console.log(`[DRR CPFinal snapshot] ${shiftDate} W${weekNumber} ${shift}(${shiftLetter}) → ${drrPercent}% (${okVins}/${totalVins})`);
   } catch (err) {
     console.error('[DRR CPFinal snapshot] ошибка сохранения:', err.message);
   }
@@ -11029,12 +11081,58 @@ async function checkAndSaveDrrCpFinalSnapshot() {
       await saveDrrCpFinalSnapshot(shiftDate, shift);
     }
   } catch (err) {
-    console.error('[DRR CPFinal snapshot] ошибка проверки:', err.message);
+    console.error('[DRR CPFinal snapshot] ошибка проверки смены:', err.message);
   }
 }
 
-setInterval(checkAndSaveDrrCpFinalSnapshot, 60 * 1000);
+async function checkAndSaveDrrCpFinalDailySnapshot() {
+  try {
+    const dayDate = getCompletedDayDate();
+    const [existing] = await notesPool.query(
+      `SELECT id FROM drr_cpfinal_snapshots WHERE shift_date = ? AND shift = 'all'`,
+      [dayDate]
+    );
+    if (existing.length === 0) {
+      await saveDrrCpFinalSnapshot(dayDate, 'all');
+    }
+  } catch (err) {
+    console.error('[DRR CPFinal snapshot] ошибка проверки суток:', err.message);
+  }
+}
+
+setInterval(() => {
+  checkAndSaveDrrCpFinalSnapshot();
+  checkAndSaveDrrCpFinalDailySnapshot();
+}, 60 * 1000);
 checkAndSaveDrrCpFinalSnapshot();
+checkAndSaveDrrCpFinalDailySnapshot();
+
+/* ====================================================================== */
+/* ХЕЛПЕР: дозаполнить week_number / shift_letter, если их нет в БД       */
+/* ====================================================================== */
+function enrichCpFinalSnapshot(r) {
+  const shiftDate = String(r.shift_date).slice(0, 10);
+  const weekNumber = r.week_number != null
+    ? r.week_number
+    : getWeekNumberForDate(shiftDate);
+  const shiftLetter = r.shift_letter != null
+    ? r.shift_letter
+    : getShiftLetterForSnapshot(r.shift, weekNumber);
+
+  return {
+    id: r.id,
+    shiftDate,
+    weekNumber,
+    shift: r.shift,
+    shiftLetter,
+    snapshotTime: r.snapshot_time,
+    totalRecords: r.total_records,
+    totalVins: r.total_vins,
+    okVins: r.ok_vins,
+    nokVins: r.nok_vins,
+    drrPercent: Number(r.drr_percent),
+  };
+}
 
 /* ====================================================================== */
 /* ЭНДПОИНТ: список снимков                                               */
@@ -11045,25 +11143,15 @@ app.get('/api/drr-cpfinal-snapshots', async (req, res) => {
     const limitDays = Math.min(parseInt(days, 10) || 14, 60);
 
     const [rows] = await notesPool.query(`
-      SELECT id, shift_date, shift, snapshot_time,
+      SELECT id, shift_date, week_number, shift, shift_letter, snapshot_time,
              total_records, total_vins, ok_vins, nok_vins, drr_percent
       FROM drr_cpfinal_snapshots
       WHERE shift_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
       ORDER BY shift_date DESC,
-        FIELD(shift, 'evening', 'day', 'night')
+        FIELD(shift, 'all', 'evening', 'day', 'night')
     `, [limitDays]);
 
-    res.json(rows.map(r => ({
-      id: r.id,
-      shiftDate: String(r.shift_date).slice(0, 10),
-      shift: r.shift,
-      snapshotTime: r.snapshot_time,
-      totalRecords: r.total_records,
-      totalVins: r.total_vins,
-      okVins: r.ok_vins,
-      nokVins: r.nok_vins,
-      drrPercent: Number(r.drr_percent),
-    })));
+    res.json(rows.map(enrichCpFinalSnapshot));
   } catch (err) {
     console.error('Ошибка /api/drr-cpfinal-snapshots:', err.message);
     res.status(500).json({ error: err.message });
@@ -11091,15 +11179,7 @@ app.get('/api/drr-cpfinal-snapshot/:id', async (req, res) => {
     } catch { topDefects = []; }
 
     res.json({
-      id: r.id,
-      shiftDate: String(r.shift_date).slice(0, 10),
-      shift: r.shift,
-      snapshotTime: r.snapshot_time,
-      totalRecords: r.total_records,
-      totalVins: r.total_vins,
-      okVins: r.ok_vins,
-      nokVins: r.nok_vins,
-      drrPercent: Number(r.drr_percent),
+      ...enrichCpFinalSnapshot(r),
       topDefects,
     });
   } catch (err) {
