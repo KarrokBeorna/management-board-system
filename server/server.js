@@ -13094,22 +13094,32 @@ app.delete('/api/defect-notes/:mpp', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* ================== DRR SHIFT — ФОТОГРАФИИ ============================ */
+/* ============ DRR SHIFT — ФОТОГРАФИИ И МЕТКИ ========================== */
 /* ====================================================================== */
 
-// Папка для файлов
 const DRR_SHIFT_UPLOAD_DIR = path.join(__dirname, 'uploads', 'drr-shift');
 if (!fs.existsSync(DRR_SHIFT_UPLOAD_DIR)) {
   fs.mkdirSync(DRR_SHIFT_UPLOAD_DIR, { recursive: true });
 }
 
-// Раздача статики
-app.use('/uploads/drr-shift', express.static(DRR_SHIFT_UPLOAD_DIR));
+const DRR_SHIFT_PHOTO_TTL_MS = 2 * 24 * 60 * 60 * 1000;   // 2 дня
+const DRR_SHIFT_MARK_TTL_MS  = 24 * 60 * 60 * 1000;       // 1 сутки
 
-// Вспомогательный хелпер: TTL 2 дня
-const DRR_SHIFT_PHOTO_TTL_MS = 2 * 24 * 60 * 60 * 1000;
+/* ---------- ФОТО ---------- */
 
-// Периодическая очистка старых фото (раз в час)
+// Раздача файла по имени через API (надёжнее express.static)
+app.get('/api/drr-shift-photos/file/:filename', (req, res) => {
+  try {
+    const safeName = path.basename(req.params.filename);
+    const filePath = path.join(DRR_SHIFT_UPLOAD_DIR, safeName);
+    if (!fs.existsSync(filePath)) return res.status(404).end();
+    res.sendFile(filePath);
+  } catch (err) {
+    res.status(500).end();
+  }
+});
+
+// Периодическая очистка старых фото
 async function cleanupOldDrrShiftPhotos() {
   try {
     const cutoff = new Date(Date.now() - DRR_SHIFT_PHOTO_TTL_MS);
@@ -13140,7 +13150,6 @@ app.post('/api/drr-shift-photos/upload', async (req, res) => {
       return res.status(400).json({ error: 'photo_key и data обязательны' });
     }
 
-    // data приходит как dataURL: "data:image/jpeg;base64,....."
     let base64 = data;
     let detectedMime = mime;
     const m = data.match(/^data:(.+?);base64,(.*)$/);
@@ -13161,6 +13170,7 @@ app.post('/api/drr-shift-photos/upload', async (req, res) => {
     const filePath = path.join(DRR_SHIFT_UPLOAD_DIR, filename);
 
     fs.writeFileSync(filePath, buf);
+    console.log(`[DRR SHIFT PHOTOS] Сохранено: ${filename} (${buf.length} байт)`);
 
     const [result] = await notesPool.query(
       'INSERT INTO drr_shift_photos (photo_key, filename, mime, uploaded_by) VALUES (?, ?, ?, ?)',
@@ -13170,7 +13180,7 @@ app.post('/api/drr-shift-photos/upload', async (req, res) => {
     res.json({
       success: true,
       id: result.insertId,
-      url: `/uploads/drr-shift/${filename}`,
+      url: `/api/drr-shift-photos/file/${filename}`,
     });
   } catch (err) {
     console.error('Ошибка загрузки фото DRR SHIFT:', err.message);
@@ -13178,34 +13188,10 @@ app.post('/api/drr-shift-photos/upload', async (req, res) => {
   }
 });
 
-/* Список фото по ключу */
-app.get('/api/drr-shift-photos', async (req, res) => {
-  try {
-    const { key } = req.query;
-    if (!key) return res.status(400).json({ error: 'key обязателен' });
-
-    const [rows] = await notesPool.query(
-      'SELECT id, filename, mime, uploaded_at, uploaded_by FROM drr_shift_photos WHERE photo_key = ? ORDER BY uploaded_at ASC',
-      [key]
-    );
-
-    res.json(rows.map(r => ({
-      id: r.id,
-      url: `/uploads/drr-shift/${r.filename}`,
-      mime: r.mime,
-      uploadedAt: r.uploaded_at,
-      uploadedBy: r.uploaded_by,
-    })));
-  } catch (err) {
-    console.error('Ошибка получения фото DRR SHIFT:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* Список всех фото (для дашборда — грузим разом все, чтобы не делать N запросов) */
+/* Все фото по префиксу ключа (одним запросом) */
 app.get('/api/drr-shift-photos/all', async (req, res) => {
   try {
-    const { prefix } = req.query; // например, "2026-10-06_"
+    const { prefix } = req.query;
     let sql = 'SELECT id, photo_key, filename, mime, uploaded_at, uploaded_by FROM drr_shift_photos';
     const params = [];
     if (prefix) {
@@ -13215,10 +13201,9 @@ app.get('/api/drr-shift-photos/all', async (req, res) => {
     sql += ' ORDER BY uploaded_at ASC';
     const [rows] = await notesPool.query(sql, params);
 
-    // Группируем по photo_key
     const grouped = {};
     rows.forEach(r => {
-      const url = `/uploads/drr-shift/${r.filename}`;
+      const url = `/api/drr-shift-photos/file/${r.filename}`;
       if (!grouped[r.photo_key]) grouped[r.photo_key] = [];
       grouped[r.photo_key].push({
         id: r.id,
@@ -13250,6 +13235,69 @@ app.delete('/api/drr-shift-photos/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('Ошибка удаления фото DRR SHIFT:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ---------- МЕТКИ (жёлтые строки) ---------- */
+
+// Очистка меток старше суток
+async function cleanupOldDrrShiftMarks() {
+  try {
+    const cutoff = new Date(Date.now() - DRR_SHIFT_MARK_TTL_MS);
+    const [result] = await notesPool.query(
+      'DELETE FROM drr_shift_marks WHERE created_at < ?',
+      [cutoff]
+    );
+    if (result.affectedRows > 0) {
+      console.log(`[DRR SHIFT MARKS] Очищено ${result.affectedRows} старых меток`);
+    }
+  } catch (err) {
+    console.error('[DRR SHIFT MARKS] Ошибка очистки:', err.message);
+  }
+}
+cleanupOldDrrShiftMarks();
+setInterval(cleanupOldDrrShiftMarks, 60 * 60 * 1000);
+
+// Список меток по префиксу
+app.get('/api/drr-shift-marks', async (req, res) => {
+  try {
+    const { prefix } = req.query;
+    const cutoff = new Date(Date.now() - DRR_SHIFT_MARK_TTL_MS);
+    let sql = 'SELECT mark_key FROM drr_shift_marks WHERE created_at >= ?';
+    const params = [cutoff];
+    if (prefix) {
+      sql += ' AND mark_key LIKE ?';
+      params.push(`${prefix}%`);
+    }
+    const [rows] = await notesPool.query(sql, params);
+    res.json(rows.map(r => r.mark_key));
+  } catch (err) {
+    console.error('Ошибка получения меток DRR SHIFT:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Toggle метки (если есть — удалить, если нет — создать)
+app.post('/api/drr-shift-marks/toggle', async (req, res) => {
+  try {
+    const { mark_key } = req.body;
+    if (!mark_key) return res.status(400).json({ error: 'mark_key обязателен' });
+
+    const [existing] = await notesPool.query(
+      'SELECT id FROM drr_shift_marks WHERE mark_key = ?',
+      [mark_key]
+    );
+
+    if (existing.length > 0) {
+      await notesPool.query('DELETE FROM drr_shift_marks WHERE mark_key = ?', [mark_key]);
+      return res.json({ success: true, marked: false });
+    } else {
+      await notesPool.query('INSERT INTO drr_shift_marks (mark_key) VALUES (?)', [mark_key]);
+      return res.json({ success: true, marked: true });
+    }
+  } catch (err) {
+    console.error('Ошибка toggle метки DRR SHIFT:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

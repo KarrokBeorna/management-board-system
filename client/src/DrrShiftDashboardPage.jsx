@@ -3,7 +3,6 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 const PIE_COLORS = ['#10B981', '#EF4444'];
-const MARK_KEY = 'drr_shift_marks';
 const MAX_PHOTOS_PER_BLOCK = 3;
 
 /* ===================== СТИЛИ ===================== */
@@ -359,15 +358,15 @@ function PhotoArea({ photoKey, photos, onPhotosChange }) {
   const items = photos[photoKey] || [];
   const canAdd = items.length < MAX_PHOTOS_PER_BLOCK;
   const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
 
-  const handleFile = async (e) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = '';
-    if (files.length === 0) return;
+  const uploadFiles = async (files) => {
+    if (!files || files.length === 0) return;
     setUploading(true);
     try {
       let currentItems = photos[photoKey] || [];
       for (const file of files) {
+        if (!file.type.startsWith('image/')) continue;
         if (currentItems.length >= MAX_PHOTOS_PER_BLOCK) break;
         const dataUrl = await compressImage(file);
         const res = await fetch(`${API_BASE}/api/drr-shift-photos/upload`, {
@@ -390,6 +389,19 @@ function PhotoArea({ photoKey, photos, onPhotosChange }) {
     }
   };
 
+  const handleFile = (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    uploadFiles(files);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    const files = Array.from(e.dataTransfer.files || []);
+    uploadFiles(files);
+  };
+
   const handleDelete = async (id) => {
     if (!window.confirm('Удалить фото?')) return;
     try {
@@ -402,7 +414,19 @@ function PhotoArea({ photoKey, photos, onPhotosChange }) {
   };
 
   return (
-    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #F1F5F9' }}>
+    <div
+      style={{
+        marginTop: 12,
+        paddingTop: 12,
+        borderTop: '1px solid #F1F5F9',
+        background: dragging ? '#F0F9FF' : 'transparent',
+        borderRadius: 8,
+        transition: 'background 0.2s',
+      }}
+      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={handleDrop}
+    >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
           Фото ({items.length}/{MAX_PHOTOS_PER_BLOCK})
@@ -442,9 +466,20 @@ function PhotoArea({ photoKey, photos, onPhotosChange }) {
               <img
                 src={`${API_BASE}${it.url}`}
                 alt="Фото"
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex';
+                }}
                 style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', cursor: 'pointer' }}
                 onClick={() => window.open(`${API_BASE}${it.url}`, '_blank')}
               />
+              <div style={{
+                display: 'none', position: 'absolute', inset: 0,
+                alignItems: 'center', justifyContent: 'center',
+                color: '#94A3B8', fontSize: 11, textAlign: 'center', padding: 6,
+              }}>
+                Не загрузилось
+              </div>
               <button
                 onClick={(e) => { e.stopPropagation(); handleDelete(it.id); }}
                 title="Удалить фото"
@@ -490,11 +525,7 @@ function ReportBlock({
         <div style={{ padding: '20px 0', textAlign: 'center', color: '#94A3B8', fontSize: '0.9rem' }}>
           {emptyMessage || 'Нет данных'}
         </div>
-        <PhotoArea
-          photoKey={photoKey}
-          photos={photos}
-          onPhotosChange={onPhotosChange}
-        />
+        <PhotoArea photoKey={photoKey} photos={photos} onPhotosChange={onPhotosChange} />
       </div>
     );
   }
@@ -511,12 +542,8 @@ function ReportBlock({
           totalVins={blockData.dash.totalVins}
         />
         <div style={{
-          flex: 1,
-          minWidth: 0,
-          maxHeight: 220,
-          overflowY: 'auto',
-          border: '1px solid #F1F5F9',
-          borderRadius: 8,
+          flex: 1, minWidth: 0, maxHeight: 220, overflowY: 'auto',
+          border: '1px solid #F1F5F9', borderRadius: 8,
         }}>
           <DefectsTable
             topDefects={blockData.top}
@@ -526,24 +553,13 @@ function ReportBlock({
           />
         </div>
       </div>
-      <PhotoArea
-        photoKey={photoKey}
-        photos={photos}
-        onPhotosChange={onPhotosChange}
-      />
+      <PhotoArea photoKey={photoKey} photos={photos} onPhotosChange={onPhotosChange} />
     </div>
   );
 }
 
 function ShiftColumn({
-  shiftInfo,
-  columnLabel,
-  isDark,
-  marks,
-  onToggleMark,
-  photos,
-  onPhotosChange,
-  baseDate,
+  shiftInfo, columnLabel, isDark, marks, onToggleMark, photos, onPhotosChange, baseDate,
 }) {
   const isEmptyColumn = !shiftInfo || !shiftInfo.started || !shiftInfo.data;
   const letterKey = shiftInfo?.letter || columnLabel;
@@ -551,7 +567,6 @@ function ShiftColumn({
   return (
     <div style={columnStyle}>
       <div style={columnHeaderStyle(isDark)}>{columnLabel}</div>
-
       {isEmptyColumn ? (
         <div style={{ ...reportBlockStyle, padding: '40px 20px', textAlign: 'center', color: '#94A3B8' }}>
           Нет данных — смена ещё не началась
@@ -608,44 +623,40 @@ export default function DrrShiftDashboardPage() {
   const [marks, setMarks] = useState({});
   const [photos, setPhotos] = useState({});
 
-  // Инициализация: метки из localStorage (привязаны к сегодня)
-  useEffect(() => {
-    const today = todayMoscowStr();
-    const storedMarks = localStorage.getItem(MARK_KEY);
-    if (storedMarks) {
-      try {
-        const parsed = JSON.parse(storedMarks);
-        if (parsed && parsed.date === today && parsed.marks) {
-          setMarks(parsed.marks);
-        } else {
-          localStorage.removeItem(MARK_KEY);
-        }
-      } catch {
-        localStorage.removeItem(MARK_KEY);
-      }
+  // ---------- МЕТКИ (с сервера) ----------
+  const loadMarks = async (baseDate) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/drr-shift-marks?prefix=${encodeURIComponent(baseDate + '_')}`);
+      if (!res.ok) return;
+      const list = await res.json();
+      const map = {};
+      list.forEach(k => { map[k] = true; });
+      setMarks(map);
+    } catch (err) {
+      console.error('Ошибка загрузки меток:', err.message);
     }
-  }, []);
+  };
 
-  // Сохраняем метки
-  useEffect(() => {
-    const today = todayMoscowStr();
-    if (Object.keys(marks).length > 0) {
-      localStorage.setItem(MARK_KEY, JSON.stringify({ date: today, marks }));
-    } else {
-      localStorage.removeItem(MARK_KEY);
-    }
-  }, [marks]);
-
-  const onToggleMark = (key) => {
+  const onToggleMark = async (key) => {
+    // Оптимистично переключаем
     setMarks(prev => {
       const next = { ...prev };
       if (next[key]) delete next[key];
       else next[key] = true;
       return next;
     });
+    try {
+      await fetch(`${API_BASE}/api/drr-shift-marks/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mark_key: key }),
+      });
+    } catch (err) {
+      console.error('Ошибка сохранения метки:', err.message);
+    }
   };
 
-  // ---------- ФОТО (сервер) ----------
+  // ---------- ФОТО ----------
   const onPhotosChange = (key, newItems) => {
     setPhotos(prev => ({ ...prev, [key]: newItems }));
   };
@@ -661,9 +672,10 @@ export default function DrrShiftDashboardPage() {
     }
   };
 
-  // Перезагружаем фото при смене даты / режима
+  // Загружаем метки и фото при смене даты
   useEffect(() => {
     const bd = periodMode === 'live' ? todayMoscowStr() : selectedDate;
+    loadMarks(bd);
     loadPhotos(bd);
   }, [periodMode, selectedDate]);
 
@@ -708,7 +720,7 @@ export default function DrrShiftDashboardPage() {
 
   useEffect(() => { loadData(); }, [periodMode, selectedDate, viewType]);
 
-  // Автообновление в Live
+  // Автообновление данных (60 сек) + метки/фото раз в 5 мин
   useEffect(() => {
     if (periodMode !== 'live') return;
     const id = setInterval(loadData, 60000);
