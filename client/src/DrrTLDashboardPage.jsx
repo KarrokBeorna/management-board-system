@@ -179,6 +179,19 @@ const getTimeRange = (timeFilter) => {
   return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
 };
 
+const getArchiveRange = (shiftDate, shift) => {
+  if (shift === 'all')     return { start: `${shiftDate} 00:00:00`, end: `${shiftDate} 23:59:59` };
+  if (shift === 'day')     return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
+  if (shift === 'night')   return { start: `${shiftDate} 01:31:00`, end: `${shiftDate} 07:50:00` };
+  if (shift === 'evening') {
+    const next = new Date(`${shiftDate}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    const nextStr = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+    return { start: `${shiftDate} 16:41:00`, end: `${nextStr} 01:30:00` };
+  }
+  return null;
+};
+
 const getWeekNumber = (date) => {
   const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -229,14 +242,21 @@ export default function DrrTLDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Снимки смен
   const [snapshots, setSnapshots] = useState([]);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState('live');
+  const [archiveShift, setArchiveShift] = useState(null);
 
   const [vinList, setVinList] = useState([]);
   const [vinListStatus, setVinListStatus] = useState('');
   const [showVinModal, setShowVinModal] = useState(false);
   const [vinModalLoading, setVinModalLoading] = useState(false);
+
+  const [mppVins, setMppVins] = useState([]);
+  const [mppModalTitle, setMppModalTitle] = useState('');
+  const [showMppModal, setShowMppModal] = useState(false);
+  const [mppModalLoading, setMppModalLoading] = useState(false);
+
+  const isArchive = selectedSnapshotId !== 'live';
 
   // ---------- LIVE ----------
   const loadData = async () => {
@@ -260,7 +280,10 @@ export default function DrrTLDashboardPage() {
       const defectsRes = await fetch(`${API_BASE}/api/drr-tl-top-defects?${params.toString()}`);
       if (!defectsRes.ok) throw new Error('Ошибка загрузки топ дефектов');
       const defectsJson = await defectsRes.json();
-      setTopDefects(defectsJson);
+      setTopDefects(Array.isArray(defectsJson) ? defectsJson : []);
+
+      setShiftInfo(getCurrentShiftInfo());
+      setArchiveShift(null);
     } catch (err) {
       setError(err.message);
       setTopDefects([]);
@@ -285,6 +308,13 @@ export default function DrrTLDashboardPage() {
         drrPercent: json.drrPercent || 0,
       });
       setTopDefects(Array.isArray(json.topDefects) ? json.topDefects : []);
+
+      setShiftInfo({
+        weekNumber: json.weekNumber != null ? json.weekNumber : '—',
+        shiftLetter: json.shiftLetter != null ? json.shiftLetter : '—',
+        shiftType: json.shift || 'all',
+      });
+      setArchiveShift({ shiftDate: json.shiftDate, shift: json.shift });
     } catch (err) {
       setError(err.message);
       setTopDefects([]);
@@ -310,13 +340,22 @@ export default function DrrTLDashboardPage() {
     }
   }, [selectedSnapshotId, timeFilter]);
 
-  // ---------- Автообновление смены/фильтра ----------
+  // ---------- При возврате в live — текущая неделя/буква ----------
+  useEffect(() => {
+    if (selectedSnapshotId === 'live') {
+      setShiftInfo(getCurrentShiftInfo());
+      setArchiveShift(null);
+    }
+  }, [selectedSnapshotId]);
+
+  // ---------- Автообновление смены/фильтра (только live) ----------
   useEffect(() => {
     const interval = setInterval(() => {
-      const newShiftInfo = getCurrentShiftInfo();
-      setShiftInfo(newShiftInfo);
-      if (!isManualFilter && selectedSnapshotId === 'live') {
-        setTimeFilter(getDefaultTimeFilter());
+      if (selectedSnapshotId === 'live') {
+        setShiftInfo(getCurrentShiftInfo());
+        if (!isManualFilter) {
+          setTimeFilter(getDefaultTimeFilter());
+        }
       }
     }, 60000);
     return () => clearInterval(interval);
@@ -329,7 +368,7 @@ export default function DrrTLDashboardPage() {
     return () => clearInterval(interval);
   }, [timeFilter, selectedSnapshotId]);
 
-  // ---------- VIN ----------
+  // ---------- VIN по OK/NOK ----------
   const loadVinList = async (status) => {
     if (selectedSnapshotId !== 'live') {
       alert('В архиве список VIN недоступен — переключитесь на «Сейчас (live)».');
@@ -342,13 +381,51 @@ export default function DrrTLDashboardPage() {
       const res = await fetch(`${API_BASE}/api/drr-tl-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки списка VIN');
       const json = await res.json();
-      setVinList(json);
+      setVinList(Array.isArray(json) ? json : []);
       setVinListStatus(status);
       setShowVinModal(true);
     } catch (err) {
       alert(err.message);
     } finally {
       setVinModalLoading(false);
+    }
+  };
+
+  // ---------- VIN'ы по MPP ----------
+  const loadMppVins = async (defect) => {
+    let range;
+    if (selectedSnapshotId === 'live') {
+      range = getTimeRange(timeFilter);
+    } else {
+      if (!archiveShift) {
+        alert('Не удалось определить период снимка');
+        return;
+      }
+      range = getArchiveRange(archiveShift.shiftDate, archiveShift.shift);
+    }
+    if (!range) { alert('Некорректный период'); return; }
+
+    setMppModalTitle(defect.mpp);
+    setMppVins([]);
+    setShowMppModal(true);
+    setMppModalLoading(true);
+
+    try {
+      const params = new URLSearchParams({
+        startTime: range.start,
+        endTime: range.end,
+        model: defect.model,
+        part_name: defect.part_name || '',
+        problem_type: defect.problem_type || '',
+      });
+      const res = await fetch(`${API_BASE}/api/drr-tl-mpp-vins?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки VIN');
+      const json = await res.json();
+      setMppVins(Array.isArray(json) ? json : []);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setMppModalLoading(false);
     }
   };
 
@@ -363,7 +440,12 @@ export default function DrrTLDashboardPage() {
     setTimeFilter(filter);
   };
 
-  const isArchive = selectedSnapshotId !== 'live';
+  const displayLetter = (() => {
+    const l = shiftInfo.shiftLetter;
+    if (l == null) return '—';
+    if (l === 'ALL') return '—';
+    return l;
+  })();
 
   return (
     <div style={containerStyle}>
@@ -401,7 +483,7 @@ export default function DrrTLDashboardPage() {
               boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
               border: '4px solid #FFFFFF',
             }}>
-              {shiftInfo.shiftLetter}
+              {displayLetter}
             </div>
           </div>
 
@@ -463,7 +545,11 @@ export default function DrrTLDashboardPage() {
             >
               <option value="live">Сейчас (live)</option>
               {snapshots.map(s => {
-                const shiftLabel = s.shift === 'day' ? 'День' : s.shift === 'evening' ? 'Вечер' : 'Ночь';
+                const shiftLabel =
+                  s.shift === 'all' ? 'Сутки' :
+                  s.shift === 'day' ? 'День' :
+                  s.shift === 'evening' ? 'Вечер' :
+                  'Ночь';
                 const dateObj = new Date(s.shiftDate + 'T12:00:00');
                 const dd = String(dateObj.getDate()).padStart(2, '0');
                 const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -597,7 +683,15 @@ export default function DrrTLDashboardPage() {
                     </thead>
                     <tbody>
                       {topDefects.map((defect, idx) => (
-                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                        <tr
+                          key={idx}
+                          style={{
+                            backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC',
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => loadMppVins(defect)}
+                          title="Показать VIN'ы с этим дефектом"
+                        >
                           <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none' }}>
                             {defect.mpp}
                           </td>
@@ -617,28 +711,18 @@ export default function DrrTLDashboardPage() {
         </div>
       )}
 
+      {/* Модалка VIN по OK/NOK/ALL */}
       {showVinModal && (
         <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 2000,
         }} onClick={() => setShowVinModal(false)}>
           <div style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 16,
-            padding: 24,
-            width: '90%',
-            maxWidth: 600,
-            maxHeight: '80vh',
-            display: 'flex',
-            flexDirection: 'column',
+            backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24,
+            width: '90%', maxWidth: 700, maxHeight: '80vh',
+            display: 'flex', flexDirection: 'column',
           }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
@@ -671,6 +755,68 @@ export default function DrrTLDashboardPage() {
                   </tbody>
                 </table>
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Модалка VIN по MPP */}
+      {showMppModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 2000,
+        }} onClick={() => setShowMppModal(false)}>
+          <div style={{
+            backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24,
+            width: '90%', maxWidth: 800, maxHeight: '80vh',
+            display: 'flex', flexDirection: 'column',
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
+                VIN'ы по дефекту: {mppModalTitle}
+              </h3>
+              <button onClick={() => setShowMppModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }}>×</button>
+            </div>
+            {mppModalLoading ? (
+              <p style={{ fontSize: 16 }}>Загрузка...</p>
+            ) : mppVins.length === 0 ? (
+              <p style={{ fontSize: 16, color: '#64748B' }}>Нет VIN'ов по этому дефекту за выбранный период</p>
+            ) : (
+              <>
+                <div style={{ marginBottom: 12, fontSize: 15, color: '#475569' }}>
+                  Всего: <b>{mppVins.length}</b>
+                </div>
+                <div style={{ overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>VIN</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>Модель</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>Класс</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>Статус</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>Время TLADAS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mppVins.map((item, idx) => (
+                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.grade}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', color: (item.status || '').toLowerCase() === 'closed' ? '#059669' : '#DC2626', fontWeight: 600 }}>
+                            {item.status || '—'}
+                          </td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>
+                            {item.tlad_time ? new Date(item.tlad_time).toLocaleString('ru-RU') : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </div>
         </div>

@@ -7097,7 +7097,6 @@ app.get('/api/drr-cp8-vins', async (req, res) => {
 /* ===================== DRR ADAS (TLADAS) ============================== */
 /* ====================================================================== */
 
-// Посты дефектов — как в DRR WT
 const ADAS_DEFECT_POSTS = [
   '360', 'ADAS', 'ADAS+RB', 'WA', 'CP8 Touch Up'
 ];
@@ -7140,12 +7139,6 @@ async function getAdasTladasVins(startTime, endTime) {
 
 /* ---------------------------------------------------------------------- */
 /* Хелпер: классификация VIN (OK / NOK) по LAST_MODIFIED_TIME             */
-/*   - нет дефектов вообще                     → OK                       */
-/*   - LAST_MODIFIED_TIME <= MIN TLADAS        → OK                       */
-/*   - LAST_MODIFIED_TIME >  MIN TLADAS        → NOK                      */
-/*   - LAST_MODIFIED_TIME пуст и CLOSED        → OK                       */
-/*   - LAST_MODIFIED_TIME пуст и не CLOSED     → NOK                      */
-/* VIN NOK, если хотя бы один его дефект NOK.                             */
 /* ---------------------------------------------------------------------- */
 async function classifyAdasVins(tladRows) {
   const okSet = new Set();
@@ -7219,8 +7212,8 @@ app.get('/api/drr-tl-dashboard', async (req, res) => {
     const drrPercent = totalVins > 0 ? (closedVins / totalVins) * 100 : 0;
 
     res.json({
-      totalRecords,                         // все записи TLADAS
-      totalVins,                            // уникальные VIN
+      totalRecords,
+      totalVins,
       closedVins,
       nokVins,
       drrPercent: Math.round(drrPercent * 10) / 10,
@@ -7232,7 +7225,7 @@ app.get('/api/drr-tl-dashboard', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* ЭНДПОИНТ 2: список VIN для модалки (status: OK | NOK)                  */
+/* ЭНДПОИНТ 2: список VIN для модалки (status: OK | NOK | ALL)            */
 /* ====================================================================== */
 app.get('/api/drr-tl-vins', async (req, res) => {
   try {
@@ -7244,7 +7237,6 @@ app.get('/api/drr-tl-vins', async (req, res) => {
     const { vins: tladRows } = await getAdasTladasVins(startTime, endTime);
     if (tladRows.length === 0) return res.json([]);
 
-    // Время отображения — самое позднее TLADAS
     const lastTladByVin = new Map(tladRows.map(r => [r.vin, r.tlad_last_time]));
 
     const { okSet, nokSet } = await classifyAdasVins(tladRows);
@@ -7282,7 +7274,8 @@ app.get('/api/drr-tl-vins', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* ЭНДПОИНТ 3: топ дефектов у NOK VIN (без класса)                        */
+/* ЭНДПОИНТ 3: топ дефектов у NOK VIN                                     */
+/* — теперь возвращаем model / part_name / problem_type                   */
 /* ====================================================================== */
 app.get('/api/drr-tl-top-defects', async (req, res) => {
   try {
@@ -7335,8 +7328,15 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
       const mpp = `${d.MODEL || '—'} ${d.PART_NAME || ''} ${d.PROBLEM_TYPE || ''}`
         .replace(/\s+/g, ' ').trim();
 
-      // Группируем ТОЛЬКО по mpp (без grade)
-      if (!map.has(mpp)) map.set(mpp, { mpp, defectCount: 0 });
+      if (!map.has(mpp)) {
+        map.set(mpp, {
+          mpp,
+          model: d.MODEL || '',
+          part_name: d.PART_NAME || '',
+          problem_type: d.PROBLEM_TYPE || '',
+          defectCount: 0,
+        });
+      }
       map.get(mpp).defectCount += 1;
     });
 
@@ -7352,10 +7352,95 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
 });
 
 /* ====================================================================== */
+/* ЭНДПОИНТ 4: VIN'ы по конкретному MPP                                   */
+/* ====================================================================== */
+app.get('/api/drr-tl-mpp-vins', async (req, res) => {
+  try {
+    const { startTime, endTime, model, part_name = '', problem_type = '' } = req.query;
+
+    if (!startTime || !endTime || !model) {
+      return res.status(400).json({ error: 'startTime, endTime и model обязательны' });
+    }
+
+    const { vins: tladRows } = await getAdasTladasVins(startTime, endTime);
+    if (tladRows.length === 0) return res.json([]);
+
+    const firstTladByVin = new Map(tladRows.map(r => [r.vin, r.tlad_first_time]));
+    const lastTladByVin = new Map(tladRows.map(r => [r.vin, r.tlad_last_time]));
+    const { nokSet } = await classifyAdasVins(tladRows);
+    const nokVins = [...nokSet];
+
+    if (nokVins.length === 0) return res.json([]);
+
+    const ph = nokVins.map(() => '?').join(',');
+
+    let whereClause = `d.VIN IN (${ph}) AND d.POST_NAME IN (${ADAS_DEFECT_POSTS_STR}) AND wo.MODEL = ?`;
+    const params = [...nokVins, model];
+
+    if (part_name !== '' || problem_type !== '') {
+      whereClause += ` AND d.PART_NAME = ? AND d.PROBLEM_TYPE = ?`;
+      params.push(part_name, problem_type);
+    } else {
+      whereClause += ` AND (d.PART_NAME IS NULL OR TRIM(d.PART_NAME) = '') AND (d.PROBLEM_TYPE IS NULL OR TRIM(d.PROBLEM_TYPE) = '')`;
+    }
+
+    const [defectRows] = await pool.query(`
+      SELECT
+        d.VIN,
+        wo.MODEL,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.PROBLEM_GRADE,
+        d.STATUS,
+        d.LAST_MODIFIED_TIME
+      FROM at_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE ${whereClause}
+    `, params);
+
+    const vinMap = new Map();
+    defectRows.forEach(d => {
+      const firstTlad = firstTladByVin.get(d.VIN);
+      if (!firstTlad) return;
+      const tladMs = new Date(firstTlad).getTime();
+      const reworkMs = d.LAST_MODIFIED_TIME ? new Date(d.LAST_MODIFIED_TIME).getTime() : null;
+      const isClosed = d.STATUS && d.STATUS.toUpperCase() === 'CLOSED';
+
+      let isNok = false;
+      if (reworkMs !== null) { if (reworkMs > tladMs) isNok = true; }
+      else { if (!isClosed) isNok = true; }
+      if (!isNok) return;
+
+      const existing = vinMap.get(d.VIN);
+      const reworkTimeMs = reworkMs || 0;
+      if (!existing || reworkTimeMs > existing._reworkMs) {
+        vinMap.set(d.VIN, {
+          vin: d.VIN,
+          model: d.MODEL || '—',
+          grade: d.PROBLEM_GRADE || '—',
+          status: d.STATUS || '',
+          last_modified: d.LAST_MODIFIED_TIME || null,
+          tlad_time: lastTladByVin.get(d.VIN) || null,
+          _reworkMs: reworkTimeMs,
+        });
+      }
+    });
+
+    const result = Array.from(vinMap.values())
+      .map(({ _reworkMs, ...v }) => v)
+      .sort((a, b) => new Date(a.tlad_time) - new Date(b.tlad_time));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка /api/drr-tl-mpp-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ====================================================================== */
 /* ================== DRR ADAS — СНИМКИ СМЕН ============================ */
 /* ====================================================================== */
 
-// Определение последней ЗАВЕРШЁННОЙ смены (МСК)
 function getLastCompletedShiftAdas() {
   const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
   const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
@@ -7366,19 +7451,16 @@ function getLastCompletedShiftAdas() {
   yest.setUTCDate(yest.getUTCDate() - 1);
   const yesterdayStr = fmt(yest);
 
-  // 00:00–01:30 — идёт вечерняя (со вчера). Последняя завершённая = вчерашний день.
   if (mins < 91) return { shiftDate: yesterdayStr, shift: 'day' };
-  // 01:31–07:49 — идёт ночная. Последняя завершённая = вчерашний вечер.
   if (mins < 470) return { shiftDate: yesterdayStr, shift: 'evening' };
-  // 07:50–16:40 — идёт дневная. Последняя завершённая = сегодняшняя ночь.
   if (mins < 1001) return { shiftDate: todayStr, shift: 'night' };
-  // 16:41–23:59 — идёт вечерняя. Последняя завершённая = сегодняшний день.
   return { shiftDate: todayStr, shift: 'day' };
 }
 
 function getShiftRangeAdas(shiftDate, shift) {
-  if (shift === 'day') return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
-  if (shift === 'night') return { start: `${shiftDate} 01:31:00`, end: `${shiftDate} 07:50:00` };
+  if (shift === 'all')     return { start: `${shiftDate} 00:00:00`, end: `${shiftDate} 23:59:59` };
+  if (shift === 'day')     return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
+  if (shift === 'night')   return { start: `${shiftDate} 01:31:00`, end: `${shiftDate} 07:50:00` };
   if (shift === 'evening') {
     const next = new Date(`${shiftDate}T12:00:00Z`);
     next.setUTCDate(next.getUTCDate() + 1);
@@ -7392,6 +7474,9 @@ async function saveDrrAdasSnapshot(shiftDate, shift) {
   try {
     const range = getShiftRangeAdas(shiftDate, shift);
     if (!range) return;
+
+    const weekNumber = getWeekNumberForDate(shiftDate);
+    const shiftLetter = getShiftLetterForSnapshot(shift, weekNumber);
 
     const { vins: tladRows, totalRecords } = await getAdasTladasVins(range.start, range.end);
     const totalVins = tladRows.length;
@@ -7430,10 +7515,18 @@ async function saveDrrAdasSnapshot(shiftDate, shift) {
           else { if (!isClosed) isNok = true; }
           if (!isNok) return;
 
-          // Группируем ТОЛЬКО по mpp (без grade)
           const mpp = `${d.MODEL || '—'} ${d.PART_NAME || ''} ${d.PROBLEM_TYPE || ''}`
             .replace(/\s+/g, ' ').trim();
-          if (!map.has(mpp)) map.set(mpp, { mpp, defectCount: 0 });
+
+          if (!map.has(mpp)) {
+            map.set(mpp, {
+              mpp,
+              model: d.MODEL || '',
+              part_name: d.PART_NAME || '',
+              problem_type: d.PROBLEM_TYPE || '',
+              defectCount: 0,
+            });
+          }
           map.get(mpp).defectCount += 1;
         });
 
@@ -7445,19 +7538,23 @@ async function saveDrrAdasSnapshot(shiftDate, shift) {
 
     await notesPool.query(`
       INSERT INTO drr_adas_snapshots
-        (shift_date, shift, total_records, total_vins, closed_vins, nok_vins, drr_percent, top_defects)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (shift_date, week_number, shift, shift_letter,
+         total_records, total_vins, closed_vins, nok_vins, drr_percent, top_defects)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         snapshot_time = CURRENT_TIMESTAMP,
+        week_number = VALUES(week_number),
+        shift_letter = VALUES(shift_letter),
         total_records = VALUES(total_records),
         total_vins = VALUES(total_vins),
         closed_vins = VALUES(closed_vins),
         nok_vins = VALUES(nok_vins),
         drr_percent = VALUES(drr_percent),
         top_defects = VALUES(top_defects)
-    `, [shiftDate, shift, totalRecords, totalVins, closedVins, nokVins, drrPercent, JSON.stringify(topDefects)]);
+    `, [shiftDate, weekNumber, shift, shiftLetter,
+        totalRecords, totalVins, closedVins, nokVins, drrPercent, JSON.stringify(topDefects)]);
 
-    console.log(`[DRR ADAS snapshot] ${shiftDate} ${shift} → ${drrPercent}% (${closedVins}/${totalVins})`);
+    console.log(`[DRR ADAS snapshot] ${shiftDate} W${weekNumber} ${shift}(${shiftLetter}) → ${drrPercent}% (${closedVins}/${totalVins})`);
   } catch (err) {
     console.error('[DRR ADAS snapshot] ошибка сохранения:', err.message);
   }
@@ -7474,12 +7571,58 @@ async function checkAndSaveDrrAdasSnapshot() {
       await saveDrrAdasSnapshot(shiftDate, shift);
     }
   } catch (err) {
-    console.error('[DRR ADAS snapshot] ошибка проверки:', err.message);
+    console.error('[DRR ADAS snapshot] ошибка проверки смены:', err.message);
   }
 }
 
-setInterval(checkAndSaveDrrAdasSnapshot, 60 * 1000);
+async function checkAndSaveDrrAdasDailySnapshot() {
+  try {
+    const dayDate = getCompletedDayDate();
+    const [existing] = await notesPool.query(
+      `SELECT id FROM drr_adas_snapshots WHERE shift_date = ? AND shift = 'all'`,
+      [dayDate]
+    );
+    if (existing.length === 0) {
+      await saveDrrAdasSnapshot(dayDate, 'all');
+    }
+  } catch (err) {
+    console.error('[DRR ADAS snapshot] ошибка проверки суток:', err.message);
+  }
+}
+
+setInterval(() => {
+  checkAndSaveDrrAdasSnapshot();
+  checkAndSaveDrrAdasDailySnapshot();
+}, 60 * 1000);
 checkAndSaveDrrAdasSnapshot();
+checkAndSaveDrrAdasDailySnapshot();
+
+/* ====================================================================== */
+/* ХЕЛПЕР: дозаполнить week_number / shift_letter, если их нет в БД       */
+/* ====================================================================== */
+function enrichAdasSnapshot(r) {
+  const shiftDate = String(r.shift_date).slice(0, 10);
+  const weekNumber = r.week_number != null
+    ? r.week_number
+    : getWeekNumberForDate(shiftDate);
+  const shiftLetter = r.shift_letter != null
+    ? r.shift_letter
+    : getShiftLetterForSnapshot(r.shift, weekNumber);
+
+  return {
+    id: r.id,
+    shiftDate,
+    weekNumber,
+    shift: r.shift,
+    shiftLetter,
+    snapshotTime: r.snapshot_time,
+    totalRecords: r.total_records,
+    totalVins: r.total_vins,
+    closedVins: r.closed_vins,
+    nokVins: r.nok_vins,
+    drrPercent: Number(r.drr_percent),
+  };
+}
 
 /* ====================================================================== */
 /* ЭНДПОИНТ: список снимков                                               */
@@ -7490,25 +7633,15 @@ app.get('/api/drr-tl-snapshots', async (req, res) => {
     const limitDays = Math.min(parseInt(days, 10) || 14, 60);
 
     const [rows] = await notesPool.query(`
-      SELECT id, shift_date, shift, snapshot_time,
+      SELECT id, shift_date, week_number, shift, shift_letter, snapshot_time,
              total_records, total_vins, closed_vins, nok_vins, drr_percent
       FROM drr_adas_snapshots
       WHERE shift_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
       ORDER BY shift_date DESC,
-        FIELD(shift, 'evening', 'day', 'night')
+        FIELD(shift, 'all', 'evening', 'day', 'night')
     `, [limitDays]);
 
-    res.json(rows.map(r => ({
-      id: r.id,
-      shiftDate: String(r.shift_date).slice(0, 10),
-      shift: r.shift,
-      snapshotTime: r.snapshot_time,
-      totalRecords: r.total_records,
-      totalVins: r.total_vins,
-      closedVins: r.closed_vins,
-      nokVins: r.nok_vins,
-      drrPercent: Number(r.drr_percent),
-    })));
+    res.json(rows.map(enrichAdasSnapshot));
   } catch (err) {
     console.error('Ошибка /api/drr-tl-snapshots:', err.message);
     res.status(500).json({ error: err.message });
@@ -7536,15 +7669,7 @@ app.get('/api/drr-tl-snapshot/:id', async (req, res) => {
     } catch { topDefects = []; }
 
     res.json({
-      id: r.id,
-      shiftDate: String(r.shift_date).slice(0, 10),
-      shift: r.shift,
-      snapshotTime: r.snapshot_time,
-      totalRecords: r.total_records,
-      totalVins: r.total_vins,
-      closedVins: r.closed_vins,
-      nokVins: r.nok_vins,
-      drrPercent: Number(r.drr_percent),
+      ...enrichAdasSnapshot(r),
       topDefects,
     });
   } catch (err) {
