@@ -7681,9 +7681,10 @@ app.get('/api/drr-tl-snapshot/:id', async (req, res) => {
 
 
 
-
-
 // ================== PIP DRR DASHBOARD ==================
+
+const PIP_DEFECT_POSTS = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
+const PIP_DEFECT_POSTS_STR = PIP_DEFECT_POSTS.map(p => `'${p}'`).join(',');
 
 // 1. Основной DRR
 app.get('/api/drr-pip-dashboard', async (req, res) => {
@@ -7693,7 +7694,6 @@ app.get('/api/drr-pip-dashboard', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    // 1. VIN, прошедшие PIP9 (в MES это AGMAS01003)
     const [pip9Rows] = await mesPool.query(`
       SELECT DISTINCT vin
       FROM ti_mes_movement
@@ -7709,18 +7709,13 @@ app.get('/api/drr-pip-dashboard', async (req, res) => {
     const vins = pip9Rows.map(r => r.vin);
     const placeholders = vins.map(() => '?').join(',');
 
-    // 2. Дефекты на PIP-постах для этих VIN
-    const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-    const postListStr = pipPosts.map(p => `'${p}'`).join(',');
-
     const [defectRows] = await pool.query(`
       SELECT d.VIN, d.STATUS
       FROM at_qm_defect_info d
       WHERE d.VIN IN (${placeholders})
-        AND d.POST_NAME IN (${postListStr})
+        AND d.POST_NAME IN (${PIP_DEFECT_POSTS_STR})
     `, vins);
 
-    // 3. Определяем NOK VIN (есть хотя бы один незакрытый дефект)
     const nokSet = new Set();
     defectRows.forEach(row => {
       if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
@@ -7742,7 +7737,7 @@ app.get('/api/drr-pip-dashboard', async (req, res) => {
   }
 });
 
-// 2. Топ дефектов
+// 2. Топ дефектов — теперь с model / part_name / problem_type
 app.get('/api/drr-pip-top-defects', async (req, res) => {
   try {
     const { startTime, endTime } = req.query;
@@ -7750,7 +7745,6 @@ app.get('/api/drr-pip-top-defects', async (req, res) => {
       return res.status(400).json({ error: 'startTime и endTime обязательны' });
     }
 
-    // 1. VIN, прошедшие PIP9
     const [pip9Rows] = await mesPool.query(`
       SELECT DISTINCT vin
       FROM ti_mes_movement
@@ -7764,10 +7758,6 @@ app.get('/api/drr-pip-top-defects', async (req, res) => {
     const vins = pip9Rows.map(r => r.vin);
     const placeholders = vins.map(() => '?').join(',');
 
-    // 2. Дефекты
-    const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-    const postListStr = pipPosts.map(p => `'${p}'`).join(',');
-
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN,
@@ -7779,10 +7769,9 @@ app.get('/api/drr-pip-top-defects', async (req, res) => {
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.VIN IN (${placeholders})
-        AND d.POST_NAME IN (${postListStr})
+        AND d.POST_NAME IN (${PIP_DEFECT_POSTS_STR})
     `, vins);
 
-    // 3. Определяем NOK VIN
     const nokSet = new Set();
     defectRows.forEach(row => {
       if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
@@ -7792,7 +7781,6 @@ app.get('/api/drr-pip-top-defects', async (req, res) => {
 
     if (nokSet.size === 0) return res.json([]);
 
-    // 4. Группируем только незакрытые дефекты NOK VIN
     const defectGroupMap = new Map();
     defectRows.forEach(row => {
       if (!nokSet.has(row.VIN)) return;
@@ -7802,6 +7790,9 @@ app.get('/api/drr-pip-top-defects', async (req, res) => {
       if (!defectGroupMap.has(mpp)) {
         defectGroupMap.set(mpp, {
           mpp,
+          model: row.MODEL || '',
+          part_name: row.PART_NAME || '',
+          problem_type: row.PROBLEM_TYPE || '',
           grade: row.PROBLEM_GRADE || '-',
           defectCount: 0,
         });
@@ -7812,6 +7803,9 @@ app.get('/api/drr-pip-top-defects', async (req, res) => {
     const topDefects = Array.from(defectGroupMap.values())
       .map(d => ({
         mpp: d.mpp,
+        model: d.model,
+        part_name: d.part_name,
+        problem_type: d.problem_type,
         grade: d.grade,
         defectCount: d.defectCount,
       }))
@@ -7847,14 +7841,11 @@ app.get('/api/drr-pip-vins', async (req, res) => {
     const vins = pip9Rows.map(r => r.vin);
     const placeholders = vins.map(() => '?').join(',');
 
-    const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-    const postListStr = pipPosts.map(p => `'${p}'`).join(',');
-
     const [defectRows] = await pool.query(`
       SELECT d.VIN, d.STATUS
       FROM at_qm_defect_info d
       WHERE d.VIN IN (${placeholders})
-        AND d.POST_NAME IN (${postListStr})
+        AND d.POST_NAME IN (${PIP_DEFECT_POSTS_STR})
     `, vins);
 
     const nokSet = new Set();
@@ -7871,14 +7862,11 @@ app.get('/api/drr-pip-vins', async (req, res) => {
       return false;
     });
 
-    // Получаем модель из work_order
     const modelMap = new Map();
     if (selectedVins.length > 0) {
       const selPlaceholders = selectedVins.map(() => '?').join(',');
       const [modelRows] = await pool.query(`
-        SELECT VIN, MODEL
-        FROM work_order
-        WHERE VIN IN (${selPlaceholders})
+        SELECT VIN, MODEL FROM work_order WHERE VIN IN (${selPlaceholders})
       `, selectedVins.map(r => r.vin));
       modelRows.forEach(r => modelMap.set(r.VIN, r.MODEL));
     }
@@ -7896,13 +7884,102 @@ app.get('/api/drr-pip-vins', async (req, res) => {
   }
 });
 
+// 4. VIN'ы по конкретному MPP
+app.get('/api/drr-pip-mpp-vins', async (req, res) => {
+  try {
+    const { startTime, endTime, model, part_name = '', problem_type = '' } = req.query;
+
+    if (!startTime || !endTime || !model) {
+      return res.status(400).json({ error: 'startTime, endTime и model обязательны' });
+    }
+
+    const [pip9Rows] = await mesPool.query(`
+      SELECT vin, MIN(scan_time) AS pip9_time
+      FROM ti_mes_movement
+      WHERE uloc_no = 'AGMAS01003'
+        AND scan_time >= ? AND scan_time <= ?
+        AND is_deleted = 0
+      GROUP BY vin
+    `, [startTime, endTime]);
+
+    if (pip9Rows.length === 0) return res.json([]);
+
+    const pip9TimeByVin = new Map(pip9Rows.map(r => [r.vin, r.pip9_time]));
+    const vins = pip9Rows.map(r => r.vin);
+    const placeholders = vins.map(() => '?').join(',');
+
+    const [defectRows] = await pool.query(`
+      SELECT d.VIN, d.STATUS
+      FROM at_qm_defect_info d
+      WHERE d.VIN IN (${placeholders})
+        AND d.POST_NAME IN (${PIP_DEFECT_POSTS_STR})
+    `, vins);
+
+    const nokSet = new Set();
+    defectRows.forEach(row => {
+      if (!row.STATUS || row.STATUS.toLowerCase() !== 'closed') {
+        nokSet.add(row.VIN);
+      }
+    });
+
+    const nokVins = [...nokSet];
+    if (nokVins.length === 0) return res.json([]);
+
+    const ph = nokVins.map(() => '?').join(',');
+    let whereClause = `d.VIN IN (${ph}) AND d.POST_NAME IN (${PIP_DEFECT_POSTS_STR}) AND wo.MODEL = ?`;
+    const params = [...nokVins, model];
+
+    if (part_name !== '' || problem_type !== '') {
+      whereClause += ` AND d.PART_NAME = ? AND d.PROBLEM_TYPE = ?`;
+      params.push(part_name, problem_type);
+    } else {
+      whereClause += ` AND (d.PART_NAME IS NULL OR TRIM(d.PART_NAME) = '') AND (d.PROBLEM_TYPE IS NULL OR TRIM(d.PROBLEM_TYPE) = '')`;
+    }
+
+    const [matchedDefects] = await pool.query(`
+      SELECT
+        d.VIN,
+        wo.MODEL,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.PROBLEM_GRADE,
+        d.STATUS
+      FROM at_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE ${whereClause}
+    `, params);
+
+    const vinMap = new Map();
+    matchedDefects.forEach(d => {
+      if (!nokSet.has(d.VIN)) return; // только NOK
+      if (!vinMap.has(d.VIN)) {
+        vinMap.set(d.VIN, {
+          vin: d.VIN,
+          model: d.MODEL || '—',
+          grade: d.PROBLEM_GRADE || '—',
+          status: d.STATUS || '',
+          pip9_time: pip9TimeByVin.get(d.VIN) || null,
+        });
+      }
+    });
+
+    const result = Array.from(vinMap.values())
+      .sort((a, b) => new Date(a.pip9_time) - new Date(b.pip9_time));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка /api/drr-pip-mpp-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ====================================================================== */
 /* ================== DRR PIP — СНИМКИ СМЕН ============================= */
 /* ====================================================================== */
 
-/* Хелпер: определение последней завершённой смены (МСК) */
+/* Определение последней ЗАВЕРШЁННОЙ смены (МСК) */
 function getLastCompletedShift() {
-  const now = new Date(Date.now() + 3 * 60 * 60 * 1000); // МСК
+  const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
   const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
 
   const fmt = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
@@ -7911,37 +7988,17 @@ function getLastCompletedShift() {
   yest.setUTCDate(yest.getUTCDate() - 1);
   const yesterdayStr = fmt(yest);
 
-  // 00:00–01:30 — идёт ВЕЧЕРНЯЯ смена (перешла со вчерашнего дня).
-  // Последняя завершённая = ВЧЕРАШНИЙ ДЕНЬ (закончился вчера в 16:40).
-  if (mins < 91) {
-    return { shiftDate: yesterdayStr, shift: 'day' };
-  }
-
-  // 01:31–07:49 — идёт НОЧНАЯ смена.
-  // Последняя завершённая = ВЧЕРАШНИЙ ВЕЧЕР (закончился в 01:30).
-  if (mins < 470) {
-    return { shiftDate: yesterdayStr, shift: 'evening' };
-  }
-
-  // 07:50–16:40 — идёт ДНЕВНАЯ смена.
-  // Последняя завершённая = СЕГОДНЯШНЯЯ НОЧЬ (закончилась в 07:50).
-  if (mins < 1001) {
-    return { shiftDate: todayStr, shift: 'night' };
-  }
-
-  // 16:41–23:59 — идёт ВЕЧЕРНЯЯ смена.
-  // Последняя завершённая = СЕГОДНЯШНИЙ ДЕНЬ (закончился в 16:40).
+  if (mins < 91) return { shiftDate: yesterdayStr, shift: 'day' };
+  if (mins < 470) return { shiftDate: yesterdayStr, shift: 'evening' };
+  if (mins < 1001) return { shiftDate: todayStr, shift: 'night' };
   return { shiftDate: todayStr, shift: 'day' };
 }
 
-/* Хелпер: временные границы смены */
+/* Временные границы смены (+ 'all') */
 function getShiftRange(shiftDate, shift) {
-  if (shift === 'day') {
-    return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
-  }
-  if (shift === 'night') {
-    return { start: `${shiftDate} 01:31:00`, end: `${shiftDate} 07:50:00` };
-  }
+  if (shift === 'all')     return { start: `${shiftDate} 00:00:00`, end: `${shiftDate} 23:59:59` };
+  if (shift === 'day')     return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
+  if (shift === 'night')   return { start: `${shiftDate} 01:31:00`, end: `${shiftDate} 07:50:00` };
   if (shift === 'evening') {
     const next = new Date(`${shiftDate}T12:00:00Z`);
     next.setUTCDate(next.getUTCDate() + 1);
@@ -7951,13 +8008,15 @@ function getShiftRange(shiftDate, shift) {
   return null;
 }
 
-/* Хелпер: сохранение снимка */
+/* Сохранение снимка — с week_number и shift_letter */
 async function saveDrrPipSnapshot(shiftDate, shift) {
   try {
     const range = getShiftRange(shiftDate, shift);
     if (!range) return;
 
-    // 1. VIN, прошедшие PIP9 (AGMAS01003)
+    const weekNumber = getWeekNumberForDate(shiftDate);
+    const shiftLetter = getShiftLetterForSnapshot(shift, weekNumber);
+
     const [pip9Rows] = await mesPool.query(`
       SELECT DISTINCT vin
       FROM ti_mes_movement
@@ -7976,9 +8035,6 @@ async function saveDrrPipSnapshot(shiftDate, shift) {
 
     if (totalVins > 0) {
       const ph = vins.map(() => '?').join(',');
-      const pipPosts = ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'];
-      const postStr = pipPosts.map(p => `'${p}'`).join(',');
-
       const [defectRows] = await pool.query(`
         SELECT
           d.VIN,
@@ -7990,7 +8046,7 @@ async function saveDrrPipSnapshot(shiftDate, shift) {
         FROM at_qm_defect_info d
         LEFT JOIN work_order wo ON wo.VIN = d.VIN
         WHERE d.VIN IN (${ph})
-          AND d.POST_NAME IN (${postStr})
+          AND d.POST_NAME IN (${PIP_DEFECT_POSTS_STR})
       `, vins);
 
       const nokSet = new Set();
@@ -8000,17 +8056,18 @@ async function saveDrrPipSnapshot(shiftDate, shift) {
         const isClosed = d.STATUS && d.STATUS.toLowerCase() === 'closed';
         if (!isClosed) {
           nokSet.add(d.VIN);
-          // Класс оставлен: группируем по mpp + grade
           const mpp = `${d.MODEL || '-'} ${d.PART_NAME || ''} ${d.PROBLEM_TYPE || ''}`.trim();
-          const key = `${mpp}|${d.PROBLEM_GRADE || '-'}`;
-          if (!defectGroupMap.has(key)) {
-            defectGroupMap.set(key, {
+          if (!defectGroupMap.has(mpp)) {
+            defectGroupMap.set(mpp, {
               mpp,
+              model: d.MODEL || '',
+              part_name: d.PART_NAME || '',
+              problem_type: d.PROBLEM_TYPE || '',
               grade: d.PROBLEM_GRADE || '-',
               defectCount: 0,
             });
           }
-          defectGroupMap.get(key).defectCount += 1;
+          defectGroupMap.get(mpp).defectCount += 1;
         }
       });
 
@@ -8025,24 +8082,28 @@ async function saveDrrPipSnapshot(shiftDate, shift) {
 
     await notesPool.query(`
       INSERT INTO drr_pip_snapshots
-        (shift_date, shift, total_vins, closed_vins, nok_vins, drr_percent, top_defects)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+        (shift_date, week_number, shift, shift_letter,
+         total_vins, closed_vins, nok_vins, drr_percent, top_defects)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         snapshot_time = CURRENT_TIMESTAMP,
+        week_number = VALUES(week_number),
+        shift_letter = VALUES(shift_letter),
         total_vins = VALUES(total_vins),
         closed_vins = VALUES(closed_vins),
         nok_vins = VALUES(nok_vins),
         drr_percent = VALUES(drr_percent),
         top_defects = VALUES(top_defects)
-    `, [shiftDate, shift, totalVins, closedVins, nokVins, drrPercent, JSON.stringify(topDefects)]);
+    `, [shiftDate, weekNumber, shift, shiftLetter,
+        totalVins, closedVins, nokVins, drrPercent, JSON.stringify(topDefects)]);
 
-    console.log(`[DRR PIP snapshot] ${shiftDate} ${shift} → ${drrPercent}% (${closedVins}/${totalVins})`);
+    console.log(`[DRR PIP snapshot] ${shiftDate} W${weekNumber} ${shift}(${shiftLetter}) → ${drrPercent}% (${closedVins}/${totalVins})`);
   } catch (err) {
     console.error('[DRR PIP snapshot] ошибка сохранения:', err.message);
   }
 }
 
-/* Хелпер: проверка и сохранение */
+/* Проверка и сохранение смены */
 async function checkAndSaveDrrPipSnapshot() {
   try {
     const { shiftDate, shift } = getLastCompletedShift();
@@ -8054,57 +8115,80 @@ async function checkAndSaveDrrPipSnapshot() {
       await saveDrrPipSnapshot(shiftDate, shift);
     }
   } catch (err) {
-    console.error('[DRR PIP snapshot] ошибка проверки:', err.message);
+    console.error('[DRR PIP snapshot] ошибка проверки смены:', err.message);
   }
 }
 
-/* Автозапуск: проверка раз в минуту */
-setInterval(checkAndSaveDrrPipSnapshot, 60 * 1000);
-checkAndSaveDrrPipSnapshot();
+/* Проверка и сохранение суток */
+async function checkAndSaveDrrPipDailySnapshot() {
+  try {
+    const dayDate = getCompletedDayDate();
+    const [existing] = await notesPool.query(
+      `SELECT id FROM drr_pip_snapshots WHERE shift_date = ? AND shift = 'all'`,
+      [dayDate]
+    );
+    if (existing.length === 0) {
+      await saveDrrPipSnapshot(dayDate, 'all');
+    }
+  } catch (err) {
+    console.error('[DRR PIP snapshot] ошибка проверки суток:', err.message);
+  }
+}
 
-/* ====================================================================== */
-/* ЭНДПОИНТ: список снимков за 14 дней                                    */
-/* ====================================================================== */
+setInterval(() => {
+  checkAndSaveDrrPipSnapshot();
+  checkAndSaveDrrPipDailySnapshot();
+}, 60 * 1000);
+checkAndSaveDrrPipSnapshot();
+checkAndSaveDrrPipDailySnapshot();
+
+/* Хелпер: дозаполнить week_number / shift_letter */
+function enrichPipSnapshot(r) {
+  const shiftDate = String(r.shift_date).slice(0, 10);
+  const weekNumber = r.week_number != null
+    ? r.week_number
+    : getWeekNumberForDate(shiftDate);
+  const shiftLetter = r.shift_letter != null
+    ? r.shift_letter
+    : getShiftLetterForSnapshot(r.shift, weekNumber);
+
+  return {
+    id: r.id,
+    shiftDate,
+    weekNumber,
+    shift: r.shift,
+    shiftLetter,
+    snapshotTime: r.snapshot_time,
+    totalVins: r.total_vins,
+    closedVins: r.closed_vins,
+    nokVins: r.nok_vins,
+    drrPercent: Number(r.drr_percent),
+  };
+}
+
+/* ЭНДПОИНТ: список снимков */
 app.get('/api/drr-pip-snapshots', async (req, res) => {
   try {
     const { days = 14 } = req.query;
     const limitDays = Math.min(parseInt(days, 10) || 14, 60);
 
     const [rows] = await notesPool.query(`
-      SELECT
-        id,
-        shift_date,
-        shift,
-        snapshot_time,
-        total_vins,
-        closed_vins,
-        nok_vins,
-        drr_percent
+      SELECT id, shift_date, week_number, shift, shift_letter, snapshot_time,
+             total_vins, closed_vins, nok_vins, drr_percent
       FROM drr_pip_snapshots
       WHERE shift_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
       ORDER BY shift_date DESC,
-        FIELD(shift, 'evening', 'day', 'night')
+        FIELD(shift, 'all', 'evening', 'day', 'night')
     `, [limitDays]);
 
-    res.json(rows.map(r => ({
-      id: r.id,
-      shiftDate: String(r.shift_date).slice(0, 10),
-      shift: r.shift,
-      snapshotTime: r.snapshot_time,
-      totalVins: r.total_vins,
-      closedVins: r.closed_vins,
-      nokVins: r.nok_vins,
-      drrPercent: Number(r.drr_percent),
-    })));
+    res.json(rows.map(enrichPipSnapshot));
   } catch (err) {
     console.error('Ошибка /api/drr-pip-snapshots:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-/* ====================================================================== */
-/* ЭНДПОИНТ: один снимок с top_defects                                    */
-/* ====================================================================== */
+/* ЭНДПОИНТ: один снимок с top_defects */
 app.get('/api/drr-pip-snapshot/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -8123,14 +8207,7 @@ app.get('/api/drr-pip-snapshot/:id', async (req, res) => {
     } catch { topDefects = []; }
 
     res.json({
-      id: r.id,
-      shiftDate: String(r.shift_date).slice(0, 10),
-      shift: r.shift,
-      snapshotTime: r.snapshot_time,
-      totalVins: r.total_vins,
-      closedVins: r.closed_vins,
-      nokVins: r.nok_vins,
-      drrPercent: Number(r.drr_percent),
+      ...enrichPipSnapshot(r),
       topDefects,
     });
   } catch (err) {
