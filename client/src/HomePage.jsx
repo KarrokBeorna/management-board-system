@@ -28,7 +28,7 @@ import drrWtPortalPreview from './assets/cp8drr.png';
 import drrCp6Preview from './assets/drrcp6.png';
 import drrCp5Preview from './assets/drrcp5.png';
 import allDrrPreview from './assets/alldrrcomp.png';
-import vrtPreview from './assets/briga.png'; // или своя
+import vrtPreview from './assets/vrt.png';
 import drrShiftPreview from './assets/123.png'; // или своя картинка
 
 // ====== СТИЛИ ======
@@ -381,7 +381,8 @@ export default function HomePage() {
     '/drr-pip-dashboard',
     '/drr-cp6',
     '/drr-cp5',
-    '/all-drr-dashboard'
+    '/all-drr-dashboard',
+    '/drr-shift-dashboard'
   ];
 
   const allDrrCards = allReportCards.filter(card => DRR_ROUTES.includes(card.to));

@@ -74,6 +74,7 @@ export default function Layout() {
   location.pathname === '/drr-cp5' ||
   location.pathname === '/all-drr-dashboard' ||
   location.pathname === '/vrt-report' ||
+  location.pathname === '/drr-shift-dashboard' ||
   location.pathname === '/brigade-report';
 
 
