@@ -216,7 +216,6 @@ const getCurrentShiftInfo = () => {
   return { weekNumber, shiftLetter, shiftType };
 };
 
-// ===== Цвет цифры по значению: >=8 красный, 7 оранжевый, <=6 зелёный =====
 const getOpcValueColor = (value) => {
   if (value === null || value === undefined) return '#94A3B8';
   const num = Number(value);
@@ -299,15 +298,15 @@ export default function DrrCp7DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Снимки смен
   const [snapshots, setSnapshots] = useState([]);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState('live');
 
-  // Состояния для модального окна VIN
   const [vinList, setVinList] = useState([]);
   const [vinListStatus, setVinListStatus] = useState('');
   const [showVinModal, setShowVinModal] = useState(false);
   const [vinModalLoading, setVinModalLoading] = useState(false);
+
+  const isArchive = selectedSnapshotId !== 'live';
 
   // ---------- LIVE-загрузка ----------
   const loadData = async () => {
@@ -331,6 +330,9 @@ export default function DrrCp7DashboardPage() {
       if (!defectsRes.ok) throw new Error('Ошибка загрузки топа дефектов');
       const defectsJson = await defectsRes.json();
       setTopDefects(Array.isArray(defectsJson) ? defectsJson : []);
+
+      // В live всегда показываем ТЕКУЩУЮ неделю/букву
+      setShiftInfo(getCurrentShiftInfo());
     } catch (err) {
       setError(err.message);
       setTopDefects([]);
@@ -353,6 +355,13 @@ export default function DrrCp7DashboardPage() {
         drrPercent: json.drrPercent || 0,
       });
       setTopDefects(Array.isArray(json.topDefects) ? json.topDefects : []);
+
+      // ИЗ СНИМКА берём weekNumber / shiftLetter / shift
+      setShiftInfo({
+        weekNumber: json.weekNumber != null ? json.weekNumber : '—',
+        shiftLetter: json.shiftLetter != null ? json.shiftLetter : '—',
+        shiftType: json.shift || 'all',
+      });
     } catch (err) {
       setError(err.message);
       setTopDefects([]);
@@ -361,14 +370,13 @@ export default function DrrCp7DashboardPage() {
     }
   };
 
-  // ---------- Загрузка списка снимков (зависит от filter) ----------
+  // ---------- Загрузка списка снимков ----------
   useEffect(() => {
     fetch(`${API_BASE}/api/drr-cp7-snapshots?days=14&filter=${filter}`)
       .then(res => res.json())
       .then(json => {
         const list = Array.isArray(json) ? json : [];
         setSnapshots(list);
-        // если выбранный снимок не из текущего фильтра — сброс в live
         if (selectedSnapshotId !== 'live' && !list.some(s => String(s.id) === String(selectedSnapshotId))) {
           setSelectedSnapshotId('live');
         }
@@ -385,13 +393,21 @@ export default function DrrCp7DashboardPage() {
     }
   }, [selectedSnapshotId, filter, timeFilter]);
 
-  // ---------- Автообновление смены/фильтра (раз в минуту, только live) ----------
+  // ---------- При возврате в live — сразу ставим текущую неделю/букву ----------
+  useEffect(() => {
+    if (selectedSnapshotId === 'live') {
+      setShiftInfo(getCurrentShiftInfo());
+    }
+  }, [selectedSnapshotId]);
+
+  // ---------- Автообновление смены/фильтра (раз в минуту, ТОЛЬКО live) ----------
   useEffect(() => {
     const interval = setInterval(() => {
-      const newShiftInfo = getCurrentShiftInfo();
-      setShiftInfo(newShiftInfo);
-      if (!isManualFilter && selectedSnapshotId === 'live') {
-        setTimeFilter(getDefaultTimeFilter());
+      if (selectedSnapshotId === 'live') {
+        setShiftInfo(getCurrentShiftInfo());
+        if (!isManualFilter) {
+          setTimeFilter(getDefaultTimeFilter());
+        }
       }
     }, 60000);
     return () => clearInterval(interval);
@@ -439,7 +455,13 @@ export default function DrrCp7DashboardPage() {
     setTimeFilter(filter);
   };
 
-  const isArchive = selectedSnapshotId !== 'live';
+  // Отображаемая буква: для снимка-суток ('ALL') и отсутствующих значений — «—»
+  const displayLetter = (() => {
+    const l = shiftInfo.shiftLetter;
+    if (l == null) return '—';
+    if (l === 'ALL') return '—';
+    return l;
+  })();
 
   return (
     <div style={containerStyle}>
@@ -479,7 +501,7 @@ export default function DrrCp7DashboardPage() {
               boxShadow: '0 8px 20px rgba(0,0,0,0.2)',
               border: '4px solid #FFFFFF',
             }}>
-              {shiftInfo.shiftLetter}
+              {displayLetter}
             </div>
           </div>
 
@@ -555,7 +577,11 @@ export default function DrrCp7DashboardPage() {
             >
               <option value="live">Сейчас (live)</option>
               {snapshots.map(s => {
-                const shiftLabel = s.shift === 'day' ? 'День' : s.shift === 'evening' ? 'Вечер' : 'Ночь';
+                const shiftLabel =
+                  s.shift === 'all' ? 'Сутки' :
+                  s.shift === 'day' ? 'День' :
+                  s.shift === 'evening' ? 'Вечер' :
+                  'Ночь';
                 const dateObj = new Date(s.shiftDate + 'T12:00:00');
                 const dd = String(dateObj.getDate()).padStart(2, '0');
                 const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -581,7 +607,6 @@ export default function DrrCp7DashboardPage() {
       ) : (
         <div style={dashboardGridStyle}>
           <div style={chartColumnStyle}>
-            {/* === Значение PLC (Bufer) === */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -696,7 +721,6 @@ export default function DrrCp7DashboardPage() {
         </div>
       )}
 
-      {/* Модальное окно для списка VIN */}
       {showVinModal && (
         <div style={{
           position: 'fixed',
