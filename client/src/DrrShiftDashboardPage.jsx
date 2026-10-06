@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 const PIE_COLORS = ['#10B981', '#EF4444'];
 const MARK_KEY = 'drr_shift_marks';
+const MAX_PHOTOS_PER_BLOCK = 3;
 
 /* ===================== СТИЛИ ===================== */
 const containerStyle = {
@@ -34,14 +35,36 @@ const titleStyle = {
   margin: 0,
 };
 
-const inputStyle = {
-  padding: '10px 16px',
-  borderRadius: '10px',
-  border: '1px solid #E2E8F0',
+const filterGroupStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  flexWrap: 'wrap',
+};
+
+const filterButtonStyle = (active, activeColor = '#2563EB') => ({
+  padding: '10px 22px',
+  borderRadius: '12px',
+  border: 'none',
+  fontWeight: 700,
+  fontSize: '1rem',
+  background: active ? activeColor : '#FFFFFF',
+  color: active ? '#FFFFFF' : '#64748B',
+  cursor: 'pointer',
+  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+  transition: 'all 0.2s',
+});
+
+const dateSelectStyle = {
+  padding: '10px 22px',
+  borderRadius: '12px',
+  border: 'none',
+  fontWeight: 700,
   fontSize: '1rem',
   background: '#FFFFFF',
   color: '#1E293B',
   cursor: 'pointer',
+  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
   outline: 'none',
 };
 
@@ -60,16 +83,17 @@ const columnStyle = {
   minWidth: 0,
 };
 
-const columnHeaderStyle = (color) => ({
-  background: color,
-  color: '#FFFFFF',
-  padding: '12px 20px',
+const columnHeaderStyle = (isDark) => ({
+  background: isDark ? '#1E293B' : '#FFFFFF',
+  color: isDark ? '#FFFFFF' : '#1E293B',
+  padding: '14px 20px',
   borderRadius: '12px',
   fontWeight: 900,
   fontSize: '1.4rem',
   textAlign: 'center',
   letterSpacing: '1px',
   boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+  border: isDark ? '1px solid #1E293B' : '1px solid #E2E8F0',
 });
 
 const reportBlockStyle = {
@@ -111,6 +135,21 @@ const tdStyleSmall = {
   fontSize: '0.85rem',
 };
 
+const addPhotoButtonStyle = {
+  padding: '8px 14px',
+  borderRadius: '8px',
+  border: '1px dashed #CBD5E1',
+  background: '#F8FAFC',
+  color: '#475569',
+  fontWeight: 600,
+  fontSize: '0.8rem',
+  cursor: 'pointer',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  transition: 'all 0.2s',
+};
+
 /* ===================== ХЕЛПЕРЫ ===================== */
 const toLocalDateStr = (d) => {
   const y = d.getUTCFullYear();
@@ -120,7 +159,6 @@ const toLocalDateStr = (d) => {
 };
 
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
-
 const todayMoscowStr = () => toLocalDateStr(getMoscowTime());
 
 const nowMoscowStr = () => {
@@ -155,7 +193,6 @@ const getShiftRange = (dateStr, shiftType) => {
   return null;
 };
 
-// Определение A/B для даты. Чётная неделя: A=вечер, B=день. Нечётная: A=день, B=вечер.
 const getShiftsForDate = (dateStr) => {
   const weekNum = getISOWeek(dateStr);
   const isEven = weekNum % 2 === 0;
@@ -197,9 +234,9 @@ const loadAllReports = async (start, end) => {
     fetch(`${API_BASE}/api/drr-cpfinal-top-defects?${params}`).then(r => r.json()),
   ]);
   return {
-    cp7: { dash: normalizeReport('cp7', cp7), top: Array.isArray(cp7top) ? cp7top.slice(0, 10) : [] },
-    adas: { dash: normalizeReport('adas', adas), top: Array.isArray(adasTop) ? adasTop.slice(0, 10) : [] },
-    cpfinal: { dash: normalizeReport('cpfinal', cpfinal), top: Array.isArray(cpfinalTop) ? cpfinalTop.slice(0, 10) : [] },
+    cp7: { dash: normalizeReport('cp7', cp7), top: Array.isArray(cp7top) ? cp7top.slice(0, 20) : [] },
+    adas: { dash: normalizeReport('adas', adas), top: Array.isArray(adasTop) ? adasTop.slice(0, 20) : [] },
+    cpfinal: { dash: normalizeReport('cpfinal', cpfinal), top: Array.isArray(cpfinalTop) ? cpfinalTop.slice(0, 20) : [] },
   };
 };
 
@@ -210,6 +247,27 @@ const formatDateShort = (dateStr) => {
   return `${dd}.${mm}`;
 };
 
+/* ===================== КОМПРЕССИЯ ФОТО ===================== */
+const compressImage = (file, maxWidth = 900) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxWidth / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.7));
+    };
+    img.onerror = reject;
+    img.src = ev.target.result;
+  };
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
+
 /* ===================== КОМПОНЕНТЫ ===================== */
 
 function PieBlock({ drrPercent, okVins, totalVins }) {
@@ -218,7 +276,7 @@ function PieBlock({ drrPercent, okVins, totalVins }) {
     { name: 'NOK', value: Math.max(0, 100 - drrPercent) },
   ];
   return (
-    <div style={{ position: 'relative', width: 160, height: 160, flexShrink: 0 }}>
+    <div style={{ position: 'relative', width: 220, height: 220, flexShrink: 0 }}>
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
@@ -242,10 +300,10 @@ function PieBlock({ drrPercent, okVins, totalVins }) {
         flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         pointerEvents: 'none',
       }}>
-        <div style={{ fontSize: '1.6rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
+        <div style={{ fontSize: '2.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
           {drrPercent.toFixed(1)}%
         </div>
-        <div style={{ fontSize: '0.7rem', color: '#64748B', marginTop: 4 }}>
+        <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: 4 }}>
           {okVins}/{totalVins}
         </div>
       </div>
@@ -296,7 +354,133 @@ function DefectsTable({ topDefects, markKeyPrefix, marks, onToggleMark }) {
   );
 }
 
-function ReportBlock({ title, reportName, blockData, markKeyPrefix, marks, onToggleMark, emptyMessage }) {
+function PhotoArea({ photoKey, photos, onPhotosChange }) {
+  const fileInputRef = useRef(null);
+  const items = photos[photoKey] || [];
+  const canAdd = items.length < MAX_PHOTOS_PER_BLOCK;
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      let currentItems = photos[photoKey] || [];
+      for (const file of files) {
+        if (currentItems.length >= MAX_PHOTOS_PER_BLOCK) break;
+        const dataUrl = await compressImage(file);
+        const res = await fetch(`${API_BASE}/api/drr-shift-photos/upload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ photo_key: photoKey, data: dataUrl }),
+        });
+        if (!res.ok) throw new Error('Ошибка загрузки');
+        const json = await res.json();
+        currentItems = [
+          ...currentItems,
+          { id: json.id, url: json.url, mime: 'image/jpeg', uploadedAt: new Date().toISOString() },
+        ];
+        onPhotosChange(photoKey, currentItems);
+      }
+    } catch (err) {
+      alert('Не удалось загрузить фото: ' + err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Удалить фото?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/drr-shift-photos/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Ошибка удаления');
+      onPhotosChange(photoKey, (photos[photoKey] || []).filter(it => it.id !== id));
+    } catch (err) {
+      alert('Не удалось удалить: ' + err.message);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #F1F5F9' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
+          Фото ({items.length}/{MAX_PHOTOS_PER_BLOCK})
+        </span>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!canAdd || uploading}
+          style={{ ...addPhotoButtonStyle, opacity: (canAdd && !uploading) ? 1 : 0.4, cursor: (canAdd && !uploading) ? 'pointer' : 'not-allowed' }}
+        >
+          {uploading ? '⏳ Загрузка...' : '📷 Добавить фото'}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleFile}
+        />
+      </div>
+
+      {items.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {items.map((it) => (
+            <div
+              key={it.id}
+              style={{
+                position: 'relative',
+                width: 96,
+                height: 96,
+                borderRadius: 10,
+                overflow: 'hidden',
+                border: '1px solid #E2E8F0',
+                background: '#F8FAFC',
+              }}
+            >
+              <img
+                src={`${API_BASE}${it.url}`}
+                alt="Фото"
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', cursor: 'pointer' }}
+                onClick={() => window.open(`${API_BASE}${it.url}`, '_blank')}
+              />
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDelete(it.id); }}
+                title="Удалить фото"
+                style={{
+                  position: 'absolute',
+                  top: 4, right: 4,
+                  width: 22, height: 22, borderRadius: '50%',
+                  border: 'none',
+                  background: 'rgba(220,38,38,0.9)',
+                  color: '#FFFFFF',
+                  fontWeight: 700, fontSize: 12,
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReportBlock({
+  title,
+  blockData,
+  markKeyPrefix,
+  photoKey,
+  marks,
+  onToggleMark,
+  photos,
+  onPhotosChange,
+  emptyMessage,
+}) {
   const isEmpty = !blockData || blockData.dash.totalVins === 0;
 
   if (isEmpty) {
@@ -306,6 +490,11 @@ function ReportBlock({ title, reportName, blockData, markKeyPrefix, marks, onTog
         <div style={{ padding: '20px 0', textAlign: 'center', color: '#94A3B8', fontSize: '0.9rem' }}>
           {emptyMessage || 'Нет данных'}
         </div>
+        <PhotoArea
+          photoKey={photoKey}
+          photos={photos}
+          onPhotosChange={onPhotosChange}
+        />
       </div>
     );
   }
@@ -321,7 +510,14 @@ function ReportBlock({ title, reportName, blockData, markKeyPrefix, marks, onTog
           okVins={blockData.dash.okVins}
           totalVins={blockData.dash.totalVins}
         />
-        <div style={{ flex: 1, maxHeight: 170, overflowY: 'auto', border: '1px solid #F1F5F9', borderRadius: 8 }}>
+        <div style={{
+          flex: 1,
+          minWidth: 0,
+          maxHeight: 220,
+          overflowY: 'auto',
+          border: '1px solid #F1F5F9',
+          borderRadius: 8,
+        }}>
           <DefectsTable
             topDefects={blockData.top}
             markKeyPrefix={markKeyPrefix}
@@ -330,16 +526,31 @@ function ReportBlock({ title, reportName, blockData, markKeyPrefix, marks, onTog
           />
         </div>
       </div>
+      <PhotoArea
+        photoKey={photoKey}
+        photos={photos}
+        onPhotosChange={onPhotosChange}
+      />
     </div>
   );
 }
 
-function ShiftColumn({ shiftInfo, columnLabel, color, marks, onToggleMark }) {
+function ShiftColumn({
+  shiftInfo,
+  columnLabel,
+  isDark,
+  marks,
+  onToggleMark,
+  photos,
+  onPhotosChange,
+  baseDate,
+}) {
   const isEmptyColumn = !shiftInfo || !shiftInfo.started || !shiftInfo.data;
+  const letterKey = shiftInfo?.letter || columnLabel;
 
   return (
     <div style={columnStyle}>
-      <div style={columnHeaderStyle(color)}>{columnLabel}</div>
+      <div style={columnHeaderStyle(isDark)}>{columnLabel}</div>
 
       {isEmptyColumn ? (
         <div style={{ ...reportBlockStyle, padding: '40px 20px', textAlign: 'center', color: '#94A3B8' }}>
@@ -349,27 +560,33 @@ function ShiftColumn({ shiftInfo, columnLabel, color, marks, onToggleMark }) {
         <>
           <ReportBlock
             title="DRR CP7"
-            reportName="cp7"
             blockData={shiftInfo.data.cp7}
-            markKeyPrefix={`${shiftInfo.letter || columnLabel}_cp7`}
+            markKeyPrefix={`${letterKey}_cp7`}
+            photoKey={`${baseDate}_${letterKey}_cp7`}
             marks={marks}
             onToggleMark={onToggleMark}
+            photos={photos}
+            onPhotosChange={onPhotosChange}
           />
           <ReportBlock
             title="DRR ADAS"
-            reportName="adas"
             blockData={shiftInfo.data.adas}
-            markKeyPrefix={`${shiftInfo.letter || columnLabel}_adas`}
+            markKeyPrefix={`${letterKey}_adas`}
+            photoKey={`${baseDate}_${letterKey}_adas`}
             marks={marks}
             onToggleMark={onToggleMark}
+            photos={photos}
+            onPhotosChange={onPhotosChange}
           />
           <ReportBlock
             title="DRR CPFinal"
-            reportName="cpfinal"
             blockData={shiftInfo.data.cpfinal}
-            markKeyPrefix={`${shiftInfo.letter || columnLabel}_cpfinal`}
+            markKeyPrefix={`${letterKey}_cpfinal`}
+            photoKey={`${baseDate}_${letterKey}_cpfinal`}
             marks={marks}
             onToggleMark={onToggleMark}
+            photos={photos}
+            onPhotosChange={onPhotosChange}
           />
         </>
       )}
@@ -379,9 +596,9 @@ function ShiftColumn({ shiftInfo, columnLabel, color, marks, onToggleMark }) {
 
 /* ===================== ГЛАВНЫЙ КОМПОНЕНТ ===================== */
 export default function DrrShiftDashboardPage() {
-  const [periodMode, setPeriodMode] = useState('live'); // 'live' | 'archive'
+  const [periodMode, setPeriodMode] = useState('live');
   const [selectedDate, setSelectedDate] = useState(todayMoscowStr());
-  const [viewType, setViewType] = useState('shifts'); // 'shifts' | 'all'
+  const [viewType, setViewType] = useState('shifts');
 
   const [shiftData, setShiftData] = useState({ a: null, b: null });
   const [allData, setAllData] = useState(null);
@@ -389,14 +606,15 @@ export default function DrrShiftDashboardPage() {
   const [error, setError] = useState(null);
 
   const [marks, setMarks] = useState({});
+  const [photos, setPhotos] = useState({});
 
-  // Маркировка: хранение с привязкой к текущей дате
+  // Инициализация: метки из localStorage (привязаны к сегодня)
   useEffect(() => {
     const today = todayMoscowStr();
-    const stored = localStorage.getItem(MARK_KEY);
-    if (stored) {
+    const storedMarks = localStorage.getItem(MARK_KEY);
+    if (storedMarks) {
       try {
-        const parsed = JSON.parse(stored);
+        const parsed = JSON.parse(storedMarks);
         if (parsed && parsed.date === today && parsed.marks) {
           setMarks(parsed.marks);
         } else {
@@ -408,10 +626,9 @@ export default function DrrShiftDashboardPage() {
     }
   }, []);
 
-  // Сохраняем при изменении
+  // Сохраняем метки
   useEffect(() => {
     const today = todayMoscowStr();
-    // сохраняем только если что-то отмечено, иначе чистим
     if (Object.keys(marks).length > 0) {
       localStorage.setItem(MARK_KEY, JSON.stringify({ date: today, marks }));
     } else {
@@ -428,7 +645,29 @@ export default function DrrShiftDashboardPage() {
     });
   };
 
-  // Загрузка
+  // ---------- ФОТО (сервер) ----------
+  const onPhotosChange = (key, newItems) => {
+    setPhotos(prev => ({ ...prev, [key]: newItems }));
+  };
+
+  const loadPhotos = async (baseDate) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/drr-shift-photos/all?prefix=${encodeURIComponent(baseDate + '_')}`);
+      if (!res.ok) return;
+      const grouped = await res.json();
+      setPhotos(grouped || {});
+    } catch (err) {
+      console.error('Ошибка загрузки фото:', err.message);
+    }
+  };
+
+  // Перезагружаем фото при смене даты / режима
+  useEffect(() => {
+    const bd = periodMode === 'live' ? todayMoscowStr() : selectedDate;
+    loadPhotos(bd);
+  }, [periodMode, selectedDate]);
+
+  // ---------- ДАННЫЕ ----------
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -467,18 +706,15 @@ export default function DrrShiftDashboardPage() {
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, [periodMode, selectedDate, viewType]);
+  useEffect(() => { loadData(); }, [periodMode, selectedDate, viewType]);
 
-  // Автообновление в Live (каждые 60 секунд)
+  // Автообновление в Live
   useEffect(() => {
     if (periodMode !== 'live') return;
     const id = setInterval(loadData, 60000);
     return () => clearInterval(id);
   }, [periodMode, viewType]);
 
-  // Опции для дат (14 дней)
   const dateOptions = [];
   for (let i = 0; i < 14; i++) {
     const d = new Date(getMoscowTime());
@@ -486,26 +722,32 @@ export default function DrrShiftDashboardPage() {
     dateOptions.push(toLocalDateStr(d));
   }
 
+  const baseDate = periodMode === 'live' ? todayMoscowStr() : selectedDate;
+
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR Shift Dashboard</h1>
 
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select
-            value={periodMode}
-            onChange={(e) => setPeriodMode(e.target.value)}
-            style={inputStyle}
+        <div style={filterGroupStyle}>
+          <button
+            style={filterButtonStyle(periodMode === 'live', '#2563EB')}
+            onClick={() => setPeriodMode('live')}
           >
-            <option value="live">Live (текущие сутки)</option>
-            <option value="archive">Архив (по датам)</option>
-          </select>
+            Live
+          </button>
+          <button
+            style={filterButtonStyle(periodMode === 'archive', '#2563EB')}
+            onClick={() => setPeriodMode('archive')}
+          >
+            Архив
+          </button>
 
           {periodMode === 'archive' && (
             <select
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              style={inputStyle}
+              style={dateSelectStyle}
             >
               {dateOptions.map(d => (
                 <option key={d} value={d}>{formatDateShort(d)}</option>
@@ -513,14 +755,20 @@ export default function DrrShiftDashboardPage() {
             </select>
           )}
 
-          <select
-            value={viewType}
-            onChange={(e) => setViewType(e.target.value)}
-            style={inputStyle}
+          <div style={{ width: 1, height: 32, background: '#E2E8F0', margin: '0 4px' }} />
+
+          <button
+            style={filterButtonStyle(viewType === 'shifts', '#7C3AED')}
+            onClick={() => setViewType('shifts')}
           >
-            <option value="shifts">Смены A / B</option>
-            <option value="all">Сутки</option>
-          </select>
+            Смены A / B
+          </button>
+          <button
+            style={filterButtonStyle(viewType === 'all', '#6B7280')}
+            onClick={() => setViewType('all')}
+          >
+            Сутки
+          </button>
         </div>
       </div>
 
@@ -533,53 +781,63 @@ export default function DrrShiftDashboardPage() {
           ❌ {error}
         </div>
       ) : viewType === 'all' ? (
-        /* ---- РЕЖИМ СУТОК: одна колонка ---- */
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {allData && (
             <>
               <ReportBlock
                 title="DRR CP7"
-                reportName="cp7"
                 blockData={allData.cp7}
                 markKeyPrefix="ALL_cp7"
+                photoKey={`${allData.date}_ALL_cp7`}
                 marks={marks}
                 onToggleMark={onToggleMark}
+                photos={photos}
+                onPhotosChange={onPhotosChange}
               />
               <ReportBlock
                 title="DRR ADAS"
-                reportName="adas"
                 blockData={allData.adas}
                 markKeyPrefix="ALL_adas"
+                photoKey={`${allData.date}_ALL_adas`}
                 marks={marks}
                 onToggleMark={onToggleMark}
+                photos={photos}
+                onPhotosChange={onPhotosChange}
               />
               <ReportBlock
                 title="DRR CPFinal"
-                reportName="cpfinal"
                 blockData={allData.cpfinal}
                 markKeyPrefix="ALL_cpfinal"
+                photoKey={`${allData.date}_ALL_cpfinal`}
                 marks={marks}
                 onToggleMark={onToggleMark}
+                photos={photos}
+                onPhotosChange={onPhotosChange}
               />
             </>
           )}
         </div>
       ) : (
-        /* ---- РЕЖИМ СМЕН: две колонки ---- */
         <div style={twoColStyle}>
           <ShiftColumn
             shiftInfo={shiftData.a}
             columnLabel="СМЕНА A"
-            color="#2563EB"
+            isDark={false}
             marks={marks}
             onToggleMark={onToggleMark}
+            photos={photos}
+            onPhotosChange={onPhotosChange}
+            baseDate={baseDate}
           />
           <ShiftColumn
             shiftInfo={shiftData.b}
             columnLabel="СМЕНА B"
-            color="#F59E0B"
+            isDark={true}
             marks={marks}
             onToggleMark={onToggleMark}
+            photos={photos}
+            onPhotosChange={onPhotosChange}
+            baseDate={baseDate}
           />
         </div>
       )}
