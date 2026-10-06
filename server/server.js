@@ -5871,6 +5871,9 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
       if (!defectGroupMap.has(mpp)) {
         defectGroupMap.set(mpp, {
           mpp,
+          model: row.MODEL || '',
+          part_name: row.PART_NAME || '',
+          problem_type: row.PROBLEM_TYPE || '',
           grade: row.PROBLEM_GRADE || '-',
           defectCount: 0,
         });
@@ -5879,7 +5882,14 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
     });
 
     const topDefects = Array.from(defectGroupMap.values())
-      .map(d => ({ mpp: d.mpp, grade: d.grade, defectCount: d.defectCount }))
+      .map(d => ({
+        mpp: d.mpp,
+        model: d.model,
+        part_name: d.part_name,
+        problem_type: d.problem_type,
+        grade: d.grade,
+        defectCount: d.defectCount,
+      }))
       .sort((a, b) => b.defectCount - a.defectCount)
       .slice(0, 20);
 
@@ -5965,6 +5975,108 @@ app.get('/api/drr-cp7-vins', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Ошибка drr-cp7-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/drr-cp7-mpp-vins', async (req, res) => {
+  try {
+    const { filter = 'all', startTime, endTime, model, part_name, problem_type } = req.query;
+
+    if (!startTime || !endTime || !model || !part_name || !problem_type) {
+      return res.status(400).json({ error: 'startTime, endTime, model, part_name, problem_type обязательны' });
+    }
+
+    const postLists = {
+      all: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ],
+      cp7: [
+        'CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate',
+        'EXT1', 'PIP9'
+      ],
+      pip: [
+        'EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'
+      ]
+    };
+    const postList = postLists[filter] || postLists.all;
+    const postListStr = postList.map(p => `'${p}'`).join(',');
+
+    const [cp72Rows] = await pool.query(`
+      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
+      FROM at_om_wiptrackinghistory
+      WHERE WC_NAME = 'CP72'
+        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
+      GROUP BY VIN
+    `, [startTime, endTime]);
+
+    if (cp72Rows.length === 0) return res.json([]);
+
+    const vins = cp72Rows.map(r => r.VIN);
+    const placeholders = vins.map(() => '?').join(',');
+    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
+
+    const [defectRows] = await pool.query(`
+      SELECT
+        d.VIN,
+        wo.MODEL,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.PROBLEM_GRADE,
+        d.STATUS,
+        d.CREATION_TIME
+      FROM at_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.POST_NAME IN (${postListStr})
+        AND d.VIN IN (${placeholders})
+        AND wo.MODEL = ?
+        AND d.PART_NAME = ?
+        AND d.PROBLEM_TYPE = ?
+    `, [...vins, model, part_name, problem_type]);
+
+    const GRACE_MS = 20 * 60 * 1000;
+
+    const filteredDefects = defectRows.filter(row => {
+      const cp72TimeStr = cp72TimeMap.get(row.VIN);
+      if (!cp72TimeStr) return false;
+      const cp72TimeMs = new Date(cp72TimeStr).getTime();
+      const defectTimeMs = new Date(row.CREATION_TIME).getTime();
+      return defectTimeMs <= cp72TimeMs + GRACE_MS;
+    });
+
+    // Уникальные VIN + агрегируем самую позднюю запись дефекта
+    const vinMap = new Map();
+    filteredDefects.forEach(row => {
+      const existing = vinMap.get(row.VIN);
+      const defectTime = new Date(row.CREATION_TIME).getTime();
+      if (!existing || defectTime > existing.defect_time_ms) {
+        vinMap.set(row.VIN, {
+          vin: row.VIN,
+          model: row.MODEL || '-',
+          status: row.STATUS || '',
+          grade: row.PROBLEM_GRADE || '-',
+          defect_time: row.CREATION_TIME,
+          defect_time_ms: defectTime,
+          cp72_time: cp72TimeMap.get(row.VIN),
+        });
+      }
+    });
+
+    const result = Array.from(vinMap.values())
+      .map(v => ({
+        vin: v.vin,
+        model: v.model,
+        status: v.status,
+        grade: v.grade,
+        defect_time: v.defect_time,
+        cp72_time: v.cp72_time,
+      }))
+      .sort((a, b) => new Date(a.cp72_time) - new Date(b.cp72_time));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка /api/drr-cp7-mpp-vins:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
