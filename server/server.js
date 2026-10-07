@@ -5678,14 +5678,11 @@ app.get('/api/vehicles-model-complect', async (req, res) => {
 // Смотрим только на REPAIR_TIME / REPAIR_TIME1 (самое раннее).
 // - есть время: NOK, если время > CP72 + 20 мин; иначе OK
 // - нет времени: NOK, если статус != closed; иначе OK
-// LAST_MODIFIED_TIME НЕ используем — это не время доработки в линии.
+// LAST_MODIFIED_TIME НЕ используем.
 const CP7_GRACE_MS = 20 * 60 * 1000;
 
 function isDefectNokCp7(defectRow, cp72Ms) {
-  const repairTimes = [
-    defectRow.REPAIR_TIME,
-    defectRow.REPAIR_TIME1,
-  ]
+  const repairTimes = [defectRow.REPAIR_TIME, defectRow.REPAIR_TIME1]
     .filter(t => t != null && t !== '')
     .map(t => new Date(t).getTime())
     .filter(t => !Number.isNaN(t));
@@ -5699,6 +5696,22 @@ function isDefectNokCp7(defectRow, cp72Ms) {
 
   const isClosed = defectRow.STATUS && defectRow.STATUS.toLowerCase() === 'closed';
   return !isClosed;
+}
+
+// Хелпер: получить время CP72 для списка VIN из MES-базы
+async function getCp72TimesMap(startTime, endTime) {
+  const [rows] = await mesPool.query(`
+    SELECT UPPER(vin) AS VIN, MIN(scan_time) AS CP72_TIME
+    FROM ti_mes_movement
+    WHERE uloc_no = 'CP72'
+      AND is_deleted = 0
+      AND scan_time >= ? AND scan_time <= ?
+    GROUP BY vin
+  `, [startTime, endTime]);
+
+  const map = new Map();
+  rows.forEach(r => map.set(r.VIN, r.CP72_TIME));
+  return { rows, map };
 }
 
 app.get('/api/drr-cp7-dashboard', async (req, res) => {
@@ -5726,13 +5739,8 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    const [cp72Rows] = await pool.query(`
-      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'CP72'
-        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-      GROUP BY VIN
-    `, [rangeStart, rangeEnd]);
+    // CP72 — из MES
+    const { rows: cp72Rows, map: cp72TimeMap } = await getCp72TimesMap(rangeStart, rangeEnd);
 
     const totalVins = cp72Rows.length;
     if (totalVins === 0) {
@@ -5741,8 +5749,8 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
 
     const vins = cp72Rows.map(r => r.VIN);
     const placeholders = vins.map(() => '?').join(',');
-    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
 
+    // Дефекты — из IOT
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN, d.STATUS, d.CREATION_TIME,
@@ -5810,19 +5818,11 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    const [cp72Rows] = await pool.query(`
-      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'CP72'
-        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-      GROUP BY VIN
-    `, [rangeStart, rangeEnd]);
-
+    const { rows: cp72Rows, map: cp72TimeMap } = await getCp72TimesMap(rangeStart, rangeEnd);
     if (cp72Rows.length === 0) return res.json([]);
 
     const vins = cp72Rows.map(r => r.VIN);
     const placeholders = vins.map(() => '?').join(',');
-    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
 
     const [defectRows] = await pool.query(`
       SELECT
@@ -5904,19 +5904,11 @@ app.get('/api/drr-cp7-vins', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    const [cp72Rows] = await pool.query(`
-      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'CP72'
-        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-      GROUP BY VIN
-    `, [startTime, endTime]);
-
+    const { rows: cp72Rows, map: cp72TimeMap } = await getCp72TimesMap(startTime, endTime);
     if (cp72Rows.length === 0) return res.json([]);
 
     const vins = cp72Rows.map(r => r.VIN);
     const placeholders = vins.map(() => '?').join(',');
-    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
 
     const [defectRows] = await pool.query(`
       SELECT d.VIN, d.STATUS, d.CREATION_TIME,
@@ -5983,19 +5975,11 @@ app.get('/api/drr-cp7-mpp-vins', async (req, res) => {
     const postList = postLists[filter] || postLists.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    const [cp72Rows] = await pool.query(`
-      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'CP72'
-        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-      GROUP BY VIN
-    `, [startTime, endTime]);
-
+    const { rows: cp72Rows, map: cp72TimeMap } = await getCp72TimesMap(startTime, endTime);
     if (cp72Rows.length === 0) return res.json([]);
 
     const vins = cp72Rows.map(r => r.VIN);
     const placeholders = vins.map(() => '?').join(',');
-    const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
 
     const [defectRows] = await pool.query(`
       SELECT
@@ -6022,7 +6006,6 @@ app.get('/api/drr-cp7-mpp-vins', async (req, res) => {
 
       if (!isDefectNokCp7(row, cp72Ms)) return;
 
-      // Раннее время доработки из REPAIR_TIME / REPAIR_TIME1
       const repairTimes = [row.REPAIR_TIME, row.REPAIR_TIME1]
         .filter(t => t != null && t !== '')
         .map(t => new Date(t).getTime())
@@ -6067,7 +6050,6 @@ const CP7_SNAPSHOT_POST_LISTS = {
   pip: ['EXT1', 'PIP1', 'PIP2', 'PIP4', 'PIP5', 'PIP6', 'PIP8', 'PIP9'],
 };
 
-/* ---------- ХЕЛПЕРЫ НЕДЕЛИ / БУКВЫ СМЕНЫ ---------- */
 function getWeekNumberForDate(dateStr) {
   const d = new Date(dateStr + 'T12:00:00Z');
   const tmp = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -6086,7 +6068,6 @@ function getShiftLetterForSnapshot(shift, weekNumber) {
   return null;
 }
 
-/* ---------- ОПРЕДЕЛЕНИЕ ЗАВЕРШЁННЫХ ПЕРИОДОВ (МСК) ---------- */
 function getLastCompletedShiftCp7() {
   const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
   const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
@@ -6126,7 +6107,6 @@ function getShiftRangeCp7(shiftDate, shift) {
   return null;
 }
 
-/* ---------- СНИМОК ПО ОДНОМУ ФИЛЬТРУ ---------- */
 async function saveDrrCp7Snapshot(shiftDate, shift, filterName) {
   try {
     const range = getShiftRangeCp7(shiftDate, shift);
@@ -6138,13 +6118,8 @@ async function saveDrrCp7Snapshot(shiftDate, shift, filterName) {
     const postList = CP7_SNAPSHOT_POST_LISTS[filterName] || CP7_SNAPSHOT_POST_LISTS.all;
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
-    const [cp72Rows] = await pool.query(`
-      SELECT VIN, MIN(CREATION_TIME) AS CP72_TIME
-      FROM at_om_wiptrackinghistory
-      WHERE WC_NAME = 'CP72'
-        AND CREATION_TIME >= ? AND CREATION_TIME <= ?
-      GROUP BY VIN
-    `, [range.start, range.end]);
+    // CP72 — из MES
+    const { rows: cp72Rows, map: cp72TimeMap } = await getCp72TimesMap(range.start, range.end);
 
     const totalVins = cp72Rows.length;
     let closedVins = 0;
@@ -6155,7 +6130,6 @@ async function saveDrrCp7Snapshot(shiftDate, shift, filterName) {
     if (totalVins > 0) {
       const vins = cp72Rows.map(r => r.VIN);
       const ph = vins.map(() => '?').join(',');
-      const cp72TimeMap = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
 
       const [defectRows] = await pool.query(`
         SELECT
@@ -6276,9 +6250,6 @@ setInterval(() => {
 checkAndSaveDrrCp7Snapshot();
 checkAndSaveDrrCp7DailySnapshot();
 
-/* ====================================================================== */
-/* ХЕЛПЕР: дозаполнить week_number / shift_letter, если их нет в БД       */
-/* ====================================================================== */
 function enrichCp7Snapshot(r) {
   const shiftDate = String(r.shift_date).slice(0, 10);
   const weekNumber = r.week_number != null
@@ -6303,9 +6274,6 @@ function enrichCp7Snapshot(r) {
   };
 }
 
-/* ====================================================================== */
-/* ЭНДПОИНТ: список снимков                                               */
-/* ====================================================================== */
 app.get('/api/drr-cp7-snapshots', async (req, res) => {
   try {
     const { days = 14, filter = 'all' } = req.query;
@@ -6328,9 +6296,6 @@ app.get('/api/drr-cp7-snapshots', async (req, res) => {
   }
 });
 
-/* ====================================================================== */
-/* ЭНДПОИНТ: один снимок с top_defects                                    */
-/* ====================================================================== */
 app.get('/api/drr-cp7-snapshot/:id', async (req, res) => {
   try {
     const { id } = req.params;
