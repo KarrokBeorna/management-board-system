@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, PieChart, Pie, Cell, LabelList
+} from 'recharts';
 
 const API_BASE = '';
 
@@ -70,11 +74,8 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
 
   const handleToggle = (value) => {
     if (value === 'ALL') {
-      if (allSelected) {
-        onChange([]);
-      } else {
-        onChange(nonAllOptions);
-      }
+      if (allSelected) onChange([]);
+      else onChange(nonAllOptions);
     } else {
       const updated = selected.includes(value)
         ? selected.filter(v => v !== value)
@@ -172,6 +173,13 @@ export default function DefectElectronicsTopPage() {
   // Фильтр топ MPP по типу
   const [topMppFilter, setTopMppFilter] = useState('all');
 
+  // График динамики
+  const [trendModalOpen, setTrendModalOpen] = useState(false);
+  const [trendData, setTrendData] = useState(null);
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendMpp, setTrendMpp] = useState('');
+  const [trendMetric, setTrendMetric] = useState('defects'); // 'defects' | 'dpu'
+
   const availableModels = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
   const availableGrades = ['A', 'B', 'C'];
   const availablePosts = ['ROBOT', 'CP7', 'CP8', 'PIP', 'TL', 'REPAIR', 'TEST TRACK'];
@@ -185,9 +193,7 @@ export default function DefectElectronicsTopPage() {
   }, []);
 
   useEffect(() => {
-    if (dateFrom && dateTo) {
-      loadData();
-    }
+    if (dateFrom && dateTo) loadData();
   }, [dateFrom, dateTo, selectedModels, selectedGrades, selectedPosts]);
 
   const loadData = async () => {
@@ -290,69 +296,104 @@ export default function DefectElectronicsTopPage() {
     saveAs(new Blob([buf], { type: 'application/octet-stream' }), `VIN_${expandedMppKey}.xlsx`);
   };
 
-    const exportFullReport = async () => {
-        if (data.length === 0) return;
-        setLoading(true);
-        try {
-            const wb = XLSX.utils.book_new();
+  const exportFullReport = async () => {
+    if (data.length === 0) return;
+    setLoading(true);
+    try {
+      const wb = XLSX.utils.book_new();
+      const summary = data.map(row => ({
+        MPP: row.MPP,
+        Модель: row.MODEL,
+        'Кол-во авто': row.VIN_COUNT,
+        'Кол-во дефектов': row.DEFECT_COUNT,
+        'DPU per 1000': row.DPU,
+      }));
+      const wsSummary = XLSX.utils.json_to_sheet(summary);
+      XLSX.utils.book_append_sheet(wb, wsSummary, 'Топ MPP');
 
-            // Лист 1: общая таблица топ MPP
-            const summary = data.map(row => ({
-            MPP: row.MPP,
-            Модель: row.MODEL,
-            'Кол-во авто': row.VIN_COUNT,
-            'Кол-во дефектов': row.DEFECT_COUNT,
-            'DPU per 1000': row.DPU,
-            }));
-            const wsSummary = XLSX.utils.json_to_sheet(summary);
-            XLSX.utils.book_append_sheet(wb, wsSummary, 'Топ MPP');
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        const params = new URLSearchParams({
+          partName: row.PART_NAME,
+          problemType: row.PROBLEM_TYPE || '',
+          model: row.MODEL,
+          dateFrom,
+          dateTo,
+        });
 
-            // Для каждого MPP
-            for (let i = 0; i < data.length; i++) {
-            const row = data[i];
-            const params = new URLSearchParams({
-                partName: row.PART_NAME,
-                problemType: row.PROBLEM_TYPE || '',
-                model: row.MODEL,
-                dateFrom,
-                dateTo,
-            });
-
-            // Получаем VIN
-            const vinsRes = await fetch(`${API_BASE}/api/drr-electronics-vins?${params.toString()}`);
-            if (vinsRes.ok) {
-                const vins = await vinsRes.json();
-                if (vins.length > 0) {
-                const wsVins = XLSX.utils.json_to_sheet(vins.map(v => ({ VIN: v.VIN, Модель: v.MODEL })));
-                // Имя листа: VIN_1_<MPP сокращённо>
-                XLSX.utils.book_append_sheet(wb, wsVins, `VIN_${i+1}_${row.MPP.substring(0, 20)}`);
-                }
-            }
-
-            // Получаем топ MPP оффлайн для этих VIN
-            const topMppRes = await fetch(`${API_BASE}/api/drr-electronics-vins-top-mpp?${params.toString()}`);
-            if (topMppRes.ok) {
-                const topMpps = await topMppRes.json();
-                if (topMpps.length > 0) {
-                const wsTop = XLSX.utils.json_to_sheet(topMpps.map(m => ({
-                    MPP: m.MPP,
-                    Модель: m.MODEL,
-                    'Кол-во': m.DEFECT_COUNT,
-                    'Онлайн/Оффлайн': m.IS_OFFLINE,
-                })));
-                XLSX.utils.book_append_sheet(wb, wsTop, `TopMPP_${i+1}_${row.MPP.substring(0, 15)}`);
-                }
-            }
-            }
-
-            const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-            saveAs(new Blob([buf], { type: 'application/octet-stream' }), 'Топ_дефектов_электроники_полный.xlsx');
-        } catch (err) {
-            alert('Ошибка при экспорте: ' + err.message);
-        } finally {
-            setLoading(false);
+        const vinsRes = await fetch(`${API_BASE}/api/drr-electronics-vins?${params.toString()}`);
+        if (vinsRes.ok) {
+          const vins = await vinsRes.json();
+          if (vins.length > 0) {
+            const wsVins = XLSX.utils.json_to_sheet(vins.map(v => ({ VIN: v.VIN, Модель: v.MODEL })));
+            XLSX.utils.book_append_sheet(wb, wsVins, `VIN_${i + 1}_${row.MPP.substring(0, 20)}`);
+          }
         }
-    };
+
+        const topMppRes = await fetch(`${API_BASE}/api/drr-electronics-vins-top-mpp?${params.toString()}`);
+        if (topMppRes.ok) {
+          const topMpps = await topMppRes.json();
+          if (topMpps.length > 0) {
+            const wsTop = XLSX.utils.json_to_sheet(topMpps.map(m => ({
+              MPP: m.MPP,
+              Модель: m.MODEL,
+              'Кол-во': m.DEFECT_COUNT,
+              'Онлайн/Оффлайн': m.IS_OFFLINE,
+            })));
+            XLSX.utils.book_append_sheet(wb, wsTop, `TopMPP_${i + 1}_${row.MPP.substring(0, 15)}`);
+          }
+        }
+      }
+
+      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      saveAs(new Blob([buf], { type: 'application/octet-stream' }), 'Топ_дефектов_электроники_полный.xlsx');
+    } catch (err) {
+      alert('Ошибка при экспорте: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ====== ДИНАМИКА ДЕФЕКТА ======
+  const openTrend = async (row) => {
+    setTrendMpp(row.MPP);
+    setTrendModalOpen(true);
+    setTrendLoading(true);
+    try {
+      const fetchTrend = (periodType) => {
+        const params = new URLSearchParams({
+          partName: row.PART_NAME,
+          problemType: row.PROBLEM_TYPE || '',
+          model: row.MODEL,
+          postName: row.POST_NAME,
+          periodType,
+        });
+        return fetch(`${API_BASE}/api/drr-electronics-defect-trend?${params.toString()}`).then(r => r.json());
+      };
+
+      const [monthData, weekData, dayData] = await Promise.all([
+        fetchTrend('month'),
+        fetchTrend('week'),
+        fetchTrend('day'),
+      ]);
+
+      setTrendData({ month: monthData, week: weekData, day: dayData });
+    } catch (err) {
+      alert('Ошибка загрузки тренда: ' + err.message);
+    } finally {
+      setTrendLoading(false);
+    }
+  };
+
+  const prepareDisplayData = (data) => {
+    if (!Array.isArray(data)) return [];
+    return data.map(d => ({
+      period: d.period,
+      value: trendMetric === 'dpu'
+        ? (d.total_cars > 0 ? Number(((d.defect_count * 1000) / d.total_cars).toFixed(2)) : 0)
+        : d.defect_count,
+    }));
+  };
 
   const filteredTopMpps = vinTopMpps.filter(mpp => {
     if (topMppFilter === 'offline') return mpp.IS_OFFLINE === 'Оффлайн';
@@ -436,9 +477,18 @@ export default function DefectElectronicsTopPage() {
                       <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DPU}</td>
                       <td style={tdStyle}>{row.POST_NAME}</td>
                       <td style={tdStyle}>
-                        <button onClick={() => handleToggleMpp(row, idx)} style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}>
-                          {expandedMppKey === `${row.MPP}_${row.POST_NAME}_${idx}` ? 'Скрыть VIN' : 'VIN'}
-                        </button>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <button
+                            onClick={() => openTrend(row)}
+                            title="Динамика дефекта"
+                            style={{ ...buttonStyle, background: '#8B5CF6', padding: '4px 10px', fontSize: 12 }}
+                          >
+                            📈
+                          </button>
+                          <button onClick={() => handleToggleMpp(row, idx)} style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}>
+                            {expandedMppKey === `${row.MPP}_${row.POST_NAME}_${idx}` ? 'Скрыть VIN' : 'VIN'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     {expandedMppKey === `${row.MPP}_${row.POST_NAME}_${idx}` && (
@@ -578,6 +628,149 @@ export default function DefectElectronicsTopPage() {
                   </tbody>
                 </table>
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Модалка динамики дефекта */}
+      {trendModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2500,
+        }} onClick={() => setTrendModalOpen(false)}>
+          <div style={{
+            backgroundColor: '#FFFFFF',
+            borderRadius: 16,
+            padding: 24,
+            width: '96%',
+            maxWidth: 1600,
+            maxHeight: '95vh',
+            overflowY: 'auto',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1F2937' }}>
+                Динамика дефекта: {trendMpp}
+              </h3>
+              <button
+                onClick={() => setTrendModalOpen(false)}
+                style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Переключатель метрики */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+              <button
+                onClick={() => setTrendMetric('defects')}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: 'none',
+                  fontWeight: 600,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  background: trendMetric === 'defects' ? '#2563EB' : '#E5E7EB',
+                  color: trendMetric === 'defects' ? '#FFFFFF' : '#374151',
+                }}
+              >
+                Шт. дефектов
+              </button>
+              <button
+                onClick={() => setTrendMetric('dpu')}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: 'none',
+                  fontWeight: 600,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  background: trendMetric === 'dpu' ? '#2563EB' : '#E5E7EB',
+                  color: trendMetric === 'dpu' ? '#FFFFFF' : '#374151',
+                }}
+              >
+                DPU per 1000
+              </button>
+            </div>
+
+            {trendLoading ? (
+              <p>Загрузка...</p>
+            ) : (
+              trendData && (
+                <div style={{ display: 'flex', flexDirection: 'row', gap: 20, flexWrap: 'nowrap' }}>
+                  {/* Месяцы */}
+                  <div style={{ flex: '1 1 0', minWidth: 250 }}>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={prepareDisplayData(trendData.month)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                        <XAxis
+                          dataKey="period"
+                          tick={{ fontSize: 12, fill: '#1F2937' }}
+                          tickFormatter={(val) => {
+                            const [y, m] = val.split('-');
+                            const monthNames = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+                            return monthNames[parseInt(m, 10) - 1];
+                          }}
+                        />
+                        <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={trendMetric === 'dpu'} />
+                        <Bar dataKey="value" fill="#3B82F6" radius={[4, 4, 0, 0]}>
+                          <LabelList dataKey="value" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Недели */}
+                  <div style={{ flex: '1 1 0', minWidth: 250 }}>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={prepareDisplayData(trendData.week)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                        <XAxis
+                          dataKey="period"
+                          tick={{ fontSize: 12, fill: '#1F2937' }}
+                          tickFormatter={(val) => val.split('-W')[1] ? `W${val.split('-W')[1]}` : val}
+                        />
+                        <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={trendMetric === 'dpu'} />
+                        <Bar dataKey="value" fill="#F59E0B" radius={[4, 4, 0, 0]}>
+                          <LabelList dataKey="value" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Дни */}
+                  <div style={{ flex: '2 1 0', minWidth: 350 }}>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={prepareDisplayData(trendData.day)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                        <XAxis
+                          dataKey="period"
+                          interval={0}
+                          tick={{ fontSize: 11, fill: '#1F2937' }}
+                          tickFormatter={(val) => {
+                            const [, m, d] = val.split('-');
+                            return `${d}.${m}`;
+                          }}
+                        />
+                        <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={trendMetric === 'dpu'} />
+                        <Bar dataKey="value" fill="#10B981" radius={[4, 4, 0, 0]}>
+                          <LabelList dataKey="value" position="top" style={{ fontSize: 13, fill: '#1F2937', fontWeight: 700 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )
             )}
           </div>
         </div>

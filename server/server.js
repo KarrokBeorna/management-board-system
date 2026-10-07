@@ -8791,7 +8791,200 @@ app.get('/api/drr-electronics-vin-defects', async (req, res) => {
   }
 });
 
+app.get('/api/drr-electronics-defect-trend', async (req, res) => {
+  try {
+    const { partName, problemType, model, postName, periodType } = req.query;
+    if (!partName || model === undefined || !periodType) {
+      return res.status(400).json({ error: 'partName, model, periodType обязательны' });
+    }
+    const finalProblemType = problemType || '';
+    const isRobot = postName === 'ROBOT';
 
+    // ─── Генерация периодов ───
+    function getISOWeekInfo(date) {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+      return { year: d.getUTCFullYear(), week: weekNo };
+    }
+
+    const generatePeriods = () => {
+      const now = new Date();
+      const periods = [];
+      if (periodType === 'month') {
+        for (let i = 2; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          periods.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+        }
+      } else if (periodType === 'week') {
+        const current = new Date(now);
+        const day = current.getDay();
+        const mondayOffset = day === 0 ? -6 : 1 - day;
+        const thisMonday = new Date(current);
+        thisMonday.setDate(current.getDate() + mondayOffset);
+        thisMonday.setHours(0, 0, 0, 0);
+        for (let i = 3; i >= 0; i--) {
+          const weekStart = new Date(thisMonday);
+          weekStart.setDate(thisMonday.getDate() - i * 7);
+          const iso = getISOWeekInfo(weekStart);
+          periods.push(`${iso.year}-W${String(iso.week).padStart(2, '0')}`);
+        }
+      } else if (periodType === 'day') {
+        for (let i = 13; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(now.getDate() - i);
+          periods.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+        }
+      }
+      return periods;
+    };
+
+    const periods = generatePeriods();
+    if (periods.length === 0) return res.json([]);
+
+    // Формат SQL в зависимости от periodType
+    const periodExpr = periodType === 'month'
+      ? "DATE_FORMAT(DATE(CREATION_TIME), '%Y-%m')"
+      : periodType === 'week'
+        ? "DATE_FORMAT(DATE(CREATION_TIME), '%x-W%v')"
+        : "DATE(CREATION_TIME)";
+
+    let periodCondition = '';
+    if (periodType === 'month') periodCondition = `DATE_FORMAT(DATE(CREATION_TIME), '%Y-%m') IN (${periods.map(() => '?').join(',')})`;
+    else if (periodType === 'week') periodCondition = `DATE_FORMAT(DATE(CREATION_TIME), '%x-W%v') IN (${periods.map(() => '?').join(',')})`;
+    else periodCondition = `DATE(CREATION_TIME) IN (${periods.map(() => '?').join(',')})`;
+
+    // ─── Роботы ───
+    let defectRows = [];
+    if (isRobot) {
+      // refuel_log
+      const [refuelRows] = await pool.query(`
+        SELECT ${periodExpr} AS period, COUNT(*) AS cnt
+        FROM at_im_refuel_log
+        WHERE FILL_RESULT IN ('NOK','NG')
+          AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')
+          AND (CASE
+            WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
+            WHEN OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
+            WHEN OIL_TYPE = 'CL1' THEN 'Заправка антифриза - NG'
+            WHEN OIL_TYPE = 'WW' THEN 'Заправка омывайки - NG'
+            WHEN OIL_TYPE = 'PREAC' THEN 'Тест утечки кондиц. – NG'
+            WHEN OIL_TYPE = 'PREBK' THEN 'Тест утечки тормозной – NG'
+            WHEN OIL_TYPE = 'E7' THEN 'Заправка трансмиссионного – NG'
+          END) = ?
+          AND '' = ?
+          AND ${periodCondition}
+        GROUP BY period
+      `, [partName, finalProblemType, ...periods]);
+
+      // electrical_check_info
+      const [electricalRows] = await pool.query(`
+        SELECT ${periodExpr} AS period, COUNT(*) AS cnt
+        FROM at_im_electrical_check_info
+        WHERE RESULT IN ('NOK','NG') AND \`TYPE\` <> '01'
+          AND (CASE
+            WHEN \`TYPE\` = '03' OR \`TYPE\` = '18' THEN 'Прошивка EOL - NG'
+            WHEN \`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
+            WHEN \`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
+            WHEN \`TYPE\` = '21' THEN 'МДВШ - Прошивка TMPS - NG'
+            WHEN \`TYPE\` = '26' THEN 'ERA - Прошивка ERA - NG'
+            WHEN \`TYPE\` = '27' THEN 'APK - Блок управления программируемых специальных функций - Запись кода, не в норме'
+          END) = ?
+          AND '' = ?
+          AND ${periodCondition}
+        GROUP BY period
+      `, [partName, finalProblemType, ...periods]);
+
+      // execute_result
+      const [executeRows] = await pool.query(`
+        SELECT ${periodExpr} AS period, COUNT(*) AS cnt
+        FROM at_im_execute_result
+        WHERE FINAL_RESULT IN ('NOK','NG')
+          AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
+          AND (CASE
+            WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
+            WHEN EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
+            WHEN EQP_NUM = 'AGMRB01' THEN 'Проверка R&B - NG'
+            WHEN EQP_NUM = 'AGMTPMS01' THEN 'Проверка TMPS – NG'
+            WHEN EQP_NUM = 'AGMWAHA01' THEN 'Проверка WA - NG'
+          END) = ?
+          AND '' = ?
+          AND ${periodCondition}
+        GROUP BY period
+      `, [partName, finalProblemType, ...periods]);
+
+      defectRows = [...refuelRows, ...electricalRows, ...executeRows];
+    } else {
+      // ─── Обычные оффлайн-дефекты ───
+      const [regularRows] = await pool.query(`
+        SELECT period, COUNT(*) AS cnt
+        FROM (
+          SELECT ${periodExpr} AS period, VIN, PART_NAME, PROBLEM_TYPE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_biw_qm_defect_info
+          UNION ALL
+          SELECT ${periodExpr} AS period, VIN, PART_NAME, PROBLEM_TYPE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_paint_qm_defect_info
+          UNION ALL
+          SELECT ${periodExpr} AS period, VIN, PART_NAME, PROBLEM_TYPE, POST_NAME,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          FROM at_qm_defect_info
+        ) QM_DEF
+        WHERE S_OFFLINE = 1
+          AND PART_NAME = ? AND PROBLEM_TYPE = ? AND POST_NAME = ?
+          AND ${periodCondition.replace(/CREATION_TIME/g, 'period')}
+        GROUP BY period
+      `, [partName, finalProblemType, postName, ...periods]);
+      defectRows = regularRows;
+    }
+
+    // Карта: period → count
+    const defectMap = {};
+    defectRows.forEach(r => {
+      defectMap[r.period] = (defectMap[r.period] || 0) + Number(r.cnt);
+    });
+
+    // ─── total_cars по CP72 для каждого периода ───
+    const modelList = (model && model !== 'ALL') ? model.split(',').map(m => m.trim()) : [];
+
+    const result = [];
+    for (const period of periods) {
+      let carCondition = '';
+      if (periodType === 'month') carCondition = `DATE_FORMAT(DATE(CREATION_TIME), '%Y-%m') = ?`;
+      else if (periodType === 'week') carCondition = `DATE_FORMAT(DATE(CREATION_TIME), '%x-W%v') = ?`;
+      else carCondition = `DATE(CREATION_TIME) = ?`;
+
+      let carSql = `
+        SELECT COUNT(DISTINCT t.VIN) AS total
+        FROM at_om_wiptrackinghistory t
+        ${modelList.length > 0 ? 'JOIN work_order wo ON wo.VIN = t.VIN' : ''}
+        WHERE t.WC_NAME = 'CP72'
+          AND ${carCondition.replace(/CREATION_TIME/g, 't.CREATION_TIME')}
+      `;
+      const carParams = [period];
+      if (modelList.length > 0) {
+        carSql += ` AND wo.MODEL IN (${modelList.map(() => '?').join(',')})`;
+        carParams.push(...modelList);
+      }
+      const [carRows] = await pool.query(carSql, carParams);
+      const totalCars = carRows[0]?.total || 0;
+
+      result.push({
+        period,
+        defect_count: defectMap[period] || 0,
+        total_cars: totalCars,
+      });
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка drr-electronics-defect-trend:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 // =========================================================================
