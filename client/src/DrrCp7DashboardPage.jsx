@@ -181,7 +181,6 @@ const getTimeRange = (timeFilter) => {
   return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
 };
 
-// Диапазон по снимку (архиву)
 const getArchiveRange = (shiftDate, shift) => {
   if (shift === 'all')     return { start: `${shiftDate} 00:00:00`, end: `${shiftDate} 23:59:59` };
   if (shift === 'day')     return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
@@ -228,6 +227,16 @@ const getCurrentShiftInfo = () => {
   else if (shiftType === 'evening') shiftLetter = isEvenWeek ? 'A' : 'B';
 
   return { weekNumber, shiftLetter, shiftType };
+};
+
+// Форматирование длительности (мс → «X ч Y мин» / «Y мин»)
+const formatDuration = (ms) => {
+  if (ms == null || ms < 0) return '—';
+  const totalMin = Math.floor(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0) return `${h} ч ${m} мин`;
+  return `${m} мин`;
 };
 
 const getOpcValueColor = (value) => {
@@ -312,18 +321,15 @@ export default function DrrCp7DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Снимки смен
   const [snapshots, setSnapshots] = useState([]);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState('live');
-  const [archiveShift, setArchiveShift] = useState(null); // { shiftDate, shift }
+  const [archiveShift, setArchiveShift] = useState(null);
 
-  // VIN-модалка (OK/NOK по карточкам)
   const [vinList, setVinList] = useState([]);
   const [vinListStatus, setVinListStatus] = useState('');
   const [showVinModal, setShowVinModal] = useState(false);
   const [vinModalLoading, setVinModalLoading] = useState(false);
 
-  // Модалка VIN'ов по MPP
   const [mppVins, setMppVins] = useState([]);
   const [mppModalTitle, setMppModalTitle] = useState('');
   const [showMppModal, setShowMppModal] = useState(false);
@@ -331,7 +337,6 @@ export default function DrrCp7DashboardPage() {
 
   const isArchive = selectedSnapshotId !== 'live';
 
-  // ---------- LIVE-загрузка ----------
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -364,7 +369,6 @@ export default function DrrCp7DashboardPage() {
     }
   };
 
-  // ---------- Загрузка снимка ----------
   const loadSnapshot = async (id) => {
     setLoading(true);
     setError(null);
@@ -393,7 +397,6 @@ export default function DrrCp7DashboardPage() {
     }
   };
 
-  // ---------- Загрузка списка снимков ----------
   useEffect(() => {
     fetch(`${API_BASE}/api/drr-cp7-snapshots?days=14&filter=${filter}`)
       .then(res => res.json())
@@ -407,7 +410,6 @@ export default function DrrCp7DashboardPage() {
       .catch(() => setSnapshots([]));
   }, [filter]);
 
-  // ---------- Реакция на смену snapshot / filter / timeFilter ----------
   useEffect(() => {
     if (selectedSnapshotId === 'live') {
       loadData();
@@ -416,7 +418,6 @@ export default function DrrCp7DashboardPage() {
     }
   }, [selectedSnapshotId, filter, timeFilter]);
 
-  // ---------- При возврате в live — сразу ставим текущую неделю/букву ----------
   useEffect(() => {
     if (selectedSnapshotId === 'live') {
       setShiftInfo(getCurrentShiftInfo());
@@ -424,7 +425,6 @@ export default function DrrCp7DashboardPage() {
     }
   }, [selectedSnapshotId]);
 
-  // ---------- Автообновление смены/фильтра (раз в минуту, только live) ----------
   useEffect(() => {
     const interval = setInterval(() => {
       if (selectedSnapshotId === 'live') {
@@ -437,14 +437,12 @@ export default function DrrCp7DashboardPage() {
     return () => clearInterval(interval);
   }, [isManualFilter, selectedSnapshotId]);
 
-  // ---------- Автообновление данных (30 секунд, только live) ----------
   useEffect(() => {
     if (selectedSnapshotId !== 'live') return;
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [filter, timeFilter, selectedSnapshotId]);
 
-  // ---------- VIN-модалка по OK/NOK ----------
   const loadVinList = async (status) => {
     if (selectedSnapshotId !== 'live') {
       alert('В архиве список VIN недоступен — переключитесь на «Сейчас (live)».');
@@ -467,7 +465,6 @@ export default function DrrCp7DashboardPage() {
     }
   };
 
-  // ---------- VIN'ы по MPP ----------
   const loadMppVins = async (defect) => {
     let range;
     if (selectedSnapshotId === 'live') {
@@ -518,7 +515,6 @@ export default function DrrCp7DashboardPage() {
     setTimeFilter(filter);
   };
 
-  // Отображаемая буква: для снимка-суток ('ALL') и отсутствующих значений — «—»
   const displayLetter = (() => {
     const l = shiftInfo.shiftLetter;
     if (l == null) return '—';
@@ -531,7 +527,6 @@ export default function DrrCp7DashboardPage() {
       <div style={headerStyle}>
         <h1 style={titleStyle}>DRR CP7</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Блок недели и смены */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
               background: '#FFFFFF',
@@ -570,7 +565,6 @@ export default function DrrCp7DashboardPage() {
 
           <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
 
-          {/* Фильтры типа */}
           <div style={filterGroupStyle}>
             <button
               style={{ ...filterButtonStyle(filter === 'all'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
@@ -591,7 +585,6 @@ export default function DrrCp7DashboardPage() {
 
           <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
 
-          {/* Фильтры времени + селект снимков */}
           <div style={filterGroupStyle}>
             <button
               style={{ ...timeFilterButtonStyle(timeFilter === 'all', '#6B7280'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }}
@@ -796,10 +789,7 @@ export default function DrrCp7DashboardPage() {
       {showVinModal && (
         <div style={{
           position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
+          top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)',
           display: 'flex',
           alignItems: 'center',
@@ -867,9 +857,9 @@ export default function DrrCp7DashboardPage() {
             backgroundColor: '#FFFFFF',
             borderRadius: 16,
             padding: 24,
-            width: '90%',
-            maxWidth: 800,
-            maxHeight: '80vh',
+            width: '95%',
+            maxWidth: 1400,
+            maxHeight: '85vh',
             display: 'flex',
             flexDirection: 'column',
           }} onClick={(e) => e.stopPropagation()}>
@@ -888,31 +878,51 @@ export default function DrrCp7DashboardPage() {
                 <div style={{ marginBottom: 12, fontSize: 15, color: '#475569' }}>
                   Всего: <b>{mppVins.length}</b>
                 </div>
-                <div style={{ overflowY: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <div style={{ overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1200 }}>
                     <thead>
                       <tr>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>VIN</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>Модель</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>Класс</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>Статус</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>CP72</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>VIN</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Модель</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Класс</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Статус</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Дата прохода CP72</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Дата регистрации дефекта</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Дата доработки дефекта</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Ушло времени на доработку</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {mppVins.map((item, idx) => (
-                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.grade}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', color: (item.status || '').toLowerCase() === 'closed' ? '#059669' : '#DC2626', fontWeight: 600 }}>
-                            {item.status || '—'}
-                          </td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>
-                            {item.cp72_time ? new Date(item.cp72_time).toLocaleString('ru-RU') : '—'}
-                          </td>
-                        </tr>
-                      ))}
+                      {mppVins.map((item, idx) => {
+                        const defectMs = item.defect_time ? new Date(item.defect_time).getTime() : null;
+                        const repairMs = item.repair_time ? new Date(item.repair_time).getTime() : null;
+                        const durMs = (defectMs != null && repairMs != null) ? (repairMs - defectMs) : null;
+                        const durMin = durMs != null ? Math.floor(durMs / 60000) : null;
+                        const isShort = durMin != null && durMin < 20;
+
+                        return (
+                          <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', whiteSpace: 'nowrap' }}>{item.vin}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.grade}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', color: (item.status || '').toLowerCase() === 'closed' ? '#059669' : '#DC2626', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                              {item.status || '—'}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', whiteSpace: 'nowrap' }}>
+                              {item.cp72_time ? new Date(item.cp72_time).toLocaleString('ru-RU') : '—'}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', whiteSpace: 'nowrap' }}>
+                              {item.defect_time ? new Date(item.defect_time).toLocaleString('ru-RU') : '—'}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', whiteSpace: 'nowrap' }}>
+                              {item.repair_time ? new Date(item.repair_time).toLocaleString('ru-RU') : '—'}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontWeight: 700, whiteSpace: 'nowrap', color: isShort ? '#DC2626' : '#1E293B' }}>
+                              {formatDuration(durMs)}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

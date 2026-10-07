@@ -6022,6 +6022,13 @@ app.get('/api/drr-cp7-mpp-vins', async (req, res) => {
 
       if (!isDefectNokCp7(row, cp72Ms)) return;
 
+      // Раннее время доработки из REPAIR_TIME / REPAIR_TIME1
+      const repairTimes = [row.REPAIR_TIME, row.REPAIR_TIME1]
+        .filter(t => t != null && t !== '')
+        .map(t => new Date(t).getTime())
+        .filter(t => !Number.isNaN(t));
+      const repairMs = repairTimes.length > 0 ? Math.min(...repairTimes) : null;
+
       const existing = vinMap.get(row.VIN);
       const defectTime = new Date(row.CREATION_TIME).getTime();
       if (!existing || defectTime > existing._defectTimeMs) {
@@ -6031,6 +6038,7 @@ app.get('/api/drr-cp7-mpp-vins', async (req, res) => {
           grade: row.PROBLEM_GRADE || '—',
           status: row.STATUS || '',
           defect_time: row.CREATION_TIME,
+          repair_time: repairMs ? new Date(repairMs).toISOString() : null,
           cp72_time: cp72TimeMap.get(row.VIN),
           _defectTimeMs: defectTime,
         });
