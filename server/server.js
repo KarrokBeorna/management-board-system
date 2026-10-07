@@ -10965,13 +10965,35 @@ app.get('/api/drr-wt-portal-defects', async (req, res) => {
 /* ===================== DRR CPFinal ==================================== */
 /* ====================================================================== */
 
-// Посты для дефектов — как в DRR WT
 const CPFINAL_DEFECT_POSTS = [
   'TLTT', 'CP8', 'TLADAS', 'TLWA', 'TLRT', 'CPA',
   'CP8 Gate', 'CP8-gate',
   'TEST TRACK', 'TRACK', 'WT', 'REPAIR VERIFICATION'
 ];
 const CPFINAL_DEFECT_POSTS_STR = CPFINAL_DEFECT_POSTS.map(p => `'${p}'`).join(',');
+
+const CPFINAL_GRACE_MS = 20 * 60 * 1000;
+
+/* Хелпер: NOK дефекта для CPFinal.
+   - есть REPAIR_TIME / REPAIR_TIME1 (берём самое раннее):
+     NOK, если оно > TLTT + 20 мин; иначе OK
+   - нет времени: NOK, если статус != closed; иначе OK
+   LAST_MODIFIED_TIME НЕ используем. */
+function isDefectNokCpFinal(defectRow, tlttMs) {
+  const repairTimes = [defectRow.REPAIR_TIME, defectRow.REPAIR_TIME1]
+    .filter(t => t != null && t !== '')
+    .map(t => new Date(t).getTime())
+    .filter(t => !Number.isNaN(t));
+
+  const threshold = tlttMs + CPFINAL_GRACE_MS;
+
+  if (repairTimes.length > 0) {
+    return Math.min(...repairTimes) > threshold;
+  }
+
+  const isClosed = defectRow.STATUS && defectRow.STATUS.toUpperCase() === 'CLOSED';
+  return !isClosed;
+}
 
 /* ---------------------------------------------------------------------- */
 /* Хелпер: VIN + два времени TLTT + общее число записей TLTT              */
@@ -11009,7 +11031,7 @@ async function getCpFinalTlttVins(startTime, endTime) {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: классификация VIN (OK / NOK)                                   */
+/* Хелпер: классификация VIN (OK / NOK) — новая логика                    */
 /* ---------------------------------------------------------------------- */
 async function classifyCpFinalVins(tlttRows) {
   const okSet = new Set();
@@ -11017,7 +11039,6 @@ async function classifyCpFinalVins(tlttRows) {
   const vins = tlttRows.map(r => r.vin);
 
   vins.forEach(v => okSet.add(v));
-
   if (vins.length === 0) return { okSet, nokSet };
 
   const firstTlttByVin = new Map(tlttRows.map(r => [r.vin, r.tltt_first_time]));
@@ -11025,9 +11046,8 @@ async function classifyCpFinalVins(tlttRows) {
 
   const [defectRows] = await pool.query(`
     SELECT
-      VIN,
-      STATUS,
-      LAST_MODIFIED_TIME
+      VIN, STATUS,
+      REPAIR_TIME, REPAIR_TIME1
     FROM at_qm_defect_info
     WHERE VIN IN (${ph})
       AND POST_NAME IN (${CPFINAL_DEFECT_POSTS_STR})
@@ -11038,17 +11058,7 @@ async function classifyCpFinalVins(tlttRows) {
     if (!tlttFirst) return;
 
     const tlttMs = new Date(tlttFirst).getTime();
-    const reworkMs = d.LAST_MODIFIED_TIME ? new Date(d.LAST_MODIFIED_TIME).getTime() : null;
-    const isClosed = d.STATUS && d.STATUS.toUpperCase() === 'CLOSED';
-
-    let isNok = false;
-    if (reworkMs !== null) {
-      if (reworkMs > tlttMs) isNok = true;
-    } else {
-      if (!isClosed) isNok = true;
-    }
-
-    if (isNok) {
+    if (isDefectNokCpFinal(d, tlttMs)) {
       nokSet.add(d.VIN);
       okSet.delete(d.VIN);
     }
@@ -11071,13 +11081,7 @@ app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
     const totalVins = tlttRows.length;
 
     if (totalVins === 0) {
-      return res.json({
-        totalRecords,
-        totalVins: 0,
-        okVins: 0,
-        nokVins: 0,
-        drrPercent: 0,
-      });
+      return res.json({ totalRecords, totalVins: 0, okVins: 0, nokVins: 0, drrPercent: 0 });
     }
 
     const { okSet, nokSet } = await classifyCpFinalVins(tlttRows);
@@ -11099,7 +11103,7 @@ app.get('/api/drr-cpfinal-dashboard', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* ЭНДПОИНТ 2: список VIN для модалки (status: ALL | OK | NOK)            */
+/* ЭНДПОИНТ 2: список VIN для модалки                                     */
 /* ====================================================================== */
 app.get('/api/drr-cpfinal-vins', async (req, res) => {
   try {
@@ -11112,19 +11116,13 @@ app.get('/api/drr-cpfinal-vins', async (req, res) => {
     if (tlttRows.length === 0) return res.json([]);
 
     const lastTlttByVin = new Map(tlttRows.map(r => [r.vin, r.tltt_last_time]));
-
     const { okSet, nokSet } = await classifyCpFinalVins(tlttRows);
 
     let vins;
-    if (status === 'ALL') {
-      vins = tlttRows.map(r => r.vin);
-    } else if (status === 'OK') {
-      vins = [...okSet];
-    } else if (status === 'NOK') {
-      vins = [...nokSet];
-    } else {
-      return res.status(400).json({ error: 'Неизвестный status' });
-    }
+    if (status === 'ALL') vins = tlttRows.map(r => r.vin);
+    else if (status === 'OK') vins = [...okSet];
+    else if (status === 'NOK') vins = [...nokSet];
+    else return res.status(400).json({ error: 'Неизвестный status' });
 
     if (vins.length === 0) return res.json([]);
 
@@ -11148,8 +11146,7 @@ app.get('/api/drr-cpfinal-vins', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* ЭНДПОИНТ 3: топ дефектов у NOK VIN                                     */
-/* — теперь возвращаем model / part_name / problem_type для фильтра VIN'ов */
+/* ЭНДПОИНТ 3: топ дефектов                                               */
 /* ====================================================================== */
 app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
   try {
@@ -11164,19 +11161,15 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
     const firstTlttByVin = new Map(tlttRows.map(r => [r.vin, r.tltt_first_time]));
     const { nokSet } = await classifyCpFinalVins(tlttRows);
     const nokVins = [...nokSet];
-
     if (nokVins.length === 0) return res.json([]);
 
     const ph = nokVins.map(() => '?').join(',');
     const [defectRows] = await pool.query(`
       SELECT
-        d.VIN,
-        wo.MODEL,
-        d.PART_NAME,
-        d.PROBLEM_TYPE,
-        d.PROBLEM_GRADE,
+        d.VIN, wo.MODEL,
+        d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE,
         d.STATUS,
-        d.LAST_MODIFIED_TIME
+        d.REPAIR_TIME, d.REPAIR_TIME1
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.VIN IN (${ph})
@@ -11188,16 +11181,7 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
       const tlttFirst = firstTlttByVin.get(d.VIN);
       if (!tlttFirst) return;
       const tlttMs = new Date(tlttFirst).getTime();
-      const reworkMs = d.LAST_MODIFIED_TIME ? new Date(d.LAST_MODIFIED_TIME).getTime() : null;
-      const isClosed = d.STATUS && d.STATUS.toUpperCase() === 'CLOSED';
-
-      let isNok = false;
-      if (reworkMs !== null) {
-        if (reworkMs > tlttMs) isNok = true;
-      } else {
-        if (!isClosed) isNok = true;
-      }
-      if (!isNok) return;
+      if (!isDefectNokCpFinal(d, tlttMs)) return;
 
       const model = d.MODEL || '—';
       const part = (d.PART_NAME || '').trim();
@@ -11253,8 +11237,6 @@ app.get('/api/drr-cpfinal-mpp-vins', async (req, res) => {
 
     const ph = nokVins.map(() => '?').join(',');
 
-    // Фильтр: model + part_name + problem_type.
-    // Для fallback-строки (TS02 WA EC Tool - NG) part и problem пустые — ищем дефекты без PART_NAME/PROBLEM_TYPE.
     let whereClause = `d.VIN IN (${ph}) AND d.POST_NAME IN (${CPFINAL_DEFECT_POSTS_STR}) AND wo.MODEL = ?`;
     const params = [...nokVins, model];
 
@@ -11267,49 +11249,47 @@ app.get('/api/drr-cpfinal-mpp-vins', async (req, res) => {
 
     const [defectRows] = await pool.query(`
       SELECT
-        d.VIN,
-        wo.MODEL,
-        d.PART_NAME,
-        d.PROBLEM_TYPE,
-        d.PROBLEM_GRADE,
-        d.STATUS,
-        d.LAST_MODIFIED_TIME
+        d.VIN, wo.MODEL,
+        d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE,
+        d.STATUS, d.CREATION_TIME,
+        d.REPAIR_TIME, d.REPAIR_TIME1
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE ${whereClause}
     `, params);
 
-    // Только NOK VIN'ы этого MPP
     const vinMap = new Map();
     defectRows.forEach(d => {
       const tlttFirst = firstTlttByVin.get(d.VIN);
       if (!tlttFirst) return;
       const tlttMs = new Date(tlttFirst).getTime();
-      const reworkMs = d.LAST_MODIFIED_TIME ? new Date(d.LAST_MODIFIED_TIME).getTime() : null;
-      const isClosed = d.STATUS && d.STATUS.toUpperCase() === 'CLOSED';
+      if (!isDefectNokCpFinal(d, tlttMs)) return;
 
-      let isNok = false;
-      if (reworkMs !== null) { if (reworkMs > tlttMs) isNok = true; }
-      else { if (!isClosed) isNok = true; }
-      if (!isNok) return;
+      // Самое раннее время доработки
+      const repairTimes = [d.REPAIR_TIME, d.REPAIR_TIME1]
+        .filter(t => t != null && t !== '')
+        .map(t => new Date(t).getTime())
+        .filter(t => !Number.isNaN(t));
+      const repairMs = repairTimes.length > 0 ? Math.min(...repairTimes) : null;
 
       const existing = vinMap.get(d.VIN);
-      const reworkTimeMs = reworkMs || 0;
-      if (!existing || reworkTimeMs > existing._reworkMs) {
+      const defectTimeMs = new Date(d.CREATION_TIME).getTime();
+      if (!existing || defectTimeMs > existing._defectTimeMs) {
         vinMap.set(d.VIN, {
           vin: d.VIN,
           model: d.MODEL || '—',
           grade: d.PROBLEM_GRADE || '—',
           status: d.STATUS || '',
-          last_modified: d.LAST_MODIFIED_TIME || null,
+          defect_time: d.CREATION_TIME,
+          repair_time: repairMs ? new Date(repairMs).toISOString() : null,
           tltt_time: lastTlttByVin.get(d.VIN) || null,
-          _reworkMs: reworkTimeMs,
+          _defectTimeMs: defectTimeMs,
         });
       }
     });
 
     const result = Array.from(vinMap.values())
-      .map(({ _reworkMs, ...v }) => v)
+      .map(({ _defectTimeMs, ...v }) => v)
       .sort((a, b) => new Date(a.tltt_time) - new Date(b.tltt_time));
 
     res.json(result);
@@ -11377,7 +11357,10 @@ async function saveDrrCpFinalSnapshot(shiftDate, shift) {
       if (nokVinsList.length > 0) {
         const ph = nokVinsList.map(() => '?').join(',');
         const [defectRows] = await pool.query(`
-          SELECT d.VIN, wo.MODEL, d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE, d.STATUS, d.LAST_MODIFIED_TIME
+          SELECT
+            d.VIN, wo.MODEL,
+            d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE,
+            d.STATUS, d.REPAIR_TIME, d.REPAIR_TIME1
           FROM at_qm_defect_info d
           LEFT JOIN work_order wo ON wo.VIN = d.VIN
           WHERE d.VIN IN (${ph})
@@ -11389,13 +11372,7 @@ async function saveDrrCpFinalSnapshot(shiftDate, shift) {
           const tlttFirst = firstTlttByVin.get(d.VIN);
           if (!tlttFirst) return;
           const tlttMs = new Date(tlttFirst).getTime();
-          const reworkMs = d.LAST_MODIFIED_TIME ? new Date(d.LAST_MODIFIED_TIME).getTime() : null;
-          const isClosed = d.STATUS && d.STATUS.toUpperCase() === 'CLOSED';
-
-          let isNok = false;
-          if (reworkMs !== null) { if (reworkMs > tlttMs) isNok = true; }
-          else { if (!isClosed) isNok = true; }
-          if (!isNok) return;
+          if (!isDefectNokCpFinal(d, tlttMs)) return;
 
           const model = d.MODEL || '—';
           const part = (d.PART_NAME || '').trim();
@@ -11477,9 +11454,7 @@ setInterval(() => {
 checkAndSaveDrrCpFinalSnapshot();
 checkAndSaveDrrCpFinalDailySnapshot();
 
-/* ====================================================================== */
-/* ХЕЛПЕР: дозаполнить week_number / shift_letter, если их нет в БД       */
-/* ====================================================================== */
+/* Хелпер: дозаполнить week_number / shift_letter */
 function enrichCpFinalSnapshot(r) {
   const shiftDate = String(r.shift_date).slice(0, 10);
   const weekNumber = r.week_number != null
@@ -11504,9 +11479,6 @@ function enrichCpFinalSnapshot(r) {
   };
 }
 
-/* ====================================================================== */
-/* ЭНДПОИНТ: список снимков                                               */
-/* ====================================================================== */
 app.get('/api/drr-cpfinal-snapshots', async (req, res) => {
   try {
     const { days = 14 } = req.query;
@@ -11528,9 +11500,6 @@ app.get('/api/drr-cpfinal-snapshots', async (req, res) => {
   }
 });
 
-/* ====================================================================== */
-/* ЭНДПОИНТ: один снимок с top_defects                                    */
-/* ====================================================================== */
 app.get('/api/drr-cpfinal-snapshot/:id', async (req, res) => {
   try {
     const { id } = req.params;

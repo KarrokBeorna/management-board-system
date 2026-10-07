@@ -228,6 +228,16 @@ const getCurrentShiftInfo = () => {
   return { weekNumber, shiftLetter, shiftType };
 };
 
+// Форматирование длительности (мс → «X ч Y мин» / «Y мин»)
+const formatDuration = (ms) => {
+  if (ms == null || ms < 0) return '—';
+  const totalMin = Math.floor(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0) return `${h} ч ${m} мин`;
+  return `${m} мин`;
+};
+
 export default function DrrCpFinalPage() {
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
   const [isManualFilter, setIsManualFilter] = useState(false);
@@ -756,9 +766,9 @@ export default function DrrCpFinalPage() {
             backgroundColor: '#FFFFFF',
             borderRadius: 16,
             padding: 24,
-            width: '90%',
-            maxWidth: 800,
-            maxHeight: '80vh',
+            width: '95%',
+            maxWidth: 1400,
+            maxHeight: '85vh',
             display: 'flex',
             flexDirection: 'column',
           }} onClick={(e) => e.stopPropagation()}>
@@ -777,31 +787,51 @@ export default function DrrCpFinalPage() {
                 <div style={{ marginBottom: 12, fontSize: 15, color: '#475569' }}>
                   Всего: <b>{mppVins.length}</b>
                 </div>
-                <div style={{ overflowY: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <div style={{ overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1200 }}>
                     <thead>
                       <tr>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>VIN</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>Модель</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>Класс</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>Статус</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF' }}>TLTT</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>VIN</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Модель</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Класс</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Статус</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Дата TLTT</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Дата регистрации дефекта</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Дата доработки дефекта</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Ушло времени на доработку</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {mppVins.map((item, idx) => (
-                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.vin}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.grade}</td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', color: (item.status || '').toLowerCase() === 'closed' ? '#059669' : '#DC2626', fontWeight: 600 }}>
-                            {item.status || '—'}
-                          </td>
-                          <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>
-                            {item.tltt_time ? new Date(item.tltt_time).toLocaleString('ru-RU') : '—'}
-                          </td>
-                        </tr>
-                      ))}
+                      {mppVins.map((item, idx) => {
+                        const defectMs = item.defect_time ? new Date(item.defect_time).getTime() : null;
+                        const repairMs = item.repair_time ? new Date(item.repair_time).getTime() : null;
+                        const durMs = (defectMs != null && repairMs != null) ? (repairMs - defectMs) : null;
+                        const durMin = durMs != null ? Math.floor(durMs / 60000) : null;
+                        const isShort = durMin != null && durMin < 20;
+
+                        return (
+                          <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', whiteSpace: 'nowrap' }}>{item.vin}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.grade}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', color: (item.status || '').toLowerCase() === 'closed' ? '#059669' : '#DC2626', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                              {item.status || '—'}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', whiteSpace: 'nowrap' }}>
+                              {item.tltt_time ? new Date(item.tltt_time).toLocaleString('ru-RU') : '—'}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', whiteSpace: 'nowrap' }}>
+                              {item.defect_time ? new Date(item.defect_time).toLocaleString('ru-RU') : '—'}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', whiteSpace: 'nowrap' }}>
+                              {item.repair_time ? new Date(item.repair_time).toLocaleString('ru-RU') : '—'}
+                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', fontWeight: 700, whiteSpace: 'nowrap', color: isShort ? '#DC2626' : '#1E293B' }}>
+                              {formatDuration(durMs)}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
