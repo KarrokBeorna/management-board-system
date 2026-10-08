@@ -7,6 +7,7 @@ const MAX_COMMENT = 500;
 const VIN_LEN = 17;
 const VIN_ALLOWED = /[^A-HJ-NPR-Z0-9]/g;
 const STATE_KEY = 'line-defect-capture-state-v1';
+const MIN_SUFFIX_LEN = 6;
 
 const LOCATIONS = [
   { code: 'CP7',    label: 'CP7',                  color: '#2563EB' },
@@ -72,6 +73,49 @@ const beep = () => {
   } catch {}
 };
 const vibrate = (ms = 60) => { try { navigator.vibrate?.(ms); } catch {} };
+
+const canUseLiveCamera = () => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return false;
+  return (
+    window.isSecureContext ||
+    window.location.protocol === 'https:' ||
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1'
+  );
+};
+
+/* ---- декодирование штрихкода из файла (fallback) ---- */
+const decodeVinFromFile = async (file, maxDim = 1800) => {
+  // 1. Файл → Image
+  const dataUrl = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = dataUrl;
+  });
+
+  // 2. Сжимаем до maxDim по большей стороне (иначе canvas тормозит на 12 Мп)
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  const compressedUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+  // 3. Декодируем через ZXing
+  const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanAttempts: 100 });
+  const result = await reader.decodeFromImageUrl(compressedUrl);
+  if (!result) throw new Error('empty result');
+  return result.getText();
+};
 
 const loadState = () => {
   try { const raw = sessionStorage.getItem(STATE_KEY); return raw ? JSON.parse(raw) : null; }
@@ -195,37 +239,34 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
   );
 }
 
-/* ================= Scanner ================= */
+/* ================= Scanner (live + photo fallback) ================= */
 function BarcodeScannerModal({ onClose, onResult }) {
+  const liveSupported = canUseLiveCamera();
+
+  // режим: 'live' | 'photo' | 'processing'
+  const [mode, setMode] = useState(liveSupported ? 'live' : 'photo');
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(liveSupported);
+  const [hint, setHint] = useState('Наведите камеру на штрихкод');
+  const [photoError, setPhotoError] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
   const streamRef = useRef(null);
-  const [err, setErr] = useState(null);
-  const [busy, setBusy] = useState(true);
-  const [hint, setHint] = useState('Наведите камеру на штрихкод');
+  const fileInputRef = useRef(null);
 
+  // ---------- LIVE ----------
   useEffect(() => {
+    if (mode !== 'live') return;
     let cancelled = false;
 
     (async () => {
-      // ---- 1. Проверка доступности API ----
-      if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        const isSecure = typeof window !== 'undefined' && (
-          window.isSecureContext ||
-          window.location.protocol === 'https:' ||
-          window.location.hostname === 'localhost' ||
-          window.location.hostname === '127.0.0.1'
-        );
-        setErr(
-          isSecure
-            ? 'Браузер не поддерживает доступ к камере. Используйте Chrome / Safari / Edge.'
-            : 'Камера работает только по HTTPS или на localhost. Откройте сайт по защищённому адресу.'
-        );
-        setBusy(false);
+      if (!liveSupported) {
+        setMode('photo');
         return;
       }
 
-      // ---- 2. Запрашиваем поток напрямую с задней камеры ----
       let stream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -238,16 +279,15 @@ function BarcodeScannerModal({ onClose, onResult }) {
         });
       } catch (e) {
         const name = e?.name || '';
+        // не смогли открыть live → уходим в фото-режим, не ругаемся
         if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-          setErr('Доступ к камере запрещён. Разрешите доступ в настройках браузера.');
-        } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-          setErr('Камера не найдена на устройстве.');
+          setPhotoError('Live-камера запрещена — используйте снимок.');
         } else if (name === 'NotReadableError' || name === 'TrackStartError') {
-          setErr('Камера занята другим приложением.');
+          setPhotoError('Камера занята — используйте снимок.');
         } else {
-          setErr(e?.message || 'Не удалось получить доступ к камере.');
+          setPhotoError(e?.message || 'Live-камера недоступна — используйте снимок.');
         }
-        setBusy(false);
+        setMode('photo');
         return;
       }
 
@@ -257,13 +297,11 @@ function BarcodeScannerModal({ onClose, onResult }) {
       }
       streamRef.current = stream;
 
-      // ---- 3. Привязываем поток к <video> ----
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         try { await videoRef.current.play(); } catch {}
       }
 
-      // ---- 4. Запускаем декодер на потоке ----
       try {
         const reader = new BrowserMultiFormatReader(undefined, {
           delayBetweenScanAttempts: 120,
@@ -288,8 +326,8 @@ function BarcodeScannerModal({ onClose, onResult }) {
         setBusy(false);
       } catch (e) {
         console.error('[scanner] decode error:', e);
-        setErr(e?.message || 'Не удалось запустить распознавание.');
-        setBusy(false);
+        setPhotoError('Live-распознавание не запустилось — используйте снимок.');
+        setMode('photo');
       }
     })();
 
@@ -298,48 +336,166 @@ function BarcodeScannerModal({ onClose, onResult }) {
       try { controlsRef.current?.stop(); } catch {}
       try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
     };
-  }, [onResult]);
+  }, [mode, onResult, liveSupported]);
 
+  // ---------- PHOTO ----------
+  const openFilePicker = () => fileInputRef.current?.click();
+
+  const handlePhotoFile = async (file) => {
+    if (!file) return;
+    setMode('processing');
+    setPhotoError(null);
+    // превью текущего файла (что именно распознаём)
+    try { setPreviewUrl(URL.createObjectURL(file)); } catch { setPreviewUrl(null); }
+
+    try {
+      const text = await decodeVinFromFile(file);
+      const clean = sanitizeVin(text);
+      if (clean.length !== VIN_LEN) {
+        setPhotoError(`Распознано «${text.slice(0, 24)}» — это не VIN. Переснимите, чтобы штрихкод был в центре кадра.`);
+        setMode('photo');
+        return;
+      }
+      beep(); vibrate(80);
+      onResult(clean);
+    } catch (e) {
+      console.warn('[scanner photo] decode error:', e);
+      setPhotoError('Не удалось распознать штрихкод. Сфотографируйте ближе и резче, штрихкод целиком в кадре.');
+      setMode('photo');
+    }
+  };
+
+  const onFileChange = (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (f) handlePhotoFile(f);
+  };
+
+  /* ---------- UI: PHOTO / PROCESSING ---------- */
+  if (mode === 'photo' || mode === 'processing') {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, background: '#0F172A', zIndex: 9000,
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{
+          flex: 1, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          padding: 24, color: '#FFFFFF', textAlign: 'center', overflow: 'auto',
+        }}>
+          <div style={{ fontSize: 60, marginBottom: 12 }}>📷</div>
+          <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 10 }}>
+            {mode === 'processing' ? 'Распознавание…' : 'Фото штрихкода'}
+          </div>
+          <div style={{ fontSize: 14, color: '#94A3B8', maxWidth: 320, lineHeight: 1.5, marginBottom: 20 }}>
+            {mode === 'processing'
+              ? 'Пожалуйста, подождите'
+              : 'Сфотографируйте штрихкод на машине — камера откроется автоматически.'}
+          </div>
+
+          {previewUrl && mode === 'photo' && (
+            <div style={{
+              width: 240, height: 240, borderRadius: 12, overflow: 'hidden',
+              border: '2px solid #334155', marginBottom: 16,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: '#1E293B',
+            }}>
+              <img src={previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            </div>
+          )}
+
+          {mode === 'photo' && (
+            <button
+              onClick={openFilePicker}
+              style={{
+                padding: '16px 32px', fontSize: 17, fontWeight: 800,
+                borderRadius: 14, border: 'none', cursor: 'pointer',
+                background: '#2563EB', color: '#FFFFFF',
+                boxShadow: '0 6px 14px rgba(37,99,235,0.5)',
+                display: 'inline-flex', alignItems: 'center', gap: 10,
+                minWidth: 240, justifyContent: 'center',
+              }}
+            >
+              📸 {previewUrl ? 'Переснять' : 'Сфотографировать'}
+            </button>
+          )}
+
+          {mode === 'processing' && (
+            <div style={{
+              width: 40, height: 40, borderRadius: '50%',
+              border: '4px solid #1E293B', borderTopColor: '#2563EB',
+              animation: 'ldspin 0.8s linear infinite',
+              marginTop: 10,
+            }} />
+          )}
+
+          {photoError && mode === 'photo' && (
+            <div style={{
+              marginTop: 20, padding: '12px 16px', borderRadius: 10,
+              background: 'rgba(239,68,68,0.15)', color: '#FCA5A5',
+              border: '1px solid rgba(239,68,68,0.4)',
+              fontSize: 13, maxWidth: 340, lineHeight: 1.5,
+            }}>⚠ {photoError}</div>
+          )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{ display: 'none' }}
+            onChange={onFileChange}
+          />
+        </div>
+
+        <div style={{
+          padding: 20, background: '#020617',
+          display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap',
+        }}>
+          {liveSupported && (
+            <button
+              onClick={() => { setMode('live'); setBusy(true); setPhotoError(null); }}
+              style={{
+                padding: '12px 24px', borderRadius: 12, border: '1px solid #334155',
+                background: 'transparent', color: '#CBD5E1',
+                fontSize: 14, fontWeight: 700, cursor: 'pointer',
+              }}
+            >🎥 Живая камера</button>
+          )}
+          <button
+            onClick={onClose}
+            style={{
+              padding: '12px 32px', borderRadius: 12, border: 'none',
+              background: '#374151', color: '#FFF',
+              fontSize: 15, fontWeight: 700, cursor: 'pointer',
+            }}
+          >Отмена</button>
+        </div>
+
+        <style>{`@keyframes ldspin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  /* ---------- UI: LIVE ---------- */
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 9000, display: 'flex', flexDirection: 'column' }}>
       <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
-        <video
-          ref={videoRef}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          muted
-          playsInline
-          autoPlay
-        />
-        {/* Прицел */}
+        <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline autoPlay />
         <div style={{
           position: 'absolute', inset: '30% 8%',
           border: '2px solid #22C55E', borderRadius: 12,
           boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)',
           pointerEvents: 'none',
-          display: err ? 'none' : 'block',
         }} />
-        {busy && !err && (
+        {busy && (
           <div style={{
             position: 'absolute', inset: 0, display: 'flex',
             alignItems: 'center', justifyContent: 'center',
             color: '#FFF', fontSize: 16, background: 'rgba(0,0,0,0.4)',
           }}>Запуск камеры…</div>
         )}
-        {err && (
-          <div style={{
-            position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center',
-            color: '#FFF', padding: 24, textAlign: 'center',
-            background: 'rgba(0,0,0,0.7)',
-          }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>⚠️</div>
-            <div style={{ fontSize: 15, lineHeight: 1.5, maxWidth: 320 }}>{err}</div>
-            <div style={{ fontSize: 13, color: '#94A3B8', marginTop: 16 }}>
-              Введите VIN вручную.
-            </div>
-          </div>
-        )}
-        {!busy && !err && (
+        {!busy && (
           <div style={{
             position: 'absolute', bottom: 20, left: 0, right: 0,
             textAlign: 'center', color: '#FFF', fontSize: 14,
@@ -347,15 +503,23 @@ function BarcodeScannerModal({ onClose, onResult }) {
           }}>{hint}</div>
         )}
       </div>
-      <div style={{ padding: 16, background: '#111', display: 'flex', justifyContent: 'center' }}>
+      <div style={{ padding: 16, background: '#111', display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <button
+          onClick={() => { setMode('photo'); setPhotoError(null); }}
+          style={{
+            padding: '12px 24px', borderRadius: 12, border: '1px solid #334155',
+            background: 'transparent', color: '#CBD5E1',
+            fontSize: 14, fontWeight: 700, cursor: 'pointer',
+          }}
+        >📷 Снимок</button>
         <button
           onClick={onClose}
           style={{
             padding: '12px 32px', borderRadius: 12, border: 'none',
-            background: '#374151', color: '#FFF', fontSize: 15,
-            fontWeight: 700, cursor: 'pointer',
+            background: '#374151', color: '#FFF',
+            fontSize: 15, fontWeight: 700, cursor: 'pointer',
           }}
-        >{err ? 'Закрыть' : 'Отмена'}</button>
+        >Отмена</button>
       </div>
     </div>
   );
@@ -383,6 +547,7 @@ export default function LineDefectCapturePage() {
 
   const [vin, setVin] = useState(boot?.vin || '');
   const [vinCheck, setVinCheck] = useState({ state: 'idle', valid: false, reason: '', model: '' });
+  const [suffixMatches, setSuffixMatches] = useState([]);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannedRaw, setScannedRaw] = useState(boot?.scannedRaw || null);
 
@@ -404,6 +569,7 @@ export default function LineDefectCapturePage() {
 
   const fileInputRef = useRef(null);
   const vinAbortRef = useRef(null);
+  const pickingRef = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -430,33 +596,78 @@ export default function LineDefectCapturePage() {
   }, [vin, partName, problemType, comment, clientId, photos, scannedRaw, captureLocation]);
 
   useEffect(() => {
-    const clean = sanitizeVin(vin);
-    if (clean.length !== VIN_LEN) {
-      setVinCheck({
-        state: 'idle', valid: false, model: '',
-        reason: clean.length === 0 ? '' : `Ещё ${VIN_LEN - clean.length} символ(ов)`,
-      });
+    if (pickingRef.current) {
+      pickingRef.current = false;
       return;
     }
+
+    const clean = sanitizeVin(vin);
+
+    if (clean.length === 0) {
+      setVinCheck({ state: 'idle', valid: false, reason: '', model: '' });
+      setSuffixMatches([]);
+      return;
+    }
+
+    if (clean.length < MIN_SUFFIX_LEN) {
+      setVinCheck({
+        state: 'idle', valid: false, model: '',
+        reason: `Ещё ${MIN_SUFFIX_LEN - clean.length} символ(ов) для поиска`,
+      });
+      setSuffixMatches([]);
+      return;
+    }
+
     if (vinAbortRef.current) vinAbortRef.current.abort();
     const ctrl = new AbortController();
     vinAbortRef.current = ctrl;
+
     setVinCheck({ state: 'checking', valid: false, reason: '', model: '' });
+    setSuffixMatches([]);
+
+    const delay = clean.length === VIN_LEN ? 350 : 600;
+
     const t = setTimeout(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/line-defects/lookup-vin`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ vin: clean }), signal: ctrl.signal,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vin: clean }),
+          signal: ctrl.signal,
         });
         const data = await res.json();
-        if (data.valid) setVinCheck({ state: 'ok', valid: true, reason: '', model: data.model });
-        else setVinCheck({ state: 'err', valid: false, reason: data.reason || 'Не найден', model: '' });
+
+        if (data.valid) {
+          if (data.vin && data.vin !== clean) {
+            pickingRef.current = true;
+            setVin(data.vin);
+          }
+          setVinCheck({
+            state: 'ok', valid: true, reason: '', model: data.model || '',
+            matched: data.matched,
+          });
+        } else if (data.multiple && Array.isArray(data.matches)) {
+          setVinCheck({ state: 'idle', valid: false, reason: data.reason || '', model: '' });
+          setSuffixMatches(data.matches);
+        } else {
+          setVinCheck({ state: 'err', valid: false, reason: data.reason || 'Не найден', model: '' });
+        }
       } catch (e) {
-        if (e.name !== 'AbortError') setVinCheck({ state: 'err', valid: false, reason: e.message, model: '' });
+        if (e.name !== 'AbortError') {
+          setVinCheck({ state: 'err', valid: false, reason: e.message, model: '' });
+        }
       }
-    }, 350);
+    }, delay);
+
     return () => clearTimeout(t);
   }, [vin]);
+
+  const pickSuffixMatch = (m) => {
+    pickingRef.current = true;
+    setVin(m.vin);
+    setSuffixMatches([]);
+    setVinCheck({ state: 'ok', valid: true, reason: '', model: m.model || '', matched: 'picked' });
+  };
 
   const handleFiles = async (files) => {
     if (!files || files.length === 0) return;
@@ -530,6 +741,7 @@ export default function LineDefectCapturePage() {
   const reset = () => {
     clearState();
     setVin(''); setVinCheck({ state: 'idle', valid: false, reason: '', model: '' });
+    setSuffixMatches([]);
     setScannedRaw(null); setCaptureLocation('');
     setPartName(''); setProblemType('');
     setPhotos([]); setComment('');
@@ -557,7 +769,6 @@ export default function LineDefectCapturePage() {
     textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5,
   };
 
-  /* -------- DONE -------- */
   if (done) {
     const loc = LOCATION_BY_CODE[done.captureLocation];
     return (
@@ -583,7 +794,6 @@ export default function LineDefectCapturePage() {
 
   const canSubmit = vinCheck.valid && captureLocation && partName.trim() && problemType.trim() && photos.length > 0 && !submitting;
 
-  /* -------- MAIN -------- */
   return (
     <div style={{ width: '100%', minHeight: '100vh', background: '#F8FAFC' }}>
       <div style={{
@@ -601,9 +811,13 @@ export default function LineDefectCapturePage() {
           <div style={stepLabel}>Шаг 1 — VIN</div>
           <input
             value={vin}
-            onChange={(e) => { setVin(sanitizeVin(e.target.value)); setScannedRaw(null); }}
-            onPaste={(e) => { e.preventDefault(); setVin(sanitizeVin(e.clipboardData.getData('text'))); }}
-            placeholder="17 символов"
+            onChange={(e) => { setVin(sanitizeVin(e.target.value)); setScannedRaw(null); setSuffixMatches([]); }}
+            onPaste={(e) => {
+              e.preventDefault();
+              setVin(sanitizeVin(e.clipboardData.getData('text')));
+              setSuffixMatches([]);
+            }}
+            placeholder="17 символов или последние 6+"
             maxLength={VIN_LEN}
             inputMode="text"
             autoComplete="off" autoCorrect="off" autoCapitalize="characters" spellCheck={false}
@@ -614,11 +828,14 @@ export default function LineDefectCapturePage() {
               boxSizing: 'border-box', marginBottom: 10,
             }}
           />
-          <button onClick={() => setScannerOpen(true)} style={{ ...secondaryButton, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <button
+            onClick={() => setScannerOpen(true)}
+            style={{ ...secondaryButton, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          >
             📷 Сканировать штрихкод
           </button>
 
-          {(vinCheck.state !== 'idle' || vinCheck.reason) && (
+          {(vinCheck.state !== 'idle' || vinCheck.reason) && suffixMatches.length === 0 && (
             <div style={{
               marginTop: 10, padding: '10px 12px', borderRadius: 10,
               background: vinCheck.state === 'ok' ? '#ECFDF5' : vinCheck.state === 'err' ? '#FEF2F2' : vinCheck.state === 'checking' ? '#F1F5F9' : 'transparent',
@@ -626,10 +843,72 @@ export default function LineDefectCapturePage() {
               fontSize: 13,
               border: vinCheck.state === 'ok' ? '1px solid #A7F3D0' : vinCheck.state === 'err' ? '1px solid #FECACA' : 'none',
             }}>
-              {vinCheck.state === 'ok' && <>✔ Модель: <b>{vinCheck.model}</b>{scannedRaw && ' · сканер'}</>}
+              {vinCheck.state === 'ok' && (
+                <>
+                  ✔ Модель: <b>{vinCheck.model}</b>
+                  {scannedRaw && ' · сканер'}
+                  {vinCheck.matched === 'suffix' && ' · найдено по 6 символам'}
+                </>
+              )}
               {vinCheck.state === 'err' && <>✖ {vinCheck.reason}</>}
               {vinCheck.state === 'checking' && <>⏳ Проверка…</>}
               {vinCheck.state === 'idle' && vinCheck.reason && <>· {vinCheck.reason}</>}
+            </div>
+          )}
+
+          {suffixMatches.length > 0 && (
+            <div style={{
+              marginTop: 10,
+              border: '1px solid #E2E8F0',
+              borderRadius: 10,
+              overflow: 'hidden',
+              background: '#FFFFFF',
+            }}>
+              <div style={{
+                padding: '8px 12px',
+                background: '#F1F5F9',
+                fontSize: 11,
+                fontWeight: 800,
+                color: '#475569',
+                textTransform: 'uppercase',
+                letterSpacing: 0.3,
+              }}>
+                Найдено {suffixMatches.length} — выберите VIN
+              </div>
+              <div style={{ maxHeight: 240, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                {suffixMatches.map(m => (
+                  <div
+                    key={m.vin}
+                    onClick={() => pickSuffixMatch(m)}
+                    style={{
+                      padding: '12px 14px',
+                      borderBottom: '1px solid #F1F5F9',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 10,
+                      minHeight: 44,
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = '#FFFFFF'}
+                  >
+                    <span style={{
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      color: '#2563EB',
+                      fontWeight: 700,
+                      letterSpacing: 0.5,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>{m.vin}</span>
+                    <span style={{ fontSize: 12, color: '#64748B', whiteSpace: 'nowrap' }}>
+                      {m.model}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

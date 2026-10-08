@@ -13465,36 +13465,68 @@ function ldRateLimit(ip, max = 60, windowMs = 60 * 1000) {
 /* ============================================================
  * POST /api/line-defects/lookup-vin
  * body: { vin }
- * Проверка существования VIN в work_order + получение модели
+ * - 17 символов → точное совпадение в work_order
+ * - 6..16 символов → поиск по суффиксу (последние N символов), LIMIT 20
  * ============================================================ */
 app.post('/api/line-defects/lookup-vin', async (req, res) => {
   try {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     if (!ldRateLimit(ip, 180)) {
-      return res.status(429).json({ valid: false, reason: 'Слишком много запросов' });
+      return res.json({ valid: false, reason: 'Слишком много запросов, подождите минуту' });
     }
 
     let vin = String(req.body?.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!vin) return res.json({ valid: false, reason: 'VIN пустой' });
-    if (vin.length !== 17) {
-      return res.json({ valid: false, reason: `VIN должен быть 17 символов (сейчас ${vin.length})` });
-    }
-    if (!VIN_REGEX.test(vin)) {
-      return res.json({ valid: false, reason: 'VIN содержит недопустимые символы (I, O, Q запрещены)' });
+
+    // ---- 17 символов: точное совпадение ----
+    if (vin.length === 17) {
+      if (!VIN_REGEX.test(vin)) {
+        return res.json({ valid: false, reason: 'VIN содержит недопустимые символы (I, O, Q запрещены)' });
+      }
+      const [rows] = await pool.query(
+        'SELECT VIN, MODEL FROM work_order WHERE VIN = ? LIMIT 1',
+        [vin]
+      );
+      if (rows.length === 0) return res.json({ valid: false, reason: 'VIN не найден в базе' });
+      return res.json({ valid: true, vin: rows[0].VIN, model: rows[0].MODEL || '', matched: 'exact' });
     }
 
+    // ---- короткий запрос: suffix-поиск ----
+    if (vin.length < 6) {
+      return res.json({
+        valid: false,
+        reason: `Минимум 6 символов для поиска (сейчас ${vin.length})`,
+      });
+    }
+
+    // suffix-поиск: без ORDER BY, LIMIT 20 — защита от full scan большого объёма
     const [rows] = await pool.query(
-      `SELECT VIN, MODEL FROM work_order WHERE VIN = ? LIMIT 1`,
-      [vin]
+      'SELECT VIN, MODEL FROM work_order WHERE VIN LIKE ? LIMIT 20',
+      [`%${vin}`]
     );
+
     if (rows.length === 0) {
-      return res.json({ valid: false, reason: 'VIN не найден в базе' });
+      return res.json({ valid: false, reason: 'По этим символам ничего не найдено' });
     }
 
-    res.json({ valid: true, vin: rows[0].VIN, model: rows[0].MODEL || '' });
+    if (rows.length === 1) {
+      return res.json({
+        valid: true,
+        vin: rows[0].VIN,
+        model: rows[0].MODEL || '',
+        matched: 'suffix',
+      });
+    }
+
+    return res.json({
+      valid: false,
+      multiple: true,
+      reason: `Найдено ${rows.length} VIN — выберите нужный`,
+      matches: rows.map(r => ({ vin: r.VIN, model: r.MODEL || '' })),
+    });
   } catch (err) {
     console.error('[LINE DEFECTS] lookup-vin:', err.message);
-    res.status(500).json({ valid: false, reason: 'Ошибка сервера: ' + err.message });
+    res.json({ valid: false, reason: 'Ошибка сервера: ' + err.message });
   }
 });
 
