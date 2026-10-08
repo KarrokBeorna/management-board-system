@@ -309,7 +309,7 @@ export default function DrrReportPage() {
     });
   }, [dpuOffDataPoints]);
 
-  const dpuOffBarDataKey = selectedModel === 'ALL' ? 'maxValue' : selectedModel;
+  const dpuOffBarDataKey = selectedModel === 'ALL' ? 'total' : selectedModel;
 
   const totalCols = chartData.length + 1;
   const colWidth = `${100 / totalCols}%`;
@@ -530,8 +530,8 @@ export default function DrrReportPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                     <XAxis dataKey="label" tick={{ fontSize: 12 }} />
                     <YAxis domain={[0, 'auto']} tick={{ fontSize: 12 }} />
-                    <ReferenceLine y={0.4} stroke="#EF4444" strokeDasharray="5 5">
-                      <Label value="Target 0.4" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 700 }} />
+                    <ReferenceLine y={2} stroke="#EF4444" strokeDasharray="5 5">
+                      <Label value="2" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 700 }} />
                     </ReferenceLine>
                     <Bar
                       dataKey={dpuOffBarDataKey}
