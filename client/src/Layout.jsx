@@ -93,7 +93,8 @@ export default function Layout() {
     location.pathname === '/vrt-report' ||
     location.pathname === '/drr-shift-dashboard' ||
     location.pathname === '/brigade-report' ||
-    location.pathname === '/defect-capture';
+    location.pathname === '/defect-capture' ||
+    location.pathname === '/line-defects-archive';
 
   return (
     <>

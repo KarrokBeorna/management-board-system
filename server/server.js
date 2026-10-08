@@ -13498,52 +13498,75 @@ app.post('/api/line-defects/lookup-vin', async (req, res) => {
   }
 });
 
-/* ============================================================
- * GET /api/line-defects/suggest-parts?model=&q=
- * Автокомплит деталей: справочник + история по модели
- * ============================================================ */
-app.get('/api/line-defects/suggest-parts', async (req, res) => {
+/* GET /api/line-defects?from=&to=&vin=&model=&part_name=&problem_type=&search=&limit=&offset= */
+app.get('/api/line-defects', async (req, res) => {
   try {
-    const model = String(req.query.model || '').trim();
-    const q     = String(req.query.q     || '').trim();
-    if (!model) return res.json([]);
-    const like = `%${q}%`;
+    const {
+      from, to, vin, model, part_name, problem_type,
+      search, limit = 200, offset = 0,
+    } = req.query;
 
-    const [catalog] = await notesPool.query(
-      `SELECT DISTINCT part_name FROM part_defect_shop_mapping
-       WHERE part_name LIKE ? LIMIT 50`,
-      [like]
+    const where = [];
+    const params = [];
+
+    if (from) { where.push('created_at >= ?'); params.push(from); }
+    if (to)   { where.push('created_at <= ?'); params.push(to); }
+    if (vin)  { where.push('vin LIKE ?'); params.push(`%${String(vin).toUpperCase().trim()}%`); }
+    if (model && model !== 'ALL') { where.push('model = ?'); params.push(model); }
+    if (part_name) { where.push('part_name LIKE ?'); params.push(`%${part_name}%`); }
+    if (problem_type) { where.push('problem_type LIKE ?'); params.push(`%${problem_type}%`); }
+    if (search) {
+      where.push('(vin LIKE ? OR model LIKE ? OR part_name LIKE ? OR problem_type LIKE ? OR comment LIKE ?)');
+      const s = `%${search}%`;
+      params.push(s, s, s, s, s);
+    }
+
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const lim = Math.min(Number(limit) || 200, 1000);
+    const off = Math.max(Number(offset) || 0, 0);
+
+    const [[{ total }]] = await notesPool.query(
+      `SELECT COUNT(*) AS total FROM line_defects ${whereSql}`,
+      params
     );
 
-    const [actual] = await pool.query(
-      `SELECT DISTINCT d.PART_NAME AS part_name
-       FROM (
-         SELECT VIN, PART_NAME FROM at_qm_defect_info
-         UNION ALL SELECT VIN, PART_NAME FROM at_biw_qm_defect_info
-         UNION ALL SELECT VIN, PART_NAME FROM at_paint_qm_defect_info
-       ) d
-       JOIN work_order wo ON wo.VIN = d.VIN
-       WHERE wo.MODEL = ?
-         AND d.PART_NAME IS NOT NULL AND TRIM(d.PART_NAME) <> ''
-         AND d.PART_NAME LIKE ?
-       LIMIT 50`,
-      [model, like]
+    const [rows] = await notesPool.query(
+      `SELECT * FROM line_defects ${whereSql}
+       ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      [...params, lim, off]
     );
 
-    const map = new Map();
-    catalog.forEach(r => map.set(r.part_name, { part_name: r.part_name, source: 'catalog' }));
-    actual.forEach(r => {
-      if (!map.has(r.part_name)) {
-        map.set(r.part_name, { part_name: r.part_name, source: 'actual' });
-      }
+    const ids = rows.map(r => r.id);
+    const photosByDefect = {};
+    if (ids.length > 0) {
+      const ph = ids.map(() => '?').join(',');
+      const [phRows] = await notesPool.query(
+        `SELECT id, line_defect_id, filename, mime, file_deleted_at
+         FROM line_defect_photos
+         WHERE line_defect_id IN (${ph})
+         ORDER BY id ASC`,
+        ids
+      );
+      phRows.forEach(p => {
+        const deleted = !!p.file_deleted_at;
+        if (!photosByDefect[p.line_defect_id]) photosByDefect[p.line_defect_id] = [];
+        photosByDefect[p.line_defect_id].push({
+          id: p.id,
+          url: deleted ? null : `/api/line-defects/file/${p.filename}`,
+          mime: p.mime,
+          deleted,
+        });
+      });
+    }
+
+    res.json({
+      items: rows.map(r => ({ ...r, photos: photosByDefect[r.id] || [] })),
+      total,
+      limit: lim,
+      offset: off,
     });
-
-    const list = [...map.values()].sort((a, b) =>
-      a.part_name.localeCompare(b.part_name, 'ru')
-    );
-    res.json(list.slice(0, 30));
   } catch (err) {
-    console.error('[LINE DEFECTS] suggest-parts:', err.message);
+    console.error('[LINE DEFECTS] list:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -13950,6 +13973,55 @@ app.get('/api/line-defects/:id', async (req, res) => {
       }),
     });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+/* GET /api/line-defects/filters — уникальные значения для дропдаунов */
+app.get('/api/line-defects/filters', async (req, res) => {
+  try {
+    const [models] = await notesPool.query(
+      `SELECT model, COUNT(*) AS cnt FROM line_defects
+       WHERE model <> '' GROUP BY model ORDER BY cnt DESC LIMIT 100`
+    );
+    const [parts] = await notesPool.query(
+      `SELECT part_name, COUNT(*) AS cnt FROM line_defects
+       GROUP BY part_name ORDER BY cnt DESC LIMIT 300`
+    );
+    const [problems] = await notesPool.query(
+      `SELECT problem_type, COUNT(*) AS cnt FROM line_defects
+       GROUP BY problem_type ORDER BY cnt DESC LIMIT 300`
+    );
+
+    res.json({
+      models:   models.map(r => r.model),
+      parts:    parts.map(r => r.part_name),
+      problems: problems.map(r => r.problem_type),
+    });
+  } catch (err) {
+    console.error('[LINE DEFECTS] filters:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* GET /api/line-defects/photos-by-session/:client_id
+   Восстановление фото после перезагрузки страницы */
+app.get('/api/line-defects/photos-by-session/:client_id', async (req, res) => {
+  try {
+    const [rows] = await notesPool.query(
+      `SELECT id, filename, mime FROM line_defect_photos
+       WHERE client_id = ? AND line_defect_id IS NULL
+       ORDER BY id ASC`,
+      [req.params.client_id]
+    );
+    res.json(rows.map(p => ({
+      id: p.id,
+      url: `/api/line-defects/file/${p.filename}`,
+      mime: p.mime,
+    })));
+  } catch (err) {
+    console.error('[LINE DEFECTS] photos-by-session:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

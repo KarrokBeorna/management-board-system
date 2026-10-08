@@ -5,7 +5,8 @@ const API_BASE = '';
 const MAX_PHOTOS = 3;
 const MAX_COMMENT = 500;
 const VIN_LEN = 17;
-const VIN_ALLOWED = /[^A-HJ-NPR-Z0-9]/g;  // без I, O, Q — как на сервере
+const VIN_ALLOWED = /[^A-HJ-NPR-Z0-9]/g;
+const STATE_KEY = 'line-defect-capture-state-v1';
 
 /* ================= helpers ================= */
 const isMobileViewport = () => typeof window !== 'undefined' && window.innerWidth < 768;
@@ -28,7 +29,6 @@ const uuid = () => {
   });
 };
 
-// ВАЖНО: режем и I/O/Q, как на сервере
 const sanitizeVin = (s) => String(s || '').toUpperCase().replace(VIN_ALLOWED, '').slice(0, VIN_LEN);
 
 const compressImage = (file, maxW = 1200, quality = 0.75) => new Promise((resolve, reject) => {
@@ -64,17 +64,31 @@ const beep = () => {
     setTimeout(() => { o.stop(); ctx.close(); }, 120);
   } catch {}
 };
-
 const vibrate = (ms = 60) => { try { navigator.vibrate?.(ms); } catch {} };
 
+/* ---------- session state persistence ---------- */
+const loadState = () => {
+  try {
+    const raw = sessionStorage.getItem(STATE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+};
+const saveState = (s) => {
+  try { sessionStorage.setItem(STATE_KEY, JSON.stringify(s)); } catch {}
+};
+const clearState = () => {
+  try { sessionStorage.removeItem(STATE_KEY); } catch {}
+};
+
 /* ================= Autocomplete ================= */
-function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label, allowEmpty = true }) {
+function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label }) {
   const [items, setItems] = useState([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const wrapRef = useRef(null);
   const abortRef = useRef(null);
+  const touchState = useRef({ startY: 0, moved: false });
 
   useEffect(() => {
     if (!fetchUrl) { setItems([]); return; }
@@ -88,27 +102,18 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label,
       try {
         const res = await fetch(fetchUrl, { signal: ctrl.signal });
         const data = await res.json();
-        if (alive) {
-          setItems(Array.isArray(data) ? data : []);
-          setHighlight(0);
-        }
+        if (alive) { setItems(Array.isArray(data) ? data : []); setHighlight(0); }
       } catch (e) {
         if (e.name !== 'AbortError' && alive) setItems([]);
       }
       if (alive) setLoading(false);
     }, 250);
 
-    return () => {
-      alive = false;
-      clearTimeout(t);
-      ctrl.abort();
-    };
+    return () => { alive = false; clearTimeout(t); ctrl.abort(); };
   }, [fetchUrl]);
 
   useEffect(() => {
-    const h = (e) => {
-      if (!wrapRef.current?.contains(e.target)) setOpen(false);
-    };
+    const h = (e) => { if (!wrapRef.current?.contains(e.target)) setOpen(false); };
     document.addEventListener('mousedown', h);
     document.addEventListener('touchstart', h, { passive: true });
     return () => {
@@ -117,13 +122,10 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label,
     };
   }, []);
 
-  const label_ = (it) => it.part_name || it.problem_type || '';
-  const key_ = (it) => label_(it) + (it.source || '');
+  const labelOf = (it) => it.part_name || it.problem_type || '';
+  const keyOf = (it) => labelOf(it) + (it.source || '');
 
-  const pick = (item) => {
-    onChange(label_(item));
-    setOpen(false);
-  };
+  const pick = (it) => { onChange(labelOf(it)); setOpen(false); };
 
   const onKeyDown = (e) => {
     if (!open || items.length === 0) return;
@@ -135,7 +137,7 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label,
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>
-      {label && <div style={{ fontSize: 13, fontWeight: 700, color: '#475569', marginBottom: 6 }}>{label}</div>}
+      {label && <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>{label}</div>}
       <input
         type="text"
         value={value}
@@ -148,40 +150,58 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label,
         autoCorrect="off"
         spellCheck={false}
         style={{
-          width: '100%', padding: '14px 16px', fontSize: 16,
-          borderRadius: 12, border: '1px solid #E2E8F0',
+          width: '100%', padding: '12px 14px', fontSize: 16,
+          borderRadius: 10, border: '1px solid #E2E8F0',
           outline: 'none', background: disabled ? '#F1F5F9' : '#FFFFFF',
           boxSizing: 'border-box',
         }}
       />
       {open && (items.length > 0 || loading) && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30,
-          marginTop: 4, maxHeight: 260, overflowY: 'auto',
-          background: '#FFFFFF', border: '1px solid #E2E8F0',
-          borderRadius: 12, boxShadow: '0 10px 24px rgba(0,0,0,0.08)',
-        }}>
+        <div
+          onTouchStart={(e) => {
+            touchState.current = { startY: e.touches[0].clientY, moved: false };
+          }}
+          onTouchMove={(e) => {
+            if (Math.abs(e.touches[0].clientY - touchState.current.startY) > 8) {
+              touchState.current.moved = true;
+            }
+          }}
+          style={{
+            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30,
+            marginTop: 4, maxHeight: 240, overflowY: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            background: '#FFFFFF', border: '1px solid #E2E8F0',
+            borderRadius: 12, boxShadow: '0 10px 24px rgba(0,0,0,0.08)',
+          }}
+        >
           {loading && <div style={{ padding: 12, color: '#94A3B8', fontSize: 13 }}>Поиск…</div>}
           {!loading && items.map((it, idx) => (
             <div
-              key={key_(it)}
-              onMouseDown={(e) => { e.preventDefault(); pick(it); }}
-              onTouchStart={(e) => { e.preventDefault(); pick(it); }}
+              key={keyOf(it)}
+              onMouseDown={(e) => {
+                if (touchState.current.moved) {
+                  touchState.current.moved = false;
+                  return;
+                }
+                e.preventDefault();
+                pick(it);
+              }}
               onMouseEnter={() => setHighlight(idx)}
               style={{
-                padding: '12px 16px', cursor: 'pointer', fontSize: 15,
+                padding: '12px 14px', cursor: 'pointer', fontSize: 15,
                 borderBottom: '1px solid #F1F5F9',
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 background: idx === highlight ? '#EFF6FF' : '#FFFFFF',
+                minHeight: 44,
               }}
             >
-              <span>{label_(it)}</span>
+              <span>{labelOf(it)}</span>
               {it.source === 'actual' && <span style={{ fontSize: 11, color: '#94A3B8' }}>из истории</span>}
             </div>
           ))}
           {!loading && items.length === 0 && value.trim() && (
             <div style={{ padding: 12, color: '#94A3B8', fontSize: 13 }}>
-              Ничего не найдено для «{value}». Уточните название.
+              Ничего не найдено. Уточните название.
             </div>
           )}
         </div>
@@ -207,7 +227,6 @@ function BarcodeScannerModal({ onClose, onResult }) {
 
     (async () => {
       try {
-        // 1) найти заднюю камеру
         let deviceId = null;
         try {
           const devices = await BrowserMultiFormatReader.listVideoInputDevices();
@@ -215,130 +234,72 @@ function BarcodeScannerModal({ onClose, onResult }) {
           if (back) deviceId = back.deviceId;
         } catch {}
 
-        const controls = await reader.decodeFromVideoDevice(
-          deviceId,
-          videoRef.current,
-          (result, e) => {
-            if (cancelled) return;
-            if (result) {
-              const text = result.getText().trim();
-              const clean = sanitizeVin(text);
-              if (clean.length !== VIN_LEN) {
-                setHint(`Считано «${text.slice(0, 24)}» — это не VIN, продолжаем…`);
-                return;
-              }
-              cancelled = true;
-              try { controls.stop(); } catch {}
-              beep(); vibrate(80);
-              onResult(clean);
+        const controls = await reader.decodeFromVideoDevice(deviceId, videoRef.current, (result) => {
+          if (cancelled) return;
+          if (result) {
+            const text = result.getText().trim();
+            const clean = sanitizeVin(text);
+            if (clean.length !== VIN_LEN) {
+              setHint(`Считано «${text.slice(0, 24)}» — не VIN, продолжаем…`);
+              return;
             }
+            cancelled = true;
+            try { controls.stop(); } catch {}
+            beep(); vibrate(80);
+            onResult(clean);
           }
-        );
+        });
         controlsRef.current = controls;
         setBusy(false);
       } catch (e) {
         const msg = e?.message || '';
-        if (/permission|NotAllowed/i.test(msg)) setErr('Доступ к камере запрещён. Разрешите в настройках браузера.');
-        else if (/secure|https/i.test(msg)) setErr('Камера работает только по HTTPS.');
-        else setErr(msg || 'Не удалось запустить камеру.');
+        if (/permission|NotAllowed/i.test(msg)) setErr('Доступ к камере запрещён');
+        else if (/secure|https/i.test(msg)) setErr('Камера работает только по HTTPS');
+        else setErr(msg || 'Не удалось запустить камеру');
         setBusy(false);
       }
     })();
 
-    return () => {
-      cancelled = true;
-      try { controlsRef.current?.stop(); } catch {}
-    };
+    return () => { cancelled = true; try { controlsRef.current?.stop(); } catch {} };
   }, [onResult]);
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: '#000', zIndex: 9000,
-      display: 'flex', flexDirection: 'column',
-    }}>
+    <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 9000, display: 'flex', flexDirection: 'column' }}>
       <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
-        <video
-          ref={videoRef}
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          muted playsInline autoPlay
-        />
+        <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline autoPlay />
         <div style={{
-          position: 'absolute', inset: '30% 8%',
-          border: '2px solid #22C55E', borderRadius: 12,
-          boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)',
-          pointerEvents: 'none',
+          position: 'absolute', inset: '30% 8%', border: '2px solid #22C55E', borderRadius: 12,
+          boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)', pointerEvents: 'none',
         }} />
         {busy && !err && (
-          <div style={{
-            position: 'absolute', inset: 0, display: 'flex',
-            alignItems: 'center', justifyContent: 'center',
-            color: '#FFF', fontSize: 16, background: 'rgba(0,0,0,0.4)',
-          }}>Запуск камеры…</div>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#FFF', fontSize: 16, background: 'rgba(0,0,0,0.4)' }}>Запуск камеры…</div>
         )}
         {err && (
-          <div style={{
-            position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center',
-            color: '#FFF', padding: 24, textAlign: 'center', background: 'rgba(0,0,0,0.6)',
-          }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#FFF', padding: 24, textAlign: 'center', background: 'rgba(0,0,0,0.6)' }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>⚠️</div>
-            <div style={{ fontSize: 16, marginBottom: 16 }}>{err}</div>
+            <div style={{ fontSize: 16 }}>{err}</div>
           </div>
         )}
         {!busy && !err && (
-          <div style={{
-            position: 'absolute', bottom: 20, left: 0, right: 0,
-            textAlign: 'center', color: '#FFF', fontSize: 14,
-            textShadow: '0 1px 4px rgba(0,0,0,0.8)',
-          }}>{hint}</div>
+          <div style={{ position: 'absolute', bottom: 20, left: 0, right: 0, textAlign: 'center', color: '#FFF', fontSize: 14, textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>{hint}</div>
         )}
       </div>
-      <div style={{ padding: 20, background: '#111', display: 'flex', justifyContent: 'center' }}>
-        <button onClick={onClose} style={{
-          padding: '14px 40px', borderRadius: 12, border: 'none',
-          background: '#374151', color: '#FFF', fontSize: 16, fontWeight: 700, cursor: 'pointer',
-        }}>Отмена</button>
+      <div style={{ padding: 16, background: '#111', display: 'flex', justifyContent: 'center' }}>
+        <button onClick={onClose} style={{ padding: '12px 32px', borderRadius: 12, border: 'none', background: '#374151', color: '#FFF', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>Отмена</button>
       </div>
     </div>
   );
 }
 
-/* ================= Confirm modal ================= */
+/* ================= Confirm ================= */
 function ConfirmModal({ text, onConfirm, onCancel }) {
   return (
-    <div
-      onClick={onCancel}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 9700,
-        background: 'rgba(15,23,42,0.55)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 20,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: '#FFF', borderRadius: 16, padding: 24,
-          maxWidth: 340, width: '100%', textAlign: 'center',
-          boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
-        }}
-      >
-        <div style={{ fontSize: 16, color: '#1E293B', marginBottom: 20 }}>{text}</div>
+    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, zIndex: 9700, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: '#FFF', borderRadius: 16, padding: 22, maxWidth: 320, width: '100%', textAlign: 'center' }}>
+        <div style={{ fontSize: 15, color: '#1E293B', marginBottom: 18 }}>{text}</div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button
-            onClick={onCancel}
-            style={{
-              flex: 1, padding: '12px', borderRadius: 10, border: '1px solid #E2E8F0',
-              background: '#FFF', color: '#475569', fontSize: 15, fontWeight: 700, cursor: 'pointer',
-            }}
-          >Отмена</button>
-          <button
-            onClick={onConfirm}
-            style={{
-              flex: 1, padding: '12px', borderRadius: 10, border: 'none',
-              background: '#DC2626', color: '#FFF', fontSize: 15, fontWeight: 700, cursor: 'pointer',
-            }}
-          >Удалить</button>
+          <button onClick={onCancel} style={{ flex: 1, padding: '11px', borderRadius: 10, border: '1px solid #E2E8F0', background: '#FFF', color: '#475569', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Отмена</button>
+          <button onClick={onConfirm} style={{ flex: 1, padding: '11px', borderRadius: 10, border: 'none', background: '#DC2626', color: '#FFF', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Удалить</button>
         </div>
       </div>
     </div>
@@ -348,30 +309,66 @@ function ConfirmModal({ text, onConfirm, onCancel }) {
 /* ================= Main ================= */
 export default function LineDefectCapturePage() {
   const isMobile = useIsMobile();
+  const boot = loadState();
 
-  const [vin, setVin] = useState('');
+  const [vin, setVin] = useState(boot?.vin || '');
   const [vinCheck, setVinCheck] = useState({ state: 'idle', valid: false, reason: '', model: '' });
   const [scannerOpen, setScannerOpen] = useState(false);
-  const [scannedRaw, setScannedRaw] = useState(null); // сырое значение из сканера
+  const [scannedRaw, setScannedRaw] = useState(boot?.scannedRaw || null);
 
-  const [partName, setPartName] = useState('');
-  const [problemType, setProblemType] = useState('');
+  const [partName, setPartName] = useState(boot?.partName || '');
+  const [problemType, setProblemType] = useState(boot?.problemType || '');
 
-  const [photos, setPhotos] = useState([]);
-  const [comment, setComment] = useState('');
+  const [photos, setPhotos] = useState(boot?.photos || []);
+  const [comment, setComment] = useState(boot?.comment || '');
   const [uploading, setUploading] = useState(false);
   const [lightbox, setLightbox] = useState(null);
   const [confirmPhotoId, setConfirmPhotoId] = useState(null);
-  const [clientId, setClientId] = useState(() => uuid());
+  const [clientId] = useState(() => boot?.clientId || uuid());
 
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(null);
   const [error, setError] = useState(null);
+  const [restored, setRestored] = useState(false);
 
   const fileInputRef = useRef(null);
   const vinAbortRef = useRef(null);
 
-  /* ---------- VIN check: debounce + abort ---------- */
+  /* ---------- восстановление фото сессии с сервера ---------- */
+  useEffect(() => {
+    // если были локально сохранённые фото — проверим, что они ещё валидны на сервере
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/line-defects/photos-by-session/${clientId}`);
+        if (!res.ok) return;
+        const serverPhotos = await res.json();
+        if (Array.isArray(serverPhotos)) {
+          // синхронизируем: берём пересечение (по id)
+          setPhotos(prev => {
+            const localIds = new Set(prev.map(p => p.id));
+            const serverIds = new Set(serverPhotos.map(p => p.id));
+            // оставляем локальные, которых уже нет на сервере (были удалены) — убираем
+            const kept = prev.filter(p => serverIds.has(p.id));
+            // добавляем с сервера те, что не пришли из локального стейта
+            const merged = [...kept];
+            serverPhotos.forEach(sp => {
+              if (!localIds.has(sp.id)) merged.push(sp);
+            });
+            return merged;
+          });
+        }
+      } catch {}
+      setRestored(true);
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ---------- сохранение состояния в sessionStorage ---------- */
+  useEffect(() => {
+    saveState({ vin, partName, problemType, comment, clientId, photos, scannedRaw });
+  }, [vin, partName, problemType, comment, clientId, photos, scannedRaw]);
+
+  /* ---------- VIN check ---------- */
   useEffect(() => {
     const clean = sanitizeVin(vin);
     if (clean.length !== VIN_LEN) {
@@ -381,12 +378,9 @@ export default function LineDefectCapturePage() {
       });
       return;
     }
-
-    // abort предыдущий запрос
     if (vinAbortRef.current) vinAbortRef.current.abort();
     const ctrl = new AbortController();
     vinAbortRef.current = ctrl;
-
     setVinCheck({ state: 'checking', valid: false, reason: '', model: '' });
 
     const t = setTimeout(async () => {
@@ -398,17 +392,12 @@ export default function LineDefectCapturePage() {
           signal: ctrl.signal,
         });
         const data = await res.json();
-        if (data.valid) {
-          setVinCheck({ state: 'ok', valid: true, reason: '', model: data.model });
-        } else {
-          setVinCheck({ state: 'err', valid: false, reason: data.reason || 'Не найден', model: '' });
-        }
+        if (data.valid) setVinCheck({ state: 'ok', valid: true, reason: '', model: data.model });
+        else setVinCheck({ state: 'err', valid: false, reason: data.reason || 'Не найден', model: '' });
       } catch (e) {
-        if (e.name !== 'AbortError') {
-          setVinCheck({ state: 'err', valid: false, reason: e.message, model: '' });
-        }
+        if (e.name !== 'AbortError') setVinCheck({ state: 'err', valid: false, reason: e.message, model: '' });
       }
-    }, 350); // debounce
+    }, 350);
 
     return () => clearTimeout(t);
   }, [vin]);
@@ -442,7 +431,6 @@ export default function LineDefectCapturePage() {
   };
 
   const confirmRemove = (id) => setConfirmPhotoId(id);
-
   const doRemove = async () => {
     const id = confirmPhotoId;
     setConfirmPhotoId(null);
@@ -487,6 +475,7 @@ export default function LineDefectCapturePage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка отправки');
       beep();
+      clearState();
       setDone({ id: json.id, vin, partName, problemType, dup: json.duplicate });
     } catch (e) {
       setError(e.message);
@@ -496,23 +485,24 @@ export default function LineDefectCapturePage() {
   };
 
   const reset = () => {
+    clearState();
     setVin(''); setVinCheck({ state: 'idle', valid: false, reason: '', model: '' });
     setScannedRaw(null);
     setPartName(''); setProblemType('');
     setPhotos([]); setComment('');
-    setClientId(uuid());
     setDone(null); setError(null);
   };
 
   /* ---------- styles ---------- */
   const cardStyle = {
-    background: '#FFFFFF', borderRadius: 16, padding: isMobile ? 20 : 28,
-    boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #F1F5F9',
-    marginBottom: 16,
+    background: '#FFFFFF', borderRadius: 14, padding: isMobile ? 14 : 22,
+    boxShadow: '0 3px 12px rgba(0,0,0,0.05)', border: '1px solid #F1F5F9',
+    marginBottom: 12,
   };
   const bigButton = {
-    width: '100%', padding: '16px 20px', fontSize: 18, fontWeight: 800,
-    borderRadius: 14, border: 'none', cursor: 'pointer',
+    width: '100%', padding: isMobile ? '14px 16px' : '16px 20px',
+    fontSize: isMobile ? 16 : 18, fontWeight: 800,
+    borderRadius: 12, border: 'none', cursor: 'pointer',
     background: '#2563EB', color: '#FFFFFF',
     boxShadow: '0 6px 14px rgba(37,99,235,0.3)',
   };
@@ -520,60 +510,54 @@ export default function LineDefectCapturePage() {
     ...bigButton, background: '#F1F5F9', color: '#1E293B',
     boxShadow: 'none', border: '1px solid #E2E8F0',
   };
+  const stepLabel = {
+    fontSize: 11, fontWeight: 800, color: '#94A3B8',
+    textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5,
+  };
 
-  /* ---------- DONE ---------- */
   if (done) {
     return (
-      <div style={{ padding: 20, maxWidth: 640, margin: '0 auto', fontFamily: 'Inter, Arial, sans-serif' }}>
-        <div style={{ ...cardStyle, textAlign: 'center', padding: 40 }}>
-          <div style={{ fontSize: 72, marginBottom: 12 }}>✅</div>
-          <h2 style={{ margin: '0 0 12px', color: '#166534' }}>
+      <div style={{ padding: isMobile ? 12 : 20, maxWidth: 640, margin: '0 auto', fontFamily: 'Inter, Arial, sans-serif' }}>
+        <div style={{ ...cardStyle, textAlign: 'center', padding: isMobile ? 24 : 40 }}>
+          <div style={{ fontSize: 56, marginBottom: 8 }}>✅</div>
+          <h2 style={{ margin: '0 0 10px', color: '#166534', fontSize: 20 }}>
             {done.dup ? 'Дефект уже был сохранён' : 'Дефект сохранён'}
           </h2>
-          <div style={{ color: '#475569', fontSize: 15, marginBottom: 24, lineHeight: 1.6 }}>
+          <div style={{ color: '#475569', fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>
             <div><b>VIN:</b> {done.vin}</div>
             <div><b>Деталь:</b> {done.partName}</div>
             <div><b>Дефект:</b> {done.problemType}</div>
-            <div style={{ marginTop: 8, fontSize: 13, color: '#94A3B8' }}>ID записи: {done.id}</div>
           </div>
-          <button onClick={reset} style={bigButton}>Зафиксировать следующий дефект</button>
+          <button onClick={reset} style={bigButton}>Зафиксировать следующий</button>
         </div>
       </div>
     );
   }
 
-  const canSubmit = vinCheck.valid
-    && partName.trim()
-    && problemType.trim()
-    && photos.length > 0
-    && !submitting;
+  const canSubmit = vinCheck.valid && partName.trim() && problemType.trim() && photos.length > 0 && !submitting;
 
-  /* ---------- MAIN ---------- */
   return (
     <div style={{
-      padding: isMobile ? 12 : 24,
-      maxWidth: 720, margin: '0 auto',
+      padding: isMobile ? 10 : 20,
+      maxWidth: 640, margin: '0 auto',
       fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
       minHeight: '100vh', background: '#F8FAFC',
     }}>
-      <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 900, color: '#0F172A', margin: '8px 0 20px' }}>
+      <h1 style={{ fontSize: isMobile ? 18 : 24, fontWeight: 900, color: '#0F172A', margin: '4px 0 12px' }}>
         Фиксация дефекта
       </h1>
 
-      {/* ---- Шаг 1 ---- */}
+      {/* Шаг 1 */}
       <div style={cardStyle}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', marginBottom: 10 }}>
-          Шаг 1 — VIN
-        </div>
+        <div style={stepLabel}>Шаг 1 — VIN</div>
         <input
           value={vin}
           onChange={(e) => { setVin(sanitizeVin(e.target.value)); setScannedRaw(null); }}
           onPaste={(e) => {
             e.preventDefault();
-            const pasted = e.clipboardData.getData('text');
-            setVin(sanitizeVin(pasted));
+            setVin(sanitizeVin(e.clipboardData.getData('text')));
           }}
-          placeholder="17 символов, например EDXDB21B7TG044448"
+          placeholder="17 символов"
           maxLength={VIN_LEN}
           inputMode="text"
           autoComplete="off"
@@ -581,10 +565,10 @@ export default function LineDefectCapturePage() {
           autoCapitalize="characters"
           spellCheck={false}
           style={{
-            width: '100%', padding: '14px 16px', fontSize: 16,
-            borderRadius: 12, border: '1px solid #E2E8F0',
-            outline: 'none', fontFamily: 'monospace', letterSpacing: '1px',
-            boxSizing: 'border-box', marginBottom: 12,
+            width: '100%', padding: '12px 14px', fontSize: 16,
+            borderRadius: 10, border: '1px solid #E2E8F0',
+            outline: 'none', fontFamily: 'monospace', letterSpacing: '0.5px',
+            boxSizing: 'border-box', marginBottom: 10,
           }}
         />
         <button
@@ -594,45 +578,45 @@ export default function LineDefectCapturePage() {
           📷 Сканировать штрихкод
         </button>
 
-        <div style={{
-          marginTop: 12, padding: '12px 14px', borderRadius: 10,
-          background:
-            vinCheck.state === 'ok' ? '#ECFDF5' :
-            vinCheck.state === 'err' ? '#FEF2F2' :
-            vinCheck.state === 'checking' ? '#F1F5F9' : 'transparent',
-          color:
-            vinCheck.state === 'ok' ? '#166534' :
-            vinCheck.state === 'err' ? '#991B1B' : '#475569',
-          fontSize: 14,
-          border: vinCheck.state === 'ok' ? '1px solid #A7F3D0'
-                : vinCheck.state === 'err' ? '1px solid #FECACA'
-                : 'none',
-        }}>
-          {vinCheck.state === 'ok' && <>✔ Модель: <b>{vinCheck.model}</b>{scannedRaw && ' · считано сканером'}</>}
-          {vinCheck.state === 'err' && <>✖ {vinCheck.reason}</>}
-          {vinCheck.state === 'checking' && <>⏳ Проверка…</>}
-          {vinCheck.state === 'idle' && vinCheck.reason && <>· {vinCheck.reason}</>}
-        </div>
+        {(vinCheck.state !== 'idle' || vinCheck.reason) && (
+          <div style={{
+            marginTop: 10, padding: '10px 12px', borderRadius: 10,
+            background:
+              vinCheck.state === 'ok' ? '#ECFDF5' :
+              vinCheck.state === 'err' ? '#FEF2F2' :
+              vinCheck.state === 'checking' ? '#F1F5F9' : 'transparent',
+            color:
+              vinCheck.state === 'ok' ? '#166534' :
+              vinCheck.state === 'err' ? '#991B1B' : '#475569',
+            fontSize: 13,
+            border: vinCheck.state === 'ok' ? '1px solid #A7F3D0'
+                  : vinCheck.state === 'err' ? '1px solid #FECACA'
+                  : 'none',
+          }}>
+            {vinCheck.state === 'ok' && <>✔ Модель: <b>{vinCheck.model}</b>{scannedRaw && ' · сканер'}</>}
+            {vinCheck.state === 'err' && <>✖ {vinCheck.reason}</>}
+            {vinCheck.state === 'checking' && <>⏳ Проверка…</>}
+            {vinCheck.state === 'idle' && vinCheck.reason && <>· {vinCheck.reason}</>}
+          </div>
+        )}
       </div>
 
-      {/* ---- Шаг 2 ---- */}
+      {/* Шаг 2 */}
       <div style={{ ...cardStyle, opacity: vinCheck.valid ? 1 : 0.5, pointerEvents: vinCheck.valid ? 'auto' : 'none' }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', marginBottom: 10 }}>
-          Шаг 2 — Что и где
-        </div>
+        <div style={stepLabel}>Шаг 2 — Что и где</div>
 
         <Autocomplete
           label="Деталь"
           value={partName}
           onChange={(v) => { setPartName(v); if (problemType) setProblemType(''); }}
-          placeholder="Начните вводить название детали"
+          placeholder="Начните вводить название"
           fetchUrl={vinCheck.valid && vinCheck.model
             ? `${API_BASE}/api/line-defects/suggest-parts?model=${encodeURIComponent(vinCheck.model)}&q=${encodeURIComponent(partName)}`
             : null}
           disabled={!vinCheck.valid}
         />
 
-        <div style={{ height: 16 }} />
+        <div style={{ height: 12 }} />
 
         <Autocomplete
           label="Дефект"
@@ -646,15 +630,13 @@ export default function LineDefectCapturePage() {
         />
       </div>
 
-      {/* ---- Шаг 3 ---- */}
+      {/* Шаг 3 */}
       <div style={cardStyle}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', marginBottom: 10 }}>
-          Шаг 3 — Фото и комментарий
-        </div>
+        <div style={stepLabel}>Шаг 3 — Фото и комментарий</div>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {photos.map(p => (
-            <div key={p.id} style={{ position: 'relative', width: 100, height: 100 }}>
+            <div key={p.id} style={{ position: 'relative', width: isMobile ? 84 : 100, height: isMobile ? 84 : 100 }}>
               <img
                 src={`${API_BASE}${p.url}`}
                 alt=""
@@ -667,9 +649,9 @@ export default function LineDefectCapturePage() {
               <button
                 onClick={() => confirmRemove(p.id)}
                 style={{
-                  position: 'absolute', top: -6, right: -6, width: 26, height: 26,
+                  position: 'absolute', top: -6, right: -6, width: 24, height: 24,
                   borderRadius: '50%', border: 'none', background: '#DC2626',
-                  color: '#FFF', fontWeight: 800, cursor: 'pointer',
+                  color: '#FFF', fontWeight: 800, cursor: 'pointer', fontSize: 12,
                 }}
               >×</button>
             </div>
@@ -679,9 +661,9 @@ export default function LineDefectCapturePage() {
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
               style={{
-                width: 100, height: 100, borderRadius: 10,
+                width: isMobile ? 84 : 100, height: isMobile ? 84 : 100, borderRadius: 10,
                 border: '2px dashed #CBD5E1', background: '#F8FAFC', color: '#64748B',
-                fontSize: 32, cursor: uploading ? 'wait' : 'pointer',
+                fontSize: 28, cursor: uploading ? 'wait' : 'pointer',
               }}
             >{uploading ? '…' : '+'}</button>
           )}
@@ -700,35 +682,35 @@ export default function LineDefectCapturePage() {
           />
         </div>
 
-        <div style={{ marginTop: 8, fontSize: 12, color: '#94A3B8' }}>
-          {photos.length} / {MAX_PHOTOS} фото · сжатие автоматическое
+        <div style={{ marginTop: 6, fontSize: 11, color: '#94A3B8' }}>
+          {photos.length} / {MAX_PHOTOS} фото
         </div>
 
-        <div style={{ height: 16 }} />
+        <div style={{ height: 12 }} />
 
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
           Комментарий (необязательно)
         </div>
         <textarea
           value={comment}
           onChange={(e) => setComment(e.target.value.slice(0, MAX_COMMENT))}
-          rows={3}
-          placeholder="Например: глубокая царапина, требуется покраска"
+          rows={2}
+          placeholder="Комментарий…"
           style={{
-            width: '100%', padding: 12, fontSize: 15, borderRadius: 12,
+            width: '100%', padding: 10, fontSize: 15, borderRadius: 10,
             border: '1px solid #E2E8F0', outline: 'none', resize: 'vertical',
             fontFamily: 'inherit', boxSizing: 'border-box',
           }}
         />
-        <div style={{ textAlign: 'right', fontSize: 11, color: '#94A3B8' }}>
+        <div style={{ textAlign: 'right', fontSize: 10, color: '#94A3B8' }}>
           {comment.length}/{MAX_COMMENT}
         </div>
       </div>
 
       {error && (
         <div style={{
-          padding: 14, background: '#FEF2F2', color: '#991B1B',
-          borderRadius: 12, marginBottom: 12, fontSize: 14, border: '1px solid #FECACA',
+          padding: 12, background: '#FEF2F2', color: '#991B1B',
+          borderRadius: 10, marginBottom: 10, fontSize: 13, border: '1px solid #FECACA',
         }}>⚠ {error}</div>
       )}
 
@@ -745,39 +727,14 @@ export default function LineDefectCapturePage() {
       </button>
 
       {lightbox && (
-        <div
-          onClick={() => setLightbox(null)}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 9500,
-            background: 'rgba(15,23,42,0.9)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 20,
-          }}
-        >
-          <img
-            src={lightbox}
-            alt=""
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 12 }}
-          />
-          <button
-            onClick={() => setLightbox(null)}
-            style={{
-              position: 'fixed', top: 20, right: 24,
-              width: 44, height: 44, borderRadius: '50%',
-              border: 'none', background: 'rgba(255,255,255,0.15)',
-              color: '#FFF', fontSize: 24, cursor: 'pointer',
-            }}
-          >×</button>
+        <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, zIndex: 9500, background: 'rgba(15,23,42,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <img src={lightbox} alt="" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 12 }} />
+          <button onClick={() => setLightbox(null)} style={{ position: 'fixed', top: 16, right: 16, width: 40, height: 40, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,0.15)', color: '#FFF', fontSize: 22, cursor: 'pointer' }}>×</button>
         </div>
       )}
 
       {confirmPhotoId && (
-        <ConfirmModal
-          text="Удалить это фото?"
-          onConfirm={doRemove}
-          onCancel={() => setConfirmPhotoId(null)}
-        />
+        <ConfirmModal text="Удалить это фото?" onConfirm={doRemove} onCancel={() => setConfirmPhotoId(null)} />
       )}
 
       {scannerOpen && (
