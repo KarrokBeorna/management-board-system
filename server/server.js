@@ -3462,11 +3462,20 @@ app.get('/api/daily-dashboard-week', async (req, res) => {
       const [defRows] = await pool.query(`
         SELECT COUNT(*) AS DEFECTS
         FROM (
-          SELECT VIN FROM at_biw_qm_defect_info   WHERE VIN IN (${ph}) AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 ${shiftDefectsCond}
+          SELECT VIN FROM at_biw_qm_defect_info   
+            WHERE VIN IN (${ph}) 
+              AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+              ${shiftDefectsCond}
           UNION ALL
-          SELECT VIN FROM at_paint_qm_defect_info WHERE VIN IN (${ph}) AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 ${shiftDefectsCond}
+          SELECT VIN FROM at_paint_qm_defect_info 
+            WHERE VIN IN (${ph}) 
+              AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+              ${shiftDefectsCond}
           UNION ALL
-          SELECT VIN FROM at_qm_defect_info       WHERE VIN IN (${ph}) AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 ${shiftDefectsCond}
+          SELECT VIN FROM at_qm_defect_info       
+            WHERE VIN IN (${ph}) 
+              AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+              ${shiftDefectsCond}
         ) t
       `, [...vins, ...vins, ...vins]);
 
@@ -3542,11 +3551,20 @@ app.get('/api/daily-dashboard-week', async (req, res) => {
       const [weekDefOffRows] = await pool.query(`
         SELECT COUNT(*) AS DEFECTS
         FROM (
-          SELECT VIN FROM at_biw_qm_defect_info   WHERE VIN IN (${ph}) AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 ${shiftDefectsCond}
+          SELECT VIN FROM at_biw_qm_defect_info   
+            WHERE VIN IN (${ph}) 
+              AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+              ${shiftDefectsCond}
           UNION ALL
-          SELECT VIN FROM at_paint_qm_defect_info WHERE VIN IN (${ph}) AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 ${shiftDefectsCond}
+          SELECT VIN FROM at_paint_qm_defect_info 
+            WHERE VIN IN (${ph}) 
+              AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+              ${shiftDefectsCond}
           UNION ALL
-          SELECT VIN FROM at_qm_defect_info       WHERE VIN IN (${ph}) AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 ${shiftDefectsCond}
+          SELECT VIN FROM at_qm_defect_info       
+            WHERE VIN IN (${ph}) 
+              AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+              ${shiftDefectsCond}
         ) t
       `, [...weekCpFinalVins, ...weekCpFinalVins, ...weekCpFinalVins]);
       const weekDefectsOff = Number(weekDefOffRows?.[0]?.DEFECTS) || 0;
