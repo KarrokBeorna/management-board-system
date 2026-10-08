@@ -2062,8 +2062,11 @@ app.get('/api/mpp-weekly-top', async (req, res) => {
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
     let typeCondition = '';
-    if (type === 'offline') typeCondition = ' AND QM_DEF.S_OFFLINE = 1';
-    else if (type === 'online') typeCondition = ' AND QM_DEF.S_OFFLINE = 0';
+    if (type === 'offline') {
+      typeCondition = " AND (QM_DEF.S_OFFLINE = 1 OR QM_DEF.PROBLEM_TYPE = 'Отсутствие')";
+    } else if (type === 'online') {
+      typeCondition = " AND QM_DEF.S_OFFLINE = 0 AND QM_DEF.PROBLEM_TYPE <> 'Отсутствие'";
+    }
 
     const params = [dateFrom, dateTo];
     let modelCondition = '';
@@ -2177,7 +2180,7 @@ app.get('/api/mpp-vins', async (req, res) => {
       return res.status(400).json({ error: 'partName, problemType, dateFrom, dateTo обязательны' });
     }
 
-    let where = `QM_DEF.PART_NAME = ? AND QM_DEF.PROBLEM_TYPE = ? AND QM_DEF.S_OFFLINE = 1 AND QM_DEF.CREATION_DATE BETWEEN ? AND ?`;
+    let where = `QM_DEF.PART_NAME = ? AND QM_DEF.PROBLEM_TYPE = ? AND (QM_DEF.S_OFFLINE = 1 OR QM_DEF.PROBLEM_TYPE = 'Отсутствие') AND QM_DEF.CREATION_DATE BETWEEN ? AND ?`;
     const params = [partName, problemType, dateFrom, dateTo];
 
     if (model && model !== 'ALL') {
@@ -2325,7 +2328,7 @@ app.get('/api/mpp-remzone-duration', async (req, res) => {
       ) QM_DEF
       JOIN work_order wo ON wo.VIN = QM_DEF.VIN
       WHERE QM_DEF.POST_NAME IN (${postListStr})
-        AND QM_DEF.S_OFFLINE = 1
+        AND (QM_DEF.S_OFFLINE = 1 OR QM_DEF.PROBLEM_TYPE = 'Отсутствие')
         AND QM_DEF.CREATION_DATE BETWEEN ? AND ?
         ${modelCondition}
         AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
@@ -2515,7 +2518,7 @@ app.get('/api/mpp-drr-analytics', async (req, res) => {
       ) QM_DEF
       JOIN work_order wo ON wo.VIN = QM_DEF.VIN
       WHERE QM_DEF.POST_NAME IN (${defectPostListStr})
-        AND QM_DEF.S_OFFLINE = 1
+        AND (QM_DEF.S_OFFLINE = 1 OR QM_DEF.PROBLEM_TYPE = 'Отсутствие')
         AND QM_DEF.CREATION_DATE BETWEEN ? AND ?
         ${modelCondition}
         AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''
@@ -2697,7 +2700,7 @@ app.get('/api/mpp-defect-trend', async (req, res) => {
       WHERE QM_DEF.PART_NAME = ? 
         AND QM_DEF.PROBLEM_TYPE = ?
         AND wo.MODEL = ?
-        AND QM_DEF.S_OFFLINE = 1
+        AND (QM_DEF.S_OFFLINE = 1 OR QM_DEF.PROBLEM_TYPE = 'Отсутствие')
         AND QM_DEF.POST_NAME IN (${postListStr})
         ${dateCondition}
       GROUP BY period
@@ -3647,7 +3650,7 @@ app.get('/api/daily-dashboard-top3', async (req, res) => {
         FROM at_qm_defect_info
       ) d
       JOIN work_order wo ON wo.VIN = d.VIN
-      WHERE d.POST_NAME IN (${postListStr}) AND d.OFFLINE = 1
+      WHERE d.POST_NAME IN (${postListStr}) AND (d.OFFLINE = 1 OR d.PROBLEM_TYPE = 'Отсутствие')
         AND DATE(d.CREATION_TIME) BETWEEN ? AND ?
       GROUP BY DEFECT
       ORDER BY CNT DESC
@@ -3683,7 +3686,7 @@ app.get('/api/daily-dashboard-top5', async (req, res) => {
     const allCpPosts = [...cp7Posts, ...cp8Posts];
     const postListStr = allCpPosts.map(p => `'${p}'`).join(',');
 
-    let where = `WHERE d.POST_NAME IN (${postListStr}) AND d.OFFLINE = 1 AND DATE(d.CREATION_TIME) BETWEEN ? AND ?`;
+    let where = `WHERE d.POST_NAME IN (${postListStr}) AND (d.OFFLINE = 1 OR d.PROBLEM_TYPE = 'Отсутствие') AND DATE(d.CREATION_TIME) BETWEEN ? AND ?`;
     const params = [startDate, endDate];
 
     if (grades) {
@@ -3755,7 +3758,7 @@ app.get('/api/daily-dashboard-week-top3', async (req, res) => {
       ) d
       JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.POST_NAME IN (${postListStr})
-        AND d.OFFLINE = 1
+        AND (d.OFFLINE = 1 OR d.PROBLEM_TYPE = 'Отсутствие')
         AND DATE(d.CREATION_TIME) BETWEEN ? AND ?
         ${shiftCond}
       GROUP BY DEFECT
