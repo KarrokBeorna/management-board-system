@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, useLocation, Link } from 'react-router-dom';
 import logo from './assets/logo.png';
 import homeIcon from './assets/home.png';
@@ -11,14 +11,16 @@ const headerStyle = {
   justifyContent: 'space-between',
   color: 'white',
   fontWeight: 'bold',
-  fontSize: '24px',
-  padding: '0 20px',
+  fontSize: '20px',
+  padding: '0 16px',
+  gap: '10px',
 };
 
 const leftGroupStyle = {
   display: 'flex',
   alignItems: 'center',
   gap: '10px',
+  minWidth: 0,
 };
 
 const homeIconStyle = {
@@ -35,6 +37,7 @@ const logoStyle = {
 const dateStyle = {
   fontSize: '14px',
   fontWeight: 'normal',
+  whiteSpace: 'nowrap',
 };
 
 function getCurrentDate() {
@@ -53,32 +56,44 @@ const mainFullScreen = {
   height: 'calc(100vh - 60px)',
 };
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false
+  );
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+  return isMobile;
+}
+
 export default function Layout() {
   const location = useLocation();
-  const isFullScreen = 
-  location.pathname === '/report' || 
-  location.pathname === '/daily-top' || 
-  location.pathname === '/model-status' || 
-  location.pathname === '/checkpoint-map' || 
-  location.pathname === '/warranty' || 
-  location.pathname === '/tl-map' || 
-  location.pathname === '/drr-cp7-dashboard' || 
-  location.pathname === '/drr-cp8-dashboard' || 
-  location.pathname === '/drr-tl-dashboard' || 
-  location.pathname === '/drr-pip-dashboard' || 
-  location.pathname === '/remzone-work-status' ||
-  location.pathname === '/vehicle-on-wheels' ||
-  location.pathname === '/drr-wt-portal-old' ||
-  location.pathname === '/drr-wt-portal' ||
-  location.pathname === '/drr-cp6' ||
-  location.pathname === '/drr-cp5' ||
-  location.pathname === '/all-drr-dashboard' ||
-  location.pathname === '/vrt-report' ||
-  location.pathname === '/drr-shift-dashboard' ||
-  location.pathname === '/brigade-report';
+  const isMobile = useIsMobile();
 
-
-
+  const isFullScreen =
+    location.pathname === '/report' ||
+    location.pathname === '/daily-top' ||
+    location.pathname === '/model-status' ||
+    location.pathname === '/checkpoint-map' ||
+    location.pathname === '/warranty' ||
+    location.pathname === '/tl-map' ||
+    location.pathname === '/drr-cp7-dashboard' ||
+    location.pathname === '/drr-cp8-dashboard' ||
+    location.pathname === '/drr-tl-dashboard' ||
+    location.pathname === '/drr-pip-dashboard' ||
+    location.pathname === '/remzone-work-status' ||
+    location.pathname === '/vehicle-on-wheels' ||
+    location.pathname === '/drr-wt-portal-old' ||
+    location.pathname === '/drr-wt-portal' ||
+    location.pathname === '/drr-cp6' ||
+    location.pathname === '/drr-cp5' ||
+    location.pathname === '/all-drr-dashboard' ||
+    location.pathname === '/vrt-report' ||
+    location.pathname === '/drr-shift-dashboard' ||
+    location.pathname === '/brigade-report' ||
+    location.pathname === '/defect-capture';
 
   return (
     <>
@@ -87,9 +102,9 @@ export default function Layout() {
           <Link to="/" title="На главную">
             <img src={homeIcon} alt="Home" style={homeIconStyle} />
           </Link>
-          <img src={logo} alt="Logo" style={logoStyle} />
+          {!isMobile && <img src={logo} alt="Logo" style={logoStyle} />}
         </div>
-        <span>AGM - Quality</span>
+        {!isMobile && <span>AGM - Quality</span>}
         <span style={dateStyle}>{getCurrentDate()}</span>
       </header>
       <main style={isFullScreen ? mainFullScreen : mainDefault}>

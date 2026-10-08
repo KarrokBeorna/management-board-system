@@ -32,6 +32,7 @@ import DrrCp5Page from './DrrCp5Page';
 import AllDrrDashboardPage from './AllDrrDashboardPage';
 import VrtReportPage from './VrtReportPage';
 import DrrShiftDashboardPage from './DrrShiftDashboardPage';
+import LineDefectCapturePage from './LineDefectCapturePage';
 
 export default function App() {
   return (
@@ -67,6 +68,7 @@ export default function App() {
         <Route path="/all-drr-dashboard" element={<AllDrrDashboardPage />} />
         <Route path="/vrt-report" element={<VrtReportPage />} />
         <Route path="/drr-shift-dashboard" element={<DrrShiftDashboardPage />} />
+        <Route path="/defect-capture" element={<LineDefectCapturePage />} />
       </Route>
     </Routes>
   );

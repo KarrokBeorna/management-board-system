@@ -1,0 +1,795 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { BrowserMultiFormatReader } from '@zxing/browser';
+
+const API_BASE = '';
+const MAX_PHOTOS = 3;
+const MAX_COMMENT = 500;
+const VIN_LEN = 17;
+const VIN_ALLOWED = /[^A-HJ-NPR-Z0-9]/g;  // без I, O, Q — как на сервере
+
+/* ================= helpers ================= */
+const isMobileViewport = () => typeof window !== 'undefined' && window.innerWidth < 768;
+const useIsMobile = () => {
+  const [mob, setMob] = useState(isMobileViewport());
+  useEffect(() => {
+    const h = () => setMob(isMobileViewport());
+    window.addEventListener('resize', h);
+    return () => window.removeEventListener('resize', h);
+  }, []);
+  return mob;
+};
+
+const uuid = () => {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
+// ВАЖНО: режем и I/O/Q, как на сервере
+const sanitizeVin = (s) => String(s || '').toUpperCase().replace(VIN_ALLOWED, '').slice(0, VIN_LEN);
+
+const compressImage = (file, maxW = 1200, quality = 0.75) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      } catch (e) { reject(e); }
+    };
+    img.onerror = reject;
+    img.src = ev.target.result;
+  };
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
+
+const beep = () => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 880;
+    g.gain.value = 0.15;
+    o.start();
+    setTimeout(() => { o.stop(); ctx.close(); }, 120);
+  } catch {}
+};
+
+const vibrate = (ms = 60) => { try { navigator.vibrate?.(ms); } catch {} };
+
+/* ================= Autocomplete ================= */
+function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label, allowEmpty = true }) {
+  const [items, setItems] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const wrapRef = useRef(null);
+  const abortRef = useRef(null);
+
+  useEffect(() => {
+    if (!fetchUrl) { setItems([]); return; }
+    if (abortRef.current) abortRef.current.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    let alive = true;
+    setLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(fetchUrl, { signal: ctrl.signal });
+        const data = await res.json();
+        if (alive) {
+          setItems(Array.isArray(data) ? data : []);
+          setHighlight(0);
+        }
+      } catch (e) {
+        if (e.name !== 'AbortError' && alive) setItems([]);
+      }
+      if (alive) setLoading(false);
+    }, 250);
+
+    return () => {
+      alive = false;
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [fetchUrl]);
+
+  useEffect(() => {
+    const h = (e) => {
+      if (!wrapRef.current?.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', h);
+    document.addEventListener('touchstart', h, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', h);
+      document.removeEventListener('touchstart', h);
+    };
+  }, []);
+
+  const label_ = (it) => it.part_name || it.problem_type || '';
+  const key_ = (it) => label_(it) + (it.source || '');
+
+  const pick = (item) => {
+    onChange(label_(item));
+    setOpen(false);
+  };
+
+  const onKeyDown = (e) => {
+    if (!open || items.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => Math.min(h + 1, items.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(h => Math.max(h - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); pick(items[highlight]); }
+    else if (e.key === 'Escape') setOpen(false);
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>
+      {label && <div style={{ fontSize: 13, fontWeight: 700, color: '#475569', marginBottom: 6 }}>{label}</div>}
+      <input
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={onKeyDown}
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        style={{
+          width: '100%', padding: '14px 16px', fontSize: 16,
+          borderRadius: 12, border: '1px solid #E2E8F0',
+          outline: 'none', background: disabled ? '#F1F5F9' : '#FFFFFF',
+          boxSizing: 'border-box',
+        }}
+      />
+      {open && (items.length > 0 || loading) && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30,
+          marginTop: 4, maxHeight: 260, overflowY: 'auto',
+          background: '#FFFFFF', border: '1px solid #E2E8F0',
+          borderRadius: 12, boxShadow: '0 10px 24px rgba(0,0,0,0.08)',
+        }}>
+          {loading && <div style={{ padding: 12, color: '#94A3B8', fontSize: 13 }}>Поиск…</div>}
+          {!loading && items.map((it, idx) => (
+            <div
+              key={key_(it)}
+              onMouseDown={(e) => { e.preventDefault(); pick(it); }}
+              onTouchStart={(e) => { e.preventDefault(); pick(it); }}
+              onMouseEnter={() => setHighlight(idx)}
+              style={{
+                padding: '12px 16px', cursor: 'pointer', fontSize: 15,
+                borderBottom: '1px solid #F1F5F9',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                background: idx === highlight ? '#EFF6FF' : '#FFFFFF',
+              }}
+            >
+              <span>{label_(it)}</span>
+              {it.source === 'actual' && <span style={{ fontSize: 11, color: '#94A3B8' }}>из истории</span>}
+            </div>
+          ))}
+          {!loading && items.length === 0 && value.trim() && (
+            <div style={{ padding: 12, color: '#94A3B8', fontSize: 13 }}>
+              Ничего не найдено для «{value}». Уточните название.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================= Scanner ================= */
+function BarcodeScannerModal({ onClose, onResult }) {
+  const videoRef = useRef(null);
+  const controlsRef = useRef(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(true);
+  const [hint, setHint] = useState('Наведите камеру на штрихкод');
+
+  useEffect(() => {
+    let cancelled = false;
+    const reader = new BrowserMultiFormatReader(undefined, {
+      delayBetweenScanAttempts: 120,
+      tryPlayVideoTimeout: 8000,
+    });
+
+    (async () => {
+      try {
+        // 1) найти заднюю камеру
+        let deviceId = null;
+        try {
+          const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+          const back = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
+          if (back) deviceId = back.deviceId;
+        } catch {}
+
+        const controls = await reader.decodeFromVideoDevice(
+          deviceId,
+          videoRef.current,
+          (result, e) => {
+            if (cancelled) return;
+            if (result) {
+              const text = result.getText().trim();
+              const clean = sanitizeVin(text);
+              if (clean.length !== VIN_LEN) {
+                setHint(`Считано «${text.slice(0, 24)}» — это не VIN, продолжаем…`);
+                return;
+              }
+              cancelled = true;
+              try { controls.stop(); } catch {}
+              beep(); vibrate(80);
+              onResult(clean);
+            }
+          }
+        );
+        controlsRef.current = controls;
+        setBusy(false);
+      } catch (e) {
+        const msg = e?.message || '';
+        if (/permission|NotAllowed/i.test(msg)) setErr('Доступ к камере запрещён. Разрешите в настройках браузера.');
+        else if (/secure|https/i.test(msg)) setErr('Камера работает только по HTTPS.');
+        else setErr(msg || 'Не удалось запустить камеру.');
+        setBusy(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      try { controlsRef.current?.stop(); } catch {}
+    };
+  }, [onResult]);
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: '#000', zIndex: 9000,
+      display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
+        <video
+          ref={videoRef}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          muted playsInline autoPlay
+        />
+        <div style={{
+          position: 'absolute', inset: '30% 8%',
+          border: '2px solid #22C55E', borderRadius: 12,
+          boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)',
+          pointerEvents: 'none',
+        }} />
+        {busy && !err && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            color: '#FFF', fontSize: 16, background: 'rgba(0,0,0,0.4)',
+          }}>Запуск камеры…</div>
+        )}
+        {err && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            color: '#FFF', padding: 24, textAlign: 'center', background: 'rgba(0,0,0,0.6)',
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>⚠️</div>
+            <div style={{ fontSize: 16, marginBottom: 16 }}>{err}</div>
+          </div>
+        )}
+        {!busy && !err && (
+          <div style={{
+            position: 'absolute', bottom: 20, left: 0, right: 0,
+            textAlign: 'center', color: '#FFF', fontSize: 14,
+            textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+          }}>{hint}</div>
+        )}
+      </div>
+      <div style={{ padding: 20, background: '#111', display: 'flex', justifyContent: 'center' }}>
+        <button onClick={onClose} style={{
+          padding: '14px 40px', borderRadius: 12, border: 'none',
+          background: '#374151', color: '#FFF', fontSize: 16, fontWeight: 700, cursor: 'pointer',
+        }}>Отмена</button>
+      </div>
+    </div>
+  );
+}
+
+/* ================= Confirm modal ================= */
+function ConfirmModal({ text, onConfirm, onCancel }) {
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9700,
+        background: 'rgba(15,23,42,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#FFF', borderRadius: 16, padding: 24,
+          maxWidth: 340, width: '100%', textAlign: 'center',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+        }}
+      >
+        <div style={{ fontSize: 16, color: '#1E293B', marginBottom: 20 }}>{text}</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={onCancel}
+            style={{
+              flex: 1, padding: '12px', borderRadius: 10, border: '1px solid #E2E8F0',
+              background: '#FFF', color: '#475569', fontSize: 15, fontWeight: 700, cursor: 'pointer',
+            }}
+          >Отмена</button>
+          <button
+            onClick={onConfirm}
+            style={{
+              flex: 1, padding: '12px', borderRadius: 10, border: 'none',
+              background: '#DC2626', color: '#FFF', fontSize: 15, fontWeight: 700, cursor: 'pointer',
+            }}
+          >Удалить</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= Main ================= */
+export default function LineDefectCapturePage() {
+  const isMobile = useIsMobile();
+
+  const [vin, setVin] = useState('');
+  const [vinCheck, setVinCheck] = useState({ state: 'idle', valid: false, reason: '', model: '' });
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannedRaw, setScannedRaw] = useState(null); // сырое значение из сканера
+
+  const [partName, setPartName] = useState('');
+  const [problemType, setProblemType] = useState('');
+
+  const [photos, setPhotos] = useState([]);
+  const [comment, setComment] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
+  const [confirmPhotoId, setConfirmPhotoId] = useState(null);
+  const [clientId, setClientId] = useState(() => uuid());
+
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(null);
+  const [error, setError] = useState(null);
+
+  const fileInputRef = useRef(null);
+  const vinAbortRef = useRef(null);
+
+  /* ---------- VIN check: debounce + abort ---------- */
+  useEffect(() => {
+    const clean = sanitizeVin(vin);
+    if (clean.length !== VIN_LEN) {
+      setVinCheck({
+        state: 'idle', valid: false, model: '',
+        reason: clean.length === 0 ? '' : `Ещё ${VIN_LEN - clean.length} символ(ов)`,
+      });
+      return;
+    }
+
+    // abort предыдущий запрос
+    if (vinAbortRef.current) vinAbortRef.current.abort();
+    const ctrl = new AbortController();
+    vinAbortRef.current = ctrl;
+
+    setVinCheck({ state: 'checking', valid: false, reason: '', model: '' });
+
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/line-defects/lookup-vin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vin: clean }),
+          signal: ctrl.signal,
+        });
+        const data = await res.json();
+        if (data.valid) {
+          setVinCheck({ state: 'ok', valid: true, reason: '', model: data.model });
+        } else {
+          setVinCheck({ state: 'err', valid: false, reason: data.reason || 'Не найден', model: '' });
+        }
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          setVinCheck({ state: 'err', valid: false, reason: e.message, model: '' });
+        }
+      }
+    }, 350); // debounce
+
+    return () => clearTimeout(t);
+  }, [vin]);
+
+  /* ---------- photos ---------- */
+  const handleFiles = async (files) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setError(null);
+    try {
+      let current = [...photos];
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) continue;
+        if (current.length >= MAX_PHOTOS) break;
+        const dataUrl = await compressImage(file);
+        const res = await fetch(`${API_BASE}/api/line-defects/photo`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: dataUrl, client_id: clientId }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Ошибка загрузки');
+        current = [...current, { id: json.id, url: json.url }];
+        setPhotos(current);
+      }
+    } catch (e) {
+      setError('Ошибка фото: ' + e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const confirmRemove = (id) => setConfirmPhotoId(id);
+
+  const doRemove = async () => {
+    const id = confirmPhotoId;
+    setConfirmPhotoId(null);
+    if (!id) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/line-defects/photo/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || 'Не удалось удалить');
+      }
+      setPhotos(prev => prev.filter(p => p.id !== id));
+    } catch (e) {
+      setError('Удаление фото: ' + e.message);
+    }
+  };
+
+  /* ---------- submit ---------- */
+  const submit = async () => {
+    setError(null);
+    if (!vinCheck.valid) return setError('VIN не подтверждён');
+    if (!partName.trim()) return setError('Не выбрана деталь');
+    if (!problemType.trim()) return setError('Не выбран дефект');
+    if (photos.length === 0) return setError('Добавьте минимум 1 фото');
+    if (submitting) return;
+
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/line-defects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vin,
+          part_name: partName.trim(),
+          problem_type: problemType.trim(),
+          comment: comment.trim(),
+          entry_mode: scannedRaw ? 'barcode' : 'manual',
+          barcode_raw: scannedRaw || null,
+          photo_ids: photos.map(p => p.id),
+          client_id: clientId,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Ошибка отправки');
+      beep();
+      setDone({ id: json.id, vin, partName, problemType, dup: json.duplicate });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const reset = () => {
+    setVin(''); setVinCheck({ state: 'idle', valid: false, reason: '', model: '' });
+    setScannedRaw(null);
+    setPartName(''); setProblemType('');
+    setPhotos([]); setComment('');
+    setClientId(uuid());
+    setDone(null); setError(null);
+  };
+
+  /* ---------- styles ---------- */
+  const cardStyle = {
+    background: '#FFFFFF', borderRadius: 16, padding: isMobile ? 20 : 28,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid #F1F5F9',
+    marginBottom: 16,
+  };
+  const bigButton = {
+    width: '100%', padding: '16px 20px', fontSize: 18, fontWeight: 800,
+    borderRadius: 14, border: 'none', cursor: 'pointer',
+    background: '#2563EB', color: '#FFFFFF',
+    boxShadow: '0 6px 14px rgba(37,99,235,0.3)',
+  };
+  const secondaryButton = {
+    ...bigButton, background: '#F1F5F9', color: '#1E293B',
+    boxShadow: 'none', border: '1px solid #E2E8F0',
+  };
+
+  /* ---------- DONE ---------- */
+  if (done) {
+    return (
+      <div style={{ padding: 20, maxWidth: 640, margin: '0 auto', fontFamily: 'Inter, Arial, sans-serif' }}>
+        <div style={{ ...cardStyle, textAlign: 'center', padding: 40 }}>
+          <div style={{ fontSize: 72, marginBottom: 12 }}>✅</div>
+          <h2 style={{ margin: '0 0 12px', color: '#166534' }}>
+            {done.dup ? 'Дефект уже был сохранён' : 'Дефект сохранён'}
+          </h2>
+          <div style={{ color: '#475569', fontSize: 15, marginBottom: 24, lineHeight: 1.6 }}>
+            <div><b>VIN:</b> {done.vin}</div>
+            <div><b>Деталь:</b> {done.partName}</div>
+            <div><b>Дефект:</b> {done.problemType}</div>
+            <div style={{ marginTop: 8, fontSize: 13, color: '#94A3B8' }}>ID записи: {done.id}</div>
+          </div>
+          <button onClick={reset} style={bigButton}>Зафиксировать следующий дефект</button>
+        </div>
+      </div>
+    );
+  }
+
+  const canSubmit = vinCheck.valid
+    && partName.trim()
+    && problemType.trim()
+    && photos.length > 0
+    && !submitting;
+
+  /* ---------- MAIN ---------- */
+  return (
+    <div style={{
+      padding: isMobile ? 12 : 24,
+      maxWidth: 720, margin: '0 auto',
+      fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
+      minHeight: '100vh', background: '#F8FAFC',
+    }}>
+      <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 900, color: '#0F172A', margin: '8px 0 20px' }}>
+        Фиксация дефекта
+      </h1>
+
+      {/* ---- Шаг 1 ---- */}
+      <div style={cardStyle}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', marginBottom: 10 }}>
+          Шаг 1 — VIN
+        </div>
+        <input
+          value={vin}
+          onChange={(e) => { setVin(sanitizeVin(e.target.value)); setScannedRaw(null); }}
+          onPaste={(e) => {
+            e.preventDefault();
+            const pasted = e.clipboardData.getData('text');
+            setVin(sanitizeVin(pasted));
+          }}
+          placeholder="17 символов, например EDXDB21B7TG044448"
+          maxLength={VIN_LEN}
+          inputMode="text"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          style={{
+            width: '100%', padding: '14px 16px', fontSize: 16,
+            borderRadius: 12, border: '1px solid #E2E8F0',
+            outline: 'none', fontFamily: 'monospace', letterSpacing: '1px',
+            boxSizing: 'border-box', marginBottom: 12,
+          }}
+        />
+        <button
+          onClick={() => setScannerOpen(true)}
+          style={{ ...secondaryButton, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+        >
+          📷 Сканировать штрихкод
+        </button>
+
+        <div style={{
+          marginTop: 12, padding: '12px 14px', borderRadius: 10,
+          background:
+            vinCheck.state === 'ok' ? '#ECFDF5' :
+            vinCheck.state === 'err' ? '#FEF2F2' :
+            vinCheck.state === 'checking' ? '#F1F5F9' : 'transparent',
+          color:
+            vinCheck.state === 'ok' ? '#166534' :
+            vinCheck.state === 'err' ? '#991B1B' : '#475569',
+          fontSize: 14,
+          border: vinCheck.state === 'ok' ? '1px solid #A7F3D0'
+                : vinCheck.state === 'err' ? '1px solid #FECACA'
+                : 'none',
+        }}>
+          {vinCheck.state === 'ok' && <>✔ Модель: <b>{vinCheck.model}</b>{scannedRaw && ' · считано сканером'}</>}
+          {vinCheck.state === 'err' && <>✖ {vinCheck.reason}</>}
+          {vinCheck.state === 'checking' && <>⏳ Проверка…</>}
+          {vinCheck.state === 'idle' && vinCheck.reason && <>· {vinCheck.reason}</>}
+        </div>
+      </div>
+
+      {/* ---- Шаг 2 ---- */}
+      <div style={{ ...cardStyle, opacity: vinCheck.valid ? 1 : 0.5, pointerEvents: vinCheck.valid ? 'auto' : 'none' }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', marginBottom: 10 }}>
+          Шаг 2 — Что и где
+        </div>
+
+        <Autocomplete
+          label="Деталь"
+          value={partName}
+          onChange={(v) => { setPartName(v); if (problemType) setProblemType(''); }}
+          placeholder="Начните вводить название детали"
+          fetchUrl={vinCheck.valid && vinCheck.model
+            ? `${API_BASE}/api/line-defects/suggest-parts?model=${encodeURIComponent(vinCheck.model)}&q=${encodeURIComponent(partName)}`
+            : null}
+          disabled={!vinCheck.valid}
+        />
+
+        <div style={{ height: 16 }} />
+
+        <Autocomplete
+          label="Дефект"
+          value={problemType}
+          onChange={setProblemType}
+          placeholder={partName ? 'Начните вводить тип дефекта' : 'Сначала выберите деталь'}
+          fetchUrl={vinCheck.valid && partName
+            ? `${API_BASE}/api/line-defects/suggest-defects?model=${encodeURIComponent(vinCheck.model)}&part=${encodeURIComponent(partName)}&q=${encodeURIComponent(problemType)}`
+            : null}
+          disabled={!partName}
+        />
+      </div>
+
+      {/* ---- Шаг 3 ---- */}
+      <div style={cardStyle}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', marginBottom: 10 }}>
+          Шаг 3 — Фото и комментарий
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {photos.map(p => (
+            <div key={p.id} style={{ position: 'relative', width: 100, height: 100 }}>
+              <img
+                src={`${API_BASE}${p.url}`}
+                alt=""
+                onClick={() => setLightbox(`${API_BASE}${p.url}`)}
+                style={{
+                  width: '100%', height: '100%', objectFit: 'cover',
+                  borderRadius: 10, border: '1px solid #E2E8F0', cursor: 'zoom-in',
+                }}
+              />
+              <button
+                onClick={() => confirmRemove(p.id)}
+                style={{
+                  position: 'absolute', top: -6, right: -6, width: 26, height: 26,
+                  borderRadius: '50%', border: 'none', background: '#DC2626',
+                  color: '#FFF', fontWeight: 800, cursor: 'pointer',
+                }}
+              >×</button>
+            </div>
+          ))}
+          {photos.length < MAX_PHOTOS && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              style={{
+                width: 100, height: 100, borderRadius: 10,
+                border: '2px dashed #CBD5E1', background: '#F8FAFC', color: '#64748B',
+                fontSize: 32, cursor: uploading ? 'wait' : 'pointer',
+              }}
+            >{uploading ? '…' : '+'}</button>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            multiple
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = Array.from(e.target.files || []);
+              e.target.value = '';
+              handleFiles(f);
+            }}
+          />
+        </div>
+
+        <div style={{ marginTop: 8, fontSize: 12, color: '#94A3B8' }}>
+          {photos.length} / {MAX_PHOTOS} фото · сжатие автоматическое
+        </div>
+
+        <div style={{ height: 16 }} />
+
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+          Комментарий (необязательно)
+        </div>
+        <textarea
+          value={comment}
+          onChange={(e) => setComment(e.target.value.slice(0, MAX_COMMENT))}
+          rows={3}
+          placeholder="Например: глубокая царапина, требуется покраска"
+          style={{
+            width: '100%', padding: 12, fontSize: 15, borderRadius: 12,
+            border: '1px solid #E2E8F0', outline: 'none', resize: 'vertical',
+            fontFamily: 'inherit', boxSizing: 'border-box',
+          }}
+        />
+        <div style={{ textAlign: 'right', fontSize: 11, color: '#94A3B8' }}>
+          {comment.length}/{MAX_COMMENT}
+        </div>
+      </div>
+
+      {error && (
+        <div style={{
+          padding: 14, background: '#FEF2F2', color: '#991B1B',
+          borderRadius: 12, marginBottom: 12, fontSize: 14, border: '1px solid #FECACA',
+        }}>⚠ {error}</div>
+      )}
+
+      <button
+        onClick={submit}
+        disabled={!canSubmit}
+        style={{
+          ...bigButton,
+          opacity: canSubmit ? 1 : 0.5,
+          cursor: submitting ? 'wait' : (canSubmit ? 'pointer' : 'not-allowed'),
+        }}
+      >
+        {submitting ? 'Отправка…' : '✅ Сохранить дефект'}
+      </button>
+
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9500,
+            background: 'rgba(15,23,42,0.9)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <img
+            src={lightbox}
+            alt=""
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 12 }}
+          />
+          <button
+            onClick={() => setLightbox(null)}
+            style={{
+              position: 'fixed', top: 20, right: 24,
+              width: 44, height: 44, borderRadius: '50%',
+              border: 'none', background: 'rgba(255,255,255,0.15)',
+              color: '#FFF', fontSize: 24, cursor: 'pointer',
+            }}
+          >×</button>
+        </div>
+      )}
+
+      {confirmPhotoId && (
+        <ConfirmModal
+          text="Удалить это фото?"
+          onConfirm={doRemove}
+          onCancel={() => setConfirmPhotoId(null)}
+        />
+      )}
+
+      {scannerOpen && (
+        <BarcodeScannerModal
+          onClose={() => setScannerOpen(false)}
+          onResult={(clean) => {
+            setScannerOpen(false);
+            setScannedRaw(clean);
+            setVin(clean);
+          }}
+        />
+      )}
+    </div>
+  );
+}
