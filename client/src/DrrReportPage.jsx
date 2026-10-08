@@ -101,12 +101,17 @@ const shopColors = {
 export default function DrrReportPage() {
   const [activeTab, setActiveTab] = useState('factory');
   const [selectedModel, setSelectedModel] = useState('ALL');
-  const [period, setPeriod] = useState('all'); // all | year | month | week | day
+  const [period, setPeriod] = useState('all');
   const [count, setCount] = useState(3);
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [dataPoints, setDataPoints] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // ==== НОВОЕ: DPU OFF retro ====
+  const [dpuOffDataPoints, setDpuOffDataPoints] = useState([]);
+  const [dpuOffLoading, setDpuOffLoading] = useState(false);
+  // тот же фильтр моделей — используем общий selectedModel
 
   const [shopTab, setShopTab] = useState('graphs');
   const [drrData, setDrrData] = useState(null);
@@ -129,6 +134,7 @@ export default function DrrReportPage() {
     }
   };
 
+  // ==== DRR загрузка ====
   useEffect(() => {
     if (activeTab !== 'factory') return;
     setLoading(true);
@@ -147,6 +153,28 @@ export default function DrrReportPage() {
       .catch(err => {
         console.error('Ошибка загрузки DRR:', err);
         setLoading(false);
+      });
+  }, [activeTab, period, count, fromDate, toDate]);
+
+  // ==== DPU OFF загрузка — те же параметры ====
+  useEffect(() => {
+    if (activeTab !== 'factory') return;
+    setDpuOffLoading(true);
+    const params = new URLSearchParams({ period });
+    if (period !== 'all' && count) params.append('count', count);
+    if (period !== 'all' && fromDate && toDate) {
+      params.append('fromDate', fromDate);
+      params.append('toDate', toDate);
+    }
+    fetch(`${API_BASE}/api/dpu-off-retrospective?${params.toString()}`)
+      .then(res => res.json())
+      .then(json => {
+        setDpuOffDataPoints(json.dataPoints || []);
+        setDpuOffLoading(false);
+      })
+      .catch(err => {
+        console.error('Ошибка загрузки DPU OFF:', err);
+        setDpuOffLoading(false);
       });
   }, [activeTab, period, count, fromDate, toDate]);
 
@@ -182,7 +210,7 @@ export default function DrrReportPage() {
   const handleMappingImport = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    
+
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
@@ -192,7 +220,7 @@ export default function DrrReportPage() {
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         const json = XLSX.utils.sheet_to_json(sheet);
-        
+
         const shopMap = {
           'BODY': 'BS',
           'ASSEMBLY': 'AS',
@@ -204,29 +232,29 @@ export default function DrrReportPage() {
           'СВАРКА': 'BS',
           'ОКРАСКА': 'PS',
         };
-        
+
         const mappings = json.map(row => {
           const rawShop = String(row.shop || row['Цех'] || '').trim().toUpperCase();
           const mappedShop = shopMap[rawShop] || null;
-          
+
           return {
             part_name: String(row.part_name || row['PartDefect'] || '').trim(),
             defect_type: String(row.defect_type || row['Тип'] || '').trim(),
             shop: mappedShop,
           };
         }).filter(m => m.part_name && m.defect_type && m.shop);
-        
+
         if (!mappings.length) {
           alert('Не найдены данные. Проверьте колонки и значения цехов (BODY, ASSEMBLY, PAINT)');
           return;
         }
-        
+
         const res = await fetch(`${API_BASE}/api/part-defect-shop-mapping`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ mappings }),
         });
-        
+
         if (res.ok) {
           alert(`Загружено ${mappings.length} записей`);
           loadDrrByShop();
@@ -254,6 +282,7 @@ export default function DrrReportPage() {
     }
   }, [shopTab, shopModel, activeTab]);
 
+  // ==== Обработка данных DRR ====
   const chartData = useMemo(() => {
     return dataPoints.map(point => {
       const modelValues = Object.entries(point)
@@ -268,6 +297,20 @@ export default function DrrReportPage() {
   const barDataKey = selectedModel === 'ALL' ? 'maxValue' : selectedModel;
   const modelKeys = Object.keys(modelColors);
 
+  // ==== Обработка данных DPU OFF ====
+  const dpuOffChartData = useMemo(() => {
+    return dpuOffDataPoints.map(point => {
+      const modelValues = Object.entries(point)
+        .filter(([key]) => key !== 'label' && key !== 'type' && key !== 'total')
+        .map(([, val]) => val)
+        .filter(v => v !== null && v !== undefined);
+      const max = modelValues.length > 0 ? Math.max(...modelValues) : 0;
+      return { ...point, maxValue: max };
+    });
+  }, [dpuOffDataPoints]);
+
+  const dpuOffBarDataKey = selectedModel === 'ALL' ? 'maxValue' : selectedModel;
+
   const totalCols = chartData.length + 1;
   const colWidth = `${100 / totalCols}%`;
 
@@ -277,7 +320,7 @@ export default function DrrReportPage() {
       const asValue = parseFloat(drrData.AS[idx]) || 0;
       const bsValue = parseFloat(drrData.BS[idx]) || 0;
       const psValue = parseFloat(drrData.PS[idx]) || 0;
-      
+
       return {
         week,
         AS: Math.max(0, Math.min(100, 100 - asValue)),
@@ -322,150 +365,241 @@ export default function DrrReportPage() {
 
       {/* ========== ПО ЗАВОДУ ========== */}
       {activeTab === 'factory' && (
-        <div style={cardStyle}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937' }}>Выход годной продукции с первого раза - Ретроспектива</h2>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
-                <button onClick={() => handlePeriodChange('all')} style={tabStyle(period === 'all')}>Все</button>
-                <button onClick={() => handlePeriodChange('year')} style={tabStyle(period === 'year')}>Год</button>
-                <button onClick={() => handlePeriodChange('month')} style={tabStyle(period === 'month')}>Месяц</button>
-                <button onClick={() => handlePeriodChange('week')} style={tabStyle(period === 'week')}>Неделя</button>
-                <button onClick={() => handlePeriodChange('day')} style={tabStyle(period === 'day')}>День</button>
-              </div>
-              {period !== 'all' && (
-                <>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
-                    Кол-во периодов:
-                    <input
-                      type="number"
-                      min="1"
-                      max="50"
-                      value={count}
-                      onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
-                      style={{ ...inputStyle, width: 80 }}
-                    />
-                  </label>
+        <>
+          {/* ==== КАРТОЧКА 1: DRR ==== */}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937' }}>Выход годной продукции с первого раза - Ретроспектива</h2>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
+                  <button onClick={() => handlePeriodChange('all')} style={tabStyle(period === 'all')}>Все</button>
+                  <button onClick={() => handlePeriodChange('year')} style={tabStyle(period === 'year')}>Год</button>
+                  <button onClick={() => handlePeriodChange('month')} style={tabStyle(period === 'month')}>Месяц</button>
+                  <button onClick={() => handlePeriodChange('week')} style={tabStyle(period === 'week')}>Неделя</button>
+                  <button onClick={() => handlePeriodChange('day')} style={tabStyle(period === 'day')}>День</button>
+                </div>
+                {period !== 'all' && (
+                  <>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
+                      Кол-во периодов:
+                      <input
+                        type="number"
+                        min="1"
+                        max="50"
+                        value={count}
+                        onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
+                        style={{ ...inputStyle, width: 80 }}
+                      />
+                    </label>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>От:</span>
-                    <input
-                      type="date"
-                      value={fromDate}
-                      onChange={(e) => setFromDate(e.target.value)}
-                      style={inputStyle}
-                    />
-                    <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>По:</span>
-                    <input
-                      type="date"
-                      value={toDate}
-                      onChange={(e) => setToDate(e.target.value)}
-                      style={inputStyle}
-                    />
-                    {(fromDate || toDate) && (
-                      <button
-                        onClick={() => { setFromDate(''); setToDate(''); }}
-                        style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
-              <label style={{ fontSize: 14, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 6 }}>
-                Модель:
-                <select
-                  value={selectedModel}
-                  onChange={e => setSelectedModel(e.target.value)}
-                  style={inputStyle}
-                >
-                  <option value="ALL">Все</option>
-                  {modelKeys.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>От:</span>
+                      <input
+                        type="date"
+                        value={fromDate}
+                        onChange={(e) => setFromDate(e.target.value)}
+                        style={inputStyle}
+                      />
+                      <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>По:</span>
+                      <input
+                        type="date"
+                        value={toDate}
+                        onChange={(e) => setToDate(e.target.value)}
+                        style={inputStyle}
+                      />
+                      {(fromDate || toDate) && (
+                        <button
+                          onClick={() => { setFromDate(''); setToDate(''); }}
+                          style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+                <label style={{ fontSize: 14, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Модель:
+                  <select
+                    value={selectedModel}
+                    onChange={e => setSelectedModel(e.target.value)}
+                    style={inputStyle}
+                  >
+                    <option value="ALL">Все</option>
+                    {modelKeys.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </label>
+              </div>
             </div>
+
+            {loading ? (
+              <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Загрузка данных...</p>
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={350}>
+                  <BarChart data={chartData} margin={{ top: 20, right: 48, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
+                    <ReferenceLine y={80} stroke="#EF4444" strokeDasharray="5 5">
+                      <Label value="80%" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 700 }} />
+                    </ReferenceLine>
+                    <Bar
+                      dataKey={barDataKey}
+                      barSize={28}
+                      radius={[6, 6, 0, 0]}
+                      label={{
+                        fill: '#DC2626',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        position: 'top',
+                        formatter: (v) => v !== null && v !== undefined ? `${v}%` : '',
+                      }}
+                    >
+                      {chartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={barTypeColors[entry.type]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+
+                <div style={{ overflowX: 'auto', marginTop: 12, paddingRight: 45 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#F9FAFB' }}>
+                        <th style={{ ...thStyle, width: colWidth, paddingLeft: 16 }}>Модель</th>
+                        {chartData.map((point, idx) => (
+                          <th key={idx} style={{
+                            ...thStyle,
+                            width: colWidth,
+                            backgroundColor: typeColors[point.type]
+                          }}>
+                            {point.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedModel === 'ALL' ? [...modelKeys, 'total'] : [selectedModel]).map(modelKey => (
+                        <tr key={modelKey} style={{
+                          backgroundColor: modelKey === 'total' ? '#F3F4F6' : 'white',
+                          fontWeight: modelKey === 'total' ? 700 : 400,
+                          display: (selectedModel !== 'ALL' && modelKey === 'total') ? 'none' : undefined,
+                        }}>
+                          <td style={{ ...tdStyle, width: colWidth, paddingLeft: 16 }}>
+                            {modelShortNames[modelKey] || modelKey}
+                          </td>
+                          {chartData.map((point, idx) => {
+                            const val = modelKey === 'total' ? point.maxValue : point[modelKey];
+                            return (
+                              <td key={idx} style={{
+                                ...tdStyle,
+                                width: colWidth,
+                                backgroundColor: typeColors[point.type],
+                                color: val !== null && val !== undefined ? '#1F2937' : '#9CA3AF'
+                              }}>
+                                {val !== null && val !== undefined ? `${val}%` : ''}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </div>
 
-          {loading ? (
-            <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Загрузка данных...</p>
-          ) : (
-            <>
-              <ResponsiveContainer width="100%" height={350}>
-                <BarChart data={chartData} margin={{ top: 20, right: 48, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                  <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
-                  <ReferenceLine y={80} stroke="#EF4444" strokeDasharray="5 5">
-                    <Label value="80%" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 700 }} />
-                  </ReferenceLine>
-                  <Bar
-                    dataKey={barDataKey}
-                    barSize={28}
-                    radius={[6, 6, 0, 0]}
-                    label={{
-                      fill: '#DC2626',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      position: 'top',
-                      formatter: (v) => v !== null && v !== undefined ? `${v}%` : '',
-                    }}
-                  >
-                    {chartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={barTypeColors[entry.type]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-
-              <div style={{ overflowX: 'auto', marginTop: 12, paddingRight: 45 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
-                  <thead>
-                    <tr style={{ backgroundColor: '#F9FAFB' }}>
-                      <th style={{ ...thStyle, width: colWidth, paddingLeft: 16 }}>Модель</th>
-                      {chartData.map((point, idx) => (
-                        <th key={idx} style={{
-                          ...thStyle,
-                          width: colWidth,
-                          backgroundColor: typeColors[point.type]
-                        }}>
-                          {point.label}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(selectedModel === 'ALL' ? [...modelKeys, 'total'] : [selectedModel]).map(modelKey => (
-                      <tr key={modelKey} style={{
-                        backgroundColor: modelKey === 'total' ? '#F3F4F6' : 'white',
-                        fontWeight: modelKey === 'total' ? 700 : 400,
-                        display: (selectedModel !== 'ALL' && modelKey === 'total') ? 'none' : undefined,
-                      }}>
-                        <td style={{ ...tdStyle, width: colWidth, paddingLeft: 16 }}>
-                          {modelShortNames[modelKey] || modelKey}
-                        </td>
-                        {chartData.map((point, idx) => {
-                          const val = modelKey === 'total' ? point.maxValue : point[modelKey];
-                          return (
-                            <td key={idx} style={{
-                              ...tdStyle,
-                              width: colWidth,
-                              backgroundColor: typeColors[point.type],
-                              color: val !== null && val !== undefined ? '#1F2937' : '#9CA3AF'
-                            }}>
-                              {val !== null && val !== undefined ? `${val}%` : ''}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          {/* ==== КАРТОЧКА 2: DPU OFF (новое) ==== */}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937' }}>DPU OFF - Ретроспектива</h2>
+              <div style={{ fontSize: 13, color: '#6B7280' }}>
+                {/* Фильтры те же, что и у DRR-графика — управляются общими полями выше */}
               </div>
-            </>
-          )}
-        </div>
+            </div>
+
+            {dpuOffLoading ? (
+              <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Загрузка данных...</p>
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={350}>
+                  <BarChart data={dpuOffChartData} margin={{ top: 20, right: 48, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                    <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                    <YAxis domain={[0, 'auto']} tick={{ fontSize: 12 }} />
+                    <ReferenceLine y={0.4} stroke="#EF4444" strokeDasharray="5 5">
+                      <Label value="Target 0.4" position="right" style={{ fill: '#EF4444', fontSize: 14, fontWeight: 700 }} />
+                    </ReferenceLine>
+                    <Bar
+                      dataKey={dpuOffBarDataKey}
+                      barSize={28}
+                      radius={[6, 6, 0, 0]}
+                      label={{
+                        fill: '#DC2626',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        position: 'top',
+                        formatter: (v) => v !== null && v !== undefined ? `${v}` : '',
+                      }}
+                    >
+                      {dpuOffChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={barTypeColors[entry.type]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+
+                <div style={{ overflowX: 'auto', marginTop: 12, paddingRight: 45 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#F9FAFB' }}>
+                        <th style={{ ...thStyle, width: colWidth, paddingLeft: 16 }}>Модель</th>
+                        {dpuOffChartData.map((point, idx) => (
+                          <th key={idx} style={{
+                            ...thStyle,
+                            width: colWidth,
+                            backgroundColor: typeColors[point.type]
+                          }}>
+                            {point.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedModel === 'ALL' ? [...modelKeys, 'total'] : [selectedModel]).map(modelKey => (
+                        <tr key={modelKey} style={{
+                          backgroundColor: modelKey === 'total' ? '#F3F4F6' : 'white',
+                          fontWeight: modelKey === 'total' ? 700 : 400,
+                          display: (selectedModel !== 'ALL' && modelKey === 'total') ? 'none' : undefined,
+                        }}>
+                          <td style={{ ...tdStyle, width: colWidth, paddingLeft: 16 }}>
+                            {modelShortNames[modelKey] || modelKey}
+                          </td>
+                          {dpuOffChartData.map((point, idx) => {
+                            const val = modelKey === 'total' ? point.maxValue : point[modelKey];
+                            return (
+                              <td key={idx} style={{
+                                ...tdStyle,
+                                width: colWidth,
+                                backgroundColor: typeColors[point.type],
+                                color: val !== null && val !== undefined ? '#1F2937' : '#9CA3AF'
+                              }}>
+                                {val !== null && val !== undefined ? val : ''}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        </>
       )}
 
       {/* ========== ПО ЦЕХАМ ========== */}
@@ -488,7 +622,7 @@ export default function DrrReportPage() {
               ...tabStyle(shopTab === 'PS'),
               background: shopTab === 'PS' ? '#10B981' : '#F3F4F6',
             }}>🎨 Цех окраски</button>
-            
+
             <label style={{
               ...buttonStyle,
               background: '#8B5CF6',

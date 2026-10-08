@@ -3353,6 +3353,205 @@ app.get('/api/problem-grades', async (req, res) => {
   }
 });
 
+// ================== DPU OFF РЕТРОСПЕКТИВА ==================
+app.get('/api/dpu-off-retrospective', async (req, res) => {
+  try {
+    const { period = 'all', count, fromDate, toDate } = req.query;
+
+    // ===== Расчёт DPU OFF для одного периода =====
+    const getDpuOff = async (startDate, endDate, label, type) => {
+      // 1. Получаем VIN'ы, прошедшие CPFINAL за период, с их моделями
+      const [carsRows] = await mesPool.query(`
+        SELECT DISTINCT tvv.VIN, too.product AS MODEL
+        FROM tm_vhc_vehicle tvv
+        JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+        JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+        WHERE tvvm.node_nature = 'Key_Uloc_Type_CPFINAL'
+          AND DATE(DATE_SUB(tvvm.scan_time, INTERVAL 470 MINUTE)) BETWEEN ? AND ?
+      `, [startDate, endDate]);
+
+      // 2. Группируем VIN'ы по моделям
+      const modelVins = {};
+      carsRows.forEach(r => {
+        if (!modelVins[r.MODEL]) modelVins[r.MODEL] = [];
+        modelVins[r.MODEL].push(r.VIN);
+      });
+
+      const result = { label, type };
+      let totalDefects = 0;
+      let totalVins = 0;
+
+      // 3. Для каждой модели считаем офлайн-дефекты её VIN'ов
+      for (const model of Object.keys(modelVins)) {
+        const vins = modelVins[model];
+        if (vins.length === 0) continue;
+
+        const ph = vins.map(() => '?').join(',');
+        const [defRows] = await pool.query(`
+          SELECT COUNT(*) AS DEFECTS
+          FROM (
+            SELECT VIN FROM at_biw_qm_defect_info
+              WHERE VIN IN (${ph})
+                AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+            UNION ALL
+            SELECT VIN FROM at_paint_qm_defect_info
+              WHERE VIN IN (${ph})
+                AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+            UNION ALL
+            SELECT VIN FROM at_qm_defect_info
+              WHERE VIN IN (${ph})
+                AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+          ) t
+        `, [...vins, ...vins, ...vins]);
+
+        const defects = Number(defRows[0]?.DEFECTS) || 0;
+        result[model] = +(defects / vins.length).toFixed(2);
+        totalDefects += defects;
+        totalVins += vins.length;
+      }
+
+      result.total = totalVins > 0 ? +(totalDefects / totalVins).toFixed(2) : 0;
+      return result;
+    };
+
+    // ===== Генерация периодов — идентична DRR =====
+    const formatDate = (date) => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
+
+    const getISOWeek = (date) => {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    };
+
+    const pad = (num) => String(num).padStart(2, '0');
+    const now = new Date();
+    const periods = [];
+    const typeOrder = { year: 0, month: 1, week: 2, day: 3 };
+
+    if (period === 'all') {
+      for (let i = 1; i >= 0; i--) {
+        const y = now.getFullYear() - i;
+        periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+      }
+      for (let i = 2; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+        const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+        periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${String(lastDay).padStart(2, '0')}`, type: 'month' });
+      }
+      const dayOfWeek = now.getDay();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      for (let i = 3; i >= 0; i--) {
+        const start = new Date(monday);
+        start.setDate(monday.getDate() - i * 7);
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        const weekNum = getISOWeek(start);
+        periods.push({ label: `W${weekNum} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
+      }
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
+      }
+    } else {
+      if (fromDate && toDate) {
+        let from = new Date(fromDate + 'T00:00:00');
+        let to = new Date(toDate + 'T00:00:00');
+        if (from > to) [from, to] = [to, from];
+
+        if (period === 'day') {
+          for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+            const dateStr = formatDate(d);
+            periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: dateStr, endDate: dateStr, type: 'day' });
+          }
+        } else if (period === 'month') {
+          let d = new Date(from.getFullYear(), from.getMonth(), 1);
+          while (d <= to) {
+            const y = d.getFullYear();
+            const m = d.getMonth() + 1;
+            const lastDay = new Date(y, m, 0).getDate();
+            const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+            periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${pad(m)}-01`, endDate: `${y}-${pad(m)}-${lastDay}`, type: 'month' });
+            d.setMonth(d.getMonth() + 1);
+          }
+        } else if (period === 'week') {
+          const day = from.getDay();
+          const monday = new Date(from);
+          monday.setDate(from.getDate() - (day === 0 ? 6 : day - 1));
+          for (let start = new Date(monday); start <= to; start.setDate(start.getDate() + 7)) {
+            const end = new Date(start);
+            end.setDate(start.getDate() + 6);
+            periods.push({ label: `W${getISOWeek(start)} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
+          }
+        } else if (period === 'year') {
+          for (let y = from.getFullYear(); y <= to.getFullYear(); y++) {
+            periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+          }
+        }
+      } else {
+        const defaultCount = { year: 2, month: 3, week: 4, day: 14 }[period] || 7;
+        const limit = parseInt(count, 10) || defaultCount;
+
+        if (period === 'year') {
+          for (let i = limit - 1; i >= 0; i--) {
+            const y = now.getFullYear() - i;
+            periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+          }
+        } else if (period === 'month') {
+          for (let i = limit - 1; i >= 0; i--) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+            const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+            periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${String(lastDay).padStart(2, '0')}`, type: 'month' });
+          }
+        } else if (period === 'week') {
+          const dayOfWeek = now.getDay();
+          const monday = new Date(now);
+          monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+          for (let i = limit - 1; i >= 0; i--) {
+            const start = new Date(monday);
+            start.setDate(monday.getDate() - i * 7);
+            const end = new Date(start);
+            end.setDate(start.getDate() + 6);
+            const weekNum = getISOWeek(start);
+            periods.push({ label: `W${weekNum} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
+          }
+        } else if (period === 'day') {
+          for (let i = limit - 1; i >= 0; i--) {
+            const d = new Date(now);
+            d.setDate(now.getDate() - i);
+            periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
+          }
+        }
+      }
+    }
+
+    periods.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || a.startDate.localeCompare(b.startDate));
+
+    const result = [];
+    for (const p of periods) {
+      result.push(await getDpuOff(p.startDate, p.endDate, p.label, p.type));
+    }
+
+    res.json({ dataPoints: result });
+  } catch (err) {
+    console.error('Ошибка dpu-off-retrospective:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 /* ============ Хелпер: фильтр по смене (SQL-фрагмент) ============ */
