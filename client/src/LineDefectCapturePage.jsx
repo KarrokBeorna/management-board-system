@@ -8,6 +8,14 @@ const VIN_LEN = 17;
 const VIN_ALLOWED = /[^A-HJ-NPR-Z0-9]/g;
 const STATE_KEY = 'line-defect-capture-state-v1';
 
+const LOCATIONS = [
+  { code: 'CP7',    label: 'CP7',                  color: '#2563EB' },
+  { code: 'CP8',    label: 'CP8',                  color: '#7C3AED' },
+  { code: 'SGP',    label: 'СГП (Парковка/Склад)', color: '#059669' },
+  { code: 'REPAIR', label: 'Ремзона',              color: '#DC2626' },
+];
+const LOCATION_BY_CODE = Object.fromEntries(LOCATIONS.map(l => [l.code, l]));
+
 /* ================= helpers ================= */
 const isMobileViewport = () => typeof window !== 'undefined' && window.innerWidth < 768;
 const useIsMobile = () => {
@@ -58,27 +66,19 @@ const beep = () => {
     const o = ctx.createOscillator();
     const g = ctx.createGain();
     o.connect(g); g.connect(ctx.destination);
-    o.frequency.value = 880;
-    g.gain.value = 0.15;
+    o.frequency.value = 880; g.gain.value = 0.15;
     o.start();
     setTimeout(() => { o.stop(); ctx.close(); }, 120);
   } catch {}
 };
 const vibrate = (ms = 60) => { try { navigator.vibrate?.(ms); } catch {} };
 
-/* ---------- sessionStorage ---------- */
 const loadState = () => {
-  try {
-    const raw = sessionStorage.getItem(STATE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  try { const raw = sessionStorage.getItem(STATE_KEY); return raw ? JSON.parse(raw) : null; }
+  catch { return null; }
 };
-const saveState = (s) => {
-  try { sessionStorage.setItem(STATE_KEY, JSON.stringify(s)); } catch {}
-};
-const clearState = () => {
-  try { sessionStorage.removeItem(STATE_KEY); } catch {}
-};
+const saveState = (s) => { try { sessionStorage.setItem(STATE_KEY, JSON.stringify(s)); } catch {} };
+const clearState = () => { try { sessionStorage.removeItem(STATE_KEY); } catch {} };
 
 /* ================= Autocomplete ================= */
 function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label }) {
@@ -95,7 +95,6 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
     if (abortRef.current) abortRef.current.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-
     let alive = true;
     setLoading(true);
     const t = setTimeout(async () => {
@@ -103,12 +102,9 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
         const res = await fetch(fetchUrl, { signal: ctrl.signal });
         const data = await res.json();
         if (alive) { setItems(Array.isArray(data) ? data : []); setHighlight(0); }
-      } catch (e) {
-        if (e.name !== 'AbortError' && alive) setItems([]);
-      }
+      } catch (e) { if (e.name !== 'AbortError' && alive) setItems([]); }
       if (alive) setLoading(false);
     }, 250);
-
     return () => { alive = false; clearTimeout(t); ctrl.abort(); };
   }, [fetchUrl]);
 
@@ -124,7 +120,6 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
 
   const labelOf = (it) => it.part_name || it.problem_type || '';
   const keyOf = (it) => labelOf(it) + (it.source || '');
-
   const pick = (it) => { onChange(labelOf(it)); setOpen(false); };
 
   const onKeyDown = (e) => {
@@ -146,9 +141,7 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
         onChange={(e) => { onChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
+        autoComplete="off" autoCorrect="off" spellCheck={false}
         style={{
           width: '100%', padding: '12px 14px', fontSize: 16,
           borderRadius: 10, border: '1px solid #E2E8F0',
@@ -158,13 +151,9 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
       />
       {open && (items.length > 0 || loading) && (
         <div
-          onTouchStart={(e) => {
-            touchState.current = { startY: e.touches[0].clientY, moved: false };
-          }}
+          onTouchStart={(e) => { touchState.current = { startY: e.touches[0].clientY, moved: false }; }}
           onTouchMove={(e) => {
-            if (Math.abs(e.touches[0].clientY - touchState.current.startY) > 8) {
-              touchState.current.moved = true;
-            }
+            if (Math.abs(e.touches[0].clientY - touchState.current.startY) > 8) touchState.current.moved = true;
           }}
           style={{
             position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30,
@@ -179,12 +168,8 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
             <div
               key={keyOf(it)}
               onMouseDown={(e) => {
-                if (touchState.current.moved) {
-                  touchState.current.moved = false;
-                  return;
-                }
-                e.preventDefault();
-                pick(it);
+                if (touchState.current.moved) { touchState.current.moved = false; return; }
+                e.preventDefault(); pick(it);
               }}
               onMouseEnter={() => setHighlight(idx)}
               style={{
@@ -202,9 +187,7 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
             </div>
           ))}
           {!loading && items.length === 0 && value.trim() && (
-            <div style={{ padding: 12, color: '#94A3B8', fontSize: 13 }}>
-              Ничего не найдено. Уточните название.
-            </div>
+            <div style={{ padding: 12, color: '#94A3B8', fontSize: 13 }}>Ничего не найдено. Уточните название.</div>
           )}
         </div>
       )}
@@ -226,7 +209,6 @@ function BarcodeScannerModal({ onClose, onResult }) {
       delayBetweenScanAttempts: 120,
       tryPlayVideoTimeout: 8000,
     });
-
     (async () => {
       try {
         let deviceId = null;
@@ -235,16 +217,12 @@ function BarcodeScannerModal({ onClose, onResult }) {
           const back = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
           if (back) deviceId = back.deviceId;
         } catch {}
-
         const controls = await reader.decodeFromVideoDevice(deviceId, videoRef.current, (result) => {
           if (cancelled) return;
           if (result) {
             const text = result.getText().trim();
             const clean = sanitizeVin(text);
-            if (clean.length !== VIN_LEN) {
-              setHint(`Считано «${text.slice(0, 24)}» — не VIN, продолжаем…`);
-              return;
-            }
+            if (clean.length !== VIN_LEN) { setHint(`Считано «${text.slice(0, 24)}» — не VIN, продолжаем…`); return; }
             cancelled = true;
             try { controls.stop(); } catch {}
             beep(); vibrate(80);
@@ -261,7 +239,6 @@ function BarcodeScannerModal({ onClose, onResult }) {
         setBusy(false);
       }
     })();
-
     return () => { cancelled = true; try { controlsRef.current?.stop(); } catch {} };
   }, [onResult]);
 
@@ -269,10 +246,7 @@ function BarcodeScannerModal({ onClose, onResult }) {
     <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 9000, display: 'flex', flexDirection: 'column' }}>
       <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
         <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline autoPlay />
-        <div style={{
-          position: 'absolute', inset: '30% 8%', border: '2px solid #22C55E', borderRadius: 12,
-          boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)', pointerEvents: 'none',
-        }} />
+        <div style={{ position: 'absolute', inset: '30% 8%', border: '2px solid #22C55E', borderRadius: 12, boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)', pointerEvents: 'none' }} />
         {busy && !err && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#FFF', fontSize: 16, background: 'rgba(0,0,0,0.4)' }}>Запуск камеры…</div>
         )}
@@ -318,6 +292,8 @@ export default function LineDefectCapturePage() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannedRaw, setScannedRaw] = useState(boot?.scannedRaw || null);
 
+  const [captureLocation, setCaptureLocation] = useState(boot?.captureLocation || '');
+
   const [partName, setPartName] = useState(boot?.partName || '');
   const [problemType, setProblemType] = useState(boot?.problemType || '');
 
@@ -335,7 +311,6 @@ export default function LineDefectCapturePage() {
   const fileInputRef = useRef(null);
   const vinAbortRef = useRef(null);
 
-  /* ---- восстановление фото с сервера ---- */
   useEffect(() => {
     (async () => {
       try {
@@ -348,9 +323,7 @@ export default function LineDefectCapturePage() {
           const serverIds = new Set(serverPhotos.map(p => p.id));
           const kept = prev.filter(p => serverIds.has(p.id));
           const merged = [...kept];
-          serverPhotos.forEach(sp => {
-            if (!localIds.has(sp.id)) merged.push(sp);
-          });
+          serverPhotos.forEach(sp => { if (!localIds.has(sp.id)) merged.push(sp); });
           return merged;
         });
       } catch {}
@@ -358,12 +331,10 @@ export default function LineDefectCapturePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---- сохранение в sessionStorage ---- */
   useEffect(() => {
-    saveState({ vin, partName, problemType, comment, clientId, photos, scannedRaw });
-  }, [vin, partName, problemType, comment, clientId, photos, scannedRaw]);
+    saveState({ vin, partName, problemType, comment, clientId, photos, scannedRaw, captureLocation });
+  }, [vin, partName, problemType, comment, clientId, photos, scannedRaw, captureLocation]);
 
-  /* ---- VIN check ---- */
   useEffect(() => {
     const clean = sanitizeVin(vin);
     if (clean.length !== VIN_LEN) {
@@ -377,14 +348,11 @@ export default function LineDefectCapturePage() {
     const ctrl = new AbortController();
     vinAbortRef.current = ctrl;
     setVinCheck({ state: 'checking', valid: false, reason: '', model: '' });
-
     const t = setTimeout(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/line-defects/lookup-vin`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ vin: clean }),
-          signal: ctrl.signal,
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vin: clean }), signal: ctrl.signal,
         });
         const data = await res.json();
         if (data.valid) setVinCheck({ state: 'ok', valid: true, reason: '', model: data.model });
@@ -393,15 +361,12 @@ export default function LineDefectCapturePage() {
         if (e.name !== 'AbortError') setVinCheck({ state: 'err', valid: false, reason: e.message, model: '' });
       }
     }, 350);
-
     return () => clearTimeout(t);
   }, [vin]);
 
-  /* ---- photos ---- */
   const handleFiles = async (files) => {
     if (!files || files.length === 0) return;
-    setUploading(true);
-    setError(null);
+    setUploading(true); setError(null);
     try {
       let current = [...photos];
       for (const file of files) {
@@ -409,8 +374,7 @@ export default function LineDefectCapturePage() {
         if (current.length >= MAX_PHOTOS) break;
         const dataUrl = await compressImage(file);
         const res = await fetch(`${API_BASE}/api/line-defects/photo`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ data: dataUrl, client_id: clientId }),
         });
         const json = await res.json();
@@ -418,17 +382,13 @@ export default function LineDefectCapturePage() {
         current = [...current, { id: json.id, url: json.url }];
         setPhotos(current);
       }
-    } catch (e) {
-      setError('Ошибка фото: ' + e.message);
-    } finally {
-      setUploading(false);
-    }
+    } catch (e) { setError('Ошибка фото: ' + e.message); }
+    finally { setUploading(false); }
   };
 
   const confirmRemove = (id) => setConfirmPhotoId(id);
   const doRemove = async () => {
-    const id = confirmPhotoId;
-    setConfirmPhotoId(null);
+    const id = confirmPhotoId; setConfirmPhotoId(null);
     if (!id) return;
     try {
       const res = await fetch(`${API_BASE}/api/line-defects/photo/${id}`, { method: 'DELETE' });
@@ -437,15 +397,13 @@ export default function LineDefectCapturePage() {
         throw new Error(j.error || 'Не удалось удалить');
       }
       setPhotos(prev => prev.filter(p => p.id !== id));
-    } catch (e) {
-      setError('Удаление фото: ' + e.message);
-    }
+    } catch (e) { setError('Удаление фото: ' + e.message); }
   };
 
-  /* ---- submit ---- */
   const submit = async () => {
     setError(null);
     if (!vinCheck.valid) return setError('VIN не подтверждён');
+    if (!captureLocation) return setError('Выберите место занесения');
     if (!partName.trim()) return setError('Не выбрана деталь');
     if (!problemType.trim()) return setError('Не выбран дефект');
     if (photos.length === 0) return setError('Добавьте минимум 1 фото');
@@ -454,10 +412,10 @@ export default function LineDefectCapturePage() {
     setSubmitting(true);
     try {
       const res = await fetch(`${API_BASE}/api/line-defects`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           vin,
+          capture_location: captureLocation,
           part_name: partName.trim(),
           problem_type: problemType.trim(),
           comment: comment.trim(),
@@ -469,26 +427,21 @@ export default function LineDefectCapturePage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Ошибка отправки');
-      beep();
-      clearState();
-      setDone({ id: json.id, vin, partName, problemType, dup: json.duplicate });
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSubmitting(false);
-    }
+      beep(); clearState();
+      setDone({ id: json.id, vin, partName, problemType, dup: json.duplicate, captureLocation });
+    } catch (e) { setError(e.message); }
+    finally { setSubmitting(false); }
   };
 
   const reset = () => {
     clearState();
     setVin(''); setVinCheck({ state: 'idle', valid: false, reason: '', model: '' });
-    setScannedRaw(null);
+    setScannedRaw(null); setCaptureLocation('');
     setPartName(''); setProblemType('');
     setPhotos([]); setComment('');
     setDone(null); setError(null);
   };
 
-  /* ---- styles ---- */
   const cardStyle = {
     background: '#FFFFFF', borderRadius: 14, padding: isMobile ? 14 : 22,
     boxShadow: '0 3px 12px rgba(0,0,0,0.05)', border: '1px solid #F1F5F9',
@@ -510,238 +463,254 @@ export default function LineDefectCapturePage() {
     textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5,
   };
 
+  /* -------- DONE -------- */
   if (done) {
+    const loc = LOCATION_BY_CODE[done.captureLocation];
     return (
-      <div style={{ padding: isMobile ? 12 : 20, maxWidth: 640, margin: '0 auto', fontFamily: 'Inter, Arial, sans-serif' }}>
-        <div style={{ ...cardStyle, textAlign: 'center', padding: isMobile ? 24 : 40 }}>
-          <div style={{ fontSize: 56, marginBottom: 8 }}>✅</div>
-          <h2 style={{ margin: '0 0 10px', color: '#166534', fontSize: 20 }}>
-            {done.dup ? 'Дефект уже был сохранён' : 'Дефект сохранён'}
-          </h2>
-          <div style={{ color: '#475569', fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>
-            <div><b>VIN:</b> {done.vin}</div>
-            <div><b>Деталь:</b> {done.partName}</div>
-            <div><b>Дефект:</b> {done.problemType}</div>
+      <div style={{ width: '100%', minHeight: '100vh', background: '#F8FAFC' }}>
+        <div style={{ padding: isMobile ? 12 : 20, maxWidth: 640, margin: '0 auto', fontFamily: 'Inter, Arial, sans-serif' }}>
+          <div style={{ ...cardStyle, textAlign: 'center', padding: isMobile ? 24 : 40 }}>
+            <div style={{ fontSize: 56, marginBottom: 8 }}>✅</div>
+            <h2 style={{ margin: '0 0 10px', color: '#166534', fontSize: 20 }}>
+              {done.dup ? 'Дефект уже был сохранён' : 'Дефект сохранён'}
+            </h2>
+            <div style={{ color: '#475569', fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>
+              <div><b>VIN:</b> {done.vin}</div>
+              <div><b>Место:</b> {loc?.label || done.captureLocation}</div>
+              <div><b>Деталь:</b> {done.partName}</div>
+              <div><b>Дефект:</b> {done.problemType}</div>
+            </div>
+            <button onClick={reset} style={bigButton}>Зафиксировать следующий</button>
           </div>
-          <button onClick={reset} style={bigButton}>Зафиксировать следующий</button>
         </div>
       </div>
     );
   }
 
-  const canSubmit = vinCheck.valid && partName.trim() && problemType.trim() && photos.length > 0 && !submitting;
+  const canSubmit = vinCheck.valid && captureLocation && partName.trim() && problemType.trim() && photos.length > 0 && !submitting;
 
+  /* -------- MAIN -------- */
   return (
-    <div style={{
-      padding: isMobile ? 10 : 32,
-      maxWidth: isMobile ? 640 : 780, margin: '0 auto',
-      fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
-      minHeight: '100vh', background: '#F8FAFC',
-    }}>
-      <h1 style={{ fontSize: isMobile ? 18 : 28, fontWeight: 900, color: '#0F172A', margin: isMobile ? '4px 0 12px' : '4px 0 24px' }}>
-        Фиксация дефекта
-      </h1>
+    <div style={{ width: '100%', minHeight: '100vh', background: '#F8FAFC' }}>
+      <div style={{
+        padding: isMobile ? 10 : 32,
+        maxWidth: isMobile ? 640 : 780,
+        margin: '0 auto',
+        fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
+      }}>
+        <h1 style={{ fontSize: isMobile ? 18 : 28, fontWeight: 900, color: '#0F172A', margin: isMobile ? '4px 0 12px' : '4px 0 24px' }}>
+          Фиксация дефекта
+        </h1>
 
-      {/* Шаг 1 */}
-      <div style={cardStyle}>
-        <div style={stepLabel}>Шаг 1 — VIN</div>
-        <input
-          value={vin}
-          onChange={(e) => { setVin(sanitizeVin(e.target.value)); setScannedRaw(null); }}
-          onPaste={(e) => {
-            e.preventDefault();
-            setVin(sanitizeVin(e.clipboardData.getData('text')));
-          }}
-          placeholder="17 символов"
-          maxLength={VIN_LEN}
-          inputMode="text"
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="characters"
-          spellCheck={false}
-          style={{
-            width: '100%', padding: '12px 14px', fontSize: 16,
-            borderRadius: 10, border: '1px solid #E2E8F0',
-            outline: 'none', fontFamily: 'monospace', letterSpacing: '0.5px',
-            boxSizing: 'border-box', marginBottom: 10,
-          }}
-        />
-        <button
-          onClick={() => setScannerOpen(true)}
-          style={{ ...secondaryButton, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-        >
-          📷 Сканировать штрихкод
-        </button>
-
-        {(vinCheck.state !== 'idle' || vinCheck.reason) && (
-          <div style={{
-            marginTop: 10, padding: '10px 12px', borderRadius: 10,
-            background:
-              vinCheck.state === 'ok' ? '#ECFDF5' :
-              vinCheck.state === 'err' ? '#FEF2F2' :
-              vinCheck.state === 'checking' ? '#F1F5F9' : 'transparent',
-            color:
-              vinCheck.state === 'ok' ? '#166534' :
-              vinCheck.state === 'err' ? '#991B1B' : '#475569',
-            fontSize: 13,
-            border: vinCheck.state === 'ok' ? '1px solid #A7F3D0'
-                  : vinCheck.state === 'err' ? '1px solid #FECACA'
-                  : 'none',
-          }}>
-            {vinCheck.state === 'ok' && <>✔ Модель: <b>{vinCheck.model}</b>{scannedRaw && ' · сканер'}</>}
-            {vinCheck.state === 'err' && <>✖ {vinCheck.reason}</>}
-            {vinCheck.state === 'checking' && <>⏳ Проверка…</>}
-            {vinCheck.state === 'idle' && vinCheck.reason && <>· {vinCheck.reason}</>}
-          </div>
-        )}
-      </div>
-
-      {/* Шаг 2 */}
-      <div style={{ ...cardStyle, opacity: vinCheck.valid ? 1 : 0.5, pointerEvents: vinCheck.valid ? 'auto' : 'none' }}>
-        <div style={stepLabel}>Шаг 2 — Что и где</div>
-
-        <Autocomplete
-          label="Деталь"
-          value={partName}
-          onChange={(v) => { setPartName(v); if (problemType) setProblemType(''); }}
-          placeholder="Начните вводить название"
-          fetchUrl={vinCheck.valid && vinCheck.model
-            ? `${API_BASE}/api/line-defects/suggest-parts?model=${encodeURIComponent(vinCheck.model)}&q=${encodeURIComponent(partName)}`
-            : null}
-          disabled={!vinCheck.valid}
-        />
-
-        <div style={{ height: 12 }} />
-
-        <Autocomplete
-          label="Дефект"
-          value={problemType}
-          onChange={setProblemType}
-          placeholder={partName ? 'Начните вводить тип дефекта' : 'Сначала выберите деталь'}
-          fetchUrl={vinCheck.valid && partName
-            ? `${API_BASE}/api/line-defects/suggest-defects?model=${encodeURIComponent(vinCheck.model)}&part=${encodeURIComponent(partName)}&q=${encodeURIComponent(problemType)}`
-            : null}
-          disabled={!partName}
-        />
-      </div>
-
-      {/* Шаг 3 */}
-      <div style={cardStyle}>
-        <div style={stepLabel}>Шаг 3 — Фото и комментарий</div>
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {photos.map(p => (
-            <div key={p.id} style={{ position: 'relative', width: isMobile ? 84 : 100, height: isMobile ? 84 : 100 }}>
-              <img
-                src={`${API_BASE}${p.url}`}
-                alt=""
-                onClick={() => setLightbox(`${API_BASE}${p.url}`)}
-                style={{
-                  width: '100%', height: '100%', objectFit: 'cover',
-                  borderRadius: 10, border: '1px solid #E2E8F0', cursor: 'zoom-in',
-                }}
-              />
-              <button
-                onClick={() => confirmRemove(p.id)}
-                style={{
-                  position: 'absolute', top: -6, right: -6, width: 24, height: 24,
-                  borderRadius: '50%', border: 'none', background: '#DC2626',
-                  color: '#FFF', fontWeight: 800, cursor: 'pointer', fontSize: 12,
-                }}
-              >×</button>
-            </div>
-          ))}
-          {photos.length < MAX_PHOTOS && (
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              style={{
-                width: isMobile ? 84 : 100, height: isMobile ? 84 : 100, borderRadius: 10,
-                border: '2px dashed #CBD5E1', background: '#F8FAFC', color: '#64748B',
-                fontSize: 28, cursor: uploading ? 'wait' : 'pointer',
-              }}
-            >{uploading ? '…' : '+'}</button>
-          )}
+        {/* Шаг 1 — VIN */}
+        <div style={cardStyle}>
+          <div style={stepLabel}>Шаг 1 — VIN</div>
           <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            multiple
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const f = Array.from(e.target.files || []);
-              e.target.value = '';
-              handleFiles(f);
+            value={vin}
+            onChange={(e) => { setVin(sanitizeVin(e.target.value)); setScannedRaw(null); }}
+            onPaste={(e) => { e.preventDefault(); setVin(sanitizeVin(e.clipboardData.getData('text'))); }}
+            placeholder="17 символов"
+            maxLength={VIN_LEN}
+            inputMode="text"
+            autoComplete="off" autoCorrect="off" autoCapitalize="characters" spellCheck={false}
+            style={{
+              width: '100%', padding: '12px 14px', fontSize: 16,
+              borderRadius: 10, border: '1px solid #E2E8F0',
+              outline: 'none', fontFamily: 'monospace', letterSpacing: '0.5px',
+              boxSizing: 'border-box', marginBottom: 10,
             }}
+          />
+          <button onClick={() => setScannerOpen(true)} style={{ ...secondaryButton, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            📷 Сканировать штрихкод
+          </button>
+
+          {(vinCheck.state !== 'idle' || vinCheck.reason) && (
+            <div style={{
+              marginTop: 10, padding: '10px 12px', borderRadius: 10,
+              background: vinCheck.state === 'ok' ? '#ECFDF5' : vinCheck.state === 'err' ? '#FEF2F2' : vinCheck.state === 'checking' ? '#F1F5F9' : 'transparent',
+              color: vinCheck.state === 'ok' ? '#166534' : vinCheck.state === 'err' ? '#991B1B' : '#475569',
+              fontSize: 13,
+              border: vinCheck.state === 'ok' ? '1px solid #A7F3D0' : vinCheck.state === 'err' ? '1px solid #FECACA' : 'none',
+            }}>
+              {vinCheck.state === 'ok' && <>✔ Модель: <b>{vinCheck.model}</b>{scannedRaw && ' · сканер'}</>}
+              {vinCheck.state === 'err' && <>✖ {vinCheck.reason}</>}
+              {vinCheck.state === 'checking' && <>⏳ Проверка…</>}
+              {vinCheck.state === 'idle' && vinCheck.reason && <>· {vinCheck.reason}</>}
+            </div>
+          )}
+        </div>
+
+        {/* Шаг 2 — Место занесения */}
+        <div style={{ ...cardStyle, opacity: vinCheck.valid ? 1 : 0.5, pointerEvents: vinCheck.valid ? 'auto' : 'none' }}>
+          <div style={stepLabel}>Шаг 2 — Место занесения</div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)',
+            gap: 8,
+          }}>
+            {LOCATIONS.map(loc => {
+              const active = captureLocation === loc.code;
+              return (
+                <button
+                  key={loc.code}
+                  type="button"
+                  onClick={() => setCaptureLocation(loc.code)}
+                  style={{
+                    padding: isMobile ? '16px 8px' : '18px 10px',
+                    borderRadius: 12,
+                    border: active ? `2px solid ${loc.color}` : '1px solid #E2E8F0',
+                    background: active ? loc.color : '#FFFFFF',
+                    color: active ? '#FFFFFF' : '#1E293B',
+                    fontSize: isMobile ? 13 : 14,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    minHeight: isMobile ? 60 : 72,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    textAlign: 'center',
+                    lineHeight: 1.2,
+                    boxShadow: active ? `0 6px 16px ${loc.color}40` : '0 2px 6px rgba(0,0,0,0.04)',
+                  }}
+                >
+                  {loc.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Шаг 3 — Part / Defect */}
+        <div style={{ ...cardStyle, opacity: vinCheck.valid ? 1 : 0.5, pointerEvents: vinCheck.valid ? 'auto' : 'none' }}>
+          <div style={stepLabel}>Шаг 3 — Что и где</div>
+          <Autocomplete
+            label="Деталь"
+            value={partName}
+            onChange={(v) => { setPartName(v); if (problemType) setProblemType(''); }}
+            placeholder="Начните вводить название"
+            fetchUrl={vinCheck.valid && vinCheck.model
+              ? `${API_BASE}/api/line-defects/suggest-parts?model=${encodeURIComponent(vinCheck.model)}&q=${encodeURIComponent(partName)}`
+              : null}
+            disabled={!vinCheck.valid}
+          />
+          <div style={{ height: 12 }} />
+          <Autocomplete
+            label="Дефект"
+            value={problemType}
+            onChange={setProblemType}
+            placeholder={partName ? 'Начните вводить тип дефекта' : 'Сначала выберите деталь'}
+            fetchUrl={vinCheck.valid && partName
+              ? `${API_BASE}/api/line-defects/suggest-defects?model=${encodeURIComponent(vinCheck.model)}&part=${encodeURIComponent(partName)}&q=${encodeURIComponent(problemType)}`
+              : null}
+            disabled={!partName}
           />
         </div>
 
-        <div style={{ marginTop: 6, fontSize: 11, color: '#94A3B8' }}>
-          {photos.length} / {MAX_PHOTOS} фото
+        {/* Шаг 4 — Фото и комментарий */}
+        <div style={cardStyle}>
+          <div style={stepLabel}>Шаг 4 — Фото и комментарий</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {photos.map(p => (
+              <div key={p.id} style={{ position: 'relative', width: isMobile ? 84 : 100, height: isMobile ? 84 : 100 }}>
+                <img
+                  src={`${API_BASE}${p.url}`}
+                  alt=""
+                  onClick={() => setLightbox(`${API_BASE}${p.url}`)}
+                  style={{
+                    width: '100%', height: '100%', objectFit: 'cover',
+                    borderRadius: 10, border: '1px solid #E2E8F0', cursor: 'zoom-in',
+                  }}
+                />
+                <button
+                  onClick={() => confirmRemove(p.id)}
+                  style={{
+                    position: 'absolute', top: -6, right: -6, width: 24, height: 24,
+                    borderRadius: '50%', border: 'none', background: '#DC2626',
+                    color: '#FFF', fontWeight: 800, cursor: 'pointer', fontSize: 12,
+                  }}
+                >×</button>
+              </div>
+            ))}
+            {photos.length < MAX_PHOTOS && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                style={{
+                  width: isMobile ? 84 : 100, height: isMobile ? 84 : 100, borderRadius: 10,
+                  border: '2px dashed #CBD5E1', background: '#F8FAFC', color: '#64748B',
+                  fontSize: 28, cursor: uploading ? 'wait' : 'pointer',
+                }}
+              >{uploading ? '…' : '+'}</button>
+            )}
+            <input
+              ref={fileInputRef} type="file" accept="image/*" capture="environment" multiple
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = Array.from(e.target.files || []);
+                e.target.value = '';
+                handleFiles(f);
+              }}
+            />
+          </div>
+          <div style={{ marginTop: 6, fontSize: 11, color: '#94A3B8' }}>{photos.length} / {MAX_PHOTOS} фото</div>
+          <div style={{ height: 12 }} />
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>Комментарий (необязательно)</div>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value.slice(0, MAX_COMMENT))}
+            rows={2}
+            placeholder="Комментарий…"
+            style={{
+              width: '100%', padding: 10, fontSize: 15, borderRadius: 10,
+              border: '1px solid #E2E8F0', outline: 'none', resize: 'vertical',
+              fontFamily: 'inherit', boxSizing: 'border-box',
+            }}
+          />
+          <div style={{ textAlign: 'right', fontSize: 10, color: '#94A3B8' }}>{comment.length}/{MAX_COMMENT}</div>
         </div>
 
-        <div style={{ height: 12 }} />
+        {error && (
+          <div style={{
+            padding: 12, background: '#FEF2F2', color: '#991B1B',
+            borderRadius: 10, marginBottom: 10, fontSize: 13, border: '1px solid #FECACA',
+          }}>⚠ {error}</div>
+        )}
 
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-          Комментарий (необязательно)
-        </div>
-        <textarea
-          value={comment}
-          onChange={(e) => setComment(e.target.value.slice(0, MAX_COMMENT))}
-          rows={2}
-          placeholder="Комментарий…"
+        <button
+          onClick={submit}
+          disabled={!canSubmit}
           style={{
-            width: '100%', padding: 10, fontSize: 15, borderRadius: 10,
-            border: '1px solid #E2E8F0', outline: 'none', resize: 'vertical',
-            fontFamily: 'inherit', boxSizing: 'border-box',
+            ...bigButton,
+            opacity: canSubmit ? 1 : 0.5,
+            cursor: submitting ? 'wait' : (canSubmit ? 'pointer' : 'not-allowed'),
           }}
-        />
-        <div style={{ textAlign: 'right', fontSize: 10, color: '#94A3B8' }}>
-          {comment.length}/{MAX_COMMENT}
-        </div>
+        >
+          {submitting ? 'Отправка…' : '✅ Сохранить дефект'}
+        </button>
+
+        {lightbox && (
+          <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, zIndex: 9500, background: 'rgba(15,23,42,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <img src={lightbox} alt="" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 12 }} />
+            <button onClick={() => setLightbox(null)} style={{ position: 'fixed', top: 16, right: 16, width: 40, height: 40, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,0.15)', color: '#FFF', fontSize: 22, cursor: 'pointer' }}>×</button>
+          </div>
+        )}
+
+        {confirmPhotoId && (
+          <ConfirmModal text="Удалить это фото?" onConfirm={doRemove} onCancel={() => setConfirmPhotoId(null)} />
+        )}
+
+        {scannerOpen && (
+          <BarcodeScannerModal
+            onClose={() => setScannerOpen(false)}
+            onResult={(clean) => {
+              setScannerOpen(false);
+              setScannedRaw(clean);
+              setVin(clean);
+            }}
+          />
+        )}
       </div>
-
-      {error && (
-        <div style={{
-          padding: 12, background: '#FEF2F2', color: '#991B1B',
-          borderRadius: 10, marginBottom: 10, fontSize: 13, border: '1px solid #FECACA',
-        }}>⚠ {error}</div>
-      )}
-
-      <button
-        onClick={submit}
-        disabled={!canSubmit}
-        style={{
-          ...bigButton,
-          opacity: canSubmit ? 1 : 0.5,
-          cursor: submitting ? 'wait' : (canSubmit ? 'pointer' : 'not-allowed'),
-        }}
-      >
-        {submitting ? 'Отправка…' : '✅ Сохранить дефект'}
-      </button>
-
-      {lightbox && (
-        <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, zIndex: 9500, background: 'rgba(15,23,42,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <img src={lightbox} alt="" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 12 }} />
-          <button onClick={() => setLightbox(null)} style={{ position: 'fixed', top: 16, right: 16, width: 40, height: 40, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,0.15)', color: '#FFF', fontSize: 22, cursor: 'pointer' }}>×</button>
-        </div>
-      )}
-
-      {confirmPhotoId && (
-        <ConfirmModal text="Удалить это фото?" onConfirm={doRemove} onCancel={() => setConfirmPhotoId(null)} />
-      )}
-
-      {scannerOpen && (
-        <BarcodeScannerModal
-          onClose={() => setScannerOpen(false)}
-          onResult={(clean) => {
-            setScannerOpen(false);
-            setScannedRaw(clean);
-            setVin(clean);
-          }}
-        />
-      )}
     </div>
   );
 }

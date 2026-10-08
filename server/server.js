@@ -13353,6 +13353,7 @@ const LINE_DEFECTS_MAX_PHOTOS       = 3;
 const LINE_DEFECTS_MAX_COMMENT      = 500;
 const LINE_DEFECTS_MAX_PHOTO_BYTES  = 5 * 1024 * 1024;
 const VIN_REGEX                     = /^[A-HJ-NPR-Z0-9]{17}$/;
+const LINE_DEFECT_LOCATIONS         = ['CP7', 'CP8', 'SGP', 'REPAIR'];
 
 if (!fs.existsSync(LINE_DEFECTS_DIR)) {
   fs.mkdirSync(LINE_DEFECTS_DIR, { recursive: true });
@@ -13463,6 +13464,8 @@ function ldRateLimit(ip, max = 60, windowMs = 60 * 1000) {
 
 /* ============================================================
  * POST /api/line-defects/lookup-vin
+ * body: { vin }
+ * Проверка существования VIN в work_order + получение модели
  * ============================================================ */
 app.post('/api/line-defects/lookup-vin', async (req, res) => {
   try {
@@ -13473,14 +13476,20 @@ app.post('/api/line-defects/lookup-vin', async (req, res) => {
 
     let vin = String(req.body?.vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!vin) return res.json({ valid: false, reason: 'VIN пустой' });
-    if (vin.length !== 17) return res.json({ valid: false, reason: `VIN должен быть 17 символов (сейчас ${vin.length})` });
-    if (!VIN_REGEX.test(vin)) return res.json({ valid: false, reason: 'VIN содержит недопустимые символы (I, O, Q запрещены)' });
+    if (vin.length !== 17) {
+      return res.json({ valid: false, reason: `VIN должен быть 17 символов (сейчас ${vin.length})` });
+    }
+    if (!VIN_REGEX.test(vin)) {
+      return res.json({ valid: false, reason: 'VIN содержит недопустимые символы (I, O, Q запрещены)' });
+    }
 
     const [rows] = await pool.query(
       `SELECT VIN, MODEL FROM work_order WHERE VIN = ? LIMIT 1`,
       [vin]
     );
-    if (rows.length === 0) return res.json({ valid: false, reason: 'VIN не найден в базе' });
+    if (rows.length === 0) {
+      return res.json({ valid: false, reason: 'VIN не найден в базе' });
+    }
 
     res.json({ valid: true, vin: rows[0].VIN, model: rows[0].MODEL || '' });
   } catch (err) {
@@ -13499,7 +13508,7 @@ app.get('/api/line-defects/suggest-parts', async (req, res) => {
     const q     = String(req.query.q     || '').trim();
     const like  = `%${q}%`;
 
-    // 1. Каталог
+    // 1. Каталог (part_defect_shop_mapping)
     const [catalog] = await notesPool.query(
       `SELECT DISTINCT part_name FROM part_defect_shop_mapping
        WHERE part_name LIKE ? LIMIT 50`,
@@ -13518,7 +13527,7 @@ app.get('/api/line-defects/suggest-parts', async (req, res) => {
       own = rows;
     }
 
-    // 3. IOT
+    // 3. История IOT (at_*_qm_defect_info)
     let iot = [];
     if (model) {
       const [rows] = await pool.query(
@@ -13576,7 +13585,7 @@ app.get('/api/line-defects/suggest-parts', async (req, res) => {
 
 /* ============================================================
  * GET /api/line-defects/suggest-defects?model=&part=&q=
- * Автокомплит дефектов
+ * Автокомплит дефектов для выбранной детали
  * ============================================================ */
 app.get('/api/line-defects/suggest-defects', async (req, res) => {
   try {
@@ -13586,12 +13595,14 @@ app.get('/api/line-defects/suggest-defects', async (req, res) => {
     if (!part) return res.json([]);
     const like = `%${q}%`;
 
+    // 1. Каталог
     const [catalog] = await notesPool.query(
       `SELECT DISTINCT defect_type FROM part_defect_shop_mapping
        WHERE part_name = ? AND defect_type LIKE ? LIMIT 50`,
       [part, like]
     );
 
+    // 2. Собственная история
     let own = [];
     if (model) {
       const [rows] = await notesPool.query(
@@ -13603,6 +13614,7 @@ app.get('/api/line-defects/suggest-defects', async (req, res) => {
       own = rows;
     }
 
+    // 3. IOT-история
     let iot = [];
     if (model) {
       const [rows] = await pool.query(
@@ -13661,9 +13673,9 @@ app.get('/api/line-defects/suggest-defects', async (req, res) => {
 });
 
 /* ============================================================
- * GET /api/line-defects/filters — уникальные значения для фильтров архива
- * ⚠️ ВАЖНО: этот роут должен идти ДО /api/line-defects/:id,
- *          иначе :id перехватит "filters" и вернёт 404.
+ * GET /api/line-defects/filters
+ * Уникальные значения для фильтров архива
+ * ⚠️ ВАЖНО: до /api/line-defects/:id
  * ============================================================ */
 app.get('/api/line-defects/filters', async (req, res) => {
   try {
@@ -13679,11 +13691,19 @@ app.get('/api/line-defects/filters', async (req, res) => {
       `SELECT problem_type, COUNT(*) AS cnt FROM line_defects
        GROUP BY problem_type ORDER BY cnt DESC LIMIT 300`
     );
+    const [locations] = await notesPool.query(
+      `SELECT capture_location AS loc, COUNT(*) AS cnt
+       FROM line_defects
+       WHERE capture_location IS NOT NULL
+       GROUP BY capture_location
+       ORDER BY cnt DESC`
+    );
 
     res.json({
-      models:   models.map(r => r.model),
-      parts:    parts.map(r => r.part_name),
-      problems: problems.map(r => r.problem_type),
+      models:    models.map(r => r.model),
+      parts:     parts.map(r => r.part_name),
+      problems:  problems.map(r => r.problem_type),
+      locations: locations.map(r => r.loc),
     });
   } catch (err) {
     console.error('[LINE DEFECTS] filters:', err.message);
@@ -13694,6 +13714,7 @@ app.get('/api/line-defects/filters', async (req, res) => {
 /* ============================================================
  * GET /api/line-defects/photos-by-session/:client_id
  * Восстановление фото после перезагрузки страницы
+ * ⚠️ ВАЖНО: до /api/line-defects/:id
  * ============================================================ */
 app.get('/api/line-defects/photos-by-session/:client_id', async (req, res) => {
   try {
@@ -13717,14 +13738,19 @@ app.get('/api/line-defects/photos-by-session/:client_id', async (req, res) => {
 /* ============================================================
  * POST /api/line-defects/photo
  * body: { data: "data:image/jpeg;base64,...", client_id }
+ * Загрузка одного фото к ещё не созданной записи
  * ============================================================ */
 app.post('/api/line-defects/photo', express.json({ limit: '10mb' }), async (req, res) => {
   try {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    if (!ldRateLimit(ip, 180)) return res.status(429).json({ error: 'Слишком много запросов' });
+    if (!ldRateLimit(ip, 180)) {
+      return res.status(429).json({ error: 'Слишком много запросов' });
+    }
 
     const { data, client_id } = req.body || {};
-    if (!data || !client_id) return res.status(400).json({ error: 'data и client_id обязательны' });
+    if (!data || !client_id) {
+      return res.status(400).json({ error: 'data и client_id обязательны' });
+    }
 
     const [[{ cnt }]] = await notesPool.query(
       'SELECT COUNT(*) AS cnt FROM line_defect_photos WHERE client_id = ?',
@@ -13740,11 +13766,17 @@ app.post('/api/line-defects/photo', express.json({ limit: '10mb' }), async (req,
     if (m) { mime = m[1]; base64 = m[2]; }
 
     const buf = Buffer.from(base64, 'base64');
-    if (buf.length === 0) return res.status(400).json({ error: 'Пустой файл' });
-    if (buf.length > LINE_DEFECTS_MAX_PHOTO_BYTES) return res.status(413).json({ error: 'Файл больше 5 МБ' });
+    if (buf.length === 0) {
+      return res.status(400).json({ error: 'Пустой файл' });
+    }
+    if (buf.length > LINE_DEFECTS_MAX_PHOTO_BYTES) {
+      return res.status(413).json({ error: 'Файл больше 5 МБ' });
+    }
 
+    // ---- magic bytes: реально ли это картинка ----
     const isJpeg = buf.length > 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
-    const isPng  = buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47;
+    const isPng  = buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50
+                && buf[2] === 0x4E && buf[3] === 0x47;
     const isWebp = buf.length > 12
                 && buf.slice(0, 4).toString('ascii') === 'RIFF'
                 && buf.slice(8, 12).toString('ascii') === 'WEBP';
@@ -13766,7 +13798,11 @@ app.post('/api/line-defects/photo', express.json({ limit: '10mb' }), async (req,
       [client_id, filename, mime, buf.length]
     );
 
-    res.json({ id: result.insertId, url: `/api/line-defects/file/${filename}`, size_bytes: buf.length });
+    res.json({
+      id: result.insertId,
+      url: `/api/line-defects/file/${filename}`,
+      size_bytes: buf.length,
+    });
   } catch (err) {
     console.error('[LINE DEFECTS] photo upload:', err.message);
     res.status(500).json({ error: err.message });
@@ -13792,7 +13828,9 @@ app.delete('/api/line-defects/photo/:id', async (req, res) => {
     const photo = rows[0];
 
     if (photo.line_defect_id !== null) {
-      if (!password) return res.status(401).json({ error: 'Нужен пароль', needPassword: true });
+      if (!password) {
+        return res.status(401).json({ error: 'Нужен пароль', needPassword: true });
+      }
       if (String(password) !== String(IMPORT_PASSWORD)) {
         return res.status(403).json({ error: 'Неверный пароль' });
       }
@@ -13810,7 +13848,10 @@ app.delete('/api/line-defects/photo/:id', async (req, res) => {
 });
 
 /* ============================================================
- * POST /api/line-defects — создать запись о дефекте
+ * POST /api/line-defects
+ * body: { vin, capture_location, part_name, problem_type, comment,
+ *         entry_mode, barcode_raw, photo_ids, client_id }
+ * Создание записи о дефекте + привязка фото
  * ============================================================ */
 app.post('/api/line-defects', async (req, res) => {
   try {
@@ -13818,29 +13859,52 @@ app.post('/api/line-defects', async (req, res) => {
     if (!ldRateLimit(ip, 60)) return res.status(429).json({ error: 'Слишком много запросов' });
 
     const {
-      vin: vinRaw, part_name, problem_type,
+      vin: vinRaw, part_name, problem_type, capture_location,
       comment = '', entry_mode = 'manual', barcode_raw = null,
       photo_ids = [], client_id,
     } = req.body || {};
 
+    // ---- VIN ----
     const vin = String(vinRaw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (!VIN_REGEX.test(vin)) return res.status(400).json({ error: 'Некорректный VIN' });
-    if (!part_name || !String(part_name).trim()) return res.status(400).json({ error: 'Не выбрана деталь' });
-    if (!problem_type || !String(problem_type).trim()) return res.status(400).json({ error: 'Не выбран дефект' });
-    if (!Array.isArray(photo_ids) || photo_ids.length === 0) return res.status(400).json({ error: 'Нужно хотя бы 1 фото' });
-    if (photo_ids.length > LINE_DEFECTS_MAX_PHOTOS) return res.status(400).json({ error: `Максимум ${LINE_DEFECTS_MAX_PHOTOS} фото` });
+
+    // ---- обязательные поля ----
+    if (!part_name || !String(part_name).trim()) {
+      return res.status(400).json({ error: 'Не выбрана деталь' });
+    }
+    if (!problem_type || !String(problem_type).trim()) {
+      return res.status(400).json({ error: 'Не выбран дефект' });
+    }
+    if (!Array.isArray(photo_ids) || photo_ids.length === 0) {
+      return res.status(400).json({ error: 'Нужно хотя бы 1 фото' });
+    }
+    if (photo_ids.length > LINE_DEFECTS_MAX_PHOTOS) {
+      return res.status(400).json({ error: `Максимум ${LINE_DEFECTS_MAX_PHOTOS} фото` });
+    }
+
+    // ---- валидация места занесения ----
+    const safeLocation = LINE_DEFECT_LOCATIONS.includes(capture_location) ? capture_location : null;
+    if (!safeLocation) {
+      return res.status(400).json({
+        error: 'Не указано место занесения (CP7 / CP8 / СГП / Ремзона)',
+      });
+    }
 
     const trimmedPart    = String(part_name).trim();
     const trimmedProblem = String(problem_type).trim();
 
+    // ---- дедупликация по client_id ----
     if (client_id) {
       const [exist] = await notesPool.query(
         'SELECT id FROM line_defects WHERE client_id = ? LIMIT 1',
         [client_id]
       );
-      if (exist.length > 0) return res.json({ id: exist[0].id, duplicate: true });
+      if (exist.length > 0) {
+        return res.json({ id: exist[0].id, duplicate: true });
+      }
     }
 
+    // ---- модель берём С СЕРВЕРА ----
     const [wo] = await pool.query(
       'SELECT VIN, MODEL FROM work_order WHERE VIN = ? LIMIT 1',
       [vin]
@@ -13848,10 +13912,12 @@ app.post('/api/line-defects', async (req, res) => {
     if (wo.length === 0) return res.status(400).json({ error: 'VIN не найден в базе' });
     const model = wo[0].MODEL || '';
 
-    // валидация part + problem
+    // ---- валидация part + problem против каталога и истории ----
     let allowed = false;
+
     const [catalogHit] = await notesPool.query(
-      `SELECT 1 FROM part_defect_shop_mapping WHERE part_name = ? AND defect_type = ? LIMIT 1`,
+      `SELECT 1 FROM part_defect_shop_mapping
+       WHERE part_name = ? AND defect_type = ? LIMIT 1`,
       [trimmedPart, trimmedProblem]
     );
     if (catalogHit.length > 0) allowed = true;
@@ -13865,18 +13931,25 @@ app.post('/api/line-defects', async (req, res) => {
            UNION ALL SELECT VIN, PART_NAME, PROBLEM_TYPE FROM at_paint_qm_defect_info
          ) d
          JOIN work_order wo ON wo.VIN = d.VIN
-         WHERE wo.MODEL = ? AND d.PART_NAME = ? AND d.PROBLEM_TYPE = ?
+         WHERE wo.MODEL = ?
+           AND d.PART_NAME = ?
+           AND d.PROBLEM_TYPE = ?
          LIMIT 1`,
         [model, trimmedPart, trimmedProblem]
       );
       if (historyHit.length > 0) allowed = true;
     }
+
     if (!allowed) {
-      return res.status(400).json({ error: 'Такая пара «деталь + дефект» не найдена в справочнике или истории для этой модели' });
+      return res.status(400).json({
+        error: 'Такая пара «деталь + дефект» не найдена в справочнике или истории для этой модели',
+      });
     }
 
+    // ---- комментарий ----
     const cleanComment = String(comment || '').trim().slice(0, LINE_DEFECTS_MAX_COMMENT);
 
+    // ---- проверка фото ----
     const ph = photo_ids.map(() => '?').join(',');
     const [photoRows] = await notesPool.query(
       `SELECT id, client_id FROM line_defect_photos
@@ -13891,22 +13964,31 @@ app.post('/api/line-defects', async (req, res) => {
       return res.status(400).json({ error: 'Фото не принадлежат текущей сессии' });
     }
 
+    // ---- entry_mode ----
     const validModes = ['barcode', 'manual', 'photo_ocr'];
     const safeMode = validModes.includes(entry_mode) ? entry_mode : 'manual';
 
+    // ---- запись ----
     const [ins] = await notesPool.query(
       `INSERT INTO line_defects
-         (vin, model, part_name, problem_type, comment, barcode_raw, entry_mode, client_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (vin, model, part_name, problem_type, capture_location,
+          comment, barcode_raw, entry_mode, client_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        vin, model, trimmedPart, trimmedProblem,
+        vin,
+        model,
+        trimmedPart,
+        trimmedProblem,
+        safeLocation,
         cleanComment || null,
         barcode_raw ? String(barcode_raw).slice(0, 255) : null,
-        safeMode, client_id || null,
+        safeMode,
+        client_id || null,
       ]
     );
     const defectId = ins.insertId;
 
+    // ---- привязка фото ----
     await notesPool.query(
       `UPDATE line_defect_photos SET line_defect_id = ? WHERE id IN (${ph})`,
       [defectId, ...photo_ids]
@@ -13921,6 +14003,7 @@ app.post('/api/line-defects', async (req, res) => {
 
 /* ============================================================
  * GET /api/line-defects/file/:filename
+ * Раздача файла фото
  * ============================================================ */
 app.get('/api/line-defects/file/:filename', (req, res) => {
   try {
@@ -13936,12 +14019,14 @@ app.get('/api/line-defects/file/:filename', (req, res) => {
 /* ============================================================
  * GET /api/line-defects
  * Список записей с фото и пагинацией
- * Параметры: from, to, vin, model, part_name, problem_type, search, limit, offset
+ * Параметры: from, to, vin, model, part_name, problem_type,
+ *            capture_location, search, limit, offset
  * ============================================================ */
 app.get('/api/line-defects', async (req, res) => {
   try {
     const {
       from, to, vin, model, part_name, problem_type,
+      capture_location,
       search, limit = 200, offset = 0,
     } = req.query;
 
@@ -13966,6 +14051,11 @@ app.get('/api/line-defects', async (req, res) => {
     if (model && model !== 'ALL') { where.push('model = ?'); params.push(model); }
     if (part_name)    { where.push('part_name LIKE ?');    params.push(`%${part_name}%`); }
     if (problem_type) { where.push('problem_type LIKE ?'); params.push(`%${problem_type}%`); }
+
+    if (capture_location && capture_location !== 'ALL') {
+      where.push('capture_location = ?');
+      params.push(capture_location);
+    }
 
     if (search) {
       where.push('(vin LIKE ? OR model LIKE ? OR part_name LIKE ? OR problem_type LIKE ? OR comment LIKE ?)');
@@ -14026,8 +14116,10 @@ app.get('/api/line-defects', async (req, res) => {
 
 /* ============================================================
  * GET /api/line-defects/:id
- * ⚠️ ВАЖНО: идёт ПОСЛЕ всех /api/line-defects/<something-static>,
- *          иначе "filters", "suggest-parts" и т.п. будут перехвачены.
+ * Одна запись с фото
+ * ⚠️ ВАЖНО: идёт ПОСЛЕ всех статических роутов /api/line-defects/<word>,
+ *          иначе "filters", "suggest-parts", "photos-by-session" будут
+ *          перехвачены :id и вернут 404.
  * ============================================================ */
 app.get('/api/line-defects/:id', async (req, res) => {
   try {
