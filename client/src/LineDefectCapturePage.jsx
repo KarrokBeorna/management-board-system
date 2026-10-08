@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 
 const API_BASE = '';
@@ -66,7 +66,7 @@ const beep = () => {
 };
 const vibrate = (ms = 60) => { try { navigator.vibrate?.(ms); } catch {} };
 
-/* ---------- session state persistence ---------- */
+/* ---------- sessionStorage ---------- */
 const loadState = () => {
   try {
     const raw = sessionStorage.getItem(STATE_KEY);
@@ -197,6 +197,8 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
             >
               <span>{labelOf(it)}</span>
               {it.source === 'actual' && <span style={{ fontSize: 11, color: '#94A3B8' }}>из истории</span>}
+              {it.source === 'global' && <span style={{ fontSize: 11, color: '#94A3B8' }}>глобально</span>}
+              {it.source === 'own' && <span style={{ fontSize: 11, color: '#94A3B8' }}>вы вносили</span>}
             </div>
           ))}
           {!loading && items.length === 0 && value.trim() && (
@@ -329,46 +331,39 @@ export default function LineDefectCapturePage() {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(null);
   const [error, setError] = useState(null);
-  const [restored, setRestored] = useState(false);
 
   const fileInputRef = useRef(null);
   const vinAbortRef = useRef(null);
 
-  /* ---------- восстановление фото сессии с сервера ---------- */
+  /* ---- восстановление фото с сервера ---- */
   useEffect(() => {
-    // если были локально сохранённые фото — проверим, что они ещё валидны на сервере
     (async () => {
       try {
         const res = await fetch(`${API_BASE}/api/line-defects/photos-by-session/${clientId}`);
         if (!res.ok) return;
         const serverPhotos = await res.json();
-        if (Array.isArray(serverPhotos)) {
-          // синхронизируем: берём пересечение (по id)
-          setPhotos(prev => {
-            const localIds = new Set(prev.map(p => p.id));
-            const serverIds = new Set(serverPhotos.map(p => p.id));
-            // оставляем локальные, которых уже нет на сервере (были удалены) — убираем
-            const kept = prev.filter(p => serverIds.has(p.id));
-            // добавляем с сервера те, что не пришли из локального стейта
-            const merged = [...kept];
-            serverPhotos.forEach(sp => {
-              if (!localIds.has(sp.id)) merged.push(sp);
-            });
-            return merged;
+        if (!Array.isArray(serverPhotos)) return;
+        setPhotos(prev => {
+          const localIds = new Set(prev.map(p => p.id));
+          const serverIds = new Set(serverPhotos.map(p => p.id));
+          const kept = prev.filter(p => serverIds.has(p.id));
+          const merged = [...kept];
+          serverPhotos.forEach(sp => {
+            if (!localIds.has(sp.id)) merged.push(sp);
           });
-        }
+          return merged;
+        });
       } catch {}
-      setRestored(true);
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---------- сохранение состояния в sessionStorage ---------- */
+  /* ---- сохранение в sessionStorage ---- */
   useEffect(() => {
     saveState({ vin, partName, problemType, comment, clientId, photos, scannedRaw });
   }, [vin, partName, problemType, comment, clientId, photos, scannedRaw]);
 
-  /* ---------- VIN check ---------- */
+  /* ---- VIN check ---- */
   useEffect(() => {
     const clean = sanitizeVin(vin);
     if (clean.length !== VIN_LEN) {
@@ -402,7 +397,7 @@ export default function LineDefectCapturePage() {
     return () => clearTimeout(t);
   }, [vin]);
 
-  /* ---------- photos ---------- */
+  /* ---- photos ---- */
   const handleFiles = async (files) => {
     if (!files || files.length === 0) return;
     setUploading(true);
@@ -447,7 +442,7 @@ export default function LineDefectCapturePage() {
     }
   };
 
-  /* ---------- submit ---------- */
+  /* ---- submit ---- */
   const submit = async () => {
     setError(null);
     if (!vinCheck.valid) return setError('VIN не подтверждён');
@@ -493,7 +488,7 @@ export default function LineDefectCapturePage() {
     setDone(null); setError(null);
   };
 
-  /* ---------- styles ---------- */
+  /* ---- styles ---- */
   const cardStyle = {
     background: '#FFFFFF', borderRadius: 14, padding: isMobile ? 14 : 22,
     boxShadow: '0 3px 12px rgba(0,0,0,0.05)', border: '1px solid #F1F5F9',
@@ -538,12 +533,12 @@ export default function LineDefectCapturePage() {
 
   return (
     <div style={{
-      padding: isMobile ? 10 : 20,
-      maxWidth: 640, margin: '0 auto',
+      padding: isMobile ? 10 : 32,
+      maxWidth: isMobile ? 640 : 780, margin: '0 auto',
       fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
       minHeight: '100vh', background: '#F8FAFC',
     }}>
-      <h1 style={{ fontSize: isMobile ? 18 : 24, fontWeight: 900, color: '#0F172A', margin: '4px 0 12px' }}>
+      <h1 style={{ fontSize: isMobile ? 18 : 28, fontWeight: 900, color: '#0F172A', margin: isMobile ? '4px 0 12px' : '4px 0 24px' }}>
         Фиксация дефекта
       </h1>
 

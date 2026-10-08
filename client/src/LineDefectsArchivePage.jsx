@@ -4,9 +4,9 @@ const API_BASE = '';
 const PAGE_SIZE = 40;
 
 const useIsMobile = () => {
-  const [m, setM] = useState(typeof window !== 'undefined' && window.innerWidth < 768);
+  const [m, setM] = useState(typeof window !== 'undefined' && window.innerWidth < 900);
   useEffect(() => {
-    const h = () => setM(window.innerWidth < 768);
+    const h = () => setM(window.innerWidth < 900);
     window.addEventListener('resize', h);
     return () => window.removeEventListener('resize', h);
   }, []);
@@ -17,7 +17,7 @@ const fmtDate = (s) => {
   if (!s) return '';
   const d = new Date(s);
   const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
 const toISO = (dateStr, endOfDay = false) => {
@@ -25,14 +25,85 @@ const toISO = (dateStr, endOfDay = false) => {
   return endOfDay ? `${dateStr} 23:59:59` : `${dateStr} 00:00:00`;
 };
 
+const todayStr = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+/* ================= Password modal ================= */
+function PasswordModal({ text, error, busy, onConfirm, onCancel }) {
+  const [pwd, setPwd] = useState('');
+  return (
+    <div
+      onClick={busy ? undefined : onCancel}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9800,
+        background: 'rgba(15,23,42,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: '#FFF', borderRadius: 16, padding: 24, maxWidth: 380, width: '100%' }}
+      >
+        <div style={{ fontSize: 16, fontWeight: 800, color: '#0F172A', marginBottom: 8 }}>
+          Подтвердите удаление
+        </div>
+        <div style={{ fontSize: 13, color: '#64748B', marginBottom: 16 }}>{text}</div>
+
+        <input
+          type="password"
+          value={pwd}
+          onChange={(e) => setPwd(e.target.value)}
+          autoFocus
+          placeholder="Пароль"
+          onKeyDown={(e) => { if (e.key === 'Enter' && !busy) onConfirm(pwd); }}
+          style={{
+            width: '100%', padding: '12px 14px', fontSize: 16,
+            borderRadius: 10, border: '1px solid #E2E8F0', outline: 'none',
+            boxSizing: 'border-box', marginBottom: 10,
+          }}
+        />
+
+        {error && <div style={{ color: '#DC2626', fontSize: 13, marginBottom: 10 }}>{error}</div>}
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            style={{
+              flex: 1, padding: '11px', borderRadius: 10,
+              border: '1px solid #E2E8F0', background: '#FFF',
+              color: '#475569', fontSize: 14, fontWeight: 700,
+              cursor: busy ? 'wait' : 'pointer',
+            }}
+          >Отмена</button>
+          <button
+            onClick={() => onConfirm(pwd)}
+            disabled={busy}
+            style={{
+              flex: 1, padding: '11px', borderRadius: 10, border: 'none',
+              background: '#DC2626', color: '#FFF',
+              fontSize: 14, fontWeight: 700,
+              cursor: busy ? 'wait' : 'pointer',
+              opacity: busy ? 0.7 : 1,
+            }}
+          >{busy ? '…' : 'Удалить'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= Main ================= */
 export default function LineDefectsArchivePage() {
   const isMobile = useIsMobile();
-
-  const today = new Date().toISOString().slice(0, 10);
-  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const today = todayStr();
 
   const [filters, setFilters] = useState({
-    from: weekAgo, to: today,
+    from: today, to: today,
     vin: '', model: '', part_name: '', problem_type: '', search: '',
   });
   const [filterOptions, setFilterOptions] = useState({ models: [], parts: [], problems: [] });
@@ -44,7 +115,11 @@ export default function LineDefectsArchivePage() {
   const [lightbox, setLightbox] = useState(null);
   const [detail, setDetail] = useState(null);
 
-  /* загружаем список значений для фильтров один раз */
+  const [deletePhotoTarget, setDeletePhotoTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  /* ---- фильтры значений ---- */
   useEffect(() => {
     (async () => {
       try {
@@ -65,7 +140,7 @@ export default function LineDefectsArchivePage() {
     if (filters.to)   qs.set('to',   toISO(filters.to, true));
     if (filters.vin)  qs.set('vin',  filters.vin.trim());
     if (filters.model && filters.model !== 'ALL') qs.set('model', filters.model);
-    if (filters.part_name) qs.set('part_name', filters.part_name);
+    if (filters.part_name)    qs.set('part_name', filters.part_name);
     if (filters.problem_type) qs.set('problem_type', filters.problem_type);
     if (filters.search) qs.set('search', filters.search.trim());
     qs.set('limit', PAGE_SIZE);
@@ -94,7 +169,7 @@ export default function LineDefectsArchivePage() {
 
   useEffect(() => { load(0); }, [load]);
 
-  const set = (key, value) => setFilters(f => ({ ...f, [key]: value }));
+  const set = (k, v) => setFilters(f => ({ ...f, [k]: v }));
 
   const openDetail = async (id) => {
     try {
@@ -104,43 +179,87 @@ export default function LineDefectsArchivePage() {
     } catch {}
   };
 
-  /* ---- стили ---- */
-  const cardStyle = {
-    background: '#FFFFFF', borderRadius: 12, padding: 12,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.05)', border: '1px solid #F1F5F9',
+  /* ---- удаление фото ---- */
+  const askDeletePhoto = (photoId) => {
+    setDeletePhotoTarget({ photoId });
+    setDeleteError('');
   };
-  const inputStyle = {
-    padding: '10px 12px', fontSize: 14, borderRadius: 8,
-    border: '1px solid #E2E8F0', outline: 'none', background: '#FFF',
-    boxSizing: 'border-box', width: '100%',
+  const cancelDelete = () => {
+    setDeletePhotoTarget(null);
+    setDeleteError('');
   };
-  const labelStyle = {
-    fontSize: 11, fontWeight: 700, color: '#64748B',
-    textTransform: 'uppercase', marginBottom: 4, display: 'block',
+
+  const confirmDelete = async (password) => {
+    if (!deletePhotoTarget) return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/line-defects/photo/${deletePhotoTarget.photoId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        if (res.status === 401) { setDeleteError('Введите пароль'); return; }
+        if (res.status === 403) { setDeleteError('Неверный пароль'); return; }
+        throw new Error(json.error || 'Ошибка удаления');
+      }
+      const deletedId = deletePhotoTarget.photoId;
+      setDeletePhotoTarget(null);
+      if (detail) {
+        setDetail({ ...detail, photos: detail.photos.filter(p => p.id !== deletedId) });
+      }
+      load(page);
+    } catch (e) {
+      setDeleteError(e.message);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  /* ================= стили ================= */
+  const cardStyle = {
+    background: '#FFFFFF', borderRadius: 14, padding: isMobile ? 12 : 16,
+    boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #F1F5F9',
+    marginBottom: isMobile ? 12 : 20,
+  };
+  const inputStyle = {
+    padding: isMobile ? '10px 12px' : '11px 14px',
+    fontSize: 14, borderRadius: 9, border: '1px solid #E2E8F0',
+    outline: 'none', background: '#FFF', boxSizing: 'border-box', width: '100%',
+  };
+  const labelStyle = {
+    fontSize: 11, fontWeight: 700, color: '#64748B',
+    textTransform: 'uppercase', marginBottom: 5, display: 'block',
+    letterSpacing: 0.4,
+  };
+
   return (
     <div style={{
-      padding: isMobile ? 12 : 20,
-      maxWidth: 1200, margin: '0 auto',
+      padding: isMobile ? 12 : 28,
+      maxWidth: 1440, margin: '0 auto',
       fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
       minHeight: '100vh', background: '#F8FAFC',
     }}>
-      <h1 style={{ fontSize: isMobile ? 20 : 26, fontWeight: 900, color: '#0F172A', margin: '4px 0 16px' }}>
-        Архив дефектов
-        <span style={{ fontSize: 13, fontWeight: 500, color: '#64748B', marginLeft: 10 }}>
+      {/* Заголовок */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: isMobile ? 12 : 20 }}>
+        <h1 style={{ fontSize: isMobile ? 20 : 30, fontWeight: 900, color: '#0F172A', margin: 0 }}>
+          Архив фото дефектов
+        </h1>
+        <span style={{ fontSize: isMobile ? 12 : 14, color: '#64748B', fontWeight: 500 }}>
           {total > 0 ? `${total} записей` : ''}
         </span>
-      </h1>
+      </div>
 
-      {/* ---- Фильтры ---- */}
-      <div style={{ ...cardStyle, marginBottom: 16 }}>
+      {/* Фильтры */}
+      <div style={cardStyle}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)',
-          gap: 10,
+          gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 12,
         }}>
           <div>
             <label style={labelStyle}>Дата с</label>
@@ -158,20 +277,20 @@ export default function LineDefectsArchivePage() {
             </select>
           </div>
           <div>
-            <label style={labelStyle}>VIN</label>
+            <label style={labelStyle}>VIN (можно последние 6)</label>
             <input
               value={filters.vin}
-              onChange={(e) => set('vin', e.target.value.toUpperCase())}
-              placeholder="поиск по VIN"
-              style={inputStyle}
+              onChange={(e) => set('vin', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 17))}
+              placeholder="напр. 044448 или полный"
+              style={{ ...inputStyle, fontFamily: 'monospace', letterSpacing: '0.5px' }}
             />
           </div>
-          <div style={{ gridColumn: isMobile ? 'span 2' : 'span 2' }}>
+          <div>
             <label style={labelStyle}>Деталь</label>
             <input
               value={filters.part_name}
               onChange={(e) => set('part_name', e.target.value)}
-              placeholder="любая часть названия"
+              placeholder="часть названия"
               list="parts-list"
               style={inputStyle}
             />
@@ -179,12 +298,12 @@ export default function LineDefectsArchivePage() {
               {filterOptions.parts.map(p => <option key={p} value={p} />)}
             </datalist>
           </div>
-          <div style={{ gridColumn: isMobile ? 'span 2' : 'span 2' }}>
+          <div>
             <label style={labelStyle}>Дефект</label>
             <input
               value={filters.problem_type}
               onChange={(e) => set('problem_type', e.target.value)}
-              placeholder="любая часть названия"
+              placeholder="часть названия"
               list="problems-list"
               style={inputStyle}
             />
@@ -192,52 +311,66 @@ export default function LineDefectsArchivePage() {
               {filterOptions.problems.map(p => <option key={p} value={p} />)}
             </datalist>
           </div>
-          <div style={{ gridColumn: isMobile ? 'span 2' : 'span 4' }}>
-            <label style={labelStyle}>Общий поиск (VIN, модель, деталь, дефект, комментарий)</label>
+          <div style={{ gridColumn: isMobile ? 'span 2' : 'span 2' }}>
+            <label style={labelStyle}>Общий поиск</label>
             <input
               value={filters.search}
               onChange={(e) => set('search', e.target.value)}
-              placeholder="начните вводить…"
+              placeholder="VIN, модель, деталь, дефект, комментарий…"
               style={inputStyle}
             />
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
           <button
             onClick={() => load(0)}
             style={{
-              padding: '10px 18px', borderRadius: 8, border: 'none',
+              padding: '10px 22px', borderRadius: 9, border: 'none',
               background: '#2563EB', color: '#FFF', fontWeight: 700, fontSize: 14, cursor: 'pointer',
             }}
           >Применить</button>
           <button
-            onClick={() => {
-              setFilters({ from: weekAgo, to: today, vin: '', model: '', part_name: '', problem_type: '', search: '' });
-            }}
+            onClick={() => setFilters({
+              from: today, to: today,
+              vin: '', model: '', part_name: '', problem_type: '', search: '',
+            })}
             style={{
-              padding: '10px 18px', borderRadius: 8, border: '1px solid #E2E8F0',
+              padding: '10px 22px', borderRadius: 9, border: '1px solid #E2E8F0',
               background: '#FFF', color: '#475569', fontWeight: 700, fontSize: 14, cursor: 'pointer',
             }}
-          >Сбросить</button>
+          >Сегодня</button>
+          <button
+            onClick={() => {
+              const weekAgo = new Date(Date.now() - 7 * 86400000);
+              const pad = (n) => String(n).padStart(2, '0');
+              const w = `${weekAgo.getFullYear()}-${pad(weekAgo.getMonth() + 1)}-${pad(weekAgo.getDate())}`;
+              setFilters(f => ({ ...f, from: w, to: today }));
+            }}
+            style={{
+              padding: '10px 22px', borderRadius: 9, border: '1px solid #E2E8F0',
+              background: '#FFF', color: '#475569', fontWeight: 700, fontSize: 14, cursor: 'pointer',
+            }}
+          >7 дней</button>
         </div>
       </div>
 
       {error && (
-        <div style={{ padding: 12, background: '#FEF2F2', color: '#991B1B', borderRadius: 10, marginBottom: 12, fontSize: 14, border: '1px solid #FECACA' }}>
-          ⚠ {error}
-        </div>
+        <div style={{
+          padding: 14, background: '#FEF2F2', color: '#991B1B',
+          borderRadius: 10, marginBottom: 16, fontSize: 14, border: '1px solid #FECACA',
+        }}>⚠ {error}</div>
       )}
 
-      {/* ---- Сетка карточек ---- */}
+      {/* Сетка */}
       {loading ? (
-        <div style={{ padding: 40, textAlign: 'center', color: '#64748B' }}>Загрузка…</div>
+        <div style={{ padding: 60, textAlign: 'center', color: '#64748B', fontSize: 15 }}>Загрузка…</div>
       ) : items.length === 0 ? (
-        <div style={{ padding: 40, textAlign: 'center', color: '#94A3B8' }}>Ничего не найдено</div>
+        <div style={{ padding: 60, textAlign: 'center', color: '#94A3B8', fontSize: 15 }}>Ничего не найдено</div>
       ) : (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(280px, 1fr))',
-          gap: 12,
+          gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(340px, 1fr))',
+          gap: isMobile ? 12 : 18,
         }}>
           {items.map(it => {
             const firstPhoto = it.photos?.find(p => !p.deleted && p.url);
@@ -245,42 +378,76 @@ export default function LineDefectsArchivePage() {
               <div
                 key={it.id}
                 onClick={() => openDetail(it.id)}
-                style={{ ...cardStyle, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8 }}
+                style={{
+                  ...cardStyle, marginBottom: 0,
+                  cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 12,
+                  transition: 'transform 0.15s, box-shadow 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.08)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 2px 10px rgba(0,0,0,0.05)';
+                }}
               >
-                <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 14 }}>
                   <div style={{
-                    width: 90, height: 90, borderRadius: 8, overflow: 'hidden',
+                    width: isMobile ? 96 : 120, height: isMobile ? 96 : 120,
+                    borderRadius: 10, overflow: 'hidden',
                     background: '#F1F5F9', flexShrink: 0,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: '#94A3B8', fontSize: 11, textAlign: 'center',
                   }}>
                     {firstPhoto ? (
-                      <img src={`${API_BASE}${firstPhoto.url}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img
+                        src={`${API_BASE}${firstPhoto.url}`}
+                        alt=""
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
                     ) : 'нет фото'}
                   </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#2563EB', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+
+                  <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{
+                      fontSize: 13, fontFamily: 'monospace', color: '#2563EB',
+                      fontWeight: 700, letterSpacing: 0.5,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
                       {it.vin}
                     </div>
-                    <div style={{ fontSize: 13, color: '#1E293B', fontWeight: 700, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {it.model} · {it.part_name}
+                    <div style={{
+                      fontSize: 14, color: '#1E293B', fontWeight: 800,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {it.model}
                     </div>
-                    <div style={{ fontSize: 12, color: '#64748B', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {it.problem_type}
+                    <div style={{
+                      fontSize: 13, color: '#475569',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      🔧 {it.part_name}
                     </div>
-                    <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>
-                      {fmtDate(it.created_at)}
+                    <div style={{
+                      fontSize: 13, color: '#64748B',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      ⚠ {it.problem_type}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 'auto', paddingTop: 4 }}>
+                      🕐 {fmtDate(it.created_at)}
+                      {it.photos?.length > 1 && (
+                        <span style={{ marginLeft: 10 }}>📷 {it.photos.length}</span>
+                      )}
                     </div>
                   </div>
-                  {it.photos?.length > 1 && (
-                    <div style={{ fontSize: 11, color: '#94A3B8', alignSelf: 'flex-start' }}>
-                      📷 {it.photos.length}
-                    </div>
-                  )}
                 </div>
+
                 {it.comment && (
                   <div style={{
                     fontSize: 12, color: '#475569', fontStyle: 'italic',
+                    padding: '8px 10px', background: '#F8FAFC', borderRadius: 8,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>
                     «{it.comment}»
@@ -292,26 +459,29 @@ export default function LineDefectsArchivePage() {
         </div>
       )}
 
-      {/* ---- Пагинация ---- */}
+      {/* Пагинация */}
       {totalPages > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 20, paddingBottom: 20 }}>
+        <div style={{
+          display: 'flex', justifyContent: 'center', alignItems: 'center',
+          gap: 12, marginTop: 24, paddingBottom: 24,
+        }}>
           <button
             onClick={() => load(Math.max(0, page - 1))}
             disabled={page === 0 || loading}
             style={{
-              padding: '8px 16px', borderRadius: 8, border: '1px solid #E2E8F0',
+              padding: '10px 20px', borderRadius: 9, border: '1px solid #E2E8F0',
               background: '#FFF', color: '#475569', fontWeight: 700, fontSize: 14,
               cursor: page === 0 ? 'not-allowed' : 'pointer', opacity: page === 0 ? 0.4 : 1,
             }}
           >← Назад</button>
-          <span style={{ fontSize: 13, color: '#475569' }}>
+          <span style={{ fontSize: 14, color: '#475569', fontWeight: 600 }}>
             {page + 1} / {totalPages}
           </span>
           <button
             onClick={() => load(Math.min(totalPages - 1, page + 1))}
             disabled={page >= totalPages - 1 || loading}
             style={{
-              padding: '8px 16px', borderRadius: 8, border: '1px solid #E2E8F0',
+              padding: '10px 20px', borderRadius: 9, border: '1px solid #E2E8F0',
               background: '#FFF', color: '#475569', fontWeight: 700, fontSize: 14,
               cursor: page >= totalPages - 1 ? 'not-allowed' : 'pointer',
               opacity: page >= totalPages - 1 ? 0.4 : 1,
@@ -320,7 +490,7 @@ export default function LineDefectsArchivePage() {
         </div>
       )}
 
-      {/* ---- Модалка деталей ---- */}
+      {/* Модалка деталей */}
       {detail && (
         <div
           onClick={() => setDetail(null)}
@@ -334,44 +504,75 @@ export default function LineDefectsArchivePage() {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: '#FFF', borderRadius: isMobile ? '16px 16px 0 0' : 16,
-              width: '100%', maxWidth: isMobile ? '100%' : 640,
+              background: '#FFF',
+              borderRadius: isMobile ? '16px 16px 0 0' : 16,
+              width: '100%', maxWidth: isMobile ? '100%' : 720,
               maxHeight: isMobile ? '92vh' : '90vh',
-              overflow: 'auto', padding: 20,
+              overflow: 'auto', padding: isMobile ? 18 : 28,
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-              <div style={{ fontSize: 18, fontWeight: 900, color: '#0F172A' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+              <div style={{ fontSize: isMobile ? 17 : 22, fontWeight: 900, color: '#0F172A' }}>
                 Дефект #{detail.id}
               </div>
-              <button onClick={() => setDetail(null)} style={{ border: 'none', background: 'transparent', fontSize: 22, cursor: 'pointer', color: '#94A3B8' }}>×</button>
+              <button
+                onClick={() => setDetail(null)}
+                style={{ border: 'none', background: 'transparent', fontSize: 26, cursor: 'pointer', color: '#94A3B8', lineHeight: 1, padding: 0 }}
+              >×</button>
             </div>
 
-            <div style={{ fontSize: 13, color: '#475569', lineHeight: 1.7, marginBottom: 14 }}>
-              <div><b>VIN:</b> <span style={{ fontFamily: 'monospace' }}>{detail.vin}</span></div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+              gap: '10px 24px', fontSize: 14, color: '#475569',
+              marginBottom: 20, lineHeight: 1.6,
+            }}>
+              <div><b>VIN:</b> <span style={{ fontFamily: 'monospace', color: '#2563EB', fontWeight: 700 }}>{detail.vin}</span></div>
               <div><b>Модель:</b> {detail.model}</div>
               <div><b>Деталь:</b> {detail.part_name}</div>
               <div><b>Дефект:</b> {detail.problem_type}</div>
               <div><b>Создан:</b> {fmtDate(detail.created_at)}</div>
-              <div><b>Способ ввода:</b> {detail.entry_mode === 'barcode' ? '📷 сканер' : '✍️ вручную'}</div>
-              {detail.barcode_raw && <div><b>Считано:</b> <code>{detail.barcode_raw}</code></div>}
-              {detail.comment && <div><b>Комментарий:</b> {detail.comment}</div>}
+              <div><b>Способ:</b> {detail.entry_mode === 'barcode' ? '📷 сканер' : '✍️ вручную'}</div>
+              {detail.comment && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <b>Комментарий:</b> {detail.comment}
+                </div>
+              )}
             </div>
 
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               {detail.photos?.map(p => (
-                <div key={p.id} style={{ width: 110, height: 110, borderRadius: 10, overflow: 'hidden', background: '#F1F5F9' }}>
-                  {p.deleted || !p.url ? (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94A3B8', fontSize: 11, padding: 8, textAlign: 'center' }}>
-                      фото удалено<br />(9 мес)
-                    </div>
-                  ) : (
-                    <img
-                      src={`${API_BASE}${p.url}`}
-                      alt=""
-                      onClick={() => setLightbox(`${API_BASE}${p.url}`)}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }}
-                    />
+                <div key={p.id} style={{ position: 'relative', width: 130, height: 130 }}>
+                  <div style={{ width: '100%', height: '100%', borderRadius: 10, overflow: 'hidden', background: '#F1F5F9' }}>
+                    {p.deleted || !p.url ? (
+                      <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        height: '100%', color: '#94A3B8', fontSize: 11, padding: 8, textAlign: 'center',
+                      }}>
+                        фото удалено<br />(9 мес)
+                      </div>
+                    ) : (
+                      <img
+                        src={`${API_BASE}${p.url}`}
+                        alt=""
+                        onClick={() => setLightbox(`${API_BASE}${p.url}`)}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }}
+                      />
+                    )}
+                  </div>
+                  {!p.deleted && p.url && (
+                    <button
+                      onClick={() => askDeletePhoto(p.id)}
+                      title="Удалить фото"
+                      style={{
+                        position: 'absolute', top: -6, right: -6,
+                        width: 26, height: 26, borderRadius: '50%',
+                        border: '2px solid #FFF', background: '#DC2626', color: '#FFF',
+                        fontSize: 14, fontWeight: 800, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        lineHeight: 1, padding: 0,
+                      }}
+                    >×</button>
                   )}
                 </div>
               ))}
@@ -380,12 +581,43 @@ export default function LineDefectsArchivePage() {
         </div>
       )}
 
-      {/* ---- Lightbox ---- */}
+      {/* Lightbox */}
       {lightbox && (
-        <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: 0, zIndex: 9700, background: 'rgba(15,23,42,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-          <img src={lightbox} alt="" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 12 }} />
-          <button onClick={() => setLightbox(null)} style={{ position: 'fixed', top: 16, right: 16, width: 40, height: 40, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,0.15)', color: '#FFF', fontSize: 22, cursor: 'pointer' }}>×</button>
+        <div
+          onClick={() => setLightbox(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9700,
+            background: 'rgba(15,23,42,0.92)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+          }}
+        >
+          <img
+            src={lightbox}
+            alt=""
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '95vw', maxHeight: '95vh', borderRadius: 12 }}
+          />
+          <button
+            onClick={() => setLightbox(null)}
+            style={{
+              position: 'fixed', top: 20, right: 24,
+              width: 44, height: 44, borderRadius: '50%',
+              border: 'none', background: 'rgba(255,255,255,0.15)',
+              color: '#FFF', fontSize: 24, cursor: 'pointer',
+            }}
+          >×</button>
         </div>
+      )}
+
+      {/* Модалка пароля */}
+      {deletePhotoTarget && (
+        <PasswordModal
+          text="Удаление фото дефекта. Действие необратимо."
+          error={deleteError}
+          busy={deleting}
+          onConfirm={confirmDelete}
+          onCancel={cancelDelete}
+        />
       )}
     </div>
   );

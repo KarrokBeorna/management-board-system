@@ -40,6 +40,12 @@ const dateStyle = {
   whiteSpace: 'nowrap',
 };
 
+const brandStyle = {
+  fontSize: '16px',
+  fontWeight: 800,
+  whiteSpace: 'nowrap',
+};
+
 function getCurrentDate() {
   const d = new Date();
   return d.toLocaleDateString('ru-RU');
@@ -71,6 +77,7 @@ function useIsMobile() {
 export default function Layout() {
   const location = useLocation();
   const isMobile = useIsMobile();
+  const isCapturePage = location.pathname === '/defect-capture';
 
   const isFullScreen =
     location.pathname === '/report' ||
@@ -100,12 +107,21 @@ export default function Layout() {
     <>
       <header style={headerStyle}>
         <div style={leftGroupStyle}>
-          <Link to="/" title="На главную">
-            <img src={homeIcon} alt="Home" style={homeIconStyle} />
-          </Link>
-          {!isMobile && <img src={logo} alt="Logo" style={logoStyle} />}
+          {isCapturePage ? (
+            <>
+              <img src={logo} alt="Logo" style={logoStyle} />
+              <span style={brandStyle}>AGM - Quality</span>
+            </>
+          ) : (
+            <>
+              <Link to="/" title="На главную">
+                <img src={homeIcon} alt="Home" style={homeIconStyle} />
+              </Link>
+              {!isMobile && <img src={logo} alt="Logo" style={logoStyle} />}
+            </>
+          )}
         </div>
-        {!isMobile && <span>AGM - Quality</span>}
+        {!isMobile && !isCapturePage && <span>AGM - Quality</span>}
         <span style={dateStyle}>{getCurrentDate()}</span>
       </header>
       <main style={isFullScreen ? mainFullScreen : mainDefault}>
