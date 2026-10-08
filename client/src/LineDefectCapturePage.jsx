@@ -199,32 +199,87 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
 function BarcodeScannerModal({ onClose, onResult }) {
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
+  const streamRef = useRef(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(true);
   const [hint, setHint] = useState('Наведите камеру на штрихкод');
 
   useEffect(() => {
     let cancelled = false;
-    const reader = new BrowserMultiFormatReader(undefined, {
-      delayBetweenScanAttempts: 120,
-      tryPlayVideoTimeout: 8000,
-    });
+
     (async () => {
+      // ---- 1. Проверка доступности API ----
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        const isSecure = typeof window !== 'undefined' && (
+          window.isSecureContext ||
+          window.location.protocol === 'https:' ||
+          window.location.hostname === 'localhost' ||
+          window.location.hostname === '127.0.0.1'
+        );
+        setErr(
+          isSecure
+            ? 'Браузер не поддерживает доступ к камере. Используйте Chrome / Safari / Edge.'
+            : 'Камера работает только по HTTPS или на localhost. Откройте сайт по защищённому адресу.'
+        );
+        setBusy(false);
+        return;
+      }
+
+      // ---- 2. Запрашиваем поток напрямую с задней камеры ----
+      let stream;
       try {
-        let deviceId = null;
-        try {
-          const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-          const back = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
-          if (back) deviceId = back.deviceId;
-        } catch {}
-        const controls = await reader.decodeFromVideoDevice(deviceId, videoRef.current, (result) => {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch (e) {
+        const name = e?.name || '';
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+          setErr('Доступ к камере запрещён. Разрешите доступ в настройках браузера.');
+        } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+          setErr('Камера не найдена на устройстве.');
+        } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+          setErr('Камера занята другим приложением.');
+        } else {
+          setErr(e?.message || 'Не удалось получить доступ к камере.');
+        }
+        setBusy(false);
+        return;
+      }
+
+      if (cancelled) {
+        stream.getTracks().forEach(t => { try { t.stop(); } catch {} });
+        return;
+      }
+      streamRef.current = stream;
+
+      // ---- 3. Привязываем поток к <video> ----
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        try { await videoRef.current.play(); } catch {}
+      }
+
+      // ---- 4. Запускаем декодер на потоке ----
+      try {
+        const reader = new BrowserMultiFormatReader(undefined, {
+          delayBetweenScanAttempts: 120,
+        });
+        const controls = await reader.decodeFromStream(stream, videoRef.current, (result) => {
           if (cancelled) return;
           if (result) {
             const text = result.getText().trim();
             const clean = sanitizeVin(text);
-            if (clean.length !== VIN_LEN) { setHint(`Считано «${text.slice(0, 24)}» — не VIN, продолжаем…`); return; }
+            if (clean.length !== VIN_LEN) {
+              setHint(`Считано «${text.slice(0, 24)}» — не VIN, продолжаем…`);
+              return;
+            }
             cancelled = true;
             try { controls.stop(); } catch {}
+            try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
             beep(); vibrate(80);
             onResult(clean);
           }
@@ -232,36 +287,75 @@ function BarcodeScannerModal({ onClose, onResult }) {
         controlsRef.current = controls;
         setBusy(false);
       } catch (e) {
-        const msg = e?.message || '';
-        if (/permission|NotAllowed/i.test(msg)) setErr('Доступ к камере запрещён');
-        else if (/secure|https/i.test(msg)) setErr('Камера работает только по HTTPS');
-        else setErr(msg || 'Не удалось запустить камеру');
+        console.error('[scanner] decode error:', e);
+        setErr(e?.message || 'Не удалось запустить распознавание.');
         setBusy(false);
       }
     })();
-    return () => { cancelled = true; try { controlsRef.current?.stop(); } catch {} };
+
+    return () => {
+      cancelled = true;
+      try { controlsRef.current?.stop(); } catch {}
+      try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
+    };
   }, [onResult]);
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 9000, display: 'flex', flexDirection: 'column' }}>
       <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
-        <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline autoPlay />
-        <div style={{ position: 'absolute', inset: '30% 8%', border: '2px solid #22C55E', borderRadius: 12, boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)', pointerEvents: 'none' }} />
+        <video
+          ref={videoRef}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          muted
+          playsInline
+          autoPlay
+        />
+        {/* Прицел */}
+        <div style={{
+          position: 'absolute', inset: '30% 8%',
+          border: '2px solid #22C55E', borderRadius: 12,
+          boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)',
+          pointerEvents: 'none',
+          display: err ? 'none' : 'block',
+        }} />
         {busy && !err && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#FFF', fontSize: 16, background: 'rgba(0,0,0,0.4)' }}>Запуск камеры…</div>
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            color: '#FFF', fontSize: 16, background: 'rgba(0,0,0,0.4)',
+          }}>Запуск камеры…</div>
         )}
         {err && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#FFF', padding: 24, textAlign: 'center', background: 'rgba(0,0,0,0.6)' }}>
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            color: '#FFF', padding: 24, textAlign: 'center',
+            background: 'rgba(0,0,0,0.7)',
+          }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>⚠️</div>
-            <div style={{ fontSize: 16 }}>{err}</div>
+            <div style={{ fontSize: 15, lineHeight: 1.5, maxWidth: 320 }}>{err}</div>
+            <div style={{ fontSize: 13, color: '#94A3B8', marginTop: 16 }}>
+              Введите VIN вручную.
+            </div>
           </div>
         )}
         {!busy && !err && (
-          <div style={{ position: 'absolute', bottom: 20, left: 0, right: 0, textAlign: 'center', color: '#FFF', fontSize: 14, textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>{hint}</div>
+          <div style={{
+            position: 'absolute', bottom: 20, left: 0, right: 0,
+            textAlign: 'center', color: '#FFF', fontSize: 14,
+            textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+          }}>{hint}</div>
         )}
       </div>
       <div style={{ padding: 16, background: '#111', display: 'flex', justifyContent: 'center' }}>
-        <button onClick={onClose} style={{ padding: '12px 32px', borderRadius: 12, border: 'none', background: '#374151', color: '#FFF', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>Отмена</button>
+        <button
+          onClick={onClose}
+          style={{
+            padding: '12px 32px', borderRadius: 12, border: 'none',
+            background: '#374151', color: '#FFF', fontSize: 15,
+            fontWeight: 700, cursor: 'pointer',
+          }}
+        >{err ? 'Закрыть' : 'Отмена'}</button>
       </div>
     </div>
   );
