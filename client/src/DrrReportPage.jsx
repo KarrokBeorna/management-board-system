@@ -579,7 +579,7 @@ export default function DrrReportPage() {
                             {modelShortNames[modelKey] || modelKey}
                           </td>
                           {dpuOffChartData.map((point, idx) => {
-                            const val = modelKey === 'total' ? point.maxValue : point[modelKey];
+                            const val = modelKey === 'total' ? point.total : point[modelKey];
                             return (
                               <td key={idx} style={{
                                 ...tdStyle,

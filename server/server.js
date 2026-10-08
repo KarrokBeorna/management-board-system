@@ -3353,6 +3353,7 @@ app.get('/api/problem-grades', async (req, res) => {
   }
 });
 
+
 // ================== DPU OFF РЕТРОСПЕКТИВА ==================
 app.get('/api/dpu-off-retrospective', async (req, res) => {
   try {
@@ -3378,8 +3379,7 @@ app.get('/api/dpu-off-retrospective', async (req, res) => {
       });
 
       const result = { label, type };
-      let totalDefects = 0;
-      let totalVins = 0;
+      const modelValues = []; // для простого среднего
 
       // 3. Для каждой модели считаем офлайн-дефекты её VIN'ов
       for (const model of Object.keys(modelVins)) {
@@ -3405,12 +3405,16 @@ app.get('/api/dpu-off-retrospective', async (req, res) => {
         `, [...vins, ...vins, ...vins]);
 
         const defects = Number(defRows[0]?.DEFECTS) || 0;
-        result[model] = +(defects / vins.length).toFixed(2);
-        totalDefects += defects;
-        totalVins += vins.length;
+        const dpu = +(defects / vins.length).toFixed(2);
+        result[model] = dpu;
+        modelValues.push(dpu);
       }
 
-      result.total = totalVins > 0 ? +(totalDefects / totalVins).toFixed(2) : 0;
+      // Total = простое среднее по моделям (как в DRR-ретро)
+      result.total = modelValues.length > 0
+        ? +(modelValues.reduce((a, b) => a + b, 0) / modelValues.length).toFixed(2)
+        : 0;
+
       return result;
     };
 
