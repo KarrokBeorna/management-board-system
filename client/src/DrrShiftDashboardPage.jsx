@@ -688,23 +688,27 @@ function ShiftColumn({
 
 /* ===================== НЕДЕЛЬНАЯ АНАЛИТИКА ===================== */
 
-// Блок readonly фото недели (без добавления и удаления)
+// Блок readonly фото недели — всегда максимум 10 последних
 function WeeklyPhotosBlock({ photos, loading, shiftLetter }) {
   const [lightboxUrl, setLightboxUrl] = useState(null);
+  const MAX_PHOTOS = 10;
 
-  // При выборе конкретной смены (A/B/C) — фильтруем фото по букве из photo_key
-  const filteredPhotos = shiftLetter === 'ALL'
-    ? photos
-    : photos.filter(p => {
-        const parsed = parsePhotoKey(p.photoKey);
-        return parsed.letter === shiftLetter;
-      });
+  // Сначала фильтруем по смене, затем берём 10 самых актуальных.
+  // Бэкенд уже сортирует по uploaded_at DESC — slice(0, 10) даст свежие.
+  const filteredPhotos = (
+    shiftLetter === 'ALL'
+      ? photos
+      : photos.filter(p => {
+          const parsed = parsePhotoKey(p.photoKey);
+          return parsed.letter === shiftLetter;
+        })
+  ).slice(0, MAX_PHOTOS);
 
   return (
     <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #F1F5F9' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
-          Фото периода ({filteredPhotos.length}/10)
+          Фото периода ({filteredPhotos.length}/{MAX_PHOTOS})
         </span>
         <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
           Только для просмотра
@@ -862,7 +866,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type, weekKey]);
 
-  // Загрузка фото периода
+  // Загрузка фото периода — с запасом (60), финальное ограничение до 10 делается на фронте
   useEffect(() => {
     if (weeks.length === 0) {
       setPhotos([]);
@@ -874,7 +878,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
       checkpoint: type,
       weekStart,
       weekEnd,
-      limit: 30,
+      limit: 60,
     });
     setLoadingPhotos(true);
     fetch(`${API_BASE}/api/drr-weekly-photos?${params}`)
