@@ -8981,151 +8981,26 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
 });
 
 
-
-app.get('/api/drr-electronics-vins', async (req, res) => {
+app.get('/api/drr-electronics-elec-vins', async (req, res) => {
   try {
-    const { partName, problemType, model, dateFrom, dateTo } = req.query;
-    if (!partName || !model || !dateFrom || !dateTo) {
-      return res.status(400).json({ error: 'Недостаточно параметров' });
+    const { typeCode, model, dateFrom, dateTo } = req.query;
+    if (!model || !dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'model, dateFrom, dateTo обязательны' });
     }
-
-    const electronicsPosts = [
-      'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
-      'PIP1', 'PIP2', 'PIP3','PIP4', 'PIP5', 'PIP6','PIP7', 'PIP8', 'PIP9','CP7 Audit',
-      '360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final',
-      'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up',
-      'REPAIR VERIFICATION', 'TRACK', 'ROLL'
-    ];
-    const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
-    const finalProblemType = problemType || '';
-
-    // ========== 1. Роботы: refuel_log ==========
-    const refuelSql = `
-      SELECT r.VIN AS VIN, wo.MODEL AS MODEL
-      FROM (
-        SELECT VIN, CREATION_TIME,
-               CASE
-                 WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
-                 WHEN OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
-                 WHEN OIL_TYPE = 'CL1' THEN 'Заправка антифриза - NG'
-                 WHEN OIL_TYPE = 'WW' THEN 'Заправка омывайки - NG'
-                 WHEN OIL_TYPE = 'PREAC' THEN 'Тест утечки кондиц. – NG'
-                 WHEN OIL_TYPE = 'PREBK' THEN 'Тест утечки тормозной – NG'
-                 WHEN OIL_TYPE = 'E7' THEN 'Заправка трансмиссионного – NG'
-               END AS part_name,
-               '' AS problem_type
-        FROM at_im_refuel_log
-        WHERE FILL_RESULT IN ('NOK','NG')
-          AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')
-      ) r
-      JOIN work_order wo ON wo.VIN = r.VIN
-      WHERE r.part_name = ? AND r.problem_type = ?
-        AND wo.MODEL = ?
-        AND DATE(r.CREATION_TIME) BETWEEN ? AND ?
-    `;
-
-    // ========== 2. Роботы: electrical_check_info ==========
-    const electricalSql = `
-      SELECT e.VIN AS VIN, wo.MODEL AS MODEL
-      FROM (
-        SELECT VIN, CREATION_TIME,
-               CASE
-                 WHEN \`TYPE\` = '03' OR \`TYPE\` = '18' THEN 'Прошивка EOL - NG'
-                 WHEN \`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
-                 WHEN \`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
-                 WHEN \`TYPE\` = '21' THEN 'МДВШ - Прошивка TMPS - NG'
-                 WHEN \`TYPE\` = '26' THEN 'ERA - Прошивка ERA - NG'
-                 WHEN \`TYPE\` = '27' THEN 'APK - Блок управления программируемых специальных функций - Запись кода, не в норме'
-               END AS part_name,
-               '' AS problem_type
-        FROM at_im_electrical_check_info
-        WHERE RESULT IN ('NOK','NG')
-          AND \`TYPE\` <> '01'
-      ) e
+    const types = (typeCode && typeCode !== 'ALL') ? typeCode.split(',') : ['03', '26', '17'];
+    const typePlaceholders = types.map(() => '?').join(',');
+    const [rows] = await pool.query(`
+      SELECT DISTINCT e.VIN, wo.MODEL
+      FROM at_im_electrical_check_info e
       JOIN work_order wo ON wo.VIN = e.VIN
-      WHERE e.part_name = ? AND e.problem_type = ?
+      WHERE e.\`TYPE\` IN (${typePlaceholders})
+        AND e.RESULT IN ('NG','NOK')
         AND wo.MODEL = ?
         AND DATE(e.CREATION_TIME) BETWEEN ? AND ?
-    `;
-
-    // ========== 3. Роботы: execute_result ==========
-    const executeSql = `
-      SELECT ex.VIN AS VIN, wo.MODEL AS MODEL
-      FROM (
-        SELECT VIN, CREATION_TIME,
-               CASE
-                 WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
-                 WHEN EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
-                 WHEN EQP_NUM = 'AGMRB01' THEN 'Проверка R&B - NG'
-                 WHEN EQP_NUM = 'AGMTPMS01' THEN 'Проверка TMPS – NG'
-                 WHEN EQP_NUM = 'AGMWAHA01' THEN 'Проверка WA - NG'
-               END AS part_name,
-               '' AS problem_type
-        FROM at_im_execute_result
-        WHERE FINAL_RESULT IN ('NOK','NG')
-          AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
-      ) ex
-      JOIN work_order wo ON wo.VIN = ex.VIN
-      WHERE ex.part_name = ? AND ex.problem_type = ?
-        AND wo.MODEL = ?
-        AND DATE(ex.CREATION_TIME) BETWEEN ? AND ?
-    `;
-
-    // ========== 4. Обычные таблицы (только оффлайн) ==========
-    const regularSql = `
-      SELECT reg.VIN AS VIN, wo.MODEL AS MODEL
-      FROM (
-        SELECT VIN, CREATION_TIME, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type
-        FROM at_biw_qm_defect_info
-        WHERE POST_NAME IN (${postListStr})
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-        UNION ALL
-        SELECT VIN, CREATION_TIME, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type
-        FROM at_paint_qm_defect_info
-        WHERE POST_NAME IN (${postListStr})
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-        UNION ALL
-        SELECT VIN, CREATION_TIME, PART_NAME AS part_name, PROBLEM_TYPE AS problem_type
-        FROM at_qm_defect_info
-        WHERE POST_NAME IN (${postListStr})
-          AND (OFFLINE OR OFFLINE1 OR OFFLINE2) = 1
-          AND PART_NAME IS NOT NULL AND TRIM(PART_NAME) <> ''
-          AND PROBLEM_TYPE IS NOT NULL AND TRIM(PROBLEM_TYPE) <> ''
-      ) reg
-      JOIN work_order wo ON wo.VIN = reg.VIN
-      WHERE reg.part_name = ? AND reg.problem_type = ?
-        AND wo.MODEL = ?
-        AND DATE(reg.CREATION_TIME) BETWEEN ? AND ?
-    `;
-
-    const params = [partName, finalProblemType, model, dateFrom, dateTo];
-
-    const [refuelRows] = await pool.query(refuelSql, params);
-    const [electricalRows] = await pool.query(electricalSql, params);
-    const [executeRows] = await pool.query(executeSql, params);
-    const [regularRows] = await pool.query(regularSql, params);
-
-    const allRows = [...refuelRows, ...electricalRows, ...executeRows, ...regularRows];
-
-    // Убираем дубликаты по VIN (комментарии не храним)
-    const vinMap = new Map();
-    allRows.forEach(row => {
-      if (!vinMap.has(row.VIN)) {
-        vinMap.set(row.VIN, {
-          VIN: row.VIN,
-          MODEL: row.MODEL,
-        });
-      }
-      // если VIN уже есть, модель не обновляем (одна и та же)
-    });
-
-    res.json(Array.from(vinMap.values()));
+    `, [...types, model, dateFrom, dateTo]);
+    res.json(rows);
   } catch (err) {
-    console.error('Ошибка drr-electronics-vins:', err);
+    console.error('Ошибка drr-electronics-elec-vins:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -9388,6 +9263,244 @@ app.get('/api/drr-electronics-defect-trend', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Ошибка drr-electronics-defect-trend:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/drr-electronics-top-elec-defects', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, models, categories } = req.query;
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    }
+
+    // ВАЖНО: TYPE='18' — дубликат '03'. Берём только '03'.
+    const TYPE_TO_CATEGORY = {
+      '03': 'Прошивка EOL NG',
+      '26': 'Прошивка ERA NG',
+      '17': 'Прошивка Запись/FLASH NG',
+    };
+    const CATEGORY_TO_TYPES = {
+      'Прошивка EOL NG': ['03'],
+      'Прошивка ERA NG': ['26'],
+      'Прошивка Запись/FLASH NG': ['17'],
+    };
+    const ALL_CATEGORIES = Object.keys(CATEGORY_TO_TYPES);
+
+    const selectedCategories = (!categories || categories === 'ALL')
+      ? ALL_CATEGORIES
+      : categories.split(',').map(s => s.trim()).filter(c => CATEGORY_TO_TYPES[c]);
+
+    const typesToQuery = selectedCategories.flatMap(c => CATEGORY_TO_TYPES[c]);
+    if (typesToQuery.length === 0) return res.json([]);
+
+    const typePlaceholders = typesToQuery.map(() => '?').join(',');
+    const params = [
+      ...typesToQuery,
+      `${dateFrom} 00:00:00`,
+      `${dateTo} 23:59:59`,
+    ];
+
+    let modelCondition = '';
+    if (models && models !== 'ALL') {
+      const modelList = models.split(',').map(s => s.trim()).filter(Boolean);
+      if (modelList.length > 0) {
+        modelCondition = ` AND wo.MODEL IN (${modelList.map(() => '?').join(',')})`;
+        params.push(...modelList);
+      }
+    }
+
+    const [rows] = await pool.query(`
+      SELECT
+        wo.MODEL,
+        e.\`TYPE\` AS TYPE_CODE,
+        SUM(CASE WHEN e.RESULT IN ('NG','NOK') THEN 1 ELSE 0 END) AS NG_COUNT,
+        SUM(CASE WHEN e.RESULT = 'OK' THEN 1 ELSE 0 END) AS OK_COUNT,
+        COUNT(DISTINCT CASE WHEN e.RESULT IN ('NG','NOK') THEN e.VIN END) AS VIN_COUNT
+      FROM at_im_electrical_check_info e
+      JOIN work_order wo ON wo.VIN = e.VIN
+      WHERE e.\`TYPE\` IN (${typePlaceholders})
+        AND e.CREATION_TIME BETWEEN ? AND ?
+        AND wo.MODEL IS NOT NULL
+        AND wo.MODEL <> '-'
+        ${modelCondition}
+      GROUP BY wo.MODEL, e.\`TYPE\`
+    `, params);
+
+    // Группируем по категориям + считаем агрегат по моделям
+    const categoriesMap = new Map(); // category -> [{MODEL, DEFECT_COUNT, ...}]
+    const modelAggMap = new Map();   // model -> {DEFECT_COUNT, OK_COUNT, vinsSet}
+
+    rows.forEach(r => {
+      const category = TYPE_TO_CATEGORY[r.TYPE_CODE];
+      if (!category || !selectedCategories.includes(category)) return;
+
+      const ng = Number(r.NG_COUNT) || 0;
+      const ok = Number(r.OK_COUNT) || 0;
+      const vins = Number(r.VIN_COUNT) || 0;
+      const total = ng + ok;
+      const ngShare = total > 0 ? Number((ng * 100 / total).toFixed(1)) : 0;
+
+      if (!categoriesMap.has(category)) categoriesMap.set(category, []);
+      categoriesMap.get(category).push({
+        CATEGORY: category,
+        MODEL: r.MODEL,
+        DEFECT_COUNT: ng,
+        VIN_COUNT: vins,
+        OK_COUNT: ok,
+        TOTAL_COUNT: total,
+        NG_SHARE: ngShare,
+      });
+
+      if (!modelAggMap.has(r.MODEL)) {
+        modelAggMap.set(r.MODEL, { DEFECT_COUNT: 0, OK_COUNT: 0, VIN_COUNT: 0 });
+      }
+      const agg = modelAggMap.get(r.MODEL);
+      agg.DEFECT_COUNT += ng;
+      agg.OK_COUNT += ok;
+      agg.VIN_COUNT += vins; // может пересекаться между категориями
+    });
+
+    const aggregateRows = Array.from(modelAggMap.entries()).map(([model, a]) => {
+      const total = a.DEFECT_COUNT + a.OK_COUNT;
+      return {
+        CATEGORY: 'Агрегат по моделям',
+        MODEL: model,
+        DEFECT_COUNT: a.DEFECT_COUNT,
+        VIN_COUNT: a.VIN_COUNT,
+        OK_COUNT: a.OK_COUNT,
+        TOTAL_COUNT: total,
+        NG_SHARE: total > 0 ? Number((a.DEFECT_COUNT * 100 / total).toFixed(1)) : 0,
+      };
+    });
+
+    const result = [...aggregateRows];
+    selectedCategories.forEach(cat => {
+      const list = categoriesMap.get(cat) || [];
+      list.sort((a, b) => b.DEFECT_COUNT - a.DEFECT_COUNT);
+      result.push(...list);
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка drr-electronics-top-elec-defects:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/drr-electronics-elec-defect-trend', async (req, res) => {
+  try {
+    const { typeCode, model, periodType } = req.query;
+    if (!typeCode || !periodType) {
+      return res.status(400).json({ error: 'typeCode и periodType обязательны' });
+    }
+
+    function getISOWeekInfo(date) {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+      return { year: d.getUTCFullYear(), week: weekNo };
+    }
+
+    const now = new Date();
+    const periods = [];
+    if (periodType === 'month') {
+      for (let i = 2; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        periods.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      }
+    } else if (periodType === 'week') {
+      const day = now.getDay();
+      const mondayOffset = day === 0 ? -6 : 1 - day;
+      const thisMonday = new Date(now);
+      thisMonday.setDate(now.getDate() + mondayOffset);
+      thisMonday.setHours(0, 0, 0, 0);
+      for (let i = 3; i >= 0; i--) {
+        const ws = new Date(thisMonday);
+        ws.setDate(thisMonday.getDate() - i * 7);
+        const iso = getISOWeekInfo(ws);
+        periods.push(`${iso.year}-W${String(iso.week).padStart(2, '0')}`);
+      }
+    } else if (periodType === 'day') {
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        periods.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+      }
+    }
+    if (periods.length === 0) return res.json([]);
+
+    const periodExpr = periodType === 'month'
+      ? "DATE_FORMAT(DATE(e.CREATION_TIME), '%Y-%m')"
+      : periodType === 'week'
+        ? "DATE_FORMAT(DATE(e.CREATION_TIME), '%x-W%v')"
+        : "DATE(e.CREATION_TIME)";
+
+    const types = typeCode.split(',').map(s => s.trim());
+    const typePlaceholders = types.map(() => '?').join(',');
+    const periodPlaceholders = periods.map(() => '?').join(',');
+
+    let modelCondition = '';
+    const defectParams = [...types];
+    if (model && model !== 'ALL') {
+      modelCondition = ' AND wo.MODEL = ?';
+      defectParams.push(model);
+    }
+    defectParams.push(...periods);
+
+    const [defectRows] = await pool.query(`
+      SELECT ${periodExpr} AS period, COUNT(*) AS cnt
+      FROM at_im_electrical_check_info e
+      JOIN work_order wo ON wo.VIN = e.VIN
+      WHERE e.RESULT IN ('NOK','NG')
+        AND e.\`TYPE\` IN (${typePlaceholders})
+        ${modelCondition}
+        AND ${periodExpr} IN (${periodPlaceholders})
+      GROUP BY period
+    `, defectParams);
+
+    const defectMap = {};
+    defectRows.forEach(r => {
+      defectMap[r.period] = (defectMap[r.period] || 0) + Number(r.cnt);
+    });
+
+    // total_cars по CP72
+    const modelList = (model && model !== 'ALL') ? model.split(',').map(m => m.trim()) : [];
+    const result = [];
+
+    for (const period of periods) {
+      const carCondition = periodType === 'month'
+        ? "DATE_FORMAT(DATE(t.CREATION_TIME), '%Y-%m') = ?"
+        : periodType === 'week'
+          ? "DATE_FORMAT(DATE(t.CREATION_TIME), '%x-W%v') = ?"
+          : "DATE(t.CREATION_TIME) = ?";
+
+      let carSql = `
+        SELECT COUNT(DISTINCT t.VIN) AS total
+        FROM at_om_wiptrackinghistory t
+        ${modelList.length > 0 ? 'JOIN work_order wo ON wo.VIN = t.VIN' : ''}
+        WHERE t.WC_NAME = 'CP72' AND ${carCondition}
+      `;
+      const carParams = [period];
+      if (modelList.length > 0) {
+        carSql += ` AND wo.MODEL IN (${modelList.map(() => '?').join(',')})`;
+        carParams.push(...modelList);
+      }
+      const [carRows] = await pool.query(carSql, carParams);
+      const totalCars = carRows[0]?.total || 0;
+
+      result.push({
+        period,
+        defect_count: defectMap[period] || 0,
+        total_cars: totalCars,
+      });
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка drr-electronics-elec-defect-trend:', err);
     res.status(500).json({ error: err.message });
   }
 });

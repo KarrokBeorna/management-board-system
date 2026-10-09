@@ -8,6 +8,9 @@ import {
 
 const API_BASE = '';
 
+// ============================================================
+//  СТИЛИ
+// ============================================================
 const inputStyle = {
   padding: '8px 12px',
   borderRadius: 8,
@@ -55,7 +58,55 @@ const tdStyle = {
   color: '#1F2937',
 };
 
-function MultiSelect({ options, selected, onChange, placeholder }) {
+const tabBarStyle = {
+  display: 'flex',
+  gap: 6,
+  marginBottom: 24,
+  backgroundColor: '#E5E7EB',
+  borderRadius: 14,
+  padding: 6,
+  width: 'fit-content',
+};
+
+const tabStyle = (active) => ({
+  padding: '10px 28px',
+  borderRadius: 10,
+  border: 'none',
+  fontWeight: 600,
+  fontSize: 15,
+  background: active ? '#FFFFFF' : 'transparent',
+  color: active ? '#111827' : '#6B7280',
+  cursor: 'pointer',
+  boxShadow: active ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+  whiteSpace: 'nowrap',
+});
+
+// ============================================================
+//  КОНСТАНТЫ ДЛЯ НОВОГО ОТЧЁТА
+// ============================================================
+// ВАЖНО: TYPE='18' — технический дубликат '03' (см. аудит).
+// В топ берём ТОЛЬКО '03'.
+const ELEC_CATEGORY_TO_TYPE = {
+  'Прошивка EOL NG': '03',
+  'Прошивка ERA NG': '26',
+  'Прошивка Запись/FLASH NG': '17',
+};
+const ELEC_ALL_CATEGORIES = Object.keys(ELEC_CATEGORY_TO_TYPE);
+const ELEC_CATEGORY_COLORS = {
+  'Прошивка EOL NG': '#EF4444',
+  'Прошивка ERA NG': '#F59E0B',
+  'Прошивка Запись/FLASH NG': '#8B5CF6',
+};
+
+const AVAILABLE_MODELS = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
+const AVAILABLE_GRADES = ['A', 'B', 'C'];
+const AVAILABLE_POSTS = ['ROBOT', 'CP7', 'CP8', 'PIP', 'TL', 'REPAIR', 'TEST TRACK'];
+
+// ============================================================
+//  MULTISELECT
+// ============================================================
+function MultiSelect({ options, selected, onChange, placeholder, width = 120 }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef(null);
 
@@ -94,7 +145,7 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
         onClick={() => setIsOpen(!isOpen)}
         style={{
           ...inputStyle,
-          width: 120,
+          width,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -104,32 +155,18 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
           padding: '8px 10px',
         }}
       >
-        <span style={{
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          maxWidth: 80,
-          fontSize: 13,
-        }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: width - 40, fontSize: 13 }}>
           {displayText}
         </span>
         <span style={{ fontSize: 10, color: '#6B7280' }}>▼</span>
       </button>
       {isOpen && (
         <div style={{
-          position: 'absolute',
-          top: '100%',
-          left: 0,
-          marginTop: 4,
-          background: '#FFFFFF',
-          borderRadius: 12,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-          padding: 12,
-          minWidth: 200,
-          zIndex: 100,
-          border: '1px solid #F0F0F5',
-          maxHeight: 300,
-          overflowY: 'auto',
+          position: 'absolute', top: '100%', left: 0, marginTop: 4,
+          background: '#FFFFFF', borderRadius: 12,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.12)', padding: 12,
+          minWidth: 220, zIndex: 100, border: '1px solid #F0F0F5',
+          maxHeight: 300, overflowY: 'auto',
         }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', cursor: 'pointer', fontSize: 14, fontWeight: 600 }}>
             <input type="checkbox" checked={allSelected} onChange={() => handleToggle('ALL')} />
@@ -137,11 +174,7 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
           </label>
           {nonAllOptions.map(option => (
             <label key={option} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', cursor: 'pointer', fontSize: 14 }}>
-              <input
-                type="checkbox"
-                checked={selected.includes(option)}
-                onChange={() => handleToggle(option)}
-              />
+              <input type="checkbox" checked={selected.includes(option)} onChange={() => handleToggle(option)} />
               {option}
             </label>
           ))}
@@ -151,7 +184,16 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
   );
 }
 
+// ============================================================
+//  ОСНОВНОЙ КОМПОНЕНТ
+// ============================================================
 export default function DefectElectronicsTopPage() {
+  // ─── Общий таб ───
+  const [activeTab, setActiveTab] = useState('elec'); // 'elec' | 'top'
+
+  // ============================================================
+  //  СТАРЫЙ ОТЧЁТ (без изменений логики)
+  // ============================================================
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [selectedModels, setSelectedModels] = useState([]);
@@ -163,49 +205,63 @@ export default function DefectElectronicsTopPage() {
   const [vinData, setVinData] = useState([]);
   const [vinTopMpps, setVinTopMpps] = useState([]);
   const [vinLoading, setVinLoading] = useState(false);
-
-  // Модалка VIN
   const [showVinDefectsModal, setShowVinDefectsModal] = useState(false);
   const [vinDefectsData, setVinDefectsData] = useState([]);
   const [vinDefectsLoading, setVinDefectsLoading] = useState(false);
   const [selectedVin, setSelectedVin] = useState('');
-
-  // Фильтр топ MPP по типу
   const [topMppFilter, setTopMppFilter] = useState('all');
-
-  // График динамики
   const [trendModalOpen, setTrendModalOpen] = useState(false);
   const [trendData, setTrendData] = useState(null);
   const [trendLoading, setTrendLoading] = useState(false);
   const [trendMpp, setTrendMpp] = useState('');
-  const [trendMetric, setTrendMetric] = useState('defects'); // 'defects' | 'dpu'
+  const [trendMetric, setTrendMetric] = useState('defects');
 
-  const availableModels = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
-  const availableGrades = ['A', 'B', 'C'];
-  const availablePosts = ['ROBOT', 'CP7', 'CP8', 'PIP', 'TL', 'REPAIR', 'TEST TRACK'];
+  // ============================================================
+  //  НОВЫЙ ОТЧЁТ "Elec top defect"
+  // ============================================================
+  const [elecDateFrom, setElecDateFrom] = useState('');
+  const [elecDateTo, setElecDateTo] = useState('');
+  const [elecSelectedModels, setElecSelectedModels] = useState([]);
+  const [elecSelectedCategories, setElecSelectedCategories] = useState([]);
+  const [elecData, setElecData] = useState([]);
+  const [elecLoading, setElecLoading] = useState(false);
+  const [elecExpandedKey, setElecExpandedKey] = useState(null);
+  const [elecVinData, setElecVinData] = useState([]);
+  const [elecVinLoading, setElecVinLoading] = useState(false);
 
+  // ─── Общий тренд-модал для обоих табов ───
+  // (использует уже объявленные: trendModalOpen, trendData, trendLoading, trendMpp, trendMetric)
+
+  // ============================================================
+  //  ИНИЦИАЛИЗАЦИЯ ДАТ (вчера)
+  // ============================================================
   useEffect(() => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yStr = yesterday.toISOString().split('T')[0];
     setDateFrom(yStr);
     setDateTo(yStr);
+    setElecDateFrom(yStr);
+    setElecDateTo(yStr);
   }, []);
 
+  // ============================================================
+  //  ЗАГРУЗКА СТАРОГО ОТЧЁТА
+  // ============================================================
   useEffect(() => {
-    if (dateFrom && dateTo) loadData();
-  }, [dateFrom, dateTo, selectedModels, selectedGrades, selectedPosts]);
+    if (activeTab === 'top' && dateFrom && dateTo) loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, dateFrom, dateTo, selectedModels, selectedGrades, selectedPosts]);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const modelsParam = (selectedModels.length === 0 || selectedModels.length === availableModels.length) ? 'ALL' : selectedModels.join(',');
-      const gradesParam = (selectedGrades.length === 0 || selectedGrades.length === availableGrades.length) ? 'ALL' : selectedGrades.join(',');
-      const postsParam = (selectedPosts.length === 0 || selectedPosts.length === availablePosts.length) ? 'ALL' : selectedPosts.join(',');
+      const modelsParam = (selectedModels.length === 0 || selectedModels.length === AVAILABLE_MODELS.length) ? 'ALL' : selectedModels.join(',');
+      const gradesParam = (selectedGrades.length === 0 || selectedGrades.length === AVAILABLE_GRADES.length) ? 'ALL' : selectedGrades.join(',');
+      const postsParam = (selectedPosts.length === 0 || selectedPosts.length === AVAILABLE_POSTS.length) ? 'ALL' : selectedPosts.join(',');
 
       const params = new URLSearchParams({
-        dateFrom,
-        dateTo,
+        dateFrom, dateTo,
         model: modelsParam,
         grades: gradesParam,
         posts: postsParam,
@@ -265,30 +321,9 @@ export default function DefectElectronicsTopPage() {
     }
   };
 
-  const loadVinDefects = async (vin) => {
-    setSelectedVin(vin);
-    setShowVinDefectsModal(true);
-    setVinDefectsLoading(true);
-    try {
-      const params = new URLSearchParams({ vin });
-      const res = await fetch(`${API_BASE}/api/drr-electronics-vin-defects?${params.toString()}`);
-      if (!res.ok) throw new Error('Ошибка загрузки дефектов VIN');
-      const json = await res.json();
-      setVinDefectsData(json);
-    } catch (err) {
-      alert(err.message);
-      setVinDefectsData([]);
-    } finally {
-      setVinDefectsLoading(false);
-    }
-  };
-
   const exportVins = () => {
     if (vinData.length === 0) return;
-    const exportData = vinData.map(v => ({
-      VIN: v.VIN,
-      Модель: v.MODEL,
-    }));
+    const exportData = vinData.map(v => ({ VIN: v.VIN, Модель: v.MODEL }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'VINs');
@@ -354,7 +389,6 @@ export default function DefectElectronicsTopPage() {
     }
   };
 
-  // ====== ДИНАМИКА ДЕФЕКТА ======
   const openTrend = async (row) => {
     setTrendMpp(row.MPP);
     setTrendModalOpen(true);
@@ -385,9 +419,9 @@ export default function DefectElectronicsTopPage() {
     }
   };
 
-  const prepareDisplayData = (data) => {
-    if (!Array.isArray(data)) return [];
-    return data.map(d => ({
+  const prepareDisplayData = (arr) => {
+    if (!Array.isArray(arr)) return [];
+    return arr.map(d => ({
       period: d.period,
       value: trendMetric === 'dpu'
         ? (d.total_cars > 0 ? Number(((d.defect_count * 1000) / d.total_cars).toFixed(2)) : 0)
@@ -401,188 +435,663 @@ export default function DefectElectronicsTopPage() {
     return true;
   });
 
+  const loadVinDefects = async (vin) => {
+    setSelectedVin(vin);
+    setShowVinDefectsModal(true);
+    setVinDefectsLoading(true);
+    try {
+      const params = new URLSearchParams({ vin });
+      const res = await fetch(`${API_BASE}/api/drr-electronics-vin-defects?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки дефектов VIN');
+      const json = await res.json();
+      setVinDefectsData(json);
+    } catch (err) {
+      alert(err.message);
+      setVinDefectsData([]);
+    } finally {
+      setVinDefectsLoading(false);
+    }
+  };
+
+  // ============================================================
+  //  ELE TOP DEFECT — загрузка данных
+  // ============================================================
+  useEffect(() => {
+    if (activeTab === 'elec' && elecDateFrom && elecDateTo) loadElecData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, elecDateFrom, elecDateTo, elecSelectedModels, elecSelectedCategories]);
+
+  const loadElecData = async () => {
+    setElecLoading(true);
+    try {
+      const modelsParam = (!elecSelectedModels.length || elecSelectedModels.length === AVAILABLE_MODELS.length)
+        ? 'ALL' : elecSelectedModels.join(',');
+      const catsParam = (!elecSelectedCategories.length || elecSelectedCategories.length === ELEC_ALL_CATEGORIES.length)
+        ? 'ALL' : elecSelectedCategories.join(',');
+
+      const params = new URLSearchParams({
+        dateFrom: elecDateFrom,
+        dateTo: elecDateTo,
+        models: modelsParam,
+        categories: catsParam,
+      });
+      const res = await fetch(`${API_BASE}/api/drr-electronics-top-elec-defects?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки данных');
+      setElecData(await res.json());
+    } catch (err) {
+      alert(err.message);
+      setElecData([]);
+    } finally {
+      setElecLoading(false);
+    }
+  };
+
+  const loadElecVins = async (row) => {
+    const key = `${row.CATEGORY}__${row.MODEL}`;
+    setElecExpandedKey(key);
+    setElecVinLoading(true);
+    setElecVinData([]);
+    try {
+      const typeCode = ELEC_CATEGORY_TO_TYPE[row.CATEGORY]; // undefined для "Агрегат по моделям"
+      const params = new URLSearchParams({
+        model: row.MODEL,
+        dateFrom: elecDateFrom,
+        dateTo: elecDateTo,
+      });
+      if (typeCode) params.set('typeCode', typeCode);
+      else params.set('typeCode', 'ALL');
+
+      const res = await fetch(`${API_BASE}/api/drr-electronics-elec-vins?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки VIN');
+      setElecVinData(await res.json());
+    } catch (err) {
+      alert(err.message);
+      setElecVinData([]);
+    } finally {
+      setElecVinLoading(false);
+    }
+  };
+
+  const handleElecToggle = (row) => {
+    const key = `${row.CATEGORY}__${row.MODEL}`;
+    if (elecExpandedKey === key) {
+      setElecExpandedKey(null);
+      setElecVinData([]);
+    } else {
+      loadElecVins(row);
+    }
+  };
+
+  const openElecTrend = async (row) => {
+    setTrendMpp(`${row.CATEGORY} — ${row.MODEL}`);
+    setTrendModalOpen(true);
+    setTrendLoading(true);
+    try {
+      const typeCode = ELEC_CATEGORY_TO_TYPE[row.CATEGORY]
+        || Object.values(ELEC_CATEGORY_TO_TYPE).join(',');
+
+      const fetchTrend = (periodType) => {
+        const p = new URLSearchParams({ typeCode, model: row.MODEL, periodType });
+        return fetch(`${API_BASE}/api/drr-electronics-elec-defect-trend?${p.toString()}`).then(r => r.json());
+      };
+
+      const [monthData, weekData, dayData] = await Promise.all([
+        fetchTrend('month'),
+        fetchTrend('week'),
+        fetchTrend('day'),
+      ]);
+      setTrendData({ month: monthData, week: weekData, day: dayData });
+    } catch (err) {
+      alert('Ошибка загрузки тренда: ' + err.message);
+    } finally {
+      setTrendLoading(false);
+    }
+  };
+
+  const exportElecReport = () => {
+    if (!elecData.length) return;
+    const wb = XLSX.utils.book_new();
+
+    // Основная таблица
+    const ws = XLSX.utils.json_to_sheet(elecData.map(r => ({
+      Категория: r.CATEGORY,
+      Модель: r.MODEL,
+      'Дефектов NG': r.DEFECT_COUNT,
+      'Уник. VIN': r.VIN_COUNT,
+      'OK': r.OK_COUNT,
+      'Всего проверок': r.TOTAL_COUNT,
+      '% NG': r.NG_SHARE,
+      'DPU per 1000': r.TOTAL_COUNT > 0 ? Number(((r.DEFECT_COUNT * 1000) / r.TOTAL_COUNT).toFixed(2)) : 0,
+    })));
+    XLSX.utils.book_append_sheet(wb, ws, 'Elec top defect');
+
+    // Сводка NG/OK по категориям
+    const summary = ELEC_ALL_CATEGORIES.map(cat => {
+      const rows = elecData.filter(r => r.CATEGORY === cat);
+      const ng = rows.reduce((s, r) => s + r.DEFECT_COUNT, 0);
+      const ok = rows.reduce((s, r) => s + r.OK_COUNT, 0);
+      const total = ng + ok;
+      return {
+        Категория: cat,
+        NG: ng,
+        OK: ok,
+        Всего: total,
+        '% NG': total > 0 ? Number((ng * 100 / total).toFixed(1)) : 0,
+      };
+    });
+    const wsSum = XLSX.utils.json_to_sheet(summary);
+    XLSX.utils.book_append_sheet(wb, wsSum, 'Сводка NG-OK');
+
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    saveAs(new Blob([buf], { type: 'application/octet-stream' }), 'Elec_top_defect.xlsx');
+  };
+
+  // ============================================================
+  //  ГРУППИРОВКА ДАННЫХ ELE TOP DEFECT
+  // ============================================================
+  const elecGrouped = [];
+  const seenCats = new Set();
+  elecData.forEach(r => {
+    if (!seenCats.has(r.CATEGORY)) {
+      seenCats.add(r.CATEGORY);
+      elecGrouped.push({ category: r.CATEGORY, rows: [] });
+    }
+    elecGrouped[elecGrouped.length - 1].rows.push(r);
+  });
+
+  // Сводка NG/OK по категориям (для графика)
+  const elecOkNgSummary = ELEC_ALL_CATEGORIES.map(cat => {
+    const rows = elecData.filter(r => r.CATEGORY === cat);
+    const ng = rows.reduce((s, r) => s + r.DEFECT_COUNT, 0);
+    const ok = rows.reduce((s, r) => s + r.OK_COUNT, 0);
+    const total = ng + ok;
+    return {
+      category: cat,
+      NG: ng,
+      OK: ok,
+      total,
+      ngShare: total > 0 ? Number((ng * 100 / total).toFixed(1)) : 0,
+    };
+  });
+
+  const elecTotals = elecOkNgSummary.reduce(
+    (acc, c) => ({
+      NG: acc.NG + c.NG,
+      OK: acc.OK + c.OK,
+      total: acc.total + c.total,
+    }),
+    { NG: 0, OK: 0, total: 0 }
+  );
+  const elecTotalNgShare = elecTotals.total > 0
+    ? Number((elecTotals.NG * 100 / elecTotals.total).toFixed(1))
+    : 0;
+
+  // ============================================================
+  //  РЕНДЕР
+  // ============================================================
   return (
     <div style={{ padding: 30, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
-      <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 30 }}>Топ дефектов электроники</h1>
+      <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 20 }}>
+        Отчёт по дефектам электроники
+      </h1>
 
-      <div style={cardStyle}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-            Начало:
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-            Конец:
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-            Модели:
-            <MultiSelect
-              options={['ALL', ...availableModels]}
-              selected={selectedModels}
-              onChange={setSelectedModels}
-              placeholder="Все"
-            />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-            Классы:
-            <MultiSelect
-              options={['ALL', ...availableGrades]}
-              selected={selectedGrades}
-              onChange={setSelectedGrades}
-              placeholder="Все"
-            />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
-            Посты:
-            <MultiSelect
-              options={['ALL', ...availablePosts]}
-              selected={selectedPosts}
-              onChange={setSelectedPosts}
-              placeholder="Все"
-            />
-          </label>
-          <div style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
-            <button onClick={loadData} disabled={loading} style={buttonStyle}>
-              {loading ? '⏳ Загрузка...' : '▶ Загрузить'}
-            </button>
-            <button onClick={exportFullReport} disabled={data.length === 0 || loading} style={{ ...buttonStyle, background: '#059669' }}>
-              📊 Экспорт
-            </button>
+      {/* ─── Табы ─── */}
+      <div style={tabBarStyle}>
+        <button onClick={() => setActiveTab('elec')} style={tabStyle(activeTab === 'elec')}>
+          ⚡ Elec top defect
+        </button>
+        <button onClick={() => setActiveTab('top')} style={tabStyle(activeTab === 'top')}>
+          📊 Топ дефектов электроники
+        </button>
+      </div>
+
+      {/* ============================================================
+          ТАБ 1: ELE TOP DEFECT
+      ============================================================ */}
+      {activeTab === 'elec' && (
+        <>
+          <div style={cardStyle}>
+            {/* Фильтры */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                Начало:
+                <input type="date" value={elecDateFrom} onChange={e => setElecDateFrom(e.target.value)} style={inputStyle} />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                Конец:
+                <input type="date" value={elecDateTo} onChange={e => setElecDateTo(e.target.value)} style={inputStyle} />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                Модели:
+                <MultiSelect
+                  options={['ALL', ...AVAILABLE_MODELS]}
+                  selected={elecSelectedModels}
+                  onChange={setElecSelectedModels}
+                  placeholder="Все"
+                  width={140}
+                />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                Категории:
+                <MultiSelect
+                  options={['ALL', ...ELEC_ALL_CATEGORIES]}
+                  selected={elecSelectedCategories}
+                  onChange={setElecSelectedCategories}
+                  placeholder="Все"
+                  width={210}
+                />
+              </label>
+              <div style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                <button onClick={loadElecData} disabled={elecLoading} style={buttonStyle}>
+                  {elecLoading ? '⏳ Загрузка...' : '▶ Загрузить'}
+                </button>
+                <button onClick={exportElecReport} disabled={elecData.length === 0 || elecLoading} style={{ ...buttonStyle, background: '#059669' }}>
+                  📊 Экспорт
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
 
-        {data.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-              <thead>
-                <tr style={{ backgroundColor: '#F9FAFB' }}>
-                  <th style={thStyle}>MPP</th>
-                  <th style={thStyle}>Модель</th>
-                  <th style={thStyle}>Кол-во авто</th>
-                  <th style={thStyle}>Кол-во дефектов</th>
-                  <th style={thStyle}>DPU per 1000</th>
-                  <th style={thStyle}>Пост внесения</th>
-                  <th style={thStyle}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((row, idx) => (
-                  <React.Fragment key={`${row.MPP}_${row.POST_NAME}_${idx}`}>
-                    <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                      <td style={tdStyle}>{row.MPP}</td>
-                      <td style={{ ...tdStyle, fontSize: '10px' }}>{row.MODEL}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{row.VIN_COUNT}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DEFECT_COUNT}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DPU}</td>
-                      <td style={tdStyle}>{row.POST_NAME}</td>
-                      <td style={tdStyle}>
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <button
-                            onClick={() => openTrend(row)}
-                            title="Динамика дефекта"
-                            style={{ ...buttonStyle, background: '#8B5CF6', padding: '4px 10px', fontSize: 12 }}
-                          >
-                            📈
-                          </button>
-                          <button onClick={() => handleToggleMpp(row, idx)} style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}>
-                            {expandedMppKey === `${row.MPP}_${row.POST_NAME}_${idx}` ? 'Скрыть VIN' : 'VIN'}
-                          </button>
-                        </div>
-                      </td>
+          {/* KPI + График NG/OK */}
+          <div style={cardStyle}>
+            <h2 style={{ fontSize: 18, fontWeight: 700, marginTop: 0, marginBottom: 16, color: '#1F2937' }}>
+              Доля NG / OK по категориям
+            </h2>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
+              <div style={{
+                flex: '1 1 220px', padding: 16, borderRadius: 12,
+                background: '#FEF2F2', border: '1px solid #FECACA',
+              }}>
+                <div style={{ fontSize: 13, color: '#991B1B', fontWeight: 600, marginBottom: 4 }}>Дефекты NG (всего)</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: '#DC2626' }}>{elecTotals.NG.toLocaleString()}</div>
+              </div>
+              <div style={{
+                flex: '1 1 220px', padding: 16, borderRadius: 12,
+                background: '#F0FDF4', border: '1px solid #BBF7D0',
+              }}>
+                <div style={{ fontSize: 13, color: '#166534', fontWeight: 600, marginBottom: 4 }}>Успешные OK (всего)</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: '#16A34A' }}>{elecTotals.OK.toLocaleString()}</div>
+              </div>
+              <div style={{
+                flex: '1 1 220px', padding: 16, borderRadius: 12,
+                background: '#FEF3C7', border: '1px solid #FDE68A',
+              }}>
+                <div style={{ fontSize: 13, color: '#92400E', fontWeight: 600, marginBottom: 4 }}>Общий % NG</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: '#D97706' }}>{elecTotalNgShare}%</div>
+              </div>
+            </div>
+
+            {/* График — столбчатый stacked bar по категориям */}
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart
+                layout="vertical"
+                data={elecOkNgSummary}
+                margin={{ top: 10, right: 40, left: 20, bottom: 10 }}
+                barCategoryGap={20}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                <XAxis type="number" tick={{ fontSize: 12, fill: '#374151' }} />
+                <YAxis
+                  type="category"
+                  dataKey="category"
+                  width={180}
+                  tick={{ fontSize: 13, fill: '#1F2937', fontWeight: 600 }}
+                />
+                <Tooltip
+                  formatter={(value, name) => [Number(value).toLocaleString(), name]}
+                  contentStyle={{ borderRadius: 10, border: '1px solid #E5E7EB', fontSize: 13 }}
+                />
+                <Legend wrapperStyle={{ fontSize: 13 }} />
+                <Bar dataKey="NG" stackId="a" fill="#EF4444" name="NG (дефект)">
+                  <LabelList dataKey="NG" position="inside" style={{ fontSize: 12, fill: '#fff', fontWeight: 700 }} />
+                </Bar>
+                <Bar dataKey="OK" stackId="a" fill="#10B981" name="OK (успех)">
+                  <LabelList dataKey="OK" position="inside" style={{ fontSize: 12, fill: '#fff', fontWeight: 700 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+
+            {/* Доп. круговая — общая доля */}
+            <div style={{ display: 'flex', gap: 24, marginTop: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ width: 220, height: 220 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: 'NG', value: elecTotals.NG },
+                        { name: 'OK', value: elecTotals.OK },
+                      ]}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%" cy="50%"
+                      outerRadius={80}
+                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
+                      labelLine={false}
+                    >
+                      <Cell fill="#EF4444" />
+                      <Cell fill="#10B981" />
+                    </Pie>
+                    <Tooltip formatter={(v) => Number(v).toLocaleString()} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div style={{ flex: '1 1 300px', minWidth: 260 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#F9FAFB' }}>
+                      <th style={thStyle}>Категория</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>NG</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>OK</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>% NG</th>
                     </tr>
-                    {expandedMppKey === `${row.MPP}_${row.POST_NAME}_${idx}` && (
-                      <tr>
-                        <td colSpan={7} style={{ padding: 0 }}>
-                          <div style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8, margin: '8px 0' }}>
-                            {vinLoading ? (
-                              <p>Загрузка VIN...</p>
-                            ) : (
-                              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-                                <div style={{ flex: '0 0 50%', maxWidth: '50%' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                                    <span style={{ fontWeight: 600 }}>VIN для "{row.MPP}" ({vinData.length} шт.)</span>
-                                    <button onClick={exportVins} style={{ ...buttonStyle, background: '#059669', padding: '4px 10px', fontSize: 12 }}>📊 Экспорт VIN</button>
-                                  </div>
-                                  <div style={{ overflowX: 'auto' }}>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, margin: '0 auto' }}>
-                                      <thead>
-                                        <tr style={{ backgroundColor: '#E5E7EB' }}>
-                                          <th style={thStyle}>VIN</th>
-                                          <th style={thStyle}>Модель</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {vinData.map((v, i) => (
-                                          <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                                            <td
-                                              onClick={() => loadVinDefects(v.VIN)}
-                                              style={{ ...tdStyle, cursor: 'pointer', color: '#2563EB', textDecoration: 'underline' }}
-                                            >
-                                              {v.VIN}
-                                            </td>
-                                            <td style={tdStyle}>{v.MODEL}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
+                  </thead>
+                  <tbody>
+                    {elecOkNgSummary.map(s => (
+                      <tr key={s.category}>
+                        <td style={{ ...tdStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{
+                            display: 'inline-block', width: 10, height: 10,
+                            borderRadius: '50%', background: ELEC_CATEGORY_COLORS[s.category] || '#999',
+                          }} />
+                          {s.category}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: '#DC2626' }}>{s.NG.toLocaleString()}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', color: '#16A34A' }}>{s.OK.toLocaleString()}</td>
+                        <td style={{
+                          ...tdStyle, textAlign: 'right', fontWeight: 700,
+                          color: s.ngShare > 20 ? '#DC2626' : s.ngShare > 5 ? '#D97706' : '#374151',
+                        }}>{s.ngShare}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
 
-                                <div style={{ flex: '0 0 50%', maxWidth: '50%' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                                    <span style={{ fontWeight: 600 }}>Топ MPP для этих VIN</span>
-                                    <select
-                                      value={topMppFilter}
-                                      onChange={(e) => setTopMppFilter(e.target.value)}
-                                      style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 12 }}
-                                    >
-                                      <option value="all">Все</option>
-                                      <option value="offline">Оффлайн</option>
-                                      <option value="online">Онлайн</option>
-                                    </select>
-                                  </div>
-                                  <div style={{ overflowX: 'auto' }}>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, margin: '0 auto', tableLayout: 'fixed' }}>
-                                      <thead>
-                                        <tr style={{ backgroundColor: '#E5E7EB' }}>
-                                          <th style={{ ...thStyle, width: '55%', whiteSpace: 'normal', wordBreak: 'break-word' }}>MPP</th>
-                                          <th style={{ ...thStyle, width: '20%' }}>Модель</th>
-                                          <th style={{ ...thStyle, width: '10%' }}>Кол-во</th>
-                                          <th style={{ ...thStyle, width: '15%' }}>Тип</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {filteredTopMpps.map((mpp, i) => (
-                                          <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                                            <td style={{ ...tdStyle, whiteSpace: 'normal', wordBreak: 'break-word' }}>{mpp.MPP}</td>
-                                            <td style={tdStyle}>{mpp.MODEL}</td>
-                                            <td style={{ ...tdStyle, textAlign: 'center' }}>{mpp.DEFECT_COUNT}</td>
-                                            <td style={tdStyle}>{mpp.IS_OFFLINE}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
+          {/* Блоки таблиц по категориям */}
+          <div style={cardStyle}>
+            {elecLoading && <p style={{ textAlign: 'center', color: '#6B7280' }}>Загрузка...</p>}
+            {!elecLoading && elecGrouped.length === 0 && (
+              <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Нет данных</p>
+            )}
+
+            {elecGrouped.map(group => (
+              <div key={group.category} style={{ marginBottom: 32 }}>
+                <h3 style={{
+                  fontSize: 16, fontWeight: 700, color: '#1F2937',
+                  margin: '0 0 12px', paddingBottom: 8,
+                  borderBottom: `2px solid ${ELEC_CATEGORY_COLORS[group.category] || '#2563EB'}`,
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                  <span style={{
+                    display: 'inline-block', width: 12, height: 12,
+                    borderRadius: '50%', background: ELEC_CATEGORY_COLORS[group.category] || '#999',
+                  }} />
+                  {group.category}
+                </h3>
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#F9FAFB' }}>
+                        <th style={thStyle}>Модель</th>
+                        <th style={{ ...thStyle, textAlign: 'center' }}>Дефектов NG</th>
+                        <th style={{ ...thStyle, textAlign: 'center' }}>Уник. VIN</th>
+                        <th style={{ ...thStyle, textAlign: 'center' }}>OK</th>
+                        <th style={{ ...thStyle, textAlign: 'center' }}>% NG</th>
+                        <th style={{ ...thStyle, textAlign: 'center' }}>DPU per 1000</th>
+                        <th style={thStyle}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.rows.map((row, idx) => {
+                        const key = `${row.CATEGORY}__${row.MODEL}`;
+                        const dpu = row.TOTAL_COUNT > 0
+                          ? ((row.DEFECT_COUNT * 1000) / row.TOTAL_COUNT).toFixed(1)
+                          : '—';
+                        return (
+                          <React.Fragment key={key}>
+                            <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                              <td style={{ ...tdStyle, fontWeight: 600 }}>{row.MODEL}</td>
+                              <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#DC2626' }}>{row.DEFECT_COUNT}</td>
+                              <td style={{ ...tdStyle, textAlign: 'center' }}>{row.VIN_COUNT}</td>
+                              <td style={{ ...tdStyle, textAlign: 'center', color: '#16A34A' }}>{row.OK_COUNT}</td>
+                              <td style={{
+                                ...tdStyle, textAlign: 'center', fontWeight: 700,
+                                color: row.NG_SHARE > 20 ? '#DC2626' : row.NG_SHARE > 5 ? '#D97706' : '#374151',
+                              }}>{row.NG_SHARE}%</td>
+                              <td style={{ ...tdStyle, textAlign: 'center' }}>{dpu}</td>
+                              <td style={tdStyle}>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <button
+                                    onClick={() => openElecTrend(row)}
+                                    title="Динамика"
+                                    style={{ ...buttonStyle, background: '#8B5CF6', padding: '4px 10px', fontSize: 12 }}
+                                  >📈</button>
+                                  <button
+                                    onClick={() => handleElecToggle(row)}
+                                    style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}
+                                  >
+                                    {elecExpandedKey === key ? 'Скрыть VIN' : 'VIN'}
+                                  </button>
                                 </div>
-                              </div>
+                              </td>
+                            </tr>
+                            {elecExpandedKey === key && (
+                              <tr>
+                                <td colSpan={7} style={{ padding: 0 }}>
+                                  <div style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8, margin: '8px 0' }}>
+                                    {elecVinLoading ? (
+                                      <p style={{ margin: 0 }}>Загрузка VIN...</p>
+                                    ) : (
+                                      <>
+                                        <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                                          VIN ({elecVinData.length} шт.)
+                                        </div>
+                                        <div style={{ maxHeight: 300, overflowY: 'auto', background: '#FFF', borderRadius: 8 }}>
+                                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                                            <thead>
+                                              <tr style={{ backgroundColor: '#E5E7EB' }}>
+                                                <th style={thStyle}>VIN</th>
+                                                <th style={thStyle}>Модель</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {elecVinData.map((v, i) => (
+                                                <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                                                  <td
+                                                    onClick={() => loadVinDefects(v.VIN)}
+                                                    style={{ ...tdStyle, cursor: 'pointer', color: '#2563EB', textDecoration: 'underline' }}
+                                                  >{v.VIN}</td>
+                                                  <td style={tdStyle}>{v.MODEL}</td>
+                                                </tr>
+                                              ))}
+                                              {!elecVinData.length && (
+                                                <tr><td colSpan={2} style={{ ...tdStyle, textAlign: 'center', color: '#6B7280' }}>Нет VIN</td></tr>
+                                              )}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
                             )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* ============================================================
+          ТАБ 2: СТАРЫЙ ТОП ДЕФЕКТОВ ЭЛЕКТРОНИКИ
+      ============================================================ */}
+      {activeTab === 'top' && (
+        <div style={cardStyle}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
+              Начало:
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inputStyle} />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
+              Конец:
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inputStyle} />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
+              Модели:
+              <MultiSelect options={['ALL', ...AVAILABLE_MODELS]} selected={selectedModels} onChange={setSelectedModels} placeholder="Все" />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
+              Классы:
+              <MultiSelect options={['ALL', ...AVAILABLE_GRADES]} selected={selectedGrades} onChange={setSelectedGrades} placeholder="Все" />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
+              Посты:
+              <MultiSelect options={['ALL', ...AVAILABLE_POSTS]} selected={selectedPosts} onChange={setSelectedPosts} placeholder="Все" />
+            </label>
+            <div style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
+              <button onClick={loadData} disabled={loading} style={buttonStyle}>
+                {loading ? '⏳ Загрузка...' : '▶ Загрузить'}
+              </button>
+              <button onClick={exportFullReport} disabled={data.length === 0 || loading} style={{ ...buttonStyle, background: '#059669' }}>
+                📊 Экспорт
+              </button>
+            </div>
+          </div>
+
+          {data.length > 0 && (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#F9FAFB' }}>
+                    <th style={thStyle}>MPP</th>
+                    <th style={thStyle}>Модель</th>
+                    <th style={thStyle}>Кол-во авто</th>
+                    <th style={thStyle}>Кол-во дефектов</th>
+                    <th style={thStyle}>DPU per 1000</th>
+                    <th style={thStyle}>Пост внесения</th>
+                    <th style={thStyle}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.map((row, idx) => (
+                    <React.Fragment key={`${row.MPP}_${row.POST_NAME}_${idx}`}>
+                      <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                        <td style={tdStyle}>{row.MPP}</td>
+                        <td style={{ ...tdStyle, fontSize: '10px' }}>{row.MODEL}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center' }}>{row.VIN_COUNT}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DEFECT_COUNT}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center' }}>{row.DPU}</td>
+                        <td style={tdStyle}>{row.POST_NAME}</td>
+                        <td style={tdStyle}>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <button onClick={() => openTrend(row)} title="Динамика дефекта"
+                              style={{ ...buttonStyle, background: '#8B5CF6', padding: '4px 10px', fontSize: 12 }}>📈</button>
+                            <button onClick={() => handleToggleMpp(row, idx)}
+                              style={{ ...buttonStyle, background: '#6B7280', padding: '4px 10px', fontSize: 12 }}>
+                              {expandedMppKey === `${row.MPP}_${row.POST_NAME}_${idx}` ? 'Скрыть VIN' : 'VIN'}
+                            </button>
                           </div>
                         </td>
                       </tr>
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {!loading && data.length === 0 && (
-          <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Нет данных</p>
-        )}
-      </div>
+                      {expandedMppKey === `${row.MPP}_${row.POST_NAME}_${idx}` && (
+                        <tr>
+                          <td colSpan={7} style={{ padding: 0 }}>
+                            <div style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8, margin: '8px 0' }}>
+                              {vinLoading ? (
+                                <p>Загрузка VIN...</p>
+                              ) : (
+                                <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                                  <div style={{ flex: '0 0 50%', maxWidth: '50%' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                      <span style={{ fontWeight: 600 }}>VIN для "{row.MPP}" ({vinData.length} шт.)</span>
+                                      <button onClick={exportVins} style={{ ...buttonStyle, background: '#059669', padding: '4px 10px', fontSize: 12 }}>📊 Экспорт VIN</button>
+                                    </div>
+                                    <div style={{ overflowX: 'auto' }}>
+                                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, margin: '0 auto' }}>
+                                        <thead>
+                                          <tr style={{ backgroundColor: '#E5E7EB' }}>
+                                            <th style={thStyle}>VIN</th>
+                                            <th style={thStyle}>Модель</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {vinData.map((v, i) => (
+                                            <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                                              <td onClick={() => loadVinDefects(v.VIN)}
+                                                style={{ ...tdStyle, cursor: 'pointer', color: '#2563EB', textDecoration: 'underline' }}>
+                                                {v.VIN}
+                                              </td>
+                                              <td style={tdStyle}>{v.MODEL}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                  <div style={{ flex: '0 0 50%', maxWidth: '50%' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                      <span style={{ fontWeight: 600 }}>Топ MPP для этих VIN</span>
+                                      <select value={topMppFilter} onChange={(e) => setTopMppFilter(e.target.value)}
+                                        style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 12 }}>
+                                        <option value="all">Все</option>
+                                        <option value="offline">Оффлайн</option>
+                                        <option value="online">Онлайн</option>
+                                      </select>
+                                    </div>
+                                    <div style={{ overflowX: 'auto' }}>
+                                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, margin: '0 auto', tableLayout: 'fixed' }}>
+                                        <thead>
+                                          <tr style={{ backgroundColor: '#E5E7EB' }}>
+                                            <th style={{ ...thStyle, width: '55%', whiteSpace: 'normal', wordBreak: 'break-word' }}>MPP</th>
+                                            <th style={{ ...thStyle, width: '20%' }}>Модель</th>
+                                            <th style={{ ...thStyle, width: '10%' }}>Кол-во</th>
+                                            <th style={{ ...thStyle, width: '15%' }}>Тип</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {filteredTopMpps.map((mpp, i) => (
+                                            <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                                              <td style={{ ...tdStyle, whiteSpace: 'normal', wordBreak: 'break-word' }}>{mpp.MPP}</td>
+                                              <td style={tdStyle}>{mpp.MODEL}</td>
+                                              <td style={{ ...tdStyle, textAlign: 'center' }}>{mpp.DEFECT_COUNT}</td>
+                                              <td style={tdStyle}>{mpp.IS_OFFLINE}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!loading && data.length === 0 && (
+            <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Нет данных</p>
+          )}
+        </div>
+      )}
 
-      {/* Модальное окно дефектов VIN */}
+      {/* ============================================================
+          МОДАЛКА: ДЕФЕКТЫ VIN
+      ============================================================ */}
       {showVinDefectsModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -633,71 +1142,40 @@ export default function DefectElectronicsTopPage() {
         </div>
       )}
 
-      {/* Модалка динамики дефекта */}
+      {/* ============================================================
+          МОДАЛКА: ТРЕНД
+      ============================================================ */}
       {trendModalOpen && (
         <div style={{
-          position: 'fixed',
-          top: 0, left: 0, right: 0, bottom: 0,
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 2500,
         }} onClick={() => setTrendModalOpen(false)}>
           <div style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 16,
-            padding: 24,
-            width: '96%',
-            maxWidth: 1600,
-            maxHeight: '95vh',
-            overflowY: 'auto',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+            backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24,
+            width: '96%', maxWidth: 1600, maxHeight: '95vh',
+            overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
           }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1F2937' }}>
-                Динамика дефекта: {trendMpp}
+                Динамика: {trendMpp}
               </h3>
-              <button
-                onClick={() => setTrendModalOpen(false)}
-                style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280' }}
-              >
-                ✕
-              </button>
+              <button onClick={() => setTrendModalOpen(false)}
+                style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280' }}>✕</button>
             </div>
 
-            {/* Переключатель метрики */}
             <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
-              <button
-                onClick={() => setTrendMetric('defects')}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: 8,
-                  border: 'none',
-                  fontWeight: 600,
-                  fontSize: 14,
-                  cursor: 'pointer',
-                  background: trendMetric === 'defects' ? '#2563EB' : '#E5E7EB',
-                  color: trendMetric === 'defects' ? '#FFFFFF' : '#374151',
-                }}
-              >
-                Шт. дефектов
-              </button>
-              <button
-                onClick={() => setTrendMetric('dpu')}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: 8,
-                  border: 'none',
-                  fontWeight: 600,
-                  fontSize: 14,
-                  cursor: 'pointer',
-                  background: trendMetric === 'dpu' ? '#2563EB' : '#E5E7EB',
-                  color: trendMetric === 'dpu' ? '#FFFFFF' : '#374151',
-                }}
-              >
-                DPU per 1000
-              </button>
+              <button onClick={() => setTrendMetric('defects')} style={{
+                padding: '8px 16px', borderRadius: 8, border: 'none', fontWeight: 600, fontSize: 14, cursor: 'pointer',
+                background: trendMetric === 'defects' ? '#2563EB' : '#E5E7EB',
+                color: trendMetric === 'defects' ? '#FFFFFF' : '#374151',
+              }}>Шт. дефектов</button>
+              <button onClick={() => setTrendMetric('dpu')} style={{
+                padding: '8px 16px', borderRadius: 8, border: 'none', fontWeight: 600, fontSize: 14, cursor: 'pointer',
+                background: trendMetric === 'dpu' ? '#2563EB' : '#E5E7EB',
+                color: trendMetric === 'dpu' ? '#FFFFFF' : '#374151',
+              }}>DPU per 1000</button>
             </div>
 
             {trendLoading ? (
@@ -705,21 +1183,17 @@ export default function DefectElectronicsTopPage() {
             ) : (
               trendData && (
                 <div style={{ display: 'flex', flexDirection: 'row', gap: 20, flexWrap: 'nowrap' }}>
-                  {/* Месяцы */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
                     <ResponsiveContainer width="100%" height={320}>
                       <BarChart data={prepareDisplayData(trendData.month)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis
-                          dataKey="period"
-                          tick={{ fontSize: 12, fill: '#1F2937' }}
+                        <XAxis dataKey="period" tick={{ fontSize: 12, fill: '#1F2937' }}
                           tickFormatter={(val) => {
-                            const [y, m] = val.split('-');
+                            const [, m] = val.split('-');
                             const monthNames = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
                             return monthNames[parseInt(m, 10) - 1];
-                          }}
-                        />
+                          }} />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={trendMetric === 'dpu'} />
                         <Bar dataKey="value" fill="#3B82F6" radius={[4, 4, 0, 0]}>
                           <LabelList dataKey="value" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
@@ -728,17 +1202,13 @@ export default function DefectElectronicsTopPage() {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* Недели */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
                     <ResponsiveContainer width="100%" height={320}>
                       <BarChart data={prepareDisplayData(trendData.week)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis
-                          dataKey="period"
-                          tick={{ fontSize: 12, fill: '#1F2937' }}
-                          tickFormatter={(val) => val.split('-W')[1] ? `W${val.split('-W')[1]}` : val}
-                        />
+                        <XAxis dataKey="period" tick={{ fontSize: 12, fill: '#1F2937' }}
+                          tickFormatter={(val) => val.split('-W')[1] ? `W${val.split('-W')[1]}` : val} />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={trendMetric === 'dpu'} />
                         <Bar dataKey="value" fill="#F59E0B" radius={[4, 4, 0, 0]}>
                           <LabelList dataKey="value" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
@@ -747,21 +1217,16 @@ export default function DefectElectronicsTopPage() {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* Дни */}
                   <div style={{ flex: '2 1 0', minWidth: 350 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
                     <ResponsiveContainer width="100%" height={320}>
                       <BarChart data={prepareDisplayData(trendData.day)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                        <XAxis
-                          dataKey="period"
-                          interval={0}
-                          tick={{ fontSize: 11, fill: '#1F2937' }}
+                        <XAxis dataKey="period" interval={0} tick={{ fontSize: 11, fill: '#1F2937' }}
                           tickFormatter={(val) => {
                             const [, m, d] = val.split('-');
                             return `${d}.${m}`;
-                          }}
-                        />
+                          }} />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={trendMetric === 'dpu'} />
                         <Bar dataKey="value" fill="#10B981" radius={[4, 4, 0, 0]}>
                           <LabelList dataKey="value" position="top" style={{ fontSize: 13, fill: '#1F2937', fontWeight: 700 }} />
