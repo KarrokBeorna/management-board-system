@@ -284,9 +284,10 @@ const compressImage = (file, maxWidth = 900) => new Promise((resolve, reject) =>
 /* ===================== КОМПОНЕНТЫ ===================== */
 
 function PieBlock({ drrPercent, okVins, totalVins }) {
+  const safePercent = Number.isFinite(drrPercent) ? drrPercent : 0;
   const data = [
-    { name: 'DRR', value: drrPercent },
-    { name: 'NOK', value: Math.max(0, 100 - drrPercent) },
+    { name: 'DRR', value: safePercent },
+    { name: 'NOK', value: Math.max(0, 100 - safePercent) },
   ];
   return (
     <div style={{ position: 'relative', width: 220, height: 220, flexShrink: 0 }}>
@@ -314,7 +315,7 @@ function PieBlock({ drrPercent, okVins, totalVins }) {
         pointerEvents: 'none',
       }}>
         <div style={{ fontSize: '2.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
-          {drrPercent.toFixed(1)}%
+          {safePercent.toFixed(1)}%
         </div>
         <div style={{ fontSize: '0.8rem', color: '#64748B', marginTop: 4 }}>
           {okVins}/{totalVins}
@@ -688,14 +689,22 @@ function ShiftColumn({
 /* ===================== НЕДЕЛЬНАЯ АНАЛИТИКА ===================== */
 
 // Блок readonly фото недели (без добавления и удаления)
-function WeeklyPhotosBlock({ photos, loading }) {
+function WeeklyPhotosBlock({ photos, loading, shiftLetter }) {
   const [lightboxUrl, setLightboxUrl] = useState(null);
+
+  // При выборе конкретной смены (A/B/C) — фильтруем фото по букве из photo_key
+  const filteredPhotos = shiftLetter === 'ALL'
+    ? photos
+    : photos.filter(p => {
+        const parsed = parsePhotoKey(p.photoKey);
+        return parsed.letter === shiftLetter;
+      });
 
   return (
     <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #F1F5F9' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
-          Фото периода ({photos.length}/10)
+          Фото периода ({filteredPhotos.length}/10)
         </span>
         <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
           Только для просмотра
@@ -706,13 +715,13 @@ function WeeklyPhotosBlock({ photos, loading }) {
         <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>
           Загрузка фото...
         </p>
-      ) : photos.length === 0 ? (
+      ) : filteredPhotos.length === 0 ? (
         <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>
           За выбранный период фото не прикреплено
         </p>
       ) : (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {photos.map((it) => {
+          {filteredPhotos.map((it) => {
             const parsed = parsePhotoKey(it.photoKey);
             const dateLabel = parsed.date ? formatDateShort(parsed.date) : '';
             const shiftLabel = parsed.letter === 'ALL'
@@ -784,7 +793,7 @@ function WeeklyPhotosBlock({ photos, loading }) {
 }
 
 // Один блок недельной аналитики для конкретного чекпоинта (cp7 / adas / cpfinal)
-function WeeklyCheckpointBlock({ type, title, periodLabel, weeks }) {
+function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter }) {
   const [matrix, setMatrix] = useState({ weeks: [], rows: [] });
   const [loadingTop, setLoadingTop] = useState(false);
   const [photos, setPhotos] = useState([]);
@@ -792,7 +801,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks }) {
 
   const weekKey = weeks.map(w => w.weekStart).join('|');
 
-  // Агрегат за период
+  // Агрегат за период — взвешенное среднее
   const periodTotalVins = weeks.reduce((s, w) => s + (w.totalVins || 0), 0);
   const periodClosedVins = weeks.reduce((s, w) => s + (w.closedVins || 0), 0);
   const avgDrr = periodTotalVins > 0
@@ -853,7 +862,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type, weekKey]);
 
-  // Загрузка фото за период
+  // Загрузка фото периода
   useEffect(() => {
     if (weeks.length === 0) {
       setPhotos([]);
@@ -865,7 +874,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks }) {
       checkpoint: type,
       weekStart,
       weekEnd,
-      limit: 10,
+      limit: 30,
     });
     setLoadingPhotos(true);
     fetch(`${API_BASE}/api/drr-weekly-photos?${params}`)
@@ -962,13 +971,13 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks }) {
         </div>
       </div>
 
-      <WeeklyPhotosBlock photos={photos} loading={loadingPhotos} />
+      <WeeklyPhotosBlock photos={photos} loading={loadingPhotos} shiftLetter={shiftLetter} />
     </div>
   );
 }
 
 function WeeklyAnalyticsView() {
-  const [weeksList, setWeeksList] = useState([]);        // по возрастанию (старые → свежие)
+  const [weeksList, setWeeksList] = useState([]);
   const [cp7Data, setCp7Data] = useState([]);
   const [adasData, setAdasData] = useState([]);
   const [cpFinalData, setCpFinalData] = useState([]);
@@ -976,33 +985,36 @@ function WeeklyAnalyticsView() {
 
   const [fromWeekStart, setFromWeekStart] = useState('');
   const [toWeekStart, setToWeekStart] = useState('');
+  const [shiftLetter, setShiftLetter] = useState('ALL'); // ALL | A | B | C
 
   useEffect(() => {
     setLoading(true);
+    const q = `weeks=52&shiftLetter=${shiftLetter}`;
     Promise.all([
-      fetch(`${API_BASE}/api/drr-weekly-analytics/cp7?weeks=52`).then(r => r.json()),
-      fetch(`${API_BASE}/api/drr-weekly-analytics/adas?weeks=52`).then(r => r.json()),
-      fetch(`${API_BASE}/api/drr-weekly-analytics/cpfinal?weeks=52`).then(r => r.json()),
+      fetch(`${API_BASE}/api/drr-weekly-analytics/cp7?${q}`).then(r => r.json()),
+      fetch(`${API_BASE}/api/drr-weekly-analytics/adas?${q}`).then(r => r.json()),
+      fetch(`${API_BASE}/api/drr-weekly-analytics/cpfinal?${q}`).then(r => r.json()),
     ])
       .then(([cp7, adas, cpfinal]) => {
-        const weeks = cp7.data || [];   // отсортированы по возрастанию
+        const weeks = cp7.data || [];
         setWeeksList(weeks);
         setCp7Data(cp7.data || []);
         setAdasData(adas.data || []);
         setCpFinalData(cpfinal.data || []);
 
-        // По умолчанию — текущая (последняя) неделя
         if (weeks.length > 0) {
           const lastStart = weeks[weeks.length - 1].weekStart;
           setFromWeekStart(lastStart);
           setToWeekStart(lastStart);
+        } else {
+          setFromWeekStart('');
+          setToWeekStart('');
         }
       })
       .catch(err => console.error('Ошибка загрузки недель:', err))
       .finally(() => setLoading(false));
-  }, []);
+  }, [shiftLetter]);
 
-  // Нормализация диапазона
   const fromIdx = weeksList.findIndex(w => w.weekStart === fromWeekStart);
   const toIdx = weeksList.findIndex(w => w.weekStart === toWeekStart);
   const safeFrom = Math.min(fromIdx, toIdx);
@@ -1013,13 +1025,11 @@ function WeeklyAnalyticsView() {
     : (weeksList.length > 0 ? [weeksList[weeksList.length - 1]] : []);
 
   const selectedWeekStartsSet = new Set(selectedWeeks.map(w => w.weekStart));
-
   const filterByWeeks = (arr) => arr.filter(w => selectedWeekStartsSet.has(w.weekStart));
   const cp7Filtered = filterByWeeks(cp7Data);
   const adasFiltered = filterByWeeks(adasData);
   const cpFinalFiltered = filterByWeeks(cpFinalData);
 
-  // Заголовок периода
   const periodLabel = selectedWeeks.length === 0
     ? '—'
     : selectedWeeks.length === 1
@@ -1030,6 +1040,20 @@ function WeeklyAnalyticsView() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Управление */}
       <div style={{ ...reportBlockStyle, display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+        <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
+          Смена:
+          <select
+            value={shiftLetter}
+            onChange={(e) => setShiftLetter(e.target.value)}
+            style={{ ...dateSelectStyle, padding: '8px 14px' }}
+          >
+            <option value="ALL">Сутки</option>
+            <option value="A">Смена A</option>
+            <option value="B">Смена B</option>
+            <option value="C">Смена C</option>
+          </select>
+        </label>
+
         <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
           С недели:
           <select
@@ -1080,18 +1104,21 @@ function WeeklyAnalyticsView() {
             title="DRR CP7"
             periodLabel={periodLabel}
             weeks={cp7Filtered}
+            shiftLetter={shiftLetter}
           />
           <WeeklyCheckpointBlock
             type="adas"
             title="DRR ADAS"
             periodLabel={periodLabel}
             weeks={adasFiltered}
+            shiftLetter={shiftLetter}
           />
           <WeeklyCheckpointBlock
             type="cpfinal"
             title="DRR CPFinal"
             periodLabel={periodLabel}
             weeks={cpFinalFiltered}
+            shiftLetter={shiftLetter}
           />
         </>
       )}
