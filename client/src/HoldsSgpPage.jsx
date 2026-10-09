@@ -254,7 +254,6 @@ const DailyChangeChart = ({ dates, values, baseline }) => {
     points.push({ start, end: acc, delta: v });
   });
 
-  // Масштаб: учитываем baseline и все уровни
   const allValues = [baseline];
   points.forEach((p) => {
     allValues.push(p.start, p.end);
@@ -269,7 +268,6 @@ const DailyChangeChart = ({ dates, values, baseline }) => {
   const slotWidth = chartWidth / Math.max(points.length + 1, 1);
   const barWidth = slotWidth * 0.55;
 
-  // Сетка
   const gridLines = [0, 0.25, 0.5, 0.75, 1];
 
   return (
@@ -506,7 +504,6 @@ export default function HoldsSgpPage() {
       if (!res.ok) throw new Error('Ошибка загрузки');
       const json = await res.json();
 
-      // Новый формат: { rows, uniqueVinsByDate }; поддержим и старый (массив)
       if (Array.isArray(json)) {
         setRetroData(json);
         setUniqueVinsByDate({});
@@ -534,13 +531,19 @@ export default function HoldsSgpPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  const handleVinClick = async (model, issueDesc, date) => {
+  // ====== Загрузка VIN в модалку ======
+  // opts.reason — если передан, значит запрос идёт по агрегированной причине
+  const handleVinClick = async (model, label, date, opts = {}) => {
+    const { reason } = opts;
     setVinLoading(true);
     setShowVinModal(true);
-    setVinModalTitle(`${model} - ${issueDesc} (${formatShortDate(date)})`);
+    setVinModalTitle(`${model} - ${label} (${formatShortDate(date)})`);
 
     try {
-      const params = new URLSearchParams({ model, issue_desc: issueDesc, date });
+      const params = new URLSearchParams({ model, date });
+      if (reason) params.set('reason', reason);
+      else params.set('issue_desc', label);
+
       const res = await fetch(
         `${API_BASE}/api/holds-sgp-retrospective-vins?${params.toString()}`,
       );
@@ -731,13 +734,13 @@ export default function HoldsSgpPage() {
   };
 
   // ====== ЭКСПОРТ РЕТРОСПЕКТИВЫ ======
-  const handleExportRetrospective = () => {
+  const handleExportRetrospective = async () => {
     const data = analyticsView === 'batch' ? retroData : retroDataAggregated;
     if (!data.length || !retroDates.length) return;
 
+    // ====== Лист 1: матрица ретроспективы ======
     const exportData = [];
 
-    // К-во причин холдов
     const reasonsRow = { 'Модель': 'К-во причин холдов', 'Описание': '' };
     retroDates.forEach(date => {
       const daySum = data.reduce((sum, row) => sum + (row[date] || 0), 0);
@@ -745,17 +748,12 @@ export default function HoldsSgpPage() {
     });
     exportData.push(reasonsRow);
 
-    // К-во захолдированных машин
-    const carsRow = {
-      'Модель': 'К-во захолдированных машин',
-      'Описание': '',
-    };
+    const carsRow = { 'Модель': 'К-во захолдированных машин', 'Описание': '' };
     retroDates.forEach(date => {
       carsRow[formatShortDate(date)] = uniqueVinsByDate[date] || '';
     });
     exportData.push(carsRow);
 
-    // Изменение к прошлому дню
     const deltaRow = {
       'Модель': 'Изменение к прошлому дню, шт.',
       'Описание': '',
@@ -765,7 +763,6 @@ export default function HoldsSgpPage() {
     });
     exportData.push(deltaRow);
 
-    // Данные
     data.forEach(row => {
       const dataRow = { 'Модель': row.model, 'Описание': row.issue_desc };
       retroDates.forEach(date => {
@@ -777,13 +774,73 @@ export default function HoldsSgpPage() {
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     const sheetName =
-      analyticsView === 'batch' ? 'Ретроспектива' : 'Агрегированная ретроспектива';
+      analyticsView === 'batch'
+        ? 'Ретроспектива'
+        : 'Агрегированная ретроспектива';
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
     ws['!cols'] = [
       { wch: 28 },
       { wch: 60 },
       ...retroDates.map(() => ({ wch: 8 })),
     ];
+
+    // ====== Лист 2: все VIN на последний день с причинами и расположением ======
+    try {
+      const lastDate = retroDates[retroDates.length - 1];
+      const params = new URLSearchParams({ date: lastDate });
+      if (
+        selectedRetroModels.length > 0 &&
+        selectedRetroModels.length < allModels.length
+      ) {
+        params.set('models', selectedRetroModels.join(','));
+      }
+
+      const res = await fetch(
+        `${API_BASE}/api/holds-sgp-retrospective-all-vins?${params.toString()}`,
+      );
+
+      if (res.ok) {
+        const vins = await res.json();
+
+        const vinsSheetData = vins.map((r, i) => ({
+          '№': i + 1,
+          'VIN': r.vin,
+          'Модель': r.model,
+          'Причина холда':
+            analyticsView === 'aggregated'
+              ? aggregateReason(r.issue_desc)
+              : r.issue_desc,
+          'Текущее расположение': r.location || '',
+        }));
+
+        // В агрегированном режиме один VIN мог дать несколько строк
+        // с одинаковой агрегированной причиной — схлопнём дубли
+        const finalVinsData =
+          analyticsView === 'aggregated'
+            ? Object.values(
+                vinsSheetData.reduce((acc, row) => {
+                  const key = `${row['VIN']}_|_${row['Модель']}_|_${row['Причина холда']}`;
+                  if (!acc[key]) acc[key] = { ...row };
+                  return acc;
+                }, {}),
+              ).map((row, i) => ({ ...row, '№': i + 1 }))
+            : vinsSheetData;
+
+        const ws2 = XLSX.utils.json_to_sheet(finalVinsData);
+        ws2['!cols'] = [
+          { wch: 6 },
+          { wch: 22 },
+          { wch: 14 },
+          { wch: 60 },
+          { wch: 24 },
+        ];
+        XLSX.utils.book_append_sheet(wb, ws2, 'VIN и причины холдов');
+      } else {
+        console.warn('Не удалось загрузить VIN для второго листа');
+      }
+    } catch (err) {
+      console.error('Ошибка выгрузки VIN во второй лист:', err);
+    }
 
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -857,7 +914,14 @@ export default function HoldsSgpPage() {
       {/* ========== ОТЧЕТ ========== */}
       {activeTab === 'report' && (
         <>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 12,
+              marginBottom: 16,
+              flexWrap: 'wrap',
+            }}
+          >
             <button
               style={{
                 ...buttonStyle,
@@ -872,7 +936,14 @@ export default function HoldsSgpPage() {
             </button>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              marginBottom: 16,
+              flexWrap: 'wrap',
+            }}
+          >
             <button
               onClick={() => setReportView('batch')}
               style={subTabStyle(reportView === 'batch')}
@@ -941,15 +1012,33 @@ export default function HoldsSgpPage() {
                   <tr>
                     <th style={{ ...thStyle, width: '15%' }}>Модель</th>
                     <th style={{ ...thStyle, width: '32%' }}>Описание</th>
-                    <th style={{ ...thStyle, width: '7%', textAlign: 'center' }}>
+                    <th
+                      style={{
+                        ...thStyle,
+                        width: '7%',
+                        textAlign: 'center',
+                      }}
+                    >
                       Кол-во
                     </th>
-                    <th style={{ ...thStyle, width: '12%' }}>Дата постановки</th>
-                    <th style={{ ...thStyle, width: '7%', textAlign: 'center' }}>
+                    <th style={{ ...thStyle, width: '12%' }}>
+                      Дата постановки
+                    </th>
+                    <th
+                      style={{
+                        ...thStyle,
+                        width: '7%',
+                        textAlign: 'center',
+                      }}
+                    >
                       Дней
                     </th>
-                    <th style={{ ...thStyle, width: '12%' }}>Ответственный</th>
-                    <th style={{ ...thStyle, width: '12%' }}>Плановая дата</th>
+                    <th style={{ ...thStyle, width: '12%' }}>
+                      Ответственный
+                    </th>
+                    <th style={{ ...thStyle, width: '12%' }}>
+                      Плановая дата
+                    </th>
                     <th style={{ ...thStyle, width: '10%' }}>Статус</th>
                   </tr>
                 </thead>
@@ -961,14 +1050,30 @@ export default function HoldsSgpPage() {
                         backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
                       }}
                     >
-                      <td style={{ ...tdStyle, fontWeight: 700, fontSize: 12 }}>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          fontWeight: 700,
+                          fontSize: 12,
+                        }}
+                      >
                         {row.model}
                       </td>
-                      <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4' }}>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          fontSize: 12,
+                          lineHeight: '1.4',
+                        }}
+                      >
                         {row.issue_desc}
                       </td>
                       <td
-                        style={{ ...tdStyle, textAlign: 'center', fontWeight: 700 }}
+                        style={{
+                          ...tdStyle,
+                          textAlign: 'center',
+                          fontWeight: 700,
+                        }}
                       >
                         {row.quantity}
                       </td>
@@ -1013,7 +1118,11 @@ export default function HoldsSgpPage() {
                     <td style={{ ...tdStyle, fontWeight: 800 }}>Общий итог</td>
                     <td style={tdStyle}></td>
                     <td
-                      style={{ ...tdStyle, textAlign: 'center', fontWeight: 800 }}
+                      style={{
+                        ...tdStyle,
+                        textAlign: 'center',
+                        fontWeight: 800,
+                      }}
                     >
                       {totalQuantity}
                     </td>
@@ -1033,7 +1142,14 @@ export default function HoldsSgpPage() {
       {/* ========== АНАЛИТИКА ========== */}
       {activeTab === 'analytics' && (
         <>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              marginBottom: 16,
+              flexWrap: 'wrap',
+            }}
+          >
             <button
               onClick={() => setAnalyticsView('batch')}
               style={subTabStyle(analyticsView === 'batch')}
@@ -1069,7 +1185,9 @@ export default function HoldsSgpPage() {
             >
               {allModels.map(modelFilter => {
                 const source =
-                  analyticsView === 'batch' ? filteredData : filteredDataAggregated;
+                  analyticsView === 'batch'
+                    ? filteredData
+                    : filteredDataAggregated;
                 const filtered = source
                   .filter(d => d.model === modelFilter)
                   .sort((a, b) => b.quantity - a.quantity);
@@ -1234,9 +1352,13 @@ export default function HoldsSgpPage() {
                 <button
                   style={{
                     ...buttonStyle,
-                    background: showRetroModelFilter ? '#1E40AF' : '#2563EB',
+                    background: showRetroModelFilter
+                      ? '#1E40AF'
+                      : '#2563EB',
                   }}
-                  onClick={() => setShowRetroModelFilter(!showRetroModelFilter)}
+                  onClick={() =>
+                    setShowRetroModelFilter(!showRetroModelFilter)
+                  }
                 >
                   {showRetroModelFilter ? 'Скрыть фильтр' : '🔍 Модели'}
                 </button>
@@ -1391,18 +1513,31 @@ export default function HoldsSgpPage() {
                                       : '#F9FAFB',
                                   color: val > 0 ? '#92400E' : '#D1D5DB',
                                   cursor:
-                                    val > 0 && analyticsView === 'batch'
-                                      ? 'pointer'
-                                      : 'default',
+                                    val > 0 ? 'pointer' : 'default',
                                   transition: 'all 0.2s',
                                 }}
                                 onClick={() => {
-                                  if (val > 0 && analyticsView === 'batch') {
-                                    handleVinClick(row.model, row.issue_desc, date);
+                                  if (val > 0) {
+                                    if (analyticsView === 'batch') {
+                                      handleVinClick(
+                                        row.model,
+                                        row.issue_desc,
+                                        date,
+                                      );
+                                    } else {
+                                      // В агрегированном режиме row.issue_desc —
+                                      // это уже агрегированная причина
+                                      handleVinClick(
+                                        row.model,
+                                        row.issue_desc,
+                                        date,
+                                        { reason: row.issue_desc },
+                                      );
+                                    }
                                   }
                                 }}
                                 title={
-                                  val > 0 && analyticsView === 'batch'
+                                  val > 0
                                     ? 'Нажмите для просмотра VIN'
                                     : ''
                                 }
@@ -1518,9 +1653,13 @@ export default function HoldsSgpPage() {
                         />
                         {retroDates.map(date => {
                           const v = dailyChange[date] || 0;
-                          // Рост = красный (плохо), снижение = зелёный (хорошо)
+                          // Рост = красный, снижение = зелёный
                           const color =
-                            v > 0 ? '#EF4444' : v < 0 ? '#10B981' : '#6B7280';
+                            v > 0
+                              ? '#EF4444'
+                              : v < 0
+                              ? '#10B981'
+                              : '#6B7280';
                           return (
                             <td
                               key={date}
@@ -1665,7 +1804,9 @@ export default function HoldsSgpPage() {
               {vinModalTitle}
             </div>
             {vinLoading ? (
-              <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+              <div
+                style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}
+              >
                 Загрузка VIN...
               </div>
             ) : vinList.length > 0 ? (
@@ -1717,7 +1858,9 @@ export default function HoldsSgpPage() {
                 </table>
               </div>
             ) : (
-              <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+              <div
+                style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}
+              >
                 Нет данных
               </div>
             )}

@@ -4917,35 +4917,212 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
 });
 
 // Получение VIN для конкретного холда на конкретную дату
+// Поддерживает два режима:
+//   issue_desc — точное совпадение (режим «Холды по батчам»)
+//   reason     — агрегированная причина (режим «Агрегированные причины»)
 app.get('/api/holds-sgp-retrospective-vins', async (req, res) => {
   try {
-    const { model, issue_desc, date } = req.query;
-    if (!model || !issue_desc || !date) {
-      return res.status(400).json({ error: 'model, issue_desc, date обязательны' });
+    const { model, issue_desc, reason, date } = req.query;
+    if (!model || !date || (!issue_desc && !reason)) {
+      return res
+        .status(400)
+        .json({ error: 'model, date и (issue_desc или reason) обязательны' });
     }
-    
-    // Конец указанного дня
+
     const endOfDay = new Date(date);
     endOfDay.setHours(23, 59, 59, 999);
-    
+
+    let whereIssue = '';
+    const params = [model];
+
+    if (issue_desc) {
+      whereIssue = ` AND qid.issue_desc = ? `;
+      params.push(issue_desc);
+    } else {
+      // Покрываем все варианты склейки, которые схлопывает aggregateReason:
+      //   "reason - по запросу ..."
+      //   "reason -по запросу ..."
+      //   "reason- по запросу ..."
+      //   "reason-по запросу ..."
+      //   "reason по запросу ..."
+      //   "reason" (точное совпадение без запроса)
+      whereIssue = `
+        AND (
+          qid.issue_desc = ?
+          OR qid.issue_desc LIKE CONCAT(?, ' - по запросу%')
+          OR qid.issue_desc LIKE CONCAT(?, ' -по запросу%')
+          OR qid.issue_desc LIKE CONCAT(?, '- по запросу%')
+          OR qid.issue_desc LIKE CONCAT(?, '-по запросу%')
+          OR qid.issue_desc LIKE CONCAT(?, ' по запросу%')
+        )
+      `;
+      params.push(reason, reason, reason, reason, reason, reason);
+    }
+
+    params.push(endOfDay, endOfDay);
+
     const sql = `
       SELECT DISTINCT qid.vin
       FROM higoplat_fusion_les.tv_quality_issue_detail qid
       WHERE qid.is_deleted = 0
         AND qid.model = ?
-        AND qid.issue_desc = ?
+        ${whereIssue}
         AND qid.gmt_create <= ?
         AND (qid.clear_time > ? OR qid.clear_time IS NULL)
       ORDER BY qid.vin
     `;
-    
-    const [rows] = await lesPool.query(sql, [model, issue_desc, endOfDay, endOfDay]);
+
+    const [rows] = await lesPool.query(sql, params);
     res.json(rows.map(r => r.vin));
   } catch (err) {
     console.error('Ошибка получения VIN для ретроспективы:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+app.get('/api/holds-sgp-retrospective-all-vins', async (req, res) => {
+  try {
+    const { date, models } = req.query;
+    if (!date) return res.status(400).json({ error: 'date обязателен' });
+
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    // 1. Все активные VIN на конец дня
+    let sql = `
+      SELECT DISTINCT
+        qid.model       AS model,
+        qid.issue_desc  AS issue_desc,
+        qid.vin         AS vin
+      FROM higoplat_fusion_les.tv_quality_issue_detail qid
+      WHERE qid.is_deleted = 0
+        AND qid.gmt_create <= ?
+        AND (qid.clear_time > ? OR qid.clear_time IS NULL)
+    `;
+    const params = [endOfDay, endOfDay];
+
+    if (models && models !== '') {
+      const list = models.split(',').map(m => m.trim()).filter(Boolean);
+      if (list.length) {
+        sql += ` AND qid.model IN (${list.map(() => '?').join(',')})`;
+        params.push(...list);
+      }
+    }
+
+    sql += ` ORDER BY qid.model, qid.issue_desc, qid.vin`;
+
+    const [rows] = await lesPool.query(sql, params);
+    if (!rows.length) return res.json([]);
+
+    const vinList = [...new Set(rows.map(r => r.vin))];
+    const placeholders = vinList.map(() => '?').join(',');
+
+    // 2. MES: времена прохождения точек
+    const [mesRows] = await mesPool.query(
+      `SELECT vin,
+              MAX(IF(uloc_no = 'AGMBS01002', scan_time, NULL)) AS CP5,
+              MAX(IF(uloc_no = 'AGMPS01002', scan_time, NULL)) AS CP6,
+              MAX(IF(uloc_no = 'AGMAS01001', scan_time, NULL)) AS TRIMIN,
+              MAX(IF(uloc_no = 'AGMAS01003', scan_time, NULL)) AS CP7,
+              MAX(IF(uloc_no = 'CP72', scan_time, NULL)) AS CP72,
+              MAX(IF(uloc_no = 'CPFINAL', scan_time, NULL)) AS CPFINAL,
+              MAX(IF(uloc_no = 'AGMAS01004', scan_time, NULL)) AS CP8
+       FROM ti_mes_movement
+       WHERE vin IN (${placeholders}) AND is_deleted = 0
+       GROUP BY vin`,
+      vinList
+    );
+
+    // 3. IOT: TL-точки
+    const [iotRows] = await pool.query(
+      `SELECT wo.vin,
+              MAX(IF(aow.WC_NAME = 'TLWA', aow.CREATION_TIME, NULL)) AS TLWA,
+              MAX(IF(aow.WC_NAME = 'TLRT', aow.CREATION_TIME, NULL)) AS TLRT,
+              MAX(IF(aow.WC_NAME = 'TLADAS', aow.CREATION_TIME, NULL)) AS TLADAS,
+              MAX(IF(aow.WC_NAME = 'TLTT', aow.CREATION_TIME, NULL)) AS TLTT
+       FROM work_order wo
+       LEFT JOIN at_om_wiptrackinghistory aow ON wo.vin = aow.vin
+       WHERE wo.vin IN (${placeholders})
+       GROUP BY wo.vin`,
+      vinList
+    );
+
+    // 4. LES: складские данные
+    const [storageRows] = await lesPool.query(
+      `SELECT vin, ck_no, kq_no, kw_no, out_storage_time, in_storage_status
+       FROM tv_biz_storage_car
+       WHERE vin IN (${placeholders})`,
+      vinList
+    );
+
+    const mesMap = new Map(mesRows.map(r => [r.vin, r]));
+    const iotMap = new Map(iotRows.map(r => [r.vin, r]));
+    const storageMap = new Map(storageRows.map(r => [r.vin, r]));
+
+    const checkpoints = ['CP5','CP6','TRIMIN','CP7','CP72','TLWA','TLRT','TLADAS','TLTT','CPFINAL','CP8'];
+
+    const locationMap = new Map();
+    vinList.forEach(vin => {
+      const m = mesMap.get(vin) || {};
+      const i = iotMap.get(vin) || {};
+      const s = storageMap.get(vin);
+
+      const times = {
+        CP5: m.CP5, CP6: m.CP6, TRIMIN: m.TRIMIN, CP7: m.CP7, CP72: m.CP72,
+        TLWA: i.TLWA, TLRT: i.TLRT, TLADAS: i.TLADAS, TLTT: i.TLTT,
+        CPFINAL: m.CPFINAL, CP8: m.CP8,
+      };
+
+      let latestCheckpoint = null;
+      let latestTime = null;
+      for (const cp of checkpoints) {
+        if (times[cp]) {
+          const t = new Date(times[cp]);
+          if (!latestTime || t > latestTime) {
+            latestTime = t;
+            latestCheckpoint = cp;
+          }
+        }
+      }
+
+      const isSold = s && s.in_storage_status === 'Key_Car_In_Storage_Status_3';
+      const hasStorageData =
+        s && s.ck_no && s.kq_no && s.kw_no &&
+        s.ck_no !== 'N/A' && s.kq_no !== 'N/A' && s.kw_no !== 'N/A';
+      const isInStorage = !isSold && hasStorageData;
+
+      let location = '';
+      if (isSold) {
+        location = 'Продан';
+      } else if (isInStorage) {
+        location = `${s.ck_no}-${s.kq_no}-${s.kw_no}`;
+      } else if (latestCheckpoint) {
+        location = latestCheckpoint;
+      }
+
+      locationMap.set(vin, location);
+    });
+
+    // 5. Склеиваем: одна запись на пару (model, issue_desc, vin)
+    const result = rows.map(r => ({
+      model: r.model,
+      issue_desc: r.issue_desc,
+      vin: r.vin,
+      location: locationMap.get(r.vin) || '',
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка holds-sgp-retrospective-all-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+
+
+
 
 // Справочник дефектов по цехам
 app.get('/api/part-defect-shop-mapping', async (req, res) => {
