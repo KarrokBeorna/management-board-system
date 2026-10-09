@@ -237,62 +237,166 @@ const aggregateReason = (desc) => {
   return desc.trim();
 };
 
-// ====== SVG-ГРАФИК ДЕЛЬТЫ ======
-const DailyChangeChart = ({ dates, values }) => {
+// ====== КАСКАДНАЯ ДИАГРАММА ИЗМЕНЕНИЯ КОЛ-ВА ЗАХОЛДИРОВАННЫХ МАШИН ======
+const DailyChangeChart = ({ dates, values, baseline }) => {
   const width = 1000;
-  const height = 340;
-  const padding = { top: 40, right: 30, bottom: 60, left: 60 };
+  const height = 380;
+  const padding = { top: 50, right: 30, bottom: 60, left: 60 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
-  const maxAbs = Math.max(...values.map(v => Math.abs(v)), 1);
-  const zeroY = padding.top + chartHeight / 2;
-  const scale = (chartHeight / 2) / maxAbs;
-  const slotWidth = chartWidth / Math.max(dates.length, 1);
-  const barWidth = slotWidth * 0.6;
+  // Каскад: каждая колонка «плывёт» от уровня предыдущей
+  const points = [];
+  let acc = baseline;
+  values.forEach((v) => {
+    const start = acc;
+    acc = acc + v;
+    points.push({ start, end: acc, delta: v });
+  });
+
+  // Масштаб: учитываем baseline и все уровни
+  const allValues = [baseline];
+  points.forEach((p) => {
+    allValues.push(p.start, p.end);
+  });
+  const maxVal = Math.max(...allValues, 1);
+  const minVal = Math.min(...allValues, 0);
+  const range = Math.max(maxVal - minVal, 1);
+
+  const yScale = (v) =>
+    padding.top + chartHeight - ((v - minVal) / range) * chartHeight;
+
+  const slotWidth = chartWidth / Math.max(points.length + 1, 1);
+  const barWidth = slotWidth * 0.55;
+
+  // Сетка
+  const gridLines = [0, 0.25, 0.5, 0.75, 1];
 
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
       style={{ width: '100%', height: 'auto', display: 'block' }}
     >
-      {/* Нулевая линия */}
-      <line
-        x1={padding.left}
-        y1={zeroY}
-        x2={width - padding.right}
-        y2={zeroY}
-        stroke="#9CA3AF"
-        strokeWidth="1"
-      />
-
-      {dates.map((date, i) => {
-        const v = values[i] || 0;
-        const x = padding.left + i * slotWidth + (slotWidth - barWidth) / 2;
-        const barHeight = Math.abs(v) * scale;
-        const y = v >= 0 ? zeroY - barHeight : zeroY;
-        const color = v > 0 ? '#10B981' : v < 0 ? '#EF4444' : '#D1D5DB';
-
+      {/* Горизонтальная сетка + подписи оси Y */}
+      {gridLines.map((r, i) => {
+        const y = padding.top + chartHeight * r;
+        const val = Math.round(maxVal - (maxVal - minVal) * r);
         return (
-          <g key={date}>
+          <g key={i}>
+            <line
+              x1={padding.left}
+              y1={y}
+              x2={width - padding.right}
+              y2={y}
+              stroke="#E5E7EB"
+              strokeWidth="1"
+            />
+            <text
+              x={padding.left - 8}
+              y={y + 4}
+              textAnchor="end"
+              fontSize="10"
+              fill="#9CA3AF"
+            >
+              {val}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Стартовая колонка (уровень до первого дня) */}
+      {(() => {
+        const x = padding.left + (slotWidth - barWidth) / 2;
+        const y = yScale(baseline);
+        const h = padding.top + chartHeight - y;
+        return (
+          <g>
             <rect
               x={x}
               y={y}
               width={barWidth}
-              height={v === 0 ? 1 : Math.max(barHeight, 2)}
+              height={Math.max(h, 1)}
+              fill="#9CA3AF"
+              opacity={0.45}
+              rx={3}
+            />
+            <text
+              x={x + barWidth / 2}
+              y={y - 6}
+              textAnchor="middle"
+              fontSize="10"
+              fontWeight="600"
+              fill="#6B7280"
+            >
+              {baseline}
+            </text>
+            <text
+              x={x + barWidth / 2}
+              y={height - padding.bottom + 18}
+              textAnchor="middle"
+              fontSize="10"
+              fill="#6B7280"
+            >
+              старт
+            </text>
+          </g>
+        );
+      })()}
+
+      {/* Соединительные линии каскада */}
+      {points.slice(0, -1).map((p, i) => {
+        const x1 =
+          padding.left + (i + 1) * slotWidth + (slotWidth + barWidth) / 2;
+        const x2 =
+          padding.left + (i + 2) * slotWidth + (slotWidth - barWidth) / 2;
+        const y = yScale(p.end);
+        return (
+          <line
+            key={`c-${i}`}
+            x1={x1}
+            y1={y}
+            x2={x2}
+            y2={y}
+            stroke="#9CA3AF"
+            strokeDasharray="3,3"
+            strokeWidth="1"
+          />
+        );
+      })}
+
+      {/* Столбцы-изменения */}
+      {points.map((p, i) => {
+        const x =
+          padding.left + (i + 1) * slotWidth + (slotWidth - barWidth) / 2;
+        const y1 = yScale(p.start);
+        const y2 = yScale(p.end);
+        const top = Math.min(y1, y2);
+        const barH = Math.max(Math.abs(y2 - y1), 2);
+
+        // Рост = красный (плохо), снижение = зелёный (хорошо)
+        const color =
+          p.delta > 0 ? '#EF4444' : p.delta < 0 ? '#10B981' : '#D1D5DB';
+
+        return (
+          <g key={i}>
+            <rect
+              x={x}
+              y={top}
+              width={barWidth}
+              height={barH}
               fill={color}
               rx={3}
             />
-            {v !== 0 && (
+            {p.delta !== 0 && (
               <text
                 x={x + barWidth / 2}
-                y={v > 0 ? y - 6 : y + barHeight + 14}
+                y={p.delta > 0 ? top - 6 : top + barH + 14}
                 textAnchor="middle"
                 fontSize="11"
                 fontWeight="700"
                 fill={color}
               >
-                {v > 0 ? `+${v}` : v}
+                {p.delta > 0 ? `+${p.delta}` : p.delta}
               </text>
             )}
             <text
@@ -302,7 +406,7 @@ const DailyChangeChart = ({ dates, values }) => {
               fontSize="10"
               fill="#6B7280"
             >
-              {formatShortDate(date)}
+              {formatShortDate(dates[i])}
             </text>
           </g>
         );
@@ -539,7 +643,6 @@ export default function HoldsSgpPage() {
   const dailyChange = useMemo(() => {
     if (!retroDates.length || !Object.keys(uniqueVinsByDate).length) return {};
 
-    // «Предыдущий день» = retroDates[0] - 1
     const first = new Date(retroDates[0]);
     first.setDate(first.getDate() - 1);
     const y = first.getFullYear();
@@ -555,6 +658,17 @@ export default function HoldsSgpPage() {
       prev = cur;
     });
     return result;
+  }, [retroDates, uniqueVinsByDate]);
+
+  // ====== Baseline для каскадного графика ======
+  const baselineUniqueVins = useMemo(() => {
+    if (!retroDates.length || !Object.keys(uniqueVinsByDate).length) return 0;
+    const first = new Date(retroDates[0]);
+    first.setDate(first.getDate() - 1);
+    const y = first.getFullYear();
+    const m = String(first.getMonth() + 1).padStart(2, '0');
+    const d = String(first.getDate()).padStart(2, '0');
+    return uniqueVinsByDate[`${y}-${m}-${d}`] || 0;
   }, [retroDates, uniqueVinsByDate]);
 
   const handleModelToggle = (model) => {
@@ -643,7 +757,7 @@ export default function HoldsSgpPage() {
 
     // Изменение к прошлому дню
     const deltaRow = {
-      'Модель': 'Изменение к прошлому дню',
+      'Модель': 'Изменение к прошлому дню, шт.',
       'Описание': '',
     };
     retroDates.forEach(date => {
@@ -695,7 +809,7 @@ export default function HoldsSgpPage() {
     );
   }
 
-  // Стиль футера ретроспективы (несколько строк — общий sticky-контейнер)
+  // Стиль ячейки футера ретроспективы
   const footerCellStyle = {
     ...tdStyle,
     fontWeight: 800,
@@ -1304,15 +1418,30 @@ export default function HoldsSgpPage() {
                       style={{
                         position: 'sticky',
                         bottom: 0,
-                        backgroundColor: '#FFFFFF',
                         zIndex: 10,
                         boxShadow: '0 -4px 6px -2px rgba(0,0,0,0.05)',
                       }}
                     >
-                      {/* К-во причин холдов (бывший Общий итог) */}
-                      <tr style={{ backgroundColor: '#F9FAFB', borderTop: '2px solid #E5E7EB' }}>
-                        <td style={footerCellStyle}>К-во причин холдов</td>
-                        <td style={tdStyle}></td>
+                      {/* К-во причин холдов */}
+                      <tr>
+                        <td
+                          style={{
+                            ...footerCellStyle,
+                            backgroundColor: '#F9FAFB',
+                            borderTop: '2px solid #E5E7EB',
+                            borderBottom: 'none',
+                          }}
+                        >
+                          К-во причин холдов
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle,
+                            backgroundColor: '#F9FAFB',
+                            borderTop: '2px solid #E5E7EB',
+                            borderBottom: 'none',
+                          }}
+                        />
                         {retroDates.map(date => {
                           const daySum = currentRetroData.reduce(
                             (sum, row) => sum + (row[date] || 0),
@@ -1323,6 +1452,9 @@ export default function HoldsSgpPage() {
                               key={date}
                               style={{
                                 ...footerCellStyle,
+                                backgroundColor: '#F9FAFB',
+                                borderTop: '2px solid #E5E7EB',
+                                borderBottom: 'none',
                                 textAlign: 'center',
                               }}
                             >
@@ -1332,15 +1464,31 @@ export default function HoldsSgpPage() {
                         })}
                       </tr>
 
-                      {/* К-во захолдированных машин (уникальные VIN) */}
-                      <tr style={{ backgroundColor: '#EFF6FF' }}>
-                        <td style={footerCellStyle}>К-во захолдированных машин</td>
-                        <td style={tdStyle}></td>
+                      {/* К-во захолдированных машин */}
+                      <tr>
+                        <td
+                          style={{
+                            ...footerCellStyle,
+                            backgroundColor: '#EFF6FF',
+                            borderBottom: 'none',
+                          }}
+                        >
+                          К-во захолдированных машин
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle,
+                            backgroundColor: '#EFF6FF',
+                            borderBottom: 'none',
+                          }}
+                        />
                         {retroDates.map(date => (
                           <td
                             key={date}
                             style={{
                               ...footerCellStyle,
+                              backgroundColor: '#EFF6FF',
+                              borderBottom: 'none',
                               textAlign: 'center',
                               color: '#1D4ED8',
                             }}
@@ -1350,19 +1498,36 @@ export default function HoldsSgpPage() {
                         ))}
                       </tr>
 
-                      {/* Изменение к прошлому дню */}
-                      <tr style={{ backgroundColor: '#F0FDF4' }}>
-                        <td style={footerCellStyle}>Изменение к прошлому дню</td>
-                        <td style={tdStyle}></td>
+                      {/* Изменение к прошлому дню, шт. */}
+                      <tr>
+                        <td
+                          style={{
+                            ...footerCellStyle,
+                            backgroundColor: '#FFFFFF',
+                            borderBottom: 'none',
+                          }}
+                        >
+                          Изменение к прошлому дню, шт.
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle,
+                            backgroundColor: '#FFFFFF',
+                            borderBottom: 'none',
+                          }}
+                        />
                         {retroDates.map(date => {
                           const v = dailyChange[date] || 0;
+                          // Рост = красный (плохо), снижение = зелёный (хорошо)
                           const color =
-                            v > 0 ? '#10B981' : v < 0 ? '#EF4444' : '#6B7280';
+                            v > 0 ? '#EF4444' : v < 0 ? '#10B981' : '#6B7280';
                           return (
                             <td
                               key={date}
                               style={{
                                 ...footerCellStyle,
+                                backgroundColor: '#FFFFFF',
+                                borderBottom: 'none',
                                 textAlign: 'center',
                                 color,
                               }}
@@ -1376,7 +1541,7 @@ export default function HoldsSgpPage() {
                   </table>
                 </div>
 
-                {/* График изменения количества захолдированных машин */}
+                {/* Каскадная диаграмма изменения количества захолдированных машин */}
                 <div
                   style={{
                     marginTop: 24,
@@ -1401,12 +1566,13 @@ export default function HoldsSgpPage() {
                         marginLeft: 12,
                       }}
                     >
-                      (зелёный — рост, красный — снижение)
+                      (красный — рост, зелёный — снижение)
                     </span>
                   </h3>
                   <DailyChangeChart
                     dates={retroDates}
                     values={retroDates.map(d => dailyChange[d] || 0)}
+                    baseline={baselineUniqueVins}
                   />
                 </div>
               </>
