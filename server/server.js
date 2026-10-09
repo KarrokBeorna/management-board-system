@@ -14476,7 +14476,92 @@ app.post('/api/drr-shift-marks/toggle', async (req, res) => {
   }
 });
 
+// ================== DRR WEEKLY ANALYTICS ==================
+// Агрегация snapshot-таблиц по ISO-неделям.
+// Учитываем только shift = 'all' (полные сутки) и строки с drr_percent > 0.
+app.get('/api/drr-weekly-analytics/:type', async (req, res) => {
+  try {
+    const { type } = req.params;
+    const { weeks = 8 } = req.query;
+    const weeksCount = Math.min(Math.max(parseInt(weeks, 10) || 8, 1), 52);
 
+    const config = {
+      cp7:     { table: 'drr_cp7_snapshots',     extraWhere: " AND filter_name = 'all'", closedCol: 'closed_vins', label: 'DRR CP7' },
+      adas:    { table: 'drr_adas_snapshots',    extraWhere: '',                          closedCol: 'closed_vins', label: 'DRR ADAS' },
+      cpfinal: { table: 'drr_cpfinal_snapshots', extraWhere: '',                          closedCol: 'ok_vins',     label: 'DRR CPFinal' },
+      pip:     { table: 'drr_pip_snapshots',     extraWhere: '',                          closedCol: 'closed_vins', label: 'DRR PIP' },
+    };
+
+    const cfg = config[type];
+    if (!cfg) return res.status(400).json({ error: 'Неизвестный тип отчёта' });
+
+    // YEARWEEK(date, 3) — ISO-год + ISO-неделя одним числом (YYYYWW)
+    const sql = `
+      SELECT
+        YEARWEEK(shift_date, 3) AS iso_year_week,
+        COUNT(*) AS total_days,
+        SUM(CASE WHEN drr_percent > 0 THEN 1 ELSE 0 END) AS valid_days,
+        SUM(CASE WHEN drr_percent > 0 THEN total_vins ELSE 0 END) AS total_vins,
+        SUM(CASE WHEN drr_percent > 0 THEN ${cfg.closedCol} ELSE 0 END) AS closed_vins,
+        SUM(CASE WHEN drr_percent > 0 THEN nok_vins ELSE 0 END) AS nok_vins,
+        AVG(CASE WHEN drr_percent > 0 THEN drr_percent END) AS avg_drr,
+        MIN(CASE WHEN drr_percent > 0 THEN drr_percent END) AS min_drr,
+        MAX(CASE WHEN drr_percent > 0 THEN drr_percent END) AS max_drr
+      FROM ${cfg.table}
+      WHERE shift = 'all'
+        AND week_number IS NOT NULL
+        AND shift_date >= DATE_SUB(CURDATE(), INTERVAL ${weeksCount} WEEK)
+        ${cfg.extraWhere}
+      GROUP BY YEARWEEK(shift_date, 3)
+      ORDER BY iso_year_week DESC
+      LIMIT ${weeksCount}
+    `;
+
+    const [rows] = await notesPool.query(sql);
+
+    // Находим Пн-Вс для ISO-недели (year = ISO-год, week = ISO-номер)
+    function getISOWeekRange(year, weekNumber) {
+      const jan4 = new Date(Date.UTC(year, 0, 4));
+      const jan4Day = jan4.getUTCDay() || 7;
+      const week1Monday = new Date(jan4);
+      week1Monday.setUTCDate(jan4.getUTCDate() - (jan4Day - 1));
+      const monday = new Date(week1Monday);
+      monday.setUTCDate(week1Monday.getUTCDate() + (weekNumber - 1) * 7);
+      const sunday = new Date(monday);
+      sunday.setUTCDate(monday.getUTCDate() + 6);
+      const fmt = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      return { start: fmt(monday), end: fmt(sunday) };
+    }
+
+    const result = rows.map(r => {
+      const yw = Number(r.iso_year_week);   // напр. 202641
+      const year = Math.floor(yw / 100);
+      const week = yw % 100;
+      const range = getISOWeekRange(year, week);
+
+      return {
+        weekNumber: week,
+        year,
+        weekStart: range.start,
+        weekEnd: range.end,
+        totalDays: Number(r.total_days),
+        validDays: Number(r.valid_days),
+        totalVins: Number(r.total_vins) || 0,
+        closedVins: Number(r.closed_vins) || 0,
+        nokVins: Number(r.nok_vins) || 0,
+        avgDrr: r.avg_drr !== null ? Number(Number(r.avg_drr).toFixed(1)) : null,
+        minDrr: r.min_drr !== null ? Number(Number(r.min_drr).toFixed(1)) : null,
+        maxDrr: r.max_drr !== null ? Number(Number(r.max_drr).toFixed(1)) : null,
+        label: cfg.label,
+      };
+    }).reverse(); // по возрастанию недель
+
+    res.json({ type, weeks: weeksCount, data: result });
+  } catch (err) {
+    console.error('Ошибка /api/drr-weekly-analytics:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const PORT = process.env.PORT || 40000;
 
