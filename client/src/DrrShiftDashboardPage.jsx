@@ -240,13 +240,13 @@ const loadAllReports = async (start, end) => {
 };
 
 const formatDateShort = (dateStr) => {
+  if (!dateStr) return '';
   const d = new Date(dateStr + 'T12:00:00');
   const dd = String(d.getDate()).padStart(2, '0');
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   return `${dd}.${mm}`;
 };
 
-// Разбор photo_key вида "2026-10-05_A_cp7"
 const parsePhotoKey = (key) => {
   if (!key) return { date: '', letter: '', checkpoint: '' };
   const parts = String(key).split('_');
@@ -257,6 +257,8 @@ const parsePhotoKey = (key) => {
     checkpoint: parts.slice(2).join('_'),
   };
 };
+
+const weekKeyOf = (w) => `${w.year}W${String(w.weekNumber).padStart(2, '0')}`;
 
 /* ===================== КОМПРЕССИЯ ФОТО ===================== */
 const compressImage = (file, maxWidth = 900) => new Promise((resolve, reject) => {
@@ -693,7 +695,7 @@ function WeeklyPhotosBlock({ photos, loading }) {
     <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #F1F5F9' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
-          Фото недели ({photos.length}/10)
+          Фото периода ({photos.length}/10)
         </span>
         <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
           Только для просмотра
@@ -706,15 +708,13 @@ function WeeklyPhotosBlock({ photos, loading }) {
         </p>
       ) : photos.length === 0 ? (
         <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>
-          За эту неделю фото не прикреплено
+          За выбранный период фото не прикреплено
         </p>
       ) : (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {photos.map((it) => {
             const parsed = parsePhotoKey(it.photoKey);
-            const dateLabel = parsed.date
-              ? formatDateShort(parsed.date)
-              : '';
+            const dateLabel = parsed.date ? formatDateShort(parsed.date) : '';
             const shiftLabel = parsed.letter === 'ALL'
               ? 'сутки'
               : parsed.letter
@@ -783,86 +783,88 @@ function WeeklyPhotosBlock({ photos, loading }) {
   );
 }
 
-function WeeklyAnalyticsView() {
-  const [type, setType] = useState('cp7');
-  const [weeksCount, setWeeksCount] = useState(8);
-  const [weeksList, setWeeksList] = useState([]);
-  const [selectedWeekIdx, setSelectedWeekIdx] = useState(0);
-
-  const [topDefects, setTopDefects] = useState([]);
-  const [photos, setPhotos] = useState([]);
-
-  const [loadingWeeks, setLoadingWeeks] = useState(false);
+// Один блок недельной аналитики для конкретного чекпоинта (cp7 / adas / cpfinal)
+function WeeklyCheckpointBlock({ type, title, periodLabel, weeks }) {
+  const [matrix, setMatrix] = useState({ weeks: [], rows: [] });
   const [loadingTop, setLoadingTop] = useState(false);
+  const [photos, setPhotos] = useState([]);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
 
-  const typeLabels = {
-    cp7: 'DRR CP7',
-    adas: 'DRR ADAS',
-    cpfinal: 'DRR CPFinal',
-  };
+  const weekKey = weeks.map(w => w.weekStart).join('|');
 
-  const typeTitle = {
-    cp7: 'DRR CP7',
-    adas: 'DRR ADAS',
-    cpfinal: 'DRR CPFinal',
-  };
+  // Агрегат за период
+  const periodTotalVins = weeks.reduce((s, w) => s + (w.totalVins || 0), 0);
+  const periodClosedVins = weeks.reduce((s, w) => s + (w.closedVins || 0), 0);
+  const avgDrr = periodTotalVins > 0
+    ? +((periodClosedVins / periodTotalVins) * 100).toFixed(1)
+    : 0;
 
-  const selectedWeek = weeksList[selectedWeekIdx] || null;
-
-  // 1. Загрузка списка недель
+  // Загрузка динамики по неделям
   useEffect(() => {
-    let cancelled = false;
-    setLoadingWeeks(true);
-    fetch(`${API_BASE}/api/drr-weekly-analytics/${type}?weeks=${weeksCount}`)
-      .then(r => r.json())
-      .then(json => {
-        if (cancelled) return;
-        const data = json.data || [];
-        // последняя неделя — самая свежая, идёт в конце массива (мы делали .reverse() на бэке)
-        // отображать хотим в порядке убывания свежести, поэтому последнюю в начало
-        const sorted = [...data].reverse();
-        setWeeksList(sorted);
-        setSelectedWeekIdx(0);
-      })
-      .catch(err => {
-        if (!cancelled) {
-          console.error('Ошибка загрузки недель:', err.message);
-          setWeeksList([]);
-        }
-      })
-      .finally(() => { if (!cancelled) setLoadingWeeks(false); });
-    return () => { cancelled = true; };
-  }, [type, weeksCount]);
-
-  // 2. Загрузка топа дефектов за выбранную неделю
-  useEffect(() => {
-    if (!selectedWeek) { setTopDefects([]); return; }
-    const start = `${selectedWeek.weekStart} 00:00:00`;
-    const end = `${selectedWeek.weekEnd} 23:59:59`;
-    const params = new URLSearchParams({ startTime: start, endTime: end });
-
-    let url;
-    if (type === 'cp7') url = `${API_BASE}/api/drr-cp7-top-defects?${params}`;
-    else if (type === 'adas') url = `${API_BASE}/api/drr-tl-top-defects?${params}`;
-    else if (type === 'cpfinal') url = `${API_BASE}/api/drr-cpfinal-top-defects?${params}`;
-    else { setTopDefects([]); return; }
-
+    if (weeks.length === 0) {
+      setMatrix({ weeks: [], rows: [] });
+      return;
+    }
     setLoadingTop(true);
-    fetch(url)
-      .then(r => r.json())
-      .then(json => setTopDefects(Array.isArray(json) ? json.slice(0, 20) : []))
-      .catch(() => setTopDefects([]))
-      .finally(() => setLoadingTop(false));
-  }, [selectedWeek, type]);
 
-  // 3. Загрузка фото недели
+    const endpointMap = {
+      cp7: '/api/drr-cp7-top-defects',
+      adas: '/api/drr-tl-top-defects',
+      cpfinal: '/api/drr-cpfinal-top-defects',
+    };
+    const endpoint = endpointMap[type];
+
+    const requests = weeks.map(w => {
+      const params = new URLSearchParams({
+        startTime: `${w.weekStart} 00:00:00`,
+        endTime: `${w.weekEnd} 23:59:59`,
+      });
+      return fetch(`${API_BASE}${endpoint}?${params}`)
+        .then(r => r.json())
+        .then(arr => ({ week: w, list: Array.isArray(arr) ? arr.slice(0, 20) : [] }))
+        .catch(() => ({ week: w, list: [] }));
+    });
+
+    Promise.all(requests)
+      .then(results => {
+        const mppMap = new Map();
+        results.forEach(({ week, list }) => {
+          const key = weekKeyOf(week);
+          list.forEach(item => {
+            if (!mppMap.has(item.mpp)) {
+              mppMap.set(item.mpp, { mpp: item.mpp, counts: {} });
+            }
+            mppMap.get(item.mpp).counts[key] = item.defectCount;
+          });
+        });
+        const rows = Array.from(mppMap.values())
+          .map(r => ({ ...r, total: Object.values(r.counts).reduce((s, v) => s + v, 0) }))
+          .sort((a, b) => b.total - a.total);
+
+        const weeksOrder = weeks.map(w => ({
+          key: weekKeyOf(w),
+          label: `W${w.weekNumber}`,
+          year: w.year,
+        }));
+
+        setMatrix({ weeks: weeksOrder, rows });
+      })
+      .finally(() => setLoadingTop(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, weekKey]);
+
+  // Загрузка фото за период
   useEffect(() => {
-    if (!selectedWeek) { setPhotos([]); return; }
+    if (weeks.length === 0) {
+      setPhotos([]);
+      return;
+    }
+    const weekStart = weeks[0].weekStart;
+    const weekEnd = weeks[weeks.length - 1].weekEnd;
     const params = new URLSearchParams({
       checkpoint: type,
-      weekStart: selectedWeek.weekStart,
-      weekEnd: selectedWeek.weekEnd,
+      weekStart,
+      weekEnd,
       limit: 10,
     });
     setLoadingPhotos(true);
@@ -871,114 +873,227 @@ function WeeklyAnalyticsView() {
       .then(json => setPhotos(json.photos || []))
       .catch(() => setPhotos([]))
       .finally(() => setLoadingPhotos(false));
-  }, [selectedWeek, type]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, weekKey]);
+
+  return (
+    <div style={reportBlockStyle}>
+      <div style={reportTitleStyle}>
+        <span>{title} — {periodLabel}</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <PieBlock
+          drrPercent={avgDrr}
+          okVins={periodClosedVins}
+          totalVins={periodTotalVins}
+        />
+
+        <div style={{
+          flex: 1,
+          minWidth: 0,
+          height: 320,
+          overflow: 'auto',
+          border: '1px solid #F1F5F9',
+          borderRadius: 8,
+        }}>
+          {loadingTop ? (
+            <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>
+              Загрузка...
+            </p>
+          ) : matrix.rows.length === 0 ? (
+            <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>
+              Нет данных
+            </p>
+          ) : matrix.weeks.length === 1 ? (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={thStyleSmall}>MPP</th>
+                  <th style={{ ...thStyleSmall, textAlign: 'center', width: 70 }}>Кол-во</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matrix.rows.map((row, i) => (
+                  <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                    <td style={tdStyleSmall}>{row.mpp}</td>
+                    <td style={{ ...tdStyleSmall, textAlign: 'center', fontWeight: 700, color: i < 3 ? '#DC2626' : '#1E293B' }}>
+                      {row.counts[matrix.weeks[0].key] || 0}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+              <thead>
+                <tr>
+                  <th style={thStyleSmall}>MPP</th>
+                  {matrix.weeks.map(w => (
+                    <th key={w.key} style={{ ...thStyleSmall, textAlign: 'center', width: 55, padding: '6px 4px' }}>
+                      {w.label}
+                    </th>
+                  ))}
+                  <th style={{ ...thStyleSmall, textAlign: 'center', width: 65 }}>Всего</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matrix.rows.map((row, i) => (
+                  <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
+                    <td style={{ ...tdStyleSmall, fontSize: '0.8rem' }}>{row.mpp}</td>
+                    {matrix.weeks.map(w => (
+                      <td key={w.key} style={{ ...tdStyleSmall, textAlign: 'center', padding: '6px 4px' }}>
+                        {row.counts[w.key] || ''}
+                      </td>
+                    ))}
+                    <td style={{
+                      ...tdStyleSmall,
+                      textAlign: 'center',
+                      fontWeight: 700,
+                      color: i < 3 ? '#DC2626' : '#1E293B',
+                    }}>
+                      {row.total}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      <WeeklyPhotosBlock photos={photos} loading={loadingPhotos} />
+    </div>
+  );
+}
+
+function WeeklyAnalyticsView() {
+  const [weeksList, setWeeksList] = useState([]);        // по возрастанию (старые → свежие)
+  const [cp7Data, setCp7Data] = useState([]);
+  const [adasData, setAdasData] = useState([]);
+  const [cpFinalData, setCpFinalData] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const [fromWeekStart, setFromWeekStart] = useState('');
+  const [toWeekStart, setToWeekStart] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      fetch(`${API_BASE}/api/drr-weekly-analytics/cp7?weeks=52`).then(r => r.json()),
+      fetch(`${API_BASE}/api/drr-weekly-analytics/adas?weeks=52`).then(r => r.json()),
+      fetch(`${API_BASE}/api/drr-weekly-analytics/cpfinal?weeks=52`).then(r => r.json()),
+    ])
+      .then(([cp7, adas, cpfinal]) => {
+        const weeks = cp7.data || [];   // отсортированы по возрастанию
+        setWeeksList(weeks);
+        setCp7Data(cp7.data || []);
+        setAdasData(adas.data || []);
+        setCpFinalData(cpfinal.data || []);
+
+        // По умолчанию — текущая (последняя) неделя
+        if (weeks.length > 0) {
+          const lastStart = weeks[weeks.length - 1].weekStart;
+          setFromWeekStart(lastStart);
+          setToWeekStart(lastStart);
+        }
+      })
+      .catch(err => console.error('Ошибка загрузки недель:', err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Нормализация диапазона
+  const fromIdx = weeksList.findIndex(w => w.weekStart === fromWeekStart);
+  const toIdx = weeksList.findIndex(w => w.weekStart === toWeekStart);
+  const safeFrom = Math.min(fromIdx, toIdx);
+  const safeTo = Math.max(fromIdx, toIdx);
+
+  const selectedWeeks = (safeFrom >= 0 && safeTo >= 0 && safeTo >= safeFrom)
+    ? weeksList.slice(safeFrom, safeTo + 1)
+    : (weeksList.length > 0 ? [weeksList[weeksList.length - 1]] : []);
+
+  const selectedWeekStartsSet = new Set(selectedWeeks.map(w => w.weekStart));
+
+  const filterByWeeks = (arr) => arr.filter(w => selectedWeekStartsSet.has(w.weekStart));
+  const cp7Filtered = filterByWeeks(cp7Data);
+  const adasFiltered = filterByWeeks(adasData);
+  const cpFinalFiltered = filterByWeeks(cpFinalData);
+
+  // Заголовок периода
+  const periodLabel = selectedWeeks.length === 0
+    ? '—'
+    : selectedWeeks.length === 1
+      ? `W${selectedWeeks[0].weekNumber} ${selectedWeeks[0].year}`
+      : `W${selectedWeeks[0].weekNumber} ${selectedWeeks[0].year} – W${selectedWeeks[selectedWeeks.length - 1].weekNumber} ${selectedWeeks[selectedWeeks.length - 1].year}`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Управление */}
       <div style={{ ...reportBlockStyle, display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
         <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
-          Отчёт:
+          С недели:
           <select
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-            style={{ ...dateSelectStyle, padding: '8px 14px' }}
-          >
-            <option value="cp7">DRR CP7</option>
-            <option value="adas">DRR ADAS</option>
-            <option value="cpfinal">DRR CPFinal</option>
-          </select>
-        </label>
-
-        <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
-          Количество недель:
-          <select
-            value={weeksCount}
-            onChange={(e) => setWeeksCount(Number(e.target.value))}
-            style={{ ...dateSelectStyle, padding: '8px 14px' }}
-          >
-            <option value={4}>4</option>
-            <option value={8}>8</option>
-            <option value={12}>12</option>
-            <option value={26}>26</option>
-            <option value={52}>52</option>
-          </select>
-        </label>
-
-        <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
-          Неделя:
-          <select
-            value={selectedWeekIdx}
-            onChange={(e) => setSelectedWeekIdx(Number(e.target.value))}
-            style={{ ...dateSelectStyle, padding: '8px 14px', minWidth: 260 }}
+            value={fromWeekStart}
+            onChange={(e) => setFromWeekStart(e.target.value)}
+            style={{ ...dateSelectStyle, padding: '8px 14px', minWidth: 220 }}
             disabled={weeksList.length === 0}
           >
-            {weeksList.length === 0 && <option value={0}>Нет данных</option>}
-            {weeksList.map((w, i) => (
-              <option key={`${w.year}-${w.weekNumber}`} value={i}>
-                W{w.weekNumber} {w.year} ({formatDateShort(w.weekStart)} – {formatDateShort(w.weekEnd)})
+            {weeksList.length === 0 && <option value="">Нет данных</option>}
+            {weeksList.map(w => (
+              <option key={w.weekStart} value={w.weekStart}>
+                W{w.weekNumber} {w.year} ({formatDateShort(w.weekStart)})
               </option>
             ))}
           </select>
         </label>
 
-        <div style={{ marginLeft: 'auto', fontSize: '0.85rem', color: '#64748B', fontWeight: 600 }}>
-          Недели ISO (Пн–Вс). Дни с DRR = 0% исключены.
-        </div>
+        <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
+          По неделю:
+          <select
+            value={toWeekStart}
+            onChange={(e) => setToWeekStart(e.target.value)}
+            style={{ ...dateSelectStyle, padding: '8px 14px', minWidth: 220 }}
+            disabled={weeksList.length === 0}
+          >
+            {weeksList.length === 0 && <option value="">Нет данных</option>}
+            {weeksList.map(w => (
+              <option key={w.weekStart} value={w.weekStart}>
+                W{w.weekNumber} {w.year} ({formatDateShort(w.weekStart)})
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
-      {/* Карточка недели */}
-      {loadingWeeks ? (
+      {loading ? (
         <div style={{ textAlign: 'center', padding: 60, color: '#64748B', fontSize: '1.2rem' }}>
           Загрузка...
         </div>
-      ) : !selectedWeek ? (
+      ) : selectedWeeks.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 60, color: '#94A3B8', fontSize: '1.2rem' }}>
-          Нет данных за выбранный период
+          Нет данных
         </div>
       ) : (
-        <div style={reportBlockStyle}>
-          <div style={reportTitleStyle}>
-            <span>
-              {typeTitle[type]} — W{selectedWeek.weekNumber} {selectedWeek.year}
-            </span>
-            <span style={{ fontSize: '0.9rem', color: '#64748B', fontWeight: 600 }}>
-              {selectedWeek.weekStart} — {selectedWeek.weekEnd}
-              {' '}· учтено {selectedWeek.validDays} / {selectedWeek.totalDays} дн.
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            <PieBlock
-              drrPercent={selectedWeek.avgDrr || 0}
-              okVins={selectedWeek.closedVins || 0}
-              totalVins={selectedWeek.totalVins || 0}
-            />
-            <div style={{
-              flex: 1,
-              minWidth: 0,
-              height: 320,
-              overflowY: 'auto',
-              border: '1px solid #F1F5F9',
-              borderRadius: 8,
-            }}>
-              {loadingTop ? (
-                <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>
-                  Загрузка топ дефектов...
-                </p>
-              ) : (
-                <DefectsTable
-                  topDefects={topDefects}
-                  markKeyPrefix={`weekly_${type}_W${selectedWeek.weekNumber}_${selectedWeek.year}`}
-                  marks={{}}
-                  onToggleMark={null}
-                />
-              )}
-            </div>
-          </div>
-
-          <WeeklyPhotosBlock photos={photos} loading={loadingPhotos} />
-        </div>
+        <>
+          <WeeklyCheckpointBlock
+            type="cp7"
+            title="DRR CP7"
+            periodLabel={periodLabel}
+            weeks={cp7Filtered}
+          />
+          <WeeklyCheckpointBlock
+            type="adas"
+            title="DRR ADAS"
+            periodLabel={periodLabel}
+            weeks={adasFiltered}
+          />
+          <WeeklyCheckpointBlock
+            type="cpfinal"
+            title="DRR CPFinal"
+            periodLabel={periodLabel}
+            weeks={cpFinalFiltered}
+          />
+        </>
       )}
     </div>
   );
