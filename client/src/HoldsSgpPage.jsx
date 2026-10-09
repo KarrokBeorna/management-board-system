@@ -1333,7 +1333,7 @@ export default function HoldsSgpPage() {
                   margin: 0,
                 }}
               >
-                📈 Ретроспектива холдов (14 дней)
+                📈 Ретроспектива причин холдов (14 дней)
               </h2>
               <div
                 style={{
