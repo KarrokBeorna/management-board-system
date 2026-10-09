@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import * as XLSX from 'xlsx-js-style';
+import * as XLSX from 'xlsx';
 
 const API_BASE = '';
 
@@ -183,16 +183,6 @@ const statusBadgeStyle = {
   whiteSpace: 'nowrap',
 };
 
-const totalRowStyle = {
-  backgroundColor: '#F9FAFB',
-  fontWeight: 800,
-  borderTop: '2px solid #E5E7EB',
-  position: 'sticky',
-  bottom: 0,
-  zIndex: 10,
-  boxShadow: '0 -4px 6px -2px rgba(0,0,0,0.05)',
-};
-
 const loadingStyle = {
   textAlign: 'center',
   color: '#6B7280',
@@ -206,7 +196,7 @@ const lastUpdateStyle = {
   fontWeight: 500,
 };
 
-// ====== ФУНКЦИИ ======
+// ====== УТИЛИТЫ ======
 const formatDate = (dateStr) => {
   if (!dateStr) return '';
   const d = new Date(dateStr);
@@ -232,6 +222,12 @@ const getPlannedDate = () => {
   return now;
 };
 
+/**
+ * Агрегация причины холда:
+ *   "…- по запросу X"  -> "…"
+ *   "…-по запросу X"   -> "…"
+ *   "… по запросу X"   -> "…"
+ */
 const aggregateReason = (desc) => {
   if (!desc) return '';
   const match = desc.match(/\s*-?\s*по\s+запросу/i);
@@ -241,24 +237,103 @@ const aggregateReason = (desc) => {
   return desc.trim();
 };
 
+// ====== SVG-ГРАФИК ДЕЛЬТЫ ======
+const DailyChangeChart = ({ dates, values }) => {
+  const width = 1000;
+  const height = 340;
+  const padding = { top: 40, right: 30, bottom: 60, left: 60 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+
+  const maxAbs = Math.max(...values.map(v => Math.abs(v)), 1);
+  const zeroY = padding.top + chartHeight / 2;
+  const scale = (chartHeight / 2) / maxAbs;
+  const slotWidth = chartWidth / Math.max(dates.length, 1);
+  const barWidth = slotWidth * 0.6;
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      style={{ width: '100%', height: 'auto', display: 'block' }}
+    >
+      {/* Нулевая линия */}
+      <line
+        x1={padding.left}
+        y1={zeroY}
+        x2={width - padding.right}
+        y2={zeroY}
+        stroke="#9CA3AF"
+        strokeWidth="1"
+      />
+
+      {dates.map((date, i) => {
+        const v = values[i] || 0;
+        const x = padding.left + i * slotWidth + (slotWidth - barWidth) / 2;
+        const barHeight = Math.abs(v) * scale;
+        const y = v >= 0 ? zeroY - barHeight : zeroY;
+        const color = v > 0 ? '#10B981' : v < 0 ? '#EF4444' : '#D1D5DB';
+
+        return (
+          <g key={date}>
+            <rect
+              x={x}
+              y={y}
+              width={barWidth}
+              height={v === 0 ? 1 : Math.max(barHeight, 2)}
+              fill={color}
+              rx={3}
+            />
+            {v !== 0 && (
+              <text
+                x={x + barWidth / 2}
+                y={v > 0 ? y - 6 : y + barHeight + 14}
+                textAnchor="middle"
+                fontSize="11"
+                fontWeight="700"
+                fill={color}
+              >
+                {v > 0 ? `+${v}` : v}
+              </text>
+            )}
+            <text
+              x={x + barWidth / 2}
+              y={height - padding.bottom + 18}
+              textAnchor="middle"
+              fontSize="10"
+              fill="#6B7280"
+            >
+              {formatShortDate(date)}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+// ====== ОСНОВНОЙ КОМПОНЕНТ ======
 export default function HoldsSgpPage() {
   const [activeTab, setActiveTab] = useState('report');
 
+  // Отчет
   const [rawData, setRawData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showModelFilter, setShowModelFilter] = useState(false);
   const [selectedModels, setSelectedModels] = useState([]);
   const [lastUpdate, setLastUpdate] = useState(null);
-  const [reportView, setReportView] = useState('batch');
+  const [reportView, setReportView] = useState('batch'); // 'batch' | 'aggregated'
 
+  // Аналитика
   const [retroData, setRetroData] = useState([]);
+  const [uniqueVinsByDate, setUniqueVinsByDate] = useState({});
   const [retroLoading, setRetroLoading] = useState(false);
   const [showRetroModelFilter, setShowRetroModelFilter] = useState(false);
   const [selectedRetroModels, setSelectedRetroModels] = useState([]);
   const [retroDates, setRetroDates] = useState([]);
-  const [analyticsView, setAnalyticsView] = useState('batch');
+  const [analyticsView, setAnalyticsView] = useState('batch'); // 'batch' | 'aggregated'
 
+  // Модалка VIN
   const [showVinModal, setShowVinModal] = useState(false);
   const [vinModalTitle, setVinModalTitle] = useState('');
   const [vinList, setVinList] = useState([]);
@@ -314,18 +389,31 @@ export default function HoldsSgpPage() {
       setRetroDates(dates);
 
       const params = new URLSearchParams();
-      if (selectedRetroModels.length > 0 && selectedRetroModels.length < allModels.length) {
+      if (
+        selectedRetroModels.length > 0 &&
+        selectedRetroModels.length < allModels.length
+      ) {
         params.append('models', selectedRetroModels.join(','));
       }
 
-      const res = await fetch(`${API_BASE}/api/holds-sgp-retrospective?${params.toString()}`);
+      const res = await fetch(
+        `${API_BASE}/api/holds-sgp-retrospective?${params.toString()}`,
+      );
       if (!res.ok) throw new Error('Ошибка загрузки');
       const json = await res.json();
 
-      setRetroData(json);
+      // Новый формат: { rows, uniqueVinsByDate }; поддержим и старый (массив)
+      if (Array.isArray(json)) {
+        setRetroData(json);
+        setUniqueVinsByDate({});
+      } else {
+        setRetroData(json.rows || []);
+        setUniqueVinsByDate(json.uniqueVinsByDate || {});
+      }
     } catch (err) {
       console.error('Ошибка ретроспективы:', err);
       setRetroData([]);
+      setUniqueVinsByDate({});
     } finally {
       setRetroLoading(false);
     }
@@ -339,25 +427,22 @@ export default function HoldsSgpPage() {
     if (activeTab === 'analytics') {
       loadRetrospective();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  // ====== КЛИК ПО VIN — batch режим ======
   const handleVinClick = async (model, issueDesc, date) => {
     setVinLoading(true);
     setShowVinModal(true);
     setVinModalTitle(`${model} - ${issueDesc} (${formatShortDate(date)})`);
 
     try {
-      const params = new URLSearchParams({
-        model,
-        issue_desc: issueDesc,
-        date,
-      });
-
-      const res = await fetch(`${API_BASE}/api/holds-sgp-retrospective-vins?${params.toString()}`);
+      const params = new URLSearchParams({ model, issue_desc: issueDesc, date });
+      const res = await fetch(
+        `${API_BASE}/api/holds-sgp-retrospective-vins?${params.toString()}`,
+      );
       if (!res.ok) throw new Error('Ошибка загрузки VIN');
       const vins = await res.json();
-      setVinList(Array.isArray(vins) ? vins : []);
+      setVinList(vins);
     } catch (err) {
       console.error('Ошибка загрузки VIN:', err);
       setVinList([]);
@@ -366,57 +451,12 @@ export default function HoldsSgpPage() {
     }
   };
 
-  // ====== КЛИК ПО VIN — aggregated режим ======
-  // Находим все "сырые" issue_desc в retroData, которые после aggregateReason дают ту же причину,
-  // запрашиваем VIN-ы по каждому, объединяем и убираем дубли.
-  const handleAggregatedVinClick = async (model, reason, date) => {
-    setVinLoading(true);
-    setShowVinModal(true);
-    setVinModalTitle(`${model} - ${reason} (${formatShortDate(date)})`);
-
-    try {
-      // Все сырые строки, соответствующие агрегированной причине
-      const matched = retroData.filter(
-        (r) => r.model === model && aggregateReason(r.issue_desc) === reason
-      );
-
-      const uniqueVins = new Set();
-
-      await Promise.all(
-        matched.map(async (r) => {
-          try {
-            const params = new URLSearchParams({
-              model: r.model,
-              issue_desc: r.issue_desc,
-              date,
-            });
-            const res = await fetch(
-              `${API_BASE}/api/holds-sgp-retrospective-vins?${params.toString()}`
-            );
-            if (!res.ok) return;
-            const vins = await res.json();
-            if (Array.isArray(vins)) {
-              vins.forEach((v) => uniqueVins.add(v));
-            }
-          } catch (err) {
-            console.error('VIN fetch error:', r.model, r.issue_desc, err);
-          }
-        })
-      );
-
-      setVinList(Array.from(uniqueVins).sort());
-    } catch (err) {
-      console.error('Ошибка загрузки агрегированных VIN:', err);
-      setVinList([]);
-    } finally {
-      setVinLoading(false);
-    }
-  };
-
+  // ====== ОТЧЁТ: базовый фильтр ======
   const filteredData = useMemo(() => {
-    const filtered = selectedModels.length === 0
-      ? rawData
-      : rawData.filter(d => selectedModels.includes(d.model));
+    const filtered =
+      selectedModels.length === 0
+        ? rawData
+        : rawData.filter(d => selectedModels.includes(d.model));
 
     const plannedDate = getPlannedDate();
     const withPlannedDate = filtered.map(d => ({
@@ -427,6 +467,7 @@ export default function HoldsSgpPage() {
     return withPlannedDate.sort((a, b) => b.quantity - a.quantity);
   }, [rawData, selectedModels]);
 
+  // ====== ОТЧЁТ: агрегированный ======
   const filteredDataAggregated = useMemo(() => {
     const map = new Map();
     filteredData.forEach((row) => {
@@ -449,14 +490,12 @@ export default function HoldsSgpPage() {
       if (row.hold_date) {
         const cur = item.hold_date ? new Date(item.hold_date) : null;
         const cand = new Date(row.hold_date);
-        if (!cur || cand < cur) {
-          item.hold_date = row.hold_date;
-        }
+        if (!cur || cand < cur) item.hold_date = row.hold_date;
       }
     });
 
     const arr = Array.from(map.values());
-    arr.forEach((item) => {
+    arr.forEach(item => {
       if (item.hold_date) {
         const d = new Date(item.hold_date);
         item.days_waiting = Math.max(
@@ -469,6 +508,7 @@ export default function HoldsSgpPage() {
     return arr;
   }, [filteredData]);
 
+  // ====== РЕТРОСПЕКТИВА: агрегированная ======
   const retroDataAggregated = useMemo(() => {
     if (!retroData.length || !retroDates.length) return [];
     const map = new Map();
@@ -479,11 +519,9 @@ export default function HoldsSgpPage() {
         map.set(key, { model: row.model, issue_desc: reason });
       }
       const item = map.get(key);
-      retroDates.forEach((date) => {
+      retroDates.forEach(date => {
         const v = row[date];
-        if (v) {
-          item[date] = (item[date] || 0) + v;
-        }
+        if (v) item[date] = (item[date] || 0) + v;
       });
     });
     const arr = Array.from(map.values());
@@ -497,28 +535,47 @@ export default function HoldsSgpPage() {
     return arr;
   }, [retroData, retroDates]);
 
+  // ====== Изменение к прошлому дню (по уникальным VIN) ======
+  const dailyChange = useMemo(() => {
+    if (!retroDates.length || !Object.keys(uniqueVinsByDate).length) return {};
+
+    // «Предыдущий день» = retroDates[0] - 1
+    const first = new Date(retroDates[0]);
+    first.setDate(first.getDate() - 1);
+    const y = first.getFullYear();
+    const m = String(first.getMonth() + 1).padStart(2, '0');
+    const d = String(first.getDate()).padStart(2, '0');
+    const beforeKey = `${y}-${m}-${d}`;
+
+    const result = {};
+    let prev = uniqueVinsByDate[beforeKey] || 0;
+    retroDates.forEach(date => {
+      const cur = uniqueVinsByDate[date] || 0;
+      result[date] = cur - prev;
+      prev = cur;
+    });
+    return result;
+  }, [retroDates, uniqueVinsByDate]);
+
   const handleModelToggle = (model) => {
     setSelectedModels(prev =>
-      prev.includes(model) ? prev.filter(m => m !== model) : [...prev, model]
+      prev.includes(model) ? prev.filter(m => m !== model) : [...prev, model],
     );
   };
 
   const handleSelectAll = () => {
-    if (selectedModels.length === allModels.length) {
-      setSelectedModels([]);
-    } else {
-      setSelectedModels(allModels);
-    }
+    if (selectedModels.length === allModels.length) setSelectedModels([]);
+    else setSelectedModels(allModels);
   };
 
   const handleRetroModelToggle = (model) => {
     setSelectedRetroModels(prev =>
-      prev.includes(model) ? prev.filter(m => m !== model) : [...prev, model]
+      prev.includes(model) ? prev.filter(m => m !== model) : [...prev, model],
     );
   };
 
-  // ====== ЭКСПОРТ ОТЧЁТА + ВТОРОЙ ЛИСТ С VIN ======
-  const handleExport = async () => {
+  // ====== ЭКСПОРТ ОТЧЁТА ======
+  const handleExport = () => {
     const data = reportView === 'batch' ? filteredData : filteredDataAggregated;
 
     const exportData = data.map(d => ({
@@ -527,11 +584,9 @@ export default function HoldsSgpPage() {
       'Количество': d.quantity,
       'Дата постановки на Холд': formatDate(d.hold_date),
       'Дней ожидания': d.days_waiting,
-      'Ответственный': d.responsible || '',
-      'Действия': d.actions || '',
+      'Ответственный': '',
       'Плановая дата': formatDate(d.planned_date),
       'Статус': d.status || 'В процессе',
-      'Комментарий': d.comment || '',
     }));
 
     const totalQuantity = data.reduce((sum, d) => sum + (d.quantity || 0), 0);
@@ -542,122 +597,23 @@ export default function HoldsSgpPage() {
       'Дата постановки на Холд': '',
       'Дней ожидания': '',
       'Ответственный': '',
-      'Действия': '',
       'Плановая дата': '',
       'Статус': '',
-      'Комментарий': '',
     });
 
-    const ws = XLSX.utils.json_to_sheet(exportData, { origin: 'A1' });
-    const range = XLSX.utils.decode_range(ws['!ref']);
-
-    const borderStyle = { style: 'thin', color: { rgb: "D3D3D3" } };
-    const border = { top: borderStyle, bottom: borderStyle, left: borderStyle, right: borderStyle };
-    const headerStyle = {
-      font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
-      fill: { fgColor: { rgb: "4F81BD" } },
-      alignment: { horizontal: "center", vertical: "center", wrapText: true },
-      border
-    };
-    const cellStyle = {
-      font: { sz: 11, color: { rgb: "000000" } },
-      alignment: { horizontal: "left", vertical: "center", wrapText: true },
-      border
-    };
-    const centerCellStyle = {
-      ...cellStyle,
-      alignment: { horizontal: "center", vertical: "center" }
-    };
-    const totalStyle = {
-      font: { bold: true, sz: 11 },
-      fill: { fgColor: { rgb: "E9E9E9" } },
-      alignment: { horizontal: "left", vertical: "center" },
-      border
-    };
-    const totalCenterStyle = {
-      ...totalStyle,
-      alignment: { horizontal: "center", vertical: "center" }
-    };
-
-    for (let R = range.s.r; R <= range.e.r; ++R) {
-      for (let C = range.s.c; C <= range.e.c; ++C) {
-        const cellRef = XLSX.utils.encode_cell({ c: C, r: R });
-        const cell = ws[cellRef];
-        if (!cell) continue;
-        if (R === 0) {
-          cell.s = headerStyle;
-        } else if (R === range.e.r) {
-          cell.s = (C === 0 || C === 2) ? totalCenterStyle : totalStyle;
-        } else {
-          cell.s = (C === 2 || C === 4) ? centerCellStyle : cellStyle;
-        }
-      }
-    }
-
-    ws['!cols'] = [
-      { wch: 15 }, { wch: 60 }, { wch: 12 }, { wch: 22 }, { wch: 14 },
-      { wch: 16 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 25 },
-    ];
-
+    const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
-    const sheetName = reportView === 'batch' ? 'Compound Quality Holds' : 'Агрегированные холды';
+    const sheetName =
+      reportView === 'batch' ? 'Holds SGP' : 'Агрегированные холды';
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
-
-    // ============ ЛИСТ 2: VIN СПИСОК ============
-    const todayStr = new Date().toISOString().split('T')[0];
-    const vinRows = [];
-    const rows = filteredData;
-    const CONCURRENCY = 10;
-
-    for (let i = 0; i < rows.length; i += CONCURRENCY) {
-      const chunk = rows.slice(i, i + CONCURRENCY);
-      const results = await Promise.all(chunk.map(async (row) => {
-        try {
-          const params = new URLSearchParams({
-            model: row.model,
-            issue_desc: row.issue_desc,
-            date: todayStr,
-          });
-          const res = await fetch(`${API_BASE}/api/holds-sgp-retrospective-vins?${params.toString()}`);
-          if (!res.ok) return [];
-          const vins = await res.json();
-          if (!Array.isArray(vins)) return [];
-          return vins.map(vin => ({
-            'VIN': vin,
-            'Модель': row.model,
-            'Причина холда': row.issue_desc,
-            'Статус': row.status || 'В процессе',
-            'Дата постановки': formatDate(row.hold_date),
-            'Ответственный': row.responsible || '',
-          }));
-        } catch (err) {
-          console.error('VIN fetch error:', row.model, row.issue_desc, err);
-          return [];
-        }
-      }));
-      results.forEach(arr => vinRows.push(...arr));
-    }
-
-    if (vinRows.length > 0) {
-      const ws2 = XLSX.utils.json_to_sheet(vinRows, { origin: 'A1' });
-      const range2 = XLSX.utils.decode_range(ws2['!ref']);
-      for (let R = range2.s.r; R <= range2.e.r; ++R) {
-        for (let C = range2.s.c; C <= range2.e.c; ++C) {
-          const cellRef = XLSX.utils.encode_cell({ c: C, r: R });
-          const cell = ws2[cellRef];
-          if (!cell) continue;
-          cell.s = (R === 0) ? headerStyle : cellStyle;
-        }
-      }
-      ws2['!cols'] = [
-        { wch: 25 }, { wch: 15 }, { wch: 60 }, { wch: 15 }, { wch: 16 }, { wch: 16 },
-      ];
-      XLSX.utils.book_append_sheet(wb, ws2, 'VIN список');
-    }
-
-    const today = new Date();
-    const enDate = today.toLocaleDateString('en-GB', { day: '2-digit', month: 'long' });
-    XLSX.writeFile(wb, `Compound Quality Holds_${enDate}.xlsx`);
+    ws['!cols'] = [
+      { wch: 20 }, { wch: 60 }, { wch: 10 }, { wch: 18 },
+      { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 15 },
+    ];
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const suffix = reportView === 'batch' ? 'batches' : 'aggregated';
+    XLSX.writeFile(wb, `Holds_SGP_${suffix}_${dateStr}.xlsx`);
   };
 
   // ====== ЭКСПОРТ РЕТРОСПЕКТИВЫ ======
@@ -667,18 +623,37 @@ export default function HoldsSgpPage() {
 
     const exportData = [];
 
-    const totalRow = { 'Модель': 'Общий итог', 'Описание': '' };
+    // К-во причин холдов
+    const reasonsRow = { 'Модель': 'К-во причин холдов', 'Описание': '' };
     retroDates.forEach(date => {
       const daySum = data.reduce((sum, row) => sum + (row[date] || 0), 0);
-      totalRow[formatShortDate(date)] = daySum || '';
+      reasonsRow[formatShortDate(date)] = daySum || '';
     });
-    exportData.push(totalRow);
+    exportData.push(reasonsRow);
 
+    // К-во захолдированных машин
+    const carsRow = {
+      'Модель': 'К-во захолдированных машин',
+      'Описание': '',
+    };
+    retroDates.forEach(date => {
+      carsRow[formatShortDate(date)] = uniqueVinsByDate[date] || '';
+    });
+    exportData.push(carsRow);
+
+    // Изменение к прошлому дню
+    const deltaRow = {
+      'Модель': 'Изменение к прошлому дню',
+      'Описание': '',
+    };
+    retroDates.forEach(date => {
+      deltaRow[formatShortDate(date)] = dailyChange[date] || 0;
+    });
+    exportData.push(deltaRow);
+
+    // Данные
     data.forEach(row => {
-      const dataRow = {
-        'Модель': row.model,
-        'Описание': row.issue_desc,
-      };
+      const dataRow = { 'Модель': row.model, 'Описание': row.issue_desc };
       retroDates.forEach(date => {
         dataRow[formatShortDate(date)] = row[date] || '';
       });
@@ -687,11 +662,11 @@ export default function HoldsSgpPage() {
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
-    const sheetName = analyticsView === 'batch' ? 'Ретроспектива' : 'Агрегированная ретроспектива';
+    const sheetName =
+      analyticsView === 'batch' ? 'Ретроспектива' : 'Агрегированная ретроспектива';
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
-
     ws['!cols'] = [
-      { wch: 20 },
+      { wch: 28 },
       { wch: 60 },
       ...retroDates.map(() => ({ wch: 8 })),
     ];
@@ -702,10 +677,15 @@ export default function HoldsSgpPage() {
     XLSX.writeFile(wb, `Ретроспектива_холдов_${suffix}_${dateStr}.xlsx`);
   };
 
-  const currentReportData = reportView === 'batch' ? filteredData : filteredDataAggregated;
-  const totalQuantity = currentReportData.reduce((sum, d) => sum + (d.quantity || 0), 0);
+  const currentReportData =
+    reportView === 'batch' ? filteredData : filteredDataAggregated;
+  const totalQuantity = currentReportData.reduce(
+    (sum, d) => sum + (d.quantity || 0),
+    0,
+  );
 
-  const currentRetroData = analyticsView === 'batch' ? retroData : retroDataAggregated;
+  const currentRetroData =
+    analyticsView === 'batch' ? retroData : retroDataAggregated;
 
   if (loading && rawData.length === 0) {
     return (
@@ -715,8 +695,17 @@ export default function HoldsSgpPage() {
     );
   }
 
+  // Стиль футера ретроспективы (несколько строк — общий sticky-контейнер)
+  const footerCellStyle = {
+    ...tdStyle,
+    fontWeight: 800,
+    fontSize: 10,
+    whiteSpace: 'nowrap',
+  };
+
   return (
     <div style={containerStyle}>
+      {/* Заголовок */}
       <div style={headerStyle}>
         <h1 style={titleStyle}>🚗 Holds СГП</h1>
         <div style={headerButtonsStyle}>
@@ -725,21 +714,33 @@ export default function HoldsSgpPage() {
               Обновлено: {lastUpdate.toLocaleTimeString('ru-RU')}
             </span>
           )}
-          <button style={refreshButtonStyle} onClick={fetchData} disabled={loading}>
+          <button
+            style={refreshButtonStyle}
+            onClick={fetchData}
+            disabled={loading}
+          >
             {loading ? '⏳ Загрузка...' : '🔄 Обновить'}
           </button>
         </div>
       </div>
 
+      {/* Основные вкладки */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-        <button onClick={() => setActiveTab('report')} style={tabStyle(activeTab === 'report')}>
+        <button
+          onClick={() => setActiveTab('report')}
+          style={tabStyle(activeTab === 'report')}
+        >
           Отчет
         </button>
-        <button onClick={() => setActiveTab('analytics')} style={tabStyle(activeTab === 'analytics')}>
+        <button
+          onClick={() => setActiveTab('analytics')}
+          style={tabStyle(activeTab === 'analytics')}
+        >
           Аналитика
         </button>
       </div>
 
+      {/* ========== ОТЧЕТ ========== */}
       {activeTab === 'report' && (
         <>
           <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -774,17 +775,38 @@ export default function HoldsSgpPage() {
 
           {showModelFilter && (
             <div style={filterContainerStyle}>
-              <label style={{ ...filterCheckboxStyle, backgroundColor: '#EEF2FF', border: '1px solid #2563EB' }}>
-                <input type="checkbox" checked={selectedModels.length === allModels.length} onChange={handleSelectAll} />
+              <label
+                style={{
+                  ...filterCheckboxStyle,
+                  backgroundColor: '#EEF2FF',
+                  border: '1px solid #2563EB',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedModels.length === allModels.length}
+                  onChange={handleSelectAll}
+                />
                 Все модели
               </label>
               {allModels.map(model => (
-                <label key={model} style={{
-                  ...filterCheckboxStyle,
-                  backgroundColor: selectedModels.includes(model) ? '#EEF2FF' : '#FFFFFF',
-                  border: selectedModels.includes(model) ? '1px solid #2563EB' : '1px solid #E5E7EB',
-                }}>
-                  <input type="checkbox" checked={selectedModels.includes(model)} onChange={() => handleModelToggle(model)} />
+                <label
+                  key={model}
+                  style={{
+                    ...filterCheckboxStyle,
+                    backgroundColor: selectedModels.includes(model)
+                      ? '#EEF2FF'
+                      : '#FFFFFF',
+                    border: selectedModels.includes(model)
+                      ? '1px solid #2563EB'
+                      : '1px solid #E5E7EB',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedModels.includes(model)}
+                    onChange={() => handleModelToggle(model)}
+                  />
                   {model}
                 </label>
               ))}
@@ -793,14 +815,25 @@ export default function HoldsSgpPage() {
 
           <div style={cardStyle}>
             <div style={tableWrapperStyle}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+              <table
+                style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontSize: 13,
+                  tableLayout: 'fixed',
+                }}
+              >
                 <thead>
                   <tr>
                     <th style={{ ...thStyle, width: '15%' }}>Модель</th>
                     <th style={{ ...thStyle, width: '32%' }}>Описание</th>
-                    <th style={{ ...thStyle, width: '7%', textAlign: 'center' }}>Кол-во</th>
+                    <th style={{ ...thStyle, width: '7%', textAlign: 'center' }}>
+                      Кол-во
+                    </th>
                     <th style={{ ...thStyle, width: '12%' }}>Дата постановки</th>
-                    <th style={{ ...thStyle, width: '7%', textAlign: 'center' }}>Дней</th>
+                    <th style={{ ...thStyle, width: '7%', textAlign: 'center' }}>
+                      Дней
+                    </th>
                     <th style={{ ...thStyle, width: '12%' }}>Ответственный</th>
                     <th style={{ ...thStyle, width: '12%' }}>Плановая дата</th>
                     <th style={{ ...thStyle, width: '10%' }}>Статус</th>
@@ -808,27 +841,68 @@ export default function HoldsSgpPage() {
                 </thead>
                 <tbody>
                   {currentReportData.map((row, idx) => (
-                    <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                      <td style={{ ...tdStyle, fontWeight: 700, fontSize: 12 }}>{row.model}</td>
-                      <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4' }}>{row.issue_desc}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700 }}>{row.quantity}</td>
-                      <td style={{ ...tdStyle, fontSize: 12 }}>{formatDate(row.hold_date)}</td>
-                      <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: row.days_waiting > 30 ? '#DC2626' : row.days_waiting > 14 ? '#F59E0B' : '#10B981' }}>
+                    <tr
+                      key={idx}
+                      style={{
+                        backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
+                      }}
+                    >
+                      <td style={{ ...tdStyle, fontWeight: 700, fontSize: 12 }}>
+                        {row.model}
+                      </td>
+                      <td style={{ ...tdStyle, fontSize: 12, lineHeight: '1.4' }}>
+                        {row.issue_desc}
+                      </td>
+                      <td
+                        style={{ ...tdStyle, textAlign: 'center', fontWeight: 700 }}
+                      >
+                        {row.quantity}
+                      </td>
+                      <td style={{ ...tdStyle, fontSize: 12 }}>
+                        {formatDate(row.hold_date)}
+                      </td>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          textAlign: 'center',
+                          fontWeight: 700,
+                          color:
+                            row.days_waiting > 30
+                              ? '#DC2626'
+                              : row.days_waiting > 14
+                              ? '#F59E0B'
+                              : '#10B981',
+                        }}
+                      >
                         {row.days_waiting}
                       </td>
                       <td style={{ ...tdStyle, fontSize: 12 }}></td>
-                      <td style={{ ...tdStyle, fontSize: 12 }}>{formatDate(row.planned_date)}</td>
+                      <td style={{ ...tdStyle, fontSize: 12 }}>
+                        {formatDate(row.planned_date)}
+                      </td>
                       <td style={tdStyle}>
-                        <span style={statusBadgeStyle}>{row.status || 'В процессе'}</span>
+                        <span style={statusBadgeStyle}>
+                          {row.status || 'В процессе'}
+                        </span>
                       </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr style={totalRowStyle}>
+                  <tr
+                    style={{
+                      backgroundColor: '#F9FAFB',
+                      fontWeight: 800,
+                      borderTop: '2px solid #E5E7EB',
+                    }}
+                  >
                     <td style={{ ...tdStyle, fontWeight: 800 }}>Общий итог</td>
                     <td style={tdStyle}></td>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 800 }}>{totalQuantity}</td>
+                    <td
+                      style={{ ...tdStyle, textAlign: 'center', fontWeight: 800 }}
+                    >
+                      {totalQuantity}
+                    </td>
                     <td style={tdStyle}></td>
                     <td style={tdStyle}></td>
                     <td style={tdStyle}></td>
@@ -842,6 +916,7 @@ export default function HoldsSgpPage() {
         </>
       )}
 
+      {/* ========== АНАЛИТИКА ========== */}
       {activeTab === 'analytics' && (
         <>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -859,66 +934,141 @@ export default function HoldsSgpPage() {
             </button>
           </div>
 
+          {/* Таблицы по моделям */}
           <div style={cardStyle}>
-            <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1F2937', marginBottom: 20 }}>
+            <h2
+              style={{
+                fontSize: 20,
+                fontWeight: 700,
+                color: '#1F2937',
+                marginBottom: 20,
+              }}
+            >
               📊 Холды по моделям
             </h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 20 }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                gap: 20,
+              }}
+            >
               {allModels.map(modelFilter => {
-                const source = analyticsView === 'batch' ? filteredData : filteredDataAggregated;
+                const source =
+                  analyticsView === 'batch' ? filteredData : filteredDataAggregated;
                 const filtered = source
                   .filter(d => d.model === modelFilter)
                   .sort((a, b) => b.quantity - a.quantity);
 
                 if (filtered.length === 0) return null;
 
-                const totalCount = filtered.reduce((sum, d) => sum + (d.quantity || 0), 0);
+                const totalCount = filtered.reduce(
+                  (sum, d) => sum + (d.quantity || 0),
+                  0,
+                );
 
                 return (
-                  <div key={modelFilter} style={{
-                    backgroundColor: '#FAFBFC',
-                    borderRadius: 12,
-                    padding: 16,
-                    border: '1px solid #E5E7EB',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
-                  }}>
-                    <h3 style={{
-                      margin: '0 0 12px 0',
-                      fontSize: 16,
-                      fontWeight: 700,
-                      color: '#1F2937',
-                      borderBottom: '2px solid #2563EB',
-                      paddingBottom: 6,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                    }}>
-                      <span style={{
-                        background: '#2563EB',
-                        color: 'white',
-                        borderRadius: 8,
-                        padding: '2px 12px',
-                        fontSize: 14
-                      }}>
+                  <div
+                    key={modelFilter}
+                    style={{
+                      backgroundColor: '#FAFBFC',
+                      borderRadius: 12,
+                      padding: 16,
+                      border: '1px solid #E5E7EB',
+                      boxShadow: '0 2px 6px rgba(0,0,0,0.02)',
+                    }}
+                  >
+                    <h3
+                      style={{
+                        margin: '0 0 12px 0',
+                        fontSize: 16,
+                        fontWeight: 700,
+                        color: '#1F2937',
+                        borderBottom: '2px solid #2563EB',
+                        paddingBottom: 6,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <span
+                        style={{
+                          background: '#2563EB',
+                          color: 'white',
+                          borderRadius: 8,
+                          padding: '2px 12px',
+                          fontSize: 14,
+                        }}
+                      >
                         {modelFilter}
                       </span>
-                      <span style={{ fontSize: 14, fontWeight: 800, color: '#2563EB' }}>
+                      <span
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 800,
+                          color: '#2563EB',
+                        }}
+                      >
                         {totalCount}
                       </span>
                     </h3>
 
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <table
+                      style={{
+                        width: '100%',
+                        borderCollapse: 'collapse',
+                        fontSize: 12,
+                      }}
+                    >
                       <thead>
                         <tr style={{ backgroundColor: '#F3F4F6' }}>
-                          <th style={{ padding: '6px', textAlign: 'left', borderBottom: '2px solid #D1D5DB', fontWeight: 600 }}>Описание</th>
-                          <th style={{ padding: '6px', textAlign: 'center', borderBottom: '2px solid #D1D5DB', fontWeight: 600 }}>Кол-во</th>
+                          <th
+                            style={{
+                              padding: '6px',
+                              textAlign: 'left',
+                              borderBottom: '2px solid #D1D5DB',
+                              fontWeight: 600,
+                            }}
+                          >
+                            Описание
+                          </th>
+                          <th
+                            style={{
+                              padding: '6px',
+                              textAlign: 'center',
+                              borderBottom: '2px solid #D1D5DB',
+                              fontWeight: 600,
+                            }}
+                          >
+                            Кол-во
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
                         {filtered.map((row, idx) => (
-                          <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                            <td style={{ padding: '6px', borderBottom: '1px solid #E5E7EB' }}>{row.issue_desc}</td>
-                            <td style={{ padding: '6px', textAlign: 'center', borderBottom: '1px solid #E5E7EB', fontWeight: 700 }}>
+                          <tr
+                            key={idx}
+                            style={{
+                              backgroundColor:
+                                idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
+                            }}
+                          >
+                            <td
+                              style={{
+                                padding: '6px',
+                                borderBottom: '1px solid #E5E7EB',
+                              }}
+                            >
+                              {row.issue_desc}
+                            </td>
+                            <td
+                              style={{
+                                padding: '6px',
+                                textAlign: 'center',
+                                borderBottom: '1px solid #E5E7EB',
+                                fontWeight: 700,
+                              }}
+                            >
                               {row.quantity}
                             </td>
                           </tr>
@@ -931,13 +1081,40 @@ export default function HoldsSgpPage() {
             </div>
           </div>
 
+          {/* Ретроспектива */}
           <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1F2937', margin: 0 }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 20,
+                flexWrap: 'wrap',
+                gap: 12,
+              }}
+            >
+              <h2
+                style={{
+                  fontSize: 20,
+                  fontWeight: 700,
+                  color: '#1F2937',
+                  margin: 0,
+                }}
+              >
                 📈 Ретроспектива холдов (14 дней)
               </h2>
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-                <button style={exportButtonStyle} onClick={handleExportRetrospective}>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 12,
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                }}
+              >
+                <button
+                  style={exportButtonStyle}
+                  onClick={handleExportRetrospective}
+                >
                   📥 Экспорт таблицы
                 </button>
                 <button
@@ -949,7 +1126,11 @@ export default function HoldsSgpPage() {
                 >
                   {showRetroModelFilter ? 'Скрыть фильтр' : '🔍 Модели'}
                 </button>
-                <button style={refreshButtonStyle} onClick={loadRetrospective} disabled={retroLoading}>
+                <button
+                  style={refreshButtonStyle}
+                  onClick={loadRetrospective}
+                  disabled={retroLoading}
+                >
                   {retroLoading ? '⏳ Загрузка...' : '🔄 Обновить'}
                 </button>
               </div>
@@ -958,98 +1139,286 @@ export default function HoldsSgpPage() {
             {showRetroModelFilter && (
               <div style={filterContainerStyle}>
                 {allModels.map(model => (
-                  <label key={model} style={{
-                    ...filterCheckboxStyle,
-                    backgroundColor: selectedRetroModels.includes(model) ? '#EEF2FF' : '#FFFFFF',
-                    border: selectedRetroModels.includes(model) ? '1px solid #2563EB' : '1px solid #E5E7EB',
-                  }}>
-                    <input type="checkbox" checked={selectedRetroModels.includes(model)} onChange={() => handleRetroModelToggle(model)} />
+                  <label
+                    key={model}
+                    style={{
+                      ...filterCheckboxStyle,
+                      backgroundColor: selectedRetroModels.includes(model)
+                        ? '#EEF2FF'
+                        : '#FFFFFF',
+                      border: selectedRetroModels.includes(model)
+                        ? '1px solid #2563EB'
+                        : '1px solid #E5E7EB',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedRetroModels.includes(model)}
+                      onChange={() => handleRetroModelToggle(model)}
+                    />
                     {model}
                   </label>
                 ))}
               </div>
             )}
 
-            {!retroLoading && currentRetroData.length > 0 && retroDates.length > 0 ? (
-              <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 400px)' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, tableLayout: 'fixed' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...thStyle, width: '12%', fontSize: 10, position: 'sticky', top: 0, zIndex: 30 }}>
-                        Модель
-                      </th>
-                      <th style={{ ...thStyle, width: '25%', fontSize: 10, position: 'sticky', top: 0, zIndex: 30 }}>
-                        Описание
-                      </th>
-                      {retroDates.map(date => (
-                        <th key={date} style={{ ...thStyle, textAlign: 'center', width: '4.5%', fontSize: 9, padding: '6px 2px', position: 'sticky', top: 0, zIndex: 30 }}>
-                          {formatShortDate(date)}
+            {!retroLoading &&
+            currentRetroData.length > 0 &&
+            retroDates.length > 0 ? (
+              <>
+                <div
+                  style={{
+                    overflowY: 'auto',
+                    maxHeight: 'calc(100vh - 400px)',
+                  }}
+                >
+                  <table
+                    style={{
+                      width: '100%',
+                      borderCollapse: 'collapse',
+                      fontSize: 11,
+                      tableLayout: 'fixed',
+                    }}
+                  >
+                    <thead>
+                      <tr>
+                        <th
+                          style={{
+                            ...thStyle,
+                            width: '12%',
+                            fontSize: 10,
+                            position: 'sticky',
+                            top: 0,
+                            zIndex: 30,
+                          }}
+                        >
+                          Модель
                         </th>
+                        <th
+                          style={{
+                            ...thStyle,
+                            width: '25%',
+                            fontSize: 10,
+                            position: 'sticky',
+                            top: 0,
+                            zIndex: 30,
+                          }}
+                        >
+                          Описание
+                        </th>
+                        {retroDates.map(date => (
+                          <th
+                            key={date}
+                            style={{
+                              ...thStyle,
+                              textAlign: 'center',
+                              width: '4.5%',
+                              fontSize: 9,
+                              padding: '6px 2px',
+                              position: 'sticky',
+                              top: 0,
+                              zIndex: 30,
+                            }}
+                          >
+                            {formatShortDate(date)}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {currentRetroData.map((row, idx) => (
+                        <tr
+                          key={idx}
+                          style={{
+                            backgroundColor:
+                              idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
+                          }}
+                        >
+                          <td
+                            style={{
+                              ...tdStyle,
+                              fontWeight: 700,
+                              fontSize: 10,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {row.model}
+                          </td>
+                          <td
+                            style={{
+                              ...tdStyle,
+                              fontSize: 10,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                            title={row.issue_desc}
+                          >
+                            {row.issue_desc}
+                          </td>
+                          {retroDates.map(date => {
+                            const val = row[date];
+                            return (
+                              <td
+                                key={date}
+                                style={{
+                                  ...tdStyle,
+                                  textAlign: 'center',
+                                  fontWeight: 700,
+                                  fontSize: 10,
+                                  padding: '6px 2px',
+                                  backgroundColor:
+                                    val > 0
+                                      ? '#FEF3C7'
+                                      : idx % 2 === 0
+                                      ? '#FFFFFF'
+                                      : '#F9FAFB',
+                                  color: val > 0 ? '#92400E' : '#D1D5DB',
+                                  cursor:
+                                    val > 0 && analyticsView === 'batch'
+                                      ? 'pointer'
+                                      : 'default',
+                                  transition: 'all 0.2s',
+                                }}
+                                onClick={() => {
+                                  if (val > 0 && analyticsView === 'batch') {
+                                    handleVinClick(row.model, row.issue_desc, date);
+                                  }
+                                }}
+                                title={
+                                  val > 0 && analyticsView === 'batch'
+                                    ? 'Нажмите для просмотра VIN'
+                                    : ''
+                                }
+                              >
+                                {val || ''}
+                              </td>
+                            );
+                          })}
+                        </tr>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {currentRetroData.map((row, idx) => (
-                      <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                        <td style={{ ...tdStyle, fontWeight: 700, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {row.model}
-                        </td>
-                        <td style={{ ...tdStyle, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.issue_desc}>
-                          {row.issue_desc}
-                        </td>
+                    </tbody>
+                    <tfoot
+                      style={{
+                        position: 'sticky',
+                        bottom: 0,
+                        backgroundColor: '#FFFFFF',
+                        zIndex: 10,
+                        boxShadow: '0 -4px 6px -2px rgba(0,0,0,0.05)',
+                      }}
+                    >
+                      {/* К-во причин холдов (бывший Общий итог) */}
+                      <tr style={{ backgroundColor: '#F9FAFB', borderTop: '2px solid #E5E7EB' }}>
+                        <td style={footerCellStyle}>К-во причин холдов</td>
+                        <td style={tdStyle}></td>
                         {retroDates.map(date => {
-                          const val = row[date];
+                          const daySum = currentRetroData.reduce(
+                            (sum, row) => sum + (row[date] || 0),
+                            0,
+                          );
                           return (
                             <td
                               key={date}
                               style={{
-                                ...tdStyle,
+                                ...footerCellStyle,
                                 textAlign: 'center',
-                                fontWeight: 700,
-                                fontSize: 10,
-                                padding: '6px 2px',
-                                backgroundColor: val > 0 ? '#FEF3C7' : (idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'),
-                                color: val > 0 ? '#92400E' : '#D1D5DB',
-                                cursor: val > 0 ? 'pointer' : 'default',
-                                transition: 'all 0.2s',
                               }}
-                              onClick={() => {
-                                if (val > 0) {
-                                  if (analyticsView === 'batch') {
-                                    handleVinClick(row.model, row.issue_desc, date);
-                                  } else {
-                                    handleAggregatedVinClick(row.model, row.issue_desc, date);
-                                  }
-                                }
-                              }}
-                              title={val > 0 ? 'Нажмите для просмотра VIN' : ''}
                             >
-                              {val || ''}
+                              {daySum > 0 ? daySum : ''}
                             </td>
                           );
                         })}
                       </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr style={{ ...totalRowStyle, position: 'sticky', bottom: 0, zIndex: 10 }}>
-                      <td style={{ ...tdStyle, fontWeight: 800, fontSize: 10 }}>Общий итог</td>
-                      <td style={tdStyle}></td>
-                      {retroDates.map(date => {
-                        const daySum = currentRetroData.reduce((sum, row) => sum + (row[date] || 0), 0);
-                        return (
-                          <td key={date} style={{ ...tdStyle, textAlign: 'center', fontWeight: 800, fontSize: 10 }}>
-                            {daySum > 0 ? daySum : ''}
+
+                      {/* К-во захолдированных машин (уникальные VIN) */}
+                      <tr style={{ backgroundColor: '#EFF6FF' }}>
+                        <td style={footerCellStyle}>К-во захолдированных машин</td>
+                        <td style={tdStyle}></td>
+                        {retroDates.map(date => (
+                          <td
+                            key={date}
+                            style={{
+                              ...footerCellStyle,
+                              textAlign: 'center',
+                              color: '#1D4ED8',
+                            }}
+                          >
+                            {uniqueVinsByDate[date] || ''}
                           </td>
-                        );
-                      })}
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
+                        ))}
+                      </tr>
+
+                      {/* Изменение к прошлому дню */}
+                      <tr style={{ backgroundColor: '#F0FDF4' }}>
+                        <td style={footerCellStyle}>Изменение к прошлому дню</td>
+                        <td style={tdStyle}></td>
+                        {retroDates.map(date => {
+                          const v = dailyChange[date] || 0;
+                          const color =
+                            v > 0 ? '#10B981' : v < 0 ? '#EF4444' : '#6B7280';
+                          return (
+                            <td
+                              key={date}
+                              style={{
+                                ...footerCellStyle,
+                                textAlign: 'center',
+                                color,
+                              }}
+                            >
+                              {v > 0 ? `+${v}` : v}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {/* График изменения количества захолдированных машин */}
+                <div
+                  style={{
+                    marginTop: 24,
+                    paddingTop: 20,
+                    borderTop: '1px solid #E5E7EB',
+                  }}
+                >
+                  <h3
+                    style={{
+                      fontSize: 15,
+                      fontWeight: 700,
+                      color: '#1F2937',
+                      marginBottom: 12,
+                    }}
+                  >
+                    📊 Изменение количества захолдированных машин по дням
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 500,
+                        color: '#6B7280',
+                        marginLeft: 12,
+                      }}
+                    >
+                      (зелёный — рост, красный — снижение)
+                    </span>
+                  </h3>
+                  <DailyChangeChart
+                    dates={retroDates}
+                    values={retroDates.map(d => dailyChange[d] || 0)}
+                  />
+                </div>
+              </>
             ) : (
               !retroLoading && (
-                <p style={{ color: '#6B7280', textAlign: 'center', padding: 40 }}>
+                <p
+                  style={{
+                    color: '#6B7280',
+                    textAlign: 'center',
+                    padding: 40,
+                  }}
+                >
                   Нажмите «Обновить» для загрузки данных
                 </p>
               )
@@ -1058,33 +1427,52 @@ export default function HoldsSgpPage() {
         </>
       )}
 
+      {/* Модальное окно VIN */}
       {showVinModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-        }}>
-          <div style={{
-            backgroundColor: '#FFFFFF',
-            borderRadius: 16,
-            padding: 24,
-            maxWidth: 600,
-            width: '90%',
-            maxHeight: '80vh',
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
             display: 'flex',
-            flexDirection: 'column',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1F2937' }}>
-                VIN номера {vinList.length > 0 && `(${vinList.length})`}
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: 16,
+              padding: 24,
+              maxWidth: 600,
+              width: '90%',
+              maxHeight: '80vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 16,
+              }}
+            >
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: 18,
+                  fontWeight: 700,
+                  color: '#1F2937',
+                }}
+              >
+                VIN номера
               </h3>
               <button
                 onClick={() => setShowVinModal(false)}
@@ -1100,7 +1488,14 @@ export default function HoldsSgpPage() {
                 ×
               </button>
             </div>
-            <div style={{ fontSize: 14, color: '#4B5563', marginBottom: 16, wordBreak: 'break-word' }}>
+            <div
+              style={{
+                fontSize: 14,
+                color: '#4B5563',
+                marginBottom: 16,
+                wordBreak: 'break-word',
+              }}
+            >
               {vinModalTitle}
             </div>
             {vinLoading ? (
@@ -1109,7 +1504,13 @@ export default function HoldsSgpPage() {
               </div>
             ) : vinList.length > 0 ? (
               <div style={{ overflowY: 'auto', flex: 1 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <table
+                  style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
+                    fontSize: 13,
+                  }}
+                >
                   <thead>
                     <tr>
                       <th style={{ ...thStyle, textAlign: 'center' }}>№</th>
@@ -1118,9 +1519,32 @@ export default function HoldsSgpPage() {
                   </thead>
                   <tbody>
                     {vinList.map((vin, idx) => (
-                      <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                        <td style={{ ...tdStyle, textAlign: 'center', width: 50 }}>{idx + 1}</td>
-                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, letterSpacing: '0.5px' }}>{vin}</td>
+                      <tr
+                        key={idx}
+                        style={{
+                          backgroundColor:
+                            idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB',
+                        }}
+                      >
+                        <td
+                          style={{
+                            ...tdStyle,
+                            textAlign: 'center',
+                            width: 50,
+                          }}
+                        >
+                          {idx + 1}
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle,
+                            textAlign: 'center',
+                            fontWeight: 600,
+                            letterSpacing: '0.5px',
+                          }}
+                        >
+                          {vin}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

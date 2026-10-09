@@ -4762,29 +4762,34 @@ app.get('/api/holds-sgp', async (req, res) => {
   }
 });
 
+
+
 app.get('/api/holds-sgp-retrospective', async (req, res) => {
   try {
     const { models } = req.query;
-    
-    // Генерируем последние 14 дней (включая сегодня)
+
+    // 15 дней: первый — «предыдущий» для расчёта дельты,
+    // остальные 14 — отображаемые
     const dates = [];
     const today = new Date();
-    today.setHours(23, 59, 59, 999); // Конец текущего дня
-    
-    for (let i = 13; i >= 0; i--) {
+    today.setHours(23, 59, 59, 999);
+
+    for (let i = 14; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
-      d.setHours(23, 59, 59, 999); // Конец дня
+      d.setHours(23, 59, 59, 999);
       const year = d.getFullYear();
       const month = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
       dates.push({
         dateStr: `${year}-${month}-${day}`,
-        endOfDay: d
+        endOfDay: d,
       });
     }
-    
-    // Получаем все записи, которые были созданы до конца последнего дня (14 дней назад)
+
+    // Отображаемые дни — последние 14 (первый — «до» диапазона)
+    const displayDates = dates.slice(1);
+
     let sql = `
       SELECT 
         qid.model AS model,
@@ -4796,9 +4801,9 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
       WHERE qid.is_deleted = 0
         AND qid.gmt_create <= ?
     `;
-    
+
     const params = [dates[dates.length - 1].endOfDay];
-    
+
     if (models && models !== '') {
       const modelList = models.split(',').map(m => m.trim()).filter(Boolean);
       if (modelList.length > 0) {
@@ -4806,12 +4811,12 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
         params.push(...modelList);
       }
     }
-    
+
     sql += ` ORDER BY qid.model, qid.issue_desc, qid.gmt_create`;
-    
+
     const [rows] = await lesPool.query(sql, params);
-    
-    // Группируем по model + issue_desc
+
+    // Группировка по model + issue_desc (как было)
     const groupedMap = {};
     rows.forEach(row => {
       const key = `${row.model}_|_${row.issue_desc}`;
@@ -4828,56 +4833,56 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
         clear_time: row.clear_time ? new Date(row.clear_time) : null,
       });
     });
-    
-    // Для каждой группы считаем количество активных VIN на конец каждого дня
+
     const result = [];
     Object.values(groupedMap).forEach(group => {
       const rowResult = {
         model: group.model,
         issue_desc: group.issue_desc,
       };
-      
-      dates.forEach(({ dateStr, endOfDay }) => {
-        // Считаем VIN, которые активны на конец этого дня
+
+      displayDates.forEach(({ dateStr, endOfDay }) => {
         const activeVins = new Set();
-        
         group.vins.forEach(v => {
           if (!v.gmt_create) return;
-          
-          // VIN создан до или в этот день
           const created = v.gmt_create <= endOfDay;
-          
-          // VIN не закрыт или закрыт после конца этого дня
           const notCleared = !v.clear_time || v.clear_time > endOfDay;
-          
           if (created && notCleared) {
             activeVins.add(v.vin);
           }
         });
-        
-        const activeCount = activeVins.size;
-        
-        if (activeCount > 0) {
-          rowResult[dateStr] = activeCount;
+        if (activeVins.size > 0) {
+          rowResult[dateStr] = activeVins.size;
         }
       });
-      
-      // Добавляем только если есть хоть одно значение
-      if (dates.some(({ dateStr }) => rowResult[dateStr] && rowResult[dateStr] > 0)) {
+
+      if (displayDates.some(({ dateStr }) => rowResult[dateStr] > 0)) {
         result.push(rowResult);
       }
     });
-    
-    // Сортируем: по последнему дню от большего к меньшему, затем по модели
-    const lastDate = dates[dates.length - 1].dateStr;
+
+    // Уникальные VIN на конец дня (по всем записям, без группировки)
+    const uniqueVinsByDate = {};
+    dates.forEach(({ dateStr, endOfDay }) => {
+      const activeVins = new Set();
+      rows.forEach(r => {
+        const created = r.gmt_create && new Date(r.gmt_create) <= endOfDay;
+        const notCleared = !r.clear_time || new Date(r.clear_time) > endOfDay;
+        if (created && notCleared) activeVins.add(r.vin);
+      });
+      uniqueVinsByDate[dateStr] = activeVins.size;
+    });
+
+    // Сортировка (по последнему отображаемому дню, как было)
+    const lastDate = displayDates[displayDates.length - 1].dateStr;
     result.sort((a, b) => {
       const aLast = a[lastDate] || 0;
       const bLast = b[lastDate] || 0;
       if (bLast !== aLast) return bLast - aLast;
       return a.model.localeCompare(b.model);
     });
-    
-    res.json(result);
+
+    res.json({ rows: result, uniqueVinsByDate });
   } catch (err) {
     console.error('Ошибка Holds SGP retrospective:', err.message);
     res.status(500).json({ error: err.message });
