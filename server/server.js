@@ -9080,6 +9080,8 @@ app.get('/api/drr-electronics-defect-trend', async (req, res) => {
     }
     const finalProblemType = problemType || '';
     const isRobot = postName === 'ROBOT';
+    const hasModelFilter = !!(model && model !== 'ALL');
+    const modelList = hasModelFilter ? model.split(',').map(m => m.trim()).filter(Boolean) : [];
 
     // ─── Генерация периодов ───
     function getISOWeekInfo(date) {
@@ -9107,9 +9109,9 @@ app.get('/api/drr-electronics-defect-trend', async (req, res) => {
         thisMonday.setDate(current.getDate() + mondayOffset);
         thisMonday.setHours(0, 0, 0, 0);
         for (let i = 3; i >= 0; i--) {
-          const weekStart = new Date(thisMonday);
-          weekStart.setDate(thisMonday.getDate() - i * 7);
-          const iso = getISOWeekInfo(weekStart);
+          const ws = new Date(thisMonday);
+          ws.setDate(thisMonday.getDate() - i * 7);
+          const iso = getISOWeekInfo(ws);
           periods.push(`${iso.year}-W${String(iso.week).padStart(2, '0')}`);
         }
       } else if (periodType === 'day') {
@@ -9125,131 +9127,154 @@ app.get('/api/drr-electronics-defect-trend', async (req, res) => {
     const periods = generatePeriods();
     if (periods.length === 0) return res.json([]);
 
-    // Формат SQL в зависимости от periodType
-    const periodExpr = periodType === 'month'
-      ? "DATE_FORMAT(DATE(CREATION_TIME), '%Y-%m')"
+    // ─── Общие шаблоны ───
+    const makePeriodExpr = (col) => periodType === 'month'
+      ? `DATE_FORMAT(DATE(${col}), '%Y-%m')`
       : periodType === 'week'
-        ? "DATE_FORMAT(DATE(CREATION_TIME), '%x-W%v')"
-        : "DATE(CREATION_TIME)";
+        ? `DATE_FORMAT(DATE(${col}), '%x-W%v')`
+        : `DATE(${col})`;
 
-    let periodCondition = '';
-    if (periodType === 'month') periodCondition = `DATE_FORMAT(DATE(CREATION_TIME), '%Y-%m') IN (${periods.map(() => '?').join(',')})`;
-    else if (periodType === 'week') periodCondition = `DATE_FORMAT(DATE(CREATION_TIME), '%x-W%v') IN (${periods.map(() => '?').join(',')})`;
-    else periodCondition = `DATE(CREATION_TIME) IN (${periods.map(() => '?').join(',')})`;
+    const makePeriodIn = (col) => {
+      const ph = periods.map(() => '?').join(',');
+      return periodType === 'month'
+        ? `DATE_FORMAT(DATE(${col}), '%Y-%m') IN (${ph})`
+        : periodType === 'week'
+          ? `DATE_FORMAT(DATE(${col}), '%x-W%v') IN (${ph})`
+          : `DATE(${col}) IN (${ph})`;
+    };
 
-    // ─── Роботы ───
+    const modelFilterSql = hasModelFilter
+      ? ` AND wo.MODEL IN (${modelList.map(() => '?').join(',')})`
+      : '';
+    const modelParams = hasModelFilter ? modelList : [];
+
+    const electronicsPosts = [
+      'CP7', 'CP7 Gate', 'CP78', 'CP79', 'EXT1',
+      'PIP2', 'PIP4', 'PIP9',
+      '360', 'ADAS+RB', 'CP8', 'CP8 Gate', 'REPAIR', 'REPAIR_Final',
+      'TEST TRACK', 'T-UP', 'WA', 'WT', 'CP8 Touch Up',
+      'REPAIR VERIFICATION', 'TRACK', 'ROLL'
+    ];
+    const postListStr = electronicsPosts.map(p => `'${p}'`).join(',');
+
     let defectRows = [];
+
+    // ============ РОБОТЫ ============
     if (isRobot) {
-      // refuel_log
+      // 1) refuel_log
       const [refuelRows] = await pool.query(`
-        SELECT ${periodExpr} AS period, COUNT(*) AS cnt
-        FROM at_im_refuel_log
-        WHERE FILL_RESULT IN ('NOK','NG')
-          AND OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')
+        SELECT ${makePeriodExpr('r.CREATION_TIME')} AS period, COUNT(*) AS cnt
+        FROM at_im_refuel_log r
+        JOIN work_order wo ON wo.VIN = r.VIN
+        WHERE r.FILL_RESULT IN ('NOK','NG')
+          AND r.OIL_TYPE IN ('WW','PREAC','BK','CL1','AC','PREBK','E7')
           AND (CASE
-            WHEN OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
-            WHEN OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
-            WHEN OIL_TYPE = 'CL1' THEN 'Заправка антифриза - NG'
-            WHEN OIL_TYPE = 'WW' THEN 'Заправка омывайки - NG'
-            WHEN OIL_TYPE = 'PREAC' THEN 'Тест утечки кондиц. – NG'
-            WHEN OIL_TYPE = 'PREBK' THEN 'Тест утечки тормозной – NG'
-            WHEN OIL_TYPE = 'E7' THEN 'Заправка трансмиссионного – NG'
+            WHEN r.OIL_TYPE = 'BK' THEN 'Заправка тормозов – NG'
+            WHEN r.OIL_TYPE = 'AC' THEN 'Заправка кондиционера – NG'
+            WHEN r.OIL_TYPE = 'CL1' THEN 'Заправка антифриза - NG'
+            WHEN r.OIL_TYPE = 'WW' THEN 'Заправка омывайки - NG'
+            WHEN r.OIL_TYPE = 'PREAC' THEN 'Тест утечки кондиц. – NG'
+            WHEN r.OIL_TYPE = 'PREBK' THEN 'Тест утечки тормозной – NG'
+            WHEN r.OIL_TYPE = 'E7' THEN 'Заправка трансмиссионного – NG'
           END) = ?
           AND '' = ?
-          AND ${periodCondition}
+          AND ${makePeriodIn('r.CREATION_TIME')}
+          ${modelFilterSql}
         GROUP BY period
-      `, [partName, finalProblemType, ...periods]);
+      `, [partName, finalProblemType, ...periods, ...modelParams]);
 
-      // electrical_check_info
+      // 2) electrical_check_info
       const [electricalRows] = await pool.query(`
-        SELECT ${periodExpr} AS period, COUNT(*) AS cnt
-        FROM at_im_electrical_check_info
-        WHERE RESULT IN ('NOK','NG') AND \`TYPE\` <> '01'
+        SELECT ${makePeriodExpr('e.CREATION_TIME')} AS period, COUNT(*) AS cnt
+        FROM at_im_electrical_check_info e
+        JOIN work_order wo ON wo.VIN = e.VIN
+        WHERE e.RESULT IN ('NOK','NG') AND e.\`TYPE\` <> '01'
           AND (CASE
-            WHEN \`TYPE\` = '03' OR \`TYPE\` = '18' THEN 'Прошивка EOL - NG'
-            WHEN \`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
-            WHEN \`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
-            WHEN \`TYPE\` = '21' THEN 'МДВШ - Прошивка TMPS - NG'
-            WHEN \`TYPE\` = '26' THEN 'ERA - Прошивка ERA - NG'
-            WHEN \`TYPE\` = '27' THEN 'APK - Блок управления программируемых специальных функций - Запись кода, не в норме'
+            WHEN e.\`TYPE\` = '03' OR e.\`TYPE\` = '18' THEN 'Прошивка EOL - NG'
+            WHEN e.\`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
+            WHEN e.\`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
+            WHEN e.\`TYPE\` = '21' THEN 'МДВШ - Прошивка TMPS - NG'
+            WHEN e.\`TYPE\` = '26' THEN 'ERA - Прошивка ERA - NG'
+            WHEN e.\`TYPE\` = '27' THEN 'APK - Блок управления программируемых специальных функций - Запись кода, не в норме'
           END) = ?
           AND '' = ?
-          AND ${periodCondition}
+          AND ${makePeriodIn('e.CREATION_TIME')}
+          ${modelFilterSql}
         GROUP BY period
-      `, [partName, finalProblemType, ...periods]);
+      `, [partName, finalProblemType, ...periods, ...modelParams]);
 
-      // execute_result
+      // 3) execute_result
       const [executeRows] = await pool.query(`
-        SELECT ${periodExpr} AS period, COUNT(*) AS cnt
-        FROM at_im_execute_result
-        WHERE FINAL_RESULT IN ('NOK','NG')
-          AND EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
+        SELECT ${makePeriodExpr('ex.CREATION_TIME')} AS period, COUNT(*) AS cnt
+        FROM at_im_execute_result ex
+        JOIN work_order wo ON wo.VIN = ex.VIN
+        WHERE ex.FINAL_RESULT IN ('NOK','NG')
+          AND ex.EQP_NUM IN ('AGMADAS01','AGMFL01','AGMRB01','AGMTPMS01','AGMWAHA01')
           AND (CASE
-            WHEN EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
-            WHEN EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
-            WHEN EQP_NUM = 'AGMRB01' THEN 'Проверка R&B - NG'
-            WHEN EQP_NUM = 'AGMTPMS01' THEN 'Проверка TMPS – NG'
-            WHEN EQP_NUM = 'AGMWAHA01' THEN 'Проверка WA - NG'
+            WHEN ex.EQP_NUM = 'AGMADAS01' THEN 'Проверка ADAS - NG'
+            WHEN ex.EQP_NUM = 'AGMFL01' THEN 'Тест утечки бензобак - NG'
+            WHEN ex.EQP_NUM = 'AGMRB01' THEN 'Проверка R&B - NG'
+            WHEN ex.EQP_NUM = 'AGMTPMS01' THEN 'Проверка TMPS – NG'
+            WHEN ex.EQP_NUM = 'AGMWAHA01' THEN 'Проверка WA - NG'
           END) = ?
           AND '' = ?
-          AND ${periodCondition}
+          AND ${makePeriodIn('ex.CREATION_TIME')}
+          ${modelFilterSql}
         GROUP BY period
-      `, [partName, finalProblemType, ...periods]);
+      `, [partName, finalProblemType, ...periods, ...modelParams]);
 
       defectRows = [...refuelRows, ...electricalRows, ...executeRows];
     } else {
-      // ─── Обычные оффлайн-дефекты ───
+      // ============ ОБЫЧНЫЕ ОФФЛАЙН-ДЕФЕКТЫ ============
       const [regularRows] = await pool.query(`
         SELECT period, COUNT(*) AS cnt
         FROM (
-          SELECT ${periodExpr} AS period, VIN, PART_NAME, PROBLEM_TYPE, POST_NAME,
+          SELECT ${makePeriodExpr('CREATION_TIME')} AS period, VIN, PART_NAME, PROBLEM_TYPE, POST_NAME,
                  (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
           FROM at_biw_qm_defect_info
           UNION ALL
-          SELECT ${periodExpr} AS period, VIN, PART_NAME, PROBLEM_TYPE, POST_NAME,
+          SELECT ${makePeriodExpr('CREATION_TIME')} AS period, VIN, PART_NAME, PROBLEM_TYPE, POST_NAME,
                  (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
           FROM at_paint_qm_defect_info
           UNION ALL
-          SELECT ${periodExpr} AS period, VIN, PART_NAME, PROBLEM_TYPE, POST_NAME,
+          SELECT ${makePeriodExpr('CREATION_TIME')} AS period, VIN, PART_NAME, PROBLEM_TYPE, POST_NAME,
                  (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
           FROM at_qm_defect_info
         ) QM_DEF
+        JOIN work_order wo ON wo.VIN = QM_DEF.VIN
         WHERE S_OFFLINE = 1
           AND PART_NAME = ? AND PROBLEM_TYPE = ? AND POST_NAME = ?
-          AND ${periodCondition.replace(/CREATION_TIME/g, 'period')}
+          AND ${makePeriodIn('period')}
+          ${modelFilterSql}
         GROUP BY period
-      `, [partName, finalProblemType, postName, ...periods]);
+      `, [partName, finalProblemType, postName, ...periods, ...modelParams]);
       defectRows = regularRows;
     }
 
-    // Карта: period → count
+    // period → count
     const defectMap = {};
     defectRows.forEach(r => {
       defectMap[r.period] = (defectMap[r.period] || 0) + Number(r.cnt);
     });
 
-    // ─── total_cars по CP72 для каждого периода ───
-    const modelList = (model && model !== 'ALL') ? model.split(',').map(m => m.trim()) : [];
-
+    // ─── total_cars по CP72 (уже фильтруется по модели) ───
     const result = [];
     for (const period of periods) {
-      let carCondition = '';
-      if (periodType === 'month') carCondition = `DATE_FORMAT(DATE(CREATION_TIME), '%Y-%m') = ?`;
-      else if (periodType === 'week') carCondition = `DATE_FORMAT(DATE(CREATION_TIME), '%x-W%v') = ?`;
-      else carCondition = `DATE(CREATION_TIME) = ?`;
+      const carCondition = periodType === 'month'
+        ? `DATE_FORMAT(DATE(t.CREATION_TIME), '%Y-%m') = ?`
+        : periodType === 'week'
+          ? `DATE_FORMAT(DATE(t.CREATION_TIME), '%x-W%v') = ?`
+          : `DATE(t.CREATION_TIME) = ?`;
 
       let carSql = `
         SELECT COUNT(DISTINCT t.VIN) AS total
         FROM at_om_wiptrackinghistory t
-        ${modelList.length > 0 ? 'JOIN work_order wo ON wo.VIN = t.VIN' : ''}
+        ${hasModelFilter ? 'JOIN work_order wo ON wo.VIN = t.VIN' : ''}
         WHERE t.WC_NAME = 'CP72'
-          AND ${carCondition.replace(/CREATION_TIME/g, 't.CREATION_TIME')}
+          AND ${carCondition}
+          ${hasModelFilter ? `AND wo.MODEL IN (${modelList.map(() => '?').join(',')})` : ''}
       `;
-      const carParams = [period];
-      if (modelList.length > 0) {
-        carSql += ` AND wo.MODEL IN (${modelList.map(() => '?').join(',')})`;
-        carParams.push(...modelList);
-      }
+      const carParams = [period, ...modelParams];
       const [carRows] = await pool.query(carSql, carParams);
       const totalCars = carRows[0]?.total || 0;
 

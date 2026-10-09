@@ -83,7 +83,7 @@ const tabStyle = (active) => ({
 });
 
 // ============================================================
-//  КОНСТАНТЫ ДЛЯ НОВОГО ОТЧЁТА
+//  КОНСТАНТЫ
 // ============================================================
 // ВАЖНО: TYPE='18' — технический дубликат '03'. В топ берём ТОЛЬКО '03'.
 const ELEC_CATEGORY_TO_TYPE = {
@@ -101,6 +101,35 @@ const ELEC_CATEGORY_COLORS = {
 const AVAILABLE_MODELS = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 const AVAILABLE_GRADES = ['A', 'B', 'C'];
 const AVAILABLE_POSTS = ['ROBOT', 'CP7', 'CP8', 'PIP', 'TL', 'REPAIR', 'TEST TRACK'];
+
+// ============================================================
+//  ХЕЛПЕРЫ
+// ============================================================
+const formatPeriodLabel = (period) => {
+  if (!period) return '';
+  if (/^\d{4}-\d{2}$/.test(period)) {
+    const [, m] = period.split('-');
+    const monthNames = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+    return monthNames[parseInt(m, 10) - 1];
+  }
+  if (/^\d{4}-W\d{2}$/.test(period)) {
+    const [, w] = period.split('-W');
+    return `W${w}`;
+  }
+  const parts = period.split('-');
+  if (parts.length === 3) {
+    const [, m, d] = parts;
+    return `${d}.${m}`;
+  }
+  return period;
+};
+
+const getPeriodRange = (arr) => {
+  if (!Array.isArray(arr) || arr.length === 0) return '';
+  const first = formatPeriodLabel(arr[0].period);
+  const last = formatPeriodLabel(arr[arr.length - 1].period);
+  return first === last ? first : `${first} — ${last}`;
+};
 
 // ============================================================
 //  MULTISELECT
@@ -187,11 +216,9 @@ function MultiSelect({ options, selected, onChange, placeholder, width = 120 }) 
 //  ОСНОВНОЙ КОМПОНЕНТ
 // ============================================================
 export default function DefectElectronicsTopPage() {
-  const [activeTab, setActiveTab] = useState('elec');
+  const [activeTab, setActiveTab] = useState('elec'); // 'elec' | 'top'
 
-  // ============================================================
-  //  СТАРЫЙ ОТЧЁТ
-  // ============================================================
+  // ─── Старый отчёт ───
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [selectedModels, setSelectedModels] = useState([]);
@@ -214,9 +241,7 @@ export default function DefectElectronicsTopPage() {
   const [trendMpp, setTrendMpp] = useState('');
   const [trendMetric, setTrendMetric] = useState('defects');
 
-  // ============================================================
-  //  НОВЫЙ ОТЧЁТ "Elec top defect"
-  // ============================================================
+  // ─── Новый отчёт Elec top defect ───
   const [elecDateFrom, setElecDateFrom] = useState('');
   const [elecDateTo, setElecDateTo] = useState('');
   const [elecSelectedModels, setElecSelectedModels] = useState([]);
@@ -228,7 +253,7 @@ export default function DefectElectronicsTopPage() {
   const [elecVinLoading, setElecVinLoading] = useState(false);
 
   // ============================================================
-  //  ДАТЫ (вчера)
+  //  ИНИЦИАЛИЗАЦИЯ ДАТ
   // ============================================================
   useEffect(() => {
     const yesterday = new Date();
@@ -241,7 +266,7 @@ export default function DefectElectronicsTopPage() {
   }, []);
 
   // ============================================================
-  //  СТАРЫЙ ОТЧЁТ — загрузка
+  //  СТАРЫЙ ОТЧЁТ
   // ============================================================
   useEffect(() => {
     if (activeTab === 'top' && dateFrom && dateTo) loadData();
@@ -444,7 +469,7 @@ export default function DefectElectronicsTopPage() {
   };
 
   // ============================================================
-  //  ELE TOP DEFECT — загрузка
+  //  ELE TOP DEFECT
   // ============================================================
   useEffect(() => {
     if (activeTab === 'elec' && elecDateFrom && elecDateTo) loadElecData();
@@ -482,7 +507,7 @@ export default function DefectElectronicsTopPage() {
     setElecVinLoading(true);
     setElecVinData([]);
     try {
-      const typeCode = ELEC_CATEGORY_TO_TYPE[row.CATEGORY]; // undefined для "Агрегат по моделям"
+      const typeCode = ELEC_CATEGORY_TO_TYPE[row.CATEGORY];
       const params = new URLSearchParams({
         model: row.MODEL,
         dateFrom: elecDateFrom,
@@ -571,9 +596,7 @@ export default function DefectElectronicsTopPage() {
     saveAs(new Blob([buf], { type: 'application/octet-stream' }), 'Elec_top_defect.xlsx');
   };
 
-  // ============================================================
-  //  ГРУППИРОВКА ДАННЫХ
-  // ============================================================
+  // ─── Группировка Elec ───
   const elecGrouped = [];
   const seenCats = new Set();
   elecData.forEach(r => {
@@ -722,7 +745,7 @@ export default function DefectElectronicsTopPage() {
               </BarChart>
             </ResponsiveContainer>
 
-            {/* Donut NG/OK (стиль DRR CP7) + таблица-легенда */}
+            {/* Donut NG/OK + таблица-легенда */}
             <div style={{ display: 'flex', gap: 32, marginTop: 24, flexWrap: 'wrap', alignItems: 'center' }}>
               <div style={{ position: 'relative', width: 320, height: 320, flexShrink: 0 }}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -813,6 +836,17 @@ export default function DefectElectronicsTopPage() {
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr style={{ backgroundColor: '#F3F4F6', borderTop: '2px solid #D1D5DB' }}>
+                      <td style={{ ...tdStyle, fontWeight: 800, color: '#111827' }}>Всего</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, color: '#DC2626' }}>{elecTotals.NG.toLocaleString()}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, color: '#16A34A' }}>{elecTotals.OK.toLocaleString()}</td>
+                      <td style={{
+                        ...tdStyle, textAlign: 'right', fontWeight: 800,
+                        color: elecTotalNgShare > 20 ? '#DC2626' : elecTotalNgShare > 5 ? '#D97706' : '#374151',
+                      }}>{elecTotalNgShare}%</td>
+                    </tr>
+                  </tfoot>
                 </table>
 
                 <div style={{ display: 'flex', gap: 20, marginTop: 16, fontSize: 13, color: '#475569' }}>
@@ -854,15 +888,34 @@ export default function DefectElectronicsTopPage() {
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                     <thead>
+                      {/* Верхний уровень группировки */}
                       <tr style={{ backgroundColor: '#F9FAFB' }}>
-                        <th style={thStyle}>Модель</th>
-                        <th style={{ ...thStyle, textAlign: 'center' }}>Дефектов NG</th>
-                        <th style={{ ...thStyle, textAlign: 'center' }}>VIN с NG</th>
-                        <th style={{ ...thStyle, textAlign: 'center' }}>VIN всего</th>
-                        <th style={{ ...thStyle, textAlign: 'center' }}>OK</th>
-                        <th style={{ ...thStyle, textAlign: 'center' }}>% NG</th>
-                        <th style={{ ...thStyle, textAlign: 'center' }}>DPU per 1000</th>
-                        <th style={thStyle}></th>
+                        <th rowSpan={2} style={{ ...thStyle, verticalAlign: 'bottom' }}>Модель</th>
+                        <th colSpan={4} style={{
+                          ...thStyle, textAlign: 'center',
+                          background: '#EEF2FF', color: '#1E40AF',
+                          borderBottom: '1px solid #C7D2FE', fontSize: 12, letterSpacing: '0.5px',
+                        }}>
+                          ПОПЫТКИ ПРОВЕРКИ
+                        </th>
+                        <th colSpan={2} style={{
+                          ...thStyle, textAlign: 'center',
+                          background: '#F0FDF4', color: '#166534',
+                          borderBottom: '1px solid #BBF7D0', fontSize: 12, letterSpacing: '0.5px',
+                        }}>
+                          УНИКАЛЬНЫЕ VIN
+                        </th>
+                        <th rowSpan={2} style={{ ...thStyle, textAlign: 'center', verticalAlign: 'bottom' }}>DPU / 1000</th>
+                        <th rowSpan={2} style={{ ...thStyle, verticalAlign: 'bottom' }}></th>
+                      </tr>
+                      {/* Нижний уровень */}
+                      <tr style={{ backgroundColor: '#F9FAFB' }}>
+                        <th style={{ ...thStyle, textAlign: 'center', background: '#EEF2FF', color: '#DC2626' }}>NG</th>
+                        <th style={{ ...thStyle, textAlign: 'center', background: '#EEF2FF', color: '#16A34A' }}>OK</th>
+                        <th style={{ ...thStyle, textAlign: 'center', background: '#EEF2FF', color: '#1E40AF' }}>Всего</th>
+                        <th style={{ ...thStyle, textAlign: 'center', background: '#EEF2FF', color: '#1E40AF', minWidth: 140 }}>% NG</th>
+                        <th style={{ ...thStyle, textAlign: 'center', background: '#F0FDF4', color: '#166534' }}>VIN с NG</th>
+                        <th style={{ ...thStyle, textAlign: 'center', background: '#F0FDF4', color: '#166534' }}>VIN всего</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -871,18 +924,38 @@ export default function DefectElectronicsTopPage() {
                         const dpu = row.TOTAL_COUNT > 0
                           ? ((row.DEFECT_COUNT * 1000) / row.TOTAL_COUNT).toFixed(1)
                           : '—';
+                        const barColor = row.NG_SHARE > 20 ? '#DC2626' : row.NG_SHARE > 5 ? '#F59E0B' : '#10B981';
                         return (
                           <React.Fragment key={key}>
                             <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
                               <td style={{ ...tdStyle, fontWeight: 600 }}>{row.MODEL}</td>
                               <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#DC2626' }}>{row.DEFECT_COUNT}</td>
+                              <td style={{ ...tdStyle, textAlign: 'center', color: '#16A34A', fontWeight: 600 }}>{row.OK_COUNT}</td>
+                              <td style={{ ...tdStyle, textAlign: 'center', color: '#6B7280' }}>{row.TOTAL_COUNT}</td>
+                              <td style={{ ...tdStyle, minWidth: 140 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <div style={{
+                                    flex: 1, height: 6, background: '#F1F5F9',
+                                    borderRadius: 3, overflow: 'hidden', minWidth: 50,
+                                  }}>
+                                    <div style={{
+                                      width: `${Math.min(100, row.NG_SHARE)}%`,
+                                      height: '100%',
+                                      background: barColor,
+                                      transition: 'width 0.3s ease',
+                                    }} />
+                                  </div>
+                                  <span style={{
+                                    fontWeight: 700, minWidth: 46, textAlign: 'right',
+                                    color: row.NG_SHARE > 20 ? '#DC2626' : row.NG_SHARE > 5 ? '#D97706' : '#059669',
+                                    fontSize: 13,
+                                  }}>
+                                    {row.NG_SHARE}%
+                                  </span>
+                                </div>
+                              </td>
                               <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600 }}>{row.VIN_COUNT}</td>
                               <td style={{ ...tdStyle, textAlign: 'center', color: '#6B7280' }}>{row.VIN_TOTAL_COUNT}</td>
-                              <td style={{ ...tdStyle, textAlign: 'center', color: '#16A34A' }}>{row.OK_COUNT}</td>
-                              <td style={{
-                                ...tdStyle, textAlign: 'center', fontWeight: 700,
-                                color: row.NG_SHARE > 20 ? '#DC2626' : row.NG_SHARE > 5 ? '#D97706' : '#374151',
-                              }}>{row.NG_SHARE}%</td>
                               <td style={{ ...tdStyle, textAlign: 'center' }}>{dpu}</td>
                               <td style={tdStyle}>
                                 <div style={{ display: 'flex', gap: 6 }}>
@@ -902,7 +975,7 @@ export default function DefectElectronicsTopPage() {
                             </tr>
                             {elecExpandedKey === key && (
                               <tr>
-                                <td colSpan={8} style={{ padding: 0 }}>
+                                <td colSpan={9} style={{ padding: 0 }}>
                                   <div style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8, margin: '8px 0' }}>
                                     {elecVinLoading ? (
                                       <p style={{ margin: 0 }}>Загрузка VIN...</p>
@@ -1182,12 +1255,31 @@ export default function DefectElectronicsTopPage() {
             width: '96%', maxWidth: 1600, maxHeight: '95vh',
             overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
           }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1F2937' }}>
                 Динамика: {trendMpp}
               </h3>
               <button onClick={() => setTrendModalOpen(false)}
                 style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280' }}>✕</button>
+            </div>
+
+            {/* Предупреждение про периоды + фильтр таблицы */}
+            <div style={{
+              padding: '10px 14px',
+              background: '#FEF3C7',
+              borderLeft: '4px solid #F59E0B',
+              borderRadius: 8,
+              fontSize: 13,
+              color: '#92400E',
+              marginBottom: 16,
+              lineHeight: 1.5,
+            }}>
+              ⓘ <b>Периоды тренда не зависят от фильтра таблицы.</b>{' '}
+              Каждый график показывает последние N периодов от текущей даты.
+              <div style={{ marginTop: 6, fontSize: 12, color: '#78350F' }}>
+                Фильтр таблицы:{' '}
+                <b>{activeTab === 'elec' ? elecDateFrom : dateFrom}</b> — <b>{activeTab === 'elec' ? elecDateTo : dateTo}</b>
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
@@ -1208,17 +1300,17 @@ export default function DefectElectronicsTopPage() {
             ) : (
               trendData && (
                 <div style={{ display: 'flex', flexDirection: 'row', gap: 20, flexWrap: 'nowrap' }}>
+                  {/* Месяцы */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
-                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 3 месяца</h4>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 2px' }}>Последние 3 месяца</h4>
+                    <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+                      {getPeriodRange(trendData.month)}
+                    </div>
                     <ResponsiveContainer width="100%" height={320}>
                       <BarChart data={prepareDisplayData(trendData.month)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis dataKey="period" tick={{ fontSize: 12, fill: '#1F2937' }}
-                          tickFormatter={(val) => {
-                            const [, m] = val.split('-');
-                            const monthNames = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
-                            return monthNames[parseInt(m, 10) - 1];
-                          }} />
+                          tickFormatter={(val) => formatPeriodLabel(val)} />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={trendMetric === 'dpu'} />
                         <Bar dataKey="value" fill="#3B82F6" radius={[4, 4, 0, 0]}>
                           <LabelList dataKey="value" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
@@ -1227,13 +1319,17 @@ export default function DefectElectronicsTopPage() {
                     </ResponsiveContainer>
                   </div>
 
+                  {/* Недели */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
-                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 4 недели</h4>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 2px' }}>Последние 4 недели</h4>
+                    <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+                      {getPeriodRange(trendData.week)}
+                    </div>
                     <ResponsiveContainer width="100%" height={320}>
                       <BarChart data={prepareDisplayData(trendData.week)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis dataKey="period" tick={{ fontSize: 12, fill: '#1F2937' }}
-                          tickFormatter={(val) => val.split('-W')[1] ? `W${val.split('-W')[1]}` : val} />
+                          tickFormatter={(val) => formatPeriodLabel(val)} />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={trendMetric === 'dpu'} />
                         <Bar dataKey="value" fill="#F59E0B" radius={[4, 4, 0, 0]}>
                           <LabelList dataKey="value" position="top" style={{ fontSize: 14, fill: '#1F2937', fontWeight: 700 }} />
@@ -1242,16 +1338,17 @@ export default function DefectElectronicsTopPage() {
                     </ResponsiveContainer>
                   </div>
 
+                  {/* Дни */}
                   <div style={{ flex: '2 1 0', minWidth: 350 }}>
-                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>Последние 14 дней</h4>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 2px' }}>Последние 14 дней</h4>
+                    <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+                      {getPeriodRange(trendData.day)}
+                    </div>
                     <ResponsiveContainer width="100%" height={320}>
                       <BarChart data={prepareDisplayData(trendData.day)} margin={{ top: 30, right: 10, left: 0, bottom: 30 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                         <XAxis dataKey="period" interval={0} tick={{ fontSize: 11, fill: '#1F2937' }}
-                          tickFormatter={(val) => {
-                            const [, m, d] = val.split('-');
-                            return `${d}.${m}`;
-                          }} />
+                          tickFormatter={(val) => formatPeriodLabel(val)} />
                         <YAxis tick={{ fontSize: 12, fill: '#1F2937' }} allowDecimals={trendMetric === 'dpu'} />
                         <Bar dataKey="value" fill="#10B981" radius={[4, 4, 0, 0]}>
                           <LabelList dataKey="value" position="top" style={{ fontSize: 13, fill: '#1F2937', fontWeight: 700 }} />
