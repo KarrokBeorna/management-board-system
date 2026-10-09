@@ -258,8 +258,7 @@ const parsePhotoKey = (key) => {
   };
 };
 
-// Ключ недели — CW41 2026
-const weekKeyOf = (w) => `CW${String(w.weekNumber).padStart(2, '0')} ${w.year}`;
+const weekKeyOf = (w) => `${w.year}W${String(w.weekNumber).padStart(2, '0')}`;
 
 /* ===================== КОМПРЕССИЯ ФОТО ===================== */
 const compressImage = (file, maxWidth = 900) => new Promise((resolve, reject) => {
@@ -694,6 +693,8 @@ function WeeklyPhotosBlock({ photos, loading, shiftLetter }) {
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const MAX_PHOTOS = 10;
 
+  // Сначала фильтруем по смене, затем берём 10 самых актуальных.
+  // Бэкенд уже сортирует по uploaded_at DESC — slice(0, 10) даст свежие.
   const filteredPhotos = (
     shiftLetter === 'ALL'
       ? photos
@@ -804,12 +805,14 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
 
   const weekKey = weeks.map(w => w.weekStart).join('|');
 
+  // Агрегат за период — взвешенное среднее
   const periodTotalVins = weeks.reduce((s, w) => s + (w.totalVins || 0), 0);
   const periodClosedVins = weeks.reduce((s, w) => s + (w.closedVins || 0), 0);
   const avgDrr = periodTotalVins > 0
     ? +((periodClosedVins / periodTotalVins) * 100).toFixed(1)
     : 0;
 
+  // Загрузка динамики по неделям
   useEffect(() => {
     if (weeks.length === 0) {
       setMatrix({ weeks: [], rows: [] });
@@ -851,10 +854,9 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
           .map(r => ({ ...r, total: Object.values(r.counts).reduce((s, v) => s + v, 0) }))
           .sort((a, b) => b.total - a.total);
 
-        // Заголовки колонок — CW вместо W
         const weeksOrder = weeks.map(w => ({
           key: weekKeyOf(w),
-          label: `CW${w.weekNumber}`,
+          label: `W${w.weekNumber}`,
           year: w.year,
         }));
 
@@ -864,6 +866,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type, weekKey]);
 
+  // Загрузка фото периода — с запасом (60), финальное ограничение до 10 делается на фронте
   useEffect(() => {
     if (weeks.length === 0) {
       setPhotos([]);
@@ -1031,12 +1034,11 @@ function WeeklyAnalyticsView() {
   const adasFiltered = filterByWeeks(adasData);
   const cpFinalFiltered = filterByWeeks(cpFinalData);
 
-  // Заголовок периода — CW вместо W
   const periodLabel = selectedWeeks.length === 0
     ? '—'
     : selectedWeeks.length === 1
-      ? `CW${selectedWeeks[0].weekNumber} ${selectedWeeks[0].year}`
-      : `CW${selectedWeeks[0].weekNumber} ${selectedWeeks[0].year} – CW${selectedWeeks[selectedWeeks.length - 1].weekNumber} ${selectedWeeks[selectedWeeks.length - 1].year}`;
+      ? `W${selectedWeeks[0].weekNumber} ${selectedWeeks[0].year}`
+      : `W${selectedWeeks[0].weekNumber} ${selectedWeeks[0].year} – W${selectedWeeks[selectedWeeks.length - 1].weekNumber} ${selectedWeeks[selectedWeeks.length - 1].year}`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1067,7 +1069,7 @@ function WeeklyAnalyticsView() {
             {weeksList.length === 0 && <option value="">Нет данных</option>}
             {weeksList.map(w => (
               <option key={w.weekStart} value={w.weekStart}>
-                CW{w.weekNumber} {w.year} ({formatDateShort(w.weekStart)})
+                W{w.weekNumber} {w.year} ({formatDateShort(w.weekStart)})
               </option>
             ))}
           </select>
@@ -1084,7 +1086,7 @@ function WeeklyAnalyticsView() {
             {weeksList.length === 0 && <option value="">Нет данных</option>}
             {weeksList.map(w => (
               <option key={w.weekStart} value={w.weekStart}>
-                CW{w.weekNumber} {w.year} ({formatDateShort(w.weekStart)})
+                W{w.weekNumber} {w.year} ({formatDateShort(w.weekStart)})
               </option>
             ))}
           </select>
@@ -1144,6 +1146,7 @@ export default function DrrShiftDashboardPage() {
   const [marks, setMarks] = useState({});
   const [photos, setPhotos] = useState({});
 
+  // ---------- МЕТКИ ----------
   const loadMarks = async (baseDate) => {
     try {
       const res = await fetch(`${API_BASE}/api/drr-shift-marks?prefix=${encodeURIComponent(baseDate + '_')}`);
@@ -1175,6 +1178,7 @@ export default function DrrShiftDashboardPage() {
     }
   };
 
+  // ---------- ФОТО ----------
   const onPhotosChange = (key, newItems) => {
     setPhotos(prev => ({ ...prev, [key]: newItems }));
   };
@@ -1197,6 +1201,7 @@ export default function DrrShiftDashboardPage() {
     loadPhotos(bd);
   }, [periodMode, selectedDate, pageMode]);
 
+  // ---------- ДАННЫЕ СМЕН ----------
   const loadData = async () => {
     setLoading(true);
     setError(null);

@@ -76,6 +76,40 @@ const lesPool = mysql.createPool({
   dateStrings: true,
 });
 
+// ================== NOTES AVAILABILITY ==================
+let notesAvailable = false;
+
+async function pingNotes() {
+  try {
+    const conn = await notesPool.getConnection();
+    conn.release();
+    if (!notesAvailable) {
+      console.log('[NOTES] Соединение восстановлено — snapshot DRR, метки/фото смен и справочники снова работают.');
+    }
+    notesAvailable = true;
+  } catch (err) {
+    if (notesAvailable) {
+      console.warn(`[NOTES] Соединение потеряно: ${err.code || ''} ${err.message}`);
+    }
+    notesAvailable = false;
+  }
+}
+
+// Первый пинг сразу, потом каждые 15 секунд
+pingNotes();
+setInterval(pingNotes, 15 * 1000);
+
+// Middleware для эндпоинтов, зависящих от notes
+function requireNotes(req, res, next) {
+  if (!notesAvailable) {
+    return res.status(503).json({
+      error: 'notes_database_unavailable',
+      message: 'БД заметок временно недоступна. Данные появятся автоматически, как только соединение восстановится.',
+    });
+  }
+  next();
+}
+
 console.log('DB_USER:', process.env.DB_USER);
 console.log('MES_HOST:', process.env.MES_HOST);
 console.log('LES_HOST:', process.env.LES_HOST);
@@ -93,15 +127,8 @@ async function checkDatabaseConnection() {
 }
 
 async function checkNotesDatabaseConnection() {
-  try {
-    const connection = await notesPool.getConnection();
-    console.log('Локальная БД заметок: OK');
-    connection.release();
-    return true;
-  } catch (err) {
-    console.error('БД заметок ОШИБКА:', err.message);
-    return false;
-  }
+  await pingNotes();
+  return notesAvailable;
 }
 
 async function checkLesDatabaseConnection() {
@@ -14478,18 +14505,12 @@ app.post('/api/drr-shift-marks/toggle', async (req, res) => {
 
 // ================== DRR WEEKLY ANALYTICS ==================
 // Агрегация snapshot-таблиц по ISO-неделям.
-// Средний DRR = SUM(closed_vins) / SUM(total_vins) — взвешенное среднее.
-// Фильтр shiftLetter: ALL (по умолчанию) | A | B | C
+// Учитываем только shift = 'all' (полные сутки) и строки с drr_percent > 0.
 app.get('/api/drr-weekly-analytics/:type', async (req, res) => {
   try {
     const { type } = req.params;
-    const { weeks = 12, shiftLetter = 'ALL' } = req.query;
-    const weeksCount = Math.min(Math.max(parseInt(weeks, 10) || 12, 1), 104);
-
-    const validLetters = ['ALL', 'A', 'B', 'C'];
-    const safeLetter = validLetters.includes(String(shiftLetter).toUpperCase())
-      ? String(shiftLetter).toUpperCase()
-      : 'ALL';
+    const { weeks = 8 } = req.query;
+    const weeksCount = Math.min(Math.max(parseInt(weeks, 10) || 8, 1), 52);
 
     const config = {
       cp7:     { table: 'drr_cp7_snapshots',     extraWhere: " AND filter_name = 'all'", closedCol: 'closed_vins', label: 'DRR CP7' },
@@ -14501,21 +14522,21 @@ app.get('/api/drr-weekly-analytics/:type', async (req, res) => {
     const cfg = config[type];
     if (!cfg) return res.status(400).json({ error: 'Неизвестный тип отчёта' });
 
-    // ВАЖНО: не фильтруем по week_number IS NOT NULL — у старых снапшотов он NULL.
-    // Неделя вычисляется из shift_date через YEARWEEK(..., 3).
-    // Учитываем все строки, где total_vins > 0 (дни без машин в расчёт не идут).
+    // YEARWEEK(date, 3) — ISO-год + ISO-неделя одним числом (YYYYWW)
     const sql = `
       SELECT
         YEARWEEK(shift_date, 3) AS iso_year_week,
-        COUNT(*) AS total_records,
-        SUM(CASE WHEN total_vins > 0 THEN 1 ELSE 0 END) AS days_with_cars,
-        SUM(total_vins) AS total_vins,
-        SUM(${cfg.closedCol}) AS closed_vins,
-        SUM(nok_vins) AS nok_vins,
+        COUNT(*) AS total_days,
+        SUM(CASE WHEN drr_percent > 0 THEN 1 ELSE 0 END) AS valid_days,
+        SUM(CASE WHEN drr_percent > 0 THEN total_vins ELSE 0 END) AS total_vins,
+        SUM(CASE WHEN drr_percent > 0 THEN ${cfg.closedCol} ELSE 0 END) AS closed_vins,
+        SUM(CASE WHEN drr_percent > 0 THEN nok_vins ELSE 0 END) AS nok_vins,
+        AVG(CASE WHEN drr_percent > 0 THEN drr_percent END) AS avg_drr,
         MIN(CASE WHEN drr_percent > 0 THEN drr_percent END) AS min_drr,
-        MAX(drr_percent) AS max_drr
+        MAX(CASE WHEN drr_percent > 0 THEN drr_percent END) AS max_drr
       FROM ${cfg.table}
-      WHERE shift_letter = ?
+      WHERE shift = 'all'
+        AND week_number IS NOT NULL
         AND shift_date >= DATE_SUB(CURDATE(), INTERVAL ${weeksCount} WEEK)
         ${cfg.extraWhere}
       GROUP BY YEARWEEK(shift_date, 3)
@@ -14523,8 +14544,9 @@ app.get('/api/drr-weekly-analytics/:type', async (req, res) => {
       LIMIT ${weeksCount}
     `;
 
-    const [rows] = await notesPool.query(sql, [safeLetter]);
+    const [rows] = await notesPool.query(sql);
 
+    // Находим Пн-Вс для ISO-недели (year = ISO-год, week = ISO-номер)
     function getISOWeekRange(year, weekNumber) {
       const jan4 = new Date(Date.UTC(year, 0, 4));
       const jan4Day = jan4.getUTCDay() || 7;
@@ -14539,38 +14561,29 @@ app.get('/api/drr-weekly-analytics/:type', async (req, res) => {
     }
 
     const result = rows.map(r => {
-      const yw = Number(r.iso_year_week);
+      const yw = Number(r.iso_year_week);   // напр. 202641
       const year = Math.floor(yw / 100);
       const week = yw % 100;
       const range = getISOWeekRange(year, week);
-
-      const totalVins = Number(r.total_vins) || 0;
-      const closedVins = Number(r.closed_vins) || 0;
-      const nokVins = Number(r.nok_vins) || 0;
-
-      const avgDrr = totalVins > 0
-        ? Number(((closedVins / totalVins) * 100).toFixed(1))
-        : null;
 
       return {
         weekNumber: week,
         year,
         weekStart: range.start,
         weekEnd: range.end,
-        totalDays: 7,
-        validDays: Number(r.days_with_cars),
-        totalRecords: Number(r.total_records),
-        totalVins,
-        closedVins,
-        nokVins,
-        avgDrr,
+        totalDays: Number(r.total_days),
+        validDays: Number(r.valid_days),
+        totalVins: Number(r.total_vins) || 0,
+        closedVins: Number(r.closed_vins) || 0,
+        nokVins: Number(r.nok_vins) || 0,
+        avgDrr: r.avg_drr !== null ? Number(Number(r.avg_drr).toFixed(1)) : null,
         minDrr: r.min_drr !== null ? Number(Number(r.min_drr).toFixed(1)) : null,
         maxDrr: r.max_drr !== null ? Number(Number(r.max_drr).toFixed(1)) : null,
         label: cfg.label,
       };
-    }).reverse();
+    }).reverse(); // по возрастанию недель
 
-    res.json({ type, weeks: weeksCount, shiftLetter: safeLetter, data: result });
+    res.json({ type, weeks: weeksCount, data: result });
   } catch (err) {
     console.error('Ошибка /api/drr-weekly-analytics:', err.message);
     res.status(500).json({ error: err.message });
@@ -14618,17 +14631,24 @@ const PORT = process.env.PORT || 40000;
 
 async function startServer() {
   const dbOk = await checkDatabaseConnection();
-  const notesOk = await checkNotesDatabaseConnection();
   const lesOk = await checkLesDatabaseConnection();
 
-  if (!dbOk || !notesOk || !lesOk) {
-    console.log('Сервер НЕ запущен из-за проблем с БД.');
+  if (!dbOk || !lesOk) {
+    console.log('Сервер НЕ запущен — основная БД или LES недоступны.');
     process.exit(1);
+  }
+
+  // Просто выставляем флаг, сервер из-за notes не падает
+  await checkNotesDatabaseConnection();
+
+  if (!notesAvailable) {
+    console.log('⚠️  БД заметок недоступна. Сервер стартует в деградированном режиме.');
+    console.log('    Snapshot DRR, метки/фото смен и справочники включатся автоматически при восстановлении связи.');
   }
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
- });
+  });
 }
 
 startServer();
