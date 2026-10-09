@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine, Label, LabelList
-} from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 const PIE_COLORS = ['#10B981', '#EF4444'];
@@ -249,6 +246,18 @@ const formatDateShort = (dateStr) => {
   return `${dd}.${mm}`;
 };
 
+// Разбор photo_key вида "2026-10-05_A_cp7"
+const parsePhotoKey = (key) => {
+  if (!key) return { date: '', letter: '', checkpoint: '' };
+  const parts = String(key).split('_');
+  if (parts.length < 3) return { date: parts[0] || '', letter: '', checkpoint: '' };
+  return {
+    date: parts[0],
+    letter: parts[1],
+    checkpoint: parts.slice(2).join('_'),
+  };
+};
+
 /* ===================== КОМПРЕССИЯ ФОТО ===================== */
 const compressImage = (file, maxWidth = 900) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -336,13 +345,13 @@ function DefectsTable({ topDefects, markKeyPrefix, marks, onToggleMark }) {
           return (
             <tr
               key={i}
-              onClick={() => onToggleMark(key)}
+              onClick={() => onToggleMark && onToggleMark(key)}
               style={{
-                cursor: 'pointer',
+                cursor: onToggleMark ? 'pointer' : 'default',
                 backgroundColor: marked ? '#FEF3C7' : (i % 2 === 0 ? '#FFFFFF' : '#F8FAFC'),
                 transition: 'background-color 0.15s',
               }}
-              title="Нажмите, чтобы выделить/снять выделение"
+              title={onToggleMark ? 'Нажмите, чтобы выделить/снять выделение' : ''}
             >
               <td style={tdStyleSmall}>{d.mpp}</td>
               <td style={{ ...tdStyleSmall, textAlign: 'center', fontWeight: 700, color: i < 3 ? '#DC2626' : '#1E293B' }}>
@@ -675,29 +684,194 @@ function ShiftColumn({
 }
 
 /* ===================== НЕДЕЛЬНАЯ АНАЛИТИКА ===================== */
-function WeeklyAnalyticsView({ type, onTypeChange, weeks, onWeeksChange, data, loading }) {
-  const chartData = (data?.data || []).map(w => ({
-    name: `W${w.weekNumber} ${w.year}`,
-    weekNumber: w.weekNumber,
-    year: w.year,
-    weekStart: w.weekStart,
-    weekEnd: w.weekEnd,
-    avgDrr: w.avgDrr,
-    minDrr: w.minDrr,
-    maxDrr: w.maxDrr,
-    totalVins: w.totalVins,
-    closedVins: w.closedVins,
-    nokVins: w.nokVins,
-    totalDays: w.totalDays,
-    validDays: w.validDays,
-  }));
+
+// Блок readonly фото недели (без добавления и удаления)
+function WeeklyPhotosBlock({ photos, loading }) {
+  const [lightboxUrl, setLightboxUrl] = useState(null);
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #F1F5F9' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
+          Фото недели ({photos.length}/10)
+        </span>
+        <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
+          Только для просмотра
+        </span>
+      </div>
+
+      {loading ? (
+        <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>
+          Загрузка фото...
+        </p>
+      ) : photos.length === 0 ? (
+        <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>
+          За эту неделю фото не прикреплено
+        </p>
+      ) : (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {photos.map((it) => {
+            const parsed = parsePhotoKey(it.photoKey);
+            const dateLabel = parsed.date
+              ? formatDateShort(parsed.date)
+              : '';
+            const shiftLabel = parsed.letter === 'ALL'
+              ? 'сутки'
+              : parsed.letter
+                ? `смена ${parsed.letter}`
+                : '';
+            return (
+              <div
+                key={it.id}
+                onClick={() => setLightboxUrl(`${API_BASE}${it.url}`)}
+                style={{
+                  position: 'relative',
+                  width: 140,
+                  height: 140,
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  border: '1px solid #E2E8F0',
+                  background: '#F1F5F9',
+                  cursor: 'zoom-in',
+                  transition: 'transform 0.15s, box-shadow 0.15s',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.03)';
+                  e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.12)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                  e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.06)';
+                }}
+                title="Нажмите для увеличения"
+              >
+                <img
+                  src={`${API_BASE}${it.url}`}
+                  alt="Фото"
+                  style={{
+                    width: '100%', height: '100%',
+                    objectFit: 'cover',
+                    display: 'block',
+                  }}
+                />
+                <div style={{
+                  position: 'absolute',
+                  bottom: 0, left: 0, right: 0,
+                  padding: '4px 8px',
+                  background: 'linear-gradient(to top, rgba(15,23,42,0.9), rgba(15,23,42,0))',
+                  color: '#FFFFFF',
+                  fontSize: '0.7rem',
+                  fontWeight: 700,
+                  textAlign: 'left',
+                  pointerEvents: 'none',
+                  lineHeight: 1.2,
+                }}>
+                  <div>{dateLabel}</div>
+                  <div style={{ opacity: 0.8, fontWeight: 500 }}>{shiftLabel}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {lightboxUrl && (
+        <PhotoLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
+      )}
+    </div>
+  );
+}
+
+function WeeklyAnalyticsView() {
+  const [type, setType] = useState('cp7');
+  const [weeksCount, setWeeksCount] = useState(8);
+  const [weeksList, setWeeksList] = useState([]);
+  const [selectedWeekIdx, setSelectedWeekIdx] = useState(0);
+
+  const [topDefects, setTopDefects] = useState([]);
+  const [photos, setPhotos] = useState([]);
+
+  const [loadingWeeks, setLoadingWeeks] = useState(false);
+  const [loadingTop, setLoadingTop] = useState(false);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
 
   const typeLabels = {
     cp7: 'DRR CP7',
     adas: 'DRR ADAS',
     cpfinal: 'DRR CPFinal',
-    pip: 'DRR PIP',
   };
+
+  const typeTitle = {
+    cp7: 'DRR CP7',
+    adas: 'DRR ADAS',
+    cpfinal: 'DRR CPFinal',
+  };
+
+  const selectedWeek = weeksList[selectedWeekIdx] || null;
+
+  // 1. Загрузка списка недель
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingWeeks(true);
+    fetch(`${API_BASE}/api/drr-weekly-analytics/${type}?weeks=${weeksCount}`)
+      .then(r => r.json())
+      .then(json => {
+        if (cancelled) return;
+        const data = json.data || [];
+        // последняя неделя — самая свежая, идёт в конце массива (мы делали .reverse() на бэке)
+        // отображать хотим в порядке убывания свежести, поэтому последнюю в начало
+        const sorted = [...data].reverse();
+        setWeeksList(sorted);
+        setSelectedWeekIdx(0);
+      })
+      .catch(err => {
+        if (!cancelled) {
+          console.error('Ошибка загрузки недель:', err.message);
+          setWeeksList([]);
+        }
+      })
+      .finally(() => { if (!cancelled) setLoadingWeeks(false); });
+    return () => { cancelled = true; };
+  }, [type, weeksCount]);
+
+  // 2. Загрузка топа дефектов за выбранную неделю
+  useEffect(() => {
+    if (!selectedWeek) { setTopDefects([]); return; }
+    const start = `${selectedWeek.weekStart} 00:00:00`;
+    const end = `${selectedWeek.weekEnd} 23:59:59`;
+    const params = new URLSearchParams({ startTime: start, endTime: end });
+
+    let url;
+    if (type === 'cp7') url = `${API_BASE}/api/drr-cp7-top-defects?${params}`;
+    else if (type === 'adas') url = `${API_BASE}/api/drr-tl-top-defects?${params}`;
+    else if (type === 'cpfinal') url = `${API_BASE}/api/drr-cpfinal-top-defects?${params}`;
+    else { setTopDefects([]); return; }
+
+    setLoadingTop(true);
+    fetch(url)
+      .then(r => r.json())
+      .then(json => setTopDefects(Array.isArray(json) ? json.slice(0, 20) : []))
+      .catch(() => setTopDefects([]))
+      .finally(() => setLoadingTop(false));
+  }, [selectedWeek, type]);
+
+  // 3. Загрузка фото недели
+  useEffect(() => {
+    if (!selectedWeek) { setPhotos([]); return; }
+    const params = new URLSearchParams({
+      checkpoint: type,
+      weekStart: selectedWeek.weekStart,
+      weekEnd: selectedWeek.weekEnd,
+      limit: 10,
+    });
+    setLoadingPhotos(true);
+    fetch(`${API_BASE}/api/drr-weekly-photos?${params}`)
+      .then(r => r.json())
+      .then(json => setPhotos(json.photos || []))
+      .catch(() => setPhotos([]))
+      .finally(() => setLoadingPhotos(false));
+  }, [selectedWeek, type]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -707,7 +881,7 @@ function WeeklyAnalyticsView({ type, onTypeChange, weeks, onWeeksChange, data, l
           Отчёт:
           <select
             value={type}
-            onChange={(e) => onTypeChange(e.target.value)}
+            onChange={(e) => setType(e.target.value)}
             style={{ ...dateSelectStyle, padding: '8px 14px' }}
           >
             <option value="cp7">DRR CP7</option>
@@ -719,8 +893,8 @@ function WeeklyAnalyticsView({ type, onTypeChange, weeks, onWeeksChange, data, l
         <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
           Количество недель:
           <select
-            value={weeks}
-            onChange={(e) => onWeeksChange(Number(e.target.value))}
+            value={weeksCount}
+            onChange={(e) => setWeeksCount(Number(e.target.value))}
             style={{ ...dateSelectStyle, padding: '8px 14px' }}
           >
             <option value={4}>4</option>
@@ -731,122 +905,80 @@ function WeeklyAnalyticsView({ type, onTypeChange, weeks, onWeeksChange, data, l
           </select>
         </label>
 
+        <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
+          Неделя:
+          <select
+            value={selectedWeekIdx}
+            onChange={(e) => setSelectedWeekIdx(Number(e.target.value))}
+            style={{ ...dateSelectStyle, padding: '8px 14px', minWidth: 260 }}
+            disabled={weeksList.length === 0}
+          >
+            {weeksList.length === 0 && <option value={0}>Нет данных</option>}
+            {weeksList.map((w, i) => (
+              <option key={`${w.year}-${w.weekNumber}`} value={i}>
+                W{w.weekNumber} {w.year} ({formatDateShort(w.weekStart)} – {formatDateShort(w.weekEnd)})
+              </option>
+            ))}
+          </select>
+        </label>
+
         <div style={{ marginLeft: 'auto', fontSize: '0.85rem', color: '#64748B', fontWeight: 600 }}>
           Недели ISO (Пн–Вс). Дни с DRR = 0% исключены.
         </div>
       </div>
 
-      {loading ? (
+      {/* Карточка недели */}
+      {loadingWeeks ? (
         <div style={{ textAlign: 'center', padding: 60, color: '#64748B', fontSize: '1.2rem' }}>
           Загрузка...
         </div>
-      ) : chartData.length === 0 ? (
+      ) : !selectedWeek ? (
         <div style={{ textAlign: 'center', padding: 60, color: '#94A3B8', fontSize: '1.2rem' }}>
           Нет данных за выбранный период
         </div>
       ) : (
-        <>
-          {/* График */}
-          <div style={reportBlockStyle}>
-            <div style={reportTitleStyle}>
-              <span>{typeLabels[type]} — средний DRR по неделям</span>
-            </div>
-            <ResponsiveContainer width="100%" height={400}>
-              <BarChart data={chartData} margin={{ top: 40, right: 40, left: 20, bottom: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="name" tick={{ fontSize: 13, fontWeight: 700, fill: '#1E293B' }} />
-                <YAxis domain={[0, 100]} tick={{ fontSize: 12, fill: '#475569' }} />
-                <ReferenceLine y={80} stroke="#EF4444" strokeDasharray="5 5">
-                  <Label value="Target 80%" position="right" style={{ fill: '#EF4444', fontSize: 12, fontWeight: 700 }} />
-                </ReferenceLine>
-                <Tooltip
-                  contentStyle={{ borderRadius: 8, fontSize: 13 }}
-                  formatter={(value, name, props) => {
-                    const d = props.payload;
-                    if (value === null || value === undefined) return ['—', 'Средний DRR'];
-                    return [
-                      `${value}%`,
-                      `Средний DRR (${d.validDays} из ${d.totalDays} дн.)`,
-                    ];
-                  }}
-                  labelFormatter={(label, payload) => {
-                    const d = payload?.[0]?.payload;
-                    if (!d) return label;
-                    return `${label}  (${d.weekStart} – ${d.weekEnd})`;
-                  }}
-                />
-                <Bar dataKey="avgDrr" fill="#2563EB" radius={[6, 6, 0, 0]} barSize={40} minPointSize={3}>
-                  <LabelList
-                    dataKey="avgDrr"
-                    position="top"
-                    formatter={(v) => v !== null && v !== undefined ? `${v}%` : ''}
-                    style={{ fill: '#1E293B', fontSize: 13, fontWeight: 700 }}
-                  />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+        <div style={reportBlockStyle}>
+          <div style={reportTitleStyle}>
+            <span>
+              {typeTitle[type]} — W{selectedWeek.weekNumber} {selectedWeek.year}
+            </span>
+            <span style={{ fontSize: '0.9rem', color: '#64748B', fontWeight: 600 }}>
+              {selectedWeek.weekStart} — {selectedWeek.weekEnd}
+              {' '}· учтено {selectedWeek.validDays} / {selectedWeek.totalDays} дн.
+            </span>
           </div>
 
-          {/* Таблица */}
-          <div style={reportBlockStyle}>
-            <div style={reportTitleStyle}>
-              <span>Детализация по неделям</span>
-            </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                <thead>
-                  <tr style={{ background: '#F8FAFC' }}>
-                    <th style={thStyleSmall}>Неделя</th>
-                    <th style={thStyleSmall}>Период (Пн – Вс)</th>
-                    <th style={{ ...thStyleSmall, textAlign: 'center' }}>Ср. DRR</th>
-                    <th style={{ ...thStyleSmall, textAlign: 'center' }}>Мин</th>
-                    <th style={{ ...thStyleSmall, textAlign: 'center' }}>Макс</th>
-                    <th style={{ ...thStyleSmall, textAlign: 'center' }}>Учтено дней</th>
-                    <th style={{ ...thStyleSmall, textAlign: 'center' }}>Всего VIN</th>
-                    <th style={{ ...thStyleSmall, textAlign: 'center' }}>OK</th>
-                    <th style={{ ...thStyleSmall, textAlign: 'center' }}>NOK</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...chartData].reverse().map((w, i) => (
-                    <tr key={i} style={{ background: i % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
-                      <td style={{ ...tdStyleSmall, fontWeight: 700 }}>
-                        W{w.weekNumber} {w.year}
-                      </td>
-                      <td style={tdStyleSmall}>{w.weekStart} — {w.weekEnd}</td>
-                      <td style={{
-                        ...tdStyleSmall,
-                        textAlign: 'center',
-                        fontWeight: 700,
-                        color: w.avgDrr !== null && w.avgDrr >= 80 ? '#059669' : '#DC2626',
-                      }}>
-                        {w.avgDrr !== null ? `${w.avgDrr}%` : '—'}
-                      </td>
-                      <td style={{ ...tdStyleSmall, textAlign: 'center' }}>
-                        {w.minDrr !== null ? `${w.minDrr}%` : '—'}
-                      </td>
-                      <td style={{ ...tdStyleSmall, textAlign: 'center' }}>
-                        {w.maxDrr !== null ? `${w.maxDrr}%` : '—'}
-                      </td>
-                      <td style={{ ...tdStyleSmall, textAlign: 'center' }}>
-                        <span title="Учтено дней с DRR > 0 / всего дней в неделе">
-                          {w.validDays} / {w.totalDays}
-                        </span>
-                      </td>
-                      <td style={{ ...tdStyleSmall, textAlign: 'center' }}>{w.totalVins}</td>
-                      <td style={{ ...tdStyleSmall, textAlign: 'center', color: '#059669', fontWeight: 600 }}>
-                        {w.closedVins}
-                      </td>
-                      <td style={{ ...tdStyleSmall, textAlign: 'center', color: '#DC2626', fontWeight: 600 }}>
-                        {w.nokVins}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            <PieBlock
+              drrPercent={selectedWeek.avgDrr || 0}
+              okVins={selectedWeek.closedVins || 0}
+              totalVins={selectedWeek.totalVins || 0}
+            />
+            <div style={{
+              flex: 1,
+              minWidth: 0,
+              height: 320,
+              overflowY: 'auto',
+              border: '1px solid #F1F5F9',
+              borderRadius: 8,
+            }}>
+              {loadingTop ? (
+                <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>
+                  Загрузка топ дефектов...
+                </p>
+              ) : (
+                <DefectsTable
+                  topDefects={topDefects}
+                  markKeyPrefix={`weekly_${type}_W${selectedWeek.weekNumber}_${selectedWeek.year}`}
+                  marks={{}}
+                  onToggleMark={null}
+                />
+              )}
             </div>
           </div>
-        </>
+
+          <WeeklyPhotosBlock photos={photos} loading={loadingPhotos} />
+        </div>
       )}
     </div>
   );
@@ -854,10 +986,8 @@ function WeeklyAnalyticsView({ type, onTypeChange, weeks, onWeeksChange, data, l
 
 /* ===================== ГЛАВНЫЙ КОМПОНЕНТ ===================== */
 export default function DrrShiftDashboardPage() {
-  // ---- страница ----
   const [pageMode, setPageMode] = useState('shift'); // 'shift' | 'weekly'
 
-  // ---- сменный режим ----
   const [periodMode, setPeriodMode] = useState('live');
   const [selectedDate, setSelectedDate] = useState(todayMoscowStr());
   const [viewType, setViewType] = useState('shifts');
@@ -869,12 +999,6 @@ export default function DrrShiftDashboardPage() {
 
   const [marks, setMarks] = useState({});
   const [photos, setPhotos] = useState({});
-
-  // ---- недельная аналитика ----
-  const [weeklyType, setWeeklyType] = useState('cp7');
-  const [weeklyWeeks, setWeeklyWeeks] = useState(8);
-  const [weeklyData, setWeeklyData] = useState(null);
-  const [weeklyLoading, setWeeklyLoading] = useState(false);
 
   // ---------- МЕТКИ ----------
   const loadMarks = async (baseDate) => {
@@ -981,27 +1105,6 @@ export default function DrrShiftDashboardPage() {
     return () => clearInterval(id);
   }, [periodMode, viewType, pageMode]);
 
-  // ---------- ДАННЫЕ НЕДЕЛЬНОЙ АНАЛИТИКИ ----------
-  const loadWeeklyAnalytics = async () => {
-    setWeeklyLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/drr-weekly-analytics/${weeklyType}?weeks=${weeklyWeeks}`);
-      if (!res.ok) throw new Error('Ошибка загрузки недельной аналитики');
-      const json = await res.json();
-      setWeeklyData(json);
-    } catch (err) {
-      console.error('Ошибка недельной аналитики:', err.message);
-      setWeeklyData(null);
-    } finally {
-      setWeeklyLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (pageMode !== 'weekly') return;
-    loadWeeklyAnalytics();
-  }, [pageMode, weeklyType, weeklyWeeks]);
-
   const dateOptions = [];
   for (let i = 0; i < 14; i++) {
     const d = new Date(getMoscowTime());
@@ -1017,7 +1120,6 @@ export default function DrrShiftDashboardPage() {
         <h1 style={titleStyle}>DRR Shift Dashboard</h1>
 
         <div style={filterGroupStyle}>
-          {/* Переключатель режима страницы */}
           <button
             style={filterButtonStyle(pageMode === 'shift', '#2563EB')}
             onClick={() => setPageMode('shift')}
@@ -1067,19 +1169,8 @@ export default function DrrShiftDashboardPage() {
         </div>
       </div>
 
-      {/* ========== НЕДЕЛЬНАЯ АНАЛИТИКА ========== */}
-      {pageMode === 'weekly' && (
-        <WeeklyAnalyticsView
-          type={weeklyType}
-          onTypeChange={setWeeklyType}
-          weeks={weeklyWeeks}
-          onWeeksChange={setWeeklyWeeks}
-          data={weeklyData}
-          loading={weeklyLoading}
-        />
-      )}
+      {pageMode === 'weekly' && <WeeklyAnalyticsView />}
 
-      {/* ========== СМЕННЫЙ ВИД ========== */}
       {pageMode === 'shift' && (
         <>
           {loading ? (

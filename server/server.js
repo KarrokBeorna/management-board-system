@@ -14563,6 +14563,43 @@ app.get('/api/drr-weekly-analytics/:type', async (req, res) => {
   }
 });
 
+// ================== DRR WEEKLY PHOTOS ==================
+// Возвращает последние N фото из drr_shift_photos за диапазон дат (неделя) по конкретному чекпоинту.
+// Формат photo_key: YYYY-MM-DD_<letter>_<checkpoint>, например 2026-10-05_A_cp7
+app.get('/api/drr-weekly-photos', async (req, res) => {
+  try {
+    const { checkpoint, weekStart, weekEnd, limit = 10 } = req.query;
+    if (!checkpoint || !weekStart || !weekEnd) {
+      return res.status(400).json({ error: 'checkpoint, weekStart, weekEnd обязательны' });
+    }
+    const lim = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50);
+
+    const [rows] = await notesPool.query(`
+      SELECT id, photo_key, filename, mime, uploaded_at
+      FROM drr_shift_photos
+      WHERE LEFT(photo_key, 10) BETWEEN ? AND ?
+        AND SUBSTRING_INDEX(photo_key, '_', -1) = ?
+      ORDER BY uploaded_at DESC
+      LIMIT ?
+    `, [weekStart, weekEnd, checkpoint, lim]);
+
+    res.json({
+      photos: rows.map(r => ({
+        id: r.id,
+        url: `/api/drr-shift-photos/file/${r.filename}`,
+        mime: r.mime,
+        uploadedAt: r.uploaded_at,
+        photoKey: r.photo_key,
+      })),
+      total: rows.length,
+      limit: lim,
+    });
+  } catch (err) {
+    console.error('Ошибка /api/drr-weekly-photos:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 40000;
 
 async function startServer() {
