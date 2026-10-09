@@ -85,8 +85,7 @@ const tabStyle = (active) => ({
 // ============================================================
 //  КОНСТАНТЫ ДЛЯ НОВОГО ОТЧЁТА
 // ============================================================
-// ВАЖНО: TYPE='18' — технический дубликат '03' (см. аудит).
-// В топ берём ТОЛЬКО '03'.
+// ВАЖНО: TYPE='18' — технический дубликат '03'. В топ берём ТОЛЬКО '03'.
 const ELEC_CATEGORY_TO_TYPE = {
   'Прошивка EOL NG': '03',
   'Прошивка ERA NG': '26',
@@ -188,11 +187,10 @@ function MultiSelect({ options, selected, onChange, placeholder, width = 120 }) 
 //  ОСНОВНОЙ КОМПОНЕНТ
 // ============================================================
 export default function DefectElectronicsTopPage() {
-  // ─── Общий таб ───
-  const [activeTab, setActiveTab] = useState('elec'); // 'elec' | 'top'
+  const [activeTab, setActiveTab] = useState('elec');
 
   // ============================================================
-  //  СТАРЫЙ ОТЧЁТ (без изменений логики)
+  //  СТАРЫЙ ОТЧЁТ
   // ============================================================
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -229,11 +227,8 @@ export default function DefectElectronicsTopPage() {
   const [elecVinData, setElecVinData] = useState([]);
   const [elecVinLoading, setElecVinLoading] = useState(false);
 
-  // ─── Общий тренд-модал для обоих табов ───
-  // (использует уже объявленные: trendModalOpen, trendData, trendLoading, trendMpp, trendMetric)
-
   // ============================================================
-  //  ИНИЦИАЛИЗАЦИЯ ДАТ (вчера)
+  //  ДАТЫ (вчера)
   // ============================================================
   useEffect(() => {
     const yesterday = new Date();
@@ -246,7 +241,7 @@ export default function DefectElectronicsTopPage() {
   }, []);
 
   // ============================================================
-  //  ЗАГРУЗКА СТАРОГО ОТЧЁТА
+  //  СТАРЫЙ ОТЧЁТ — загрузка
   // ============================================================
   useEffect(() => {
     if (activeTab === 'top' && dateFrom && dateTo) loadData();
@@ -268,8 +263,7 @@ export default function DefectElectronicsTopPage() {
       });
       const res = await fetch(`${API_BASE}/api/drr-electronics-top-defects?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки данных');
-      const json = await res.json();
-      setData(json);
+      setData(await res.json());
     } catch (err) {
       alert(err.message);
     } finally {
@@ -294,13 +288,11 @@ export default function DefectElectronicsTopPage() {
 
       const vinsRes = await fetch(`${API_BASE}/api/drr-electronics-vins?${params.toString()}`);
       if (!vinsRes.ok) throw new Error('Ошибка загрузки VIN');
-      const vinsJson = await vinsRes.json();
-      setVinData(vinsJson);
+      setVinData(await vinsRes.json());
 
       const topMppRes = await fetch(`${API_BASE}/api/drr-electronics-vins-top-mpp?${params.toString()}`);
       if (!topMppRes.ok) throw new Error('Ошибка загрузки топ MPP');
-      const topMppJson = await topMppRes.json();
-      setVinTopMpps(topMppJson);
+      setVinTopMpps(await topMppRes.json());
     } catch (err) {
       alert(err.message);
       setVinData([]);
@@ -323,8 +315,7 @@ export default function DefectElectronicsTopPage() {
 
   const exportVins = () => {
     if (vinData.length === 0) return;
-    const exportData = vinData.map(v => ({ VIN: v.VIN, Модель: v.MODEL }));
-    const ws = XLSX.utils.json_to_sheet(exportData);
+    const ws = XLSX.utils.json_to_sheet(vinData.map(v => ({ VIN: v.VIN, Модель: v.MODEL })));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'VINs');
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
@@ -343,8 +334,7 @@ export default function DefectElectronicsTopPage() {
         'Кол-во дефектов': row.DEFECT_COUNT,
         'DPU per 1000': row.DPU,
       }));
-      const wsSummary = XLSX.utils.json_to_sheet(summary);
-      XLSX.utils.book_append_sheet(wb, wsSummary, 'Топ MPP');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Топ MPP');
 
       for (let i = 0; i < data.length; i++) {
         const row = data[i];
@@ -352,16 +342,18 @@ export default function DefectElectronicsTopPage() {
           partName: row.PART_NAME,
           problemType: row.PROBLEM_TYPE || '',
           model: row.MODEL,
-          dateFrom,
-          dateTo,
+          dateFrom, dateTo,
         });
 
         const vinsRes = await fetch(`${API_BASE}/api/drr-electronics-vins?${params.toString()}`);
         if (vinsRes.ok) {
           const vins = await vinsRes.json();
           if (vins.length > 0) {
-            const wsVins = XLSX.utils.json_to_sheet(vins.map(v => ({ VIN: v.VIN, Модель: v.MODEL })));
-            XLSX.utils.book_append_sheet(wb, wsVins, `VIN_${i + 1}_${row.MPP.substring(0, 20)}`);
+            XLSX.utils.book_append_sheet(
+              wb,
+              XLSX.utils.json_to_sheet(vins.map(v => ({ VIN: v.VIN, Модель: v.MODEL }))),
+              `VIN_${i + 1}_${row.MPP.substring(0, 20)}`
+            );
           }
         }
 
@@ -369,13 +361,16 @@ export default function DefectElectronicsTopPage() {
         if (topMppRes.ok) {
           const topMpps = await topMppRes.json();
           if (topMpps.length > 0) {
-            const wsTop = XLSX.utils.json_to_sheet(topMpps.map(m => ({
-              MPP: m.MPP,
-              Модель: m.MODEL,
-              'Кол-во': m.DEFECT_COUNT,
-              'Онлайн/Оффлайн': m.IS_OFFLINE,
-            })));
-            XLSX.utils.book_append_sheet(wb, wsTop, `TopMPP_${i + 1}_${row.MPP.substring(0, 15)}`);
+            XLSX.utils.book_append_sheet(
+              wb,
+              XLSX.utils.json_to_sheet(topMpps.map(m => ({
+                MPP: m.MPP,
+                Модель: m.MODEL,
+                'Кол-во': m.DEFECT_COUNT,
+                'Онлайн/Оффлайн': m.IS_OFFLINE,
+              }))),
+              `TopMPP_${i + 1}_${row.MPP.substring(0, 15)}`
+            );
           }
         }
       }
@@ -406,11 +401,8 @@ export default function DefectElectronicsTopPage() {
       };
 
       const [monthData, weekData, dayData] = await Promise.all([
-        fetchTrend('month'),
-        fetchTrend('week'),
-        fetchTrend('day'),
+        fetchTrend('month'), fetchTrend('week'), fetchTrend('day'),
       ]);
-
       setTrendData({ month: monthData, week: weekData, day: dayData });
     } catch (err) {
       alert('Ошибка загрузки тренда: ' + err.message);
@@ -440,11 +432,9 @@ export default function DefectElectronicsTopPage() {
     setShowVinDefectsModal(true);
     setVinDefectsLoading(true);
     try {
-      const params = new URLSearchParams({ vin });
-      const res = await fetch(`${API_BASE}/api/drr-electronics-vin-defects?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/api/drr-electronics-vin-defects?vin=${encodeURIComponent(vin)}`);
       if (!res.ok) throw new Error('Ошибка загрузки дефектов VIN');
-      const json = await res.json();
-      setVinDefectsData(json);
+      setVinDefectsData(await res.json());
     } catch (err) {
       alert(err.message);
       setVinDefectsData([]);
@@ -454,7 +444,7 @@ export default function DefectElectronicsTopPage() {
   };
 
   // ============================================================
-  //  ELE TOP DEFECT — загрузка данных
+  //  ELE TOP DEFECT — загрузка
   // ============================================================
   useEffect(() => {
     if (activeTab === 'elec' && elecDateFrom && elecDateTo) loadElecData();
@@ -498,8 +488,7 @@ export default function DefectElectronicsTopPage() {
         dateFrom: elecDateFrom,
         dateTo: elecDateTo,
       });
-      if (typeCode) params.set('typeCode', typeCode);
-      else params.set('typeCode', 'ALL');
+      params.set('typeCode', typeCode || 'ALL');
 
       const res = await fetch(`${API_BASE}/api/drr-electronics-elec-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки VIN');
@@ -536,9 +525,7 @@ export default function DefectElectronicsTopPage() {
       };
 
       const [monthData, weekData, dayData] = await Promise.all([
-        fetchTrend('month'),
-        fetchTrend('week'),
-        fetchTrend('day'),
+        fetchTrend('month'), fetchTrend('week'), fetchTrend('day'),
       ]);
       setTrendData({ month: monthData, week: weekData, day: dayData });
     } catch (err) {
@@ -552,12 +539,12 @@ export default function DefectElectronicsTopPage() {
     if (!elecData.length) return;
     const wb = XLSX.utils.book_new();
 
-    // Основная таблица
     const ws = XLSX.utils.json_to_sheet(elecData.map(r => ({
       Категория: r.CATEGORY,
       Модель: r.MODEL,
       'Дефектов NG': r.DEFECT_COUNT,
-      'Уник. VIN': r.VIN_COUNT,
+      'VIN с NG': r.VIN_COUNT,
+      'VIN всего': r.VIN_TOTAL_COUNT,
       'OK': r.OK_COUNT,
       'Всего проверок': r.TOTAL_COUNT,
       '% NG': r.NG_SHARE,
@@ -565,7 +552,6 @@ export default function DefectElectronicsTopPage() {
     })));
     XLSX.utils.book_append_sheet(wb, ws, 'Elec top defect');
 
-    // Сводка NG/OK по категориям
     const summary = ELEC_ALL_CATEGORIES.map(cat => {
       const rows = elecData.filter(r => r.CATEGORY === cat);
       const ng = rows.reduce((s, r) => s + r.DEFECT_COUNT, 0);
@@ -579,15 +565,14 @@ export default function DefectElectronicsTopPage() {
         '% NG': total > 0 ? Number((ng * 100 / total).toFixed(1)) : 0,
       };
     });
-    const wsSum = XLSX.utils.json_to_sheet(summary);
-    XLSX.utils.book_append_sheet(wb, wsSum, 'Сводка NG-OK');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Сводка NG-OK');
 
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     saveAs(new Blob([buf], { type: 'application/octet-stream' }), 'Elec_top_defect.xlsx');
   };
 
   // ============================================================
-  //  ГРУППИРОВКА ДАННЫХ ELE TOP DEFECT
+  //  ГРУППИРОВКА ДАННЫХ
   // ============================================================
   const elecGrouped = [];
   const seenCats = new Set();
@@ -599,7 +584,6 @@ export default function DefectElectronicsTopPage() {
     elecGrouped[elecGrouped.length - 1].rows.push(r);
   });
 
-  // Сводка NG/OK по категориям (для графика)
   const elecOkNgSummary = ELEC_ALL_CATEGORIES.map(cat => {
     const rows = elecData.filter(r => r.CATEGORY === cat);
     const ng = rows.reduce((s, r) => s + r.DEFECT_COUNT, 0);
@@ -615,11 +599,7 @@ export default function DefectElectronicsTopPage() {
   });
 
   const elecTotals = elecOkNgSummary.reduce(
-    (acc, c) => ({
-      NG: acc.NG + c.NG,
-      OK: acc.OK + c.OK,
-      total: acc.total + c.total,
-    }),
+    (acc, c) => ({ NG: acc.NG + c.NG, OK: acc.OK + c.OK, total: acc.total + c.total }),
     { NG: 0, OK: 0, total: 0 }
   );
   const elecTotalNgShare = elecTotals.total > 0
@@ -651,7 +631,6 @@ export default function DefectElectronicsTopPage() {
       {activeTab === 'elec' && (
         <>
           <div style={cardStyle}>
-            {/* Фильтры */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center', marginBottom: 20 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, whiteSpace: 'nowrap' }}>
                 Начало:
@@ -699,30 +678,21 @@ export default function DefectElectronicsTopPage() {
             </h2>
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
-              <div style={{
-                flex: '1 1 220px', padding: 16, borderRadius: 12,
-                background: '#FEF2F2', border: '1px solid #FECACA',
-              }}>
+              <div style={{ flex: '1 1 220px', padding: 16, borderRadius: 12, background: '#FEF2F2', border: '1px solid #FECACA' }}>
                 <div style={{ fontSize: 13, color: '#991B1B', fontWeight: 600, marginBottom: 4 }}>Дефекты NG (всего)</div>
                 <div style={{ fontSize: 26, fontWeight: 800, color: '#DC2626' }}>{elecTotals.NG.toLocaleString()}</div>
               </div>
-              <div style={{
-                flex: '1 1 220px', padding: 16, borderRadius: 12,
-                background: '#F0FDF4', border: '1px solid #BBF7D0',
-              }}>
+              <div style={{ flex: '1 1 220px', padding: 16, borderRadius: 12, background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
                 <div style={{ fontSize: 13, color: '#166534', fontWeight: 600, marginBottom: 4 }}>Успешные OK (всего)</div>
                 <div style={{ fontSize: 26, fontWeight: 800, color: '#16A34A' }}>{elecTotals.OK.toLocaleString()}</div>
               </div>
-              <div style={{
-                flex: '1 1 220px', padding: 16, borderRadius: 12,
-                background: '#FEF3C7', border: '1px solid #FDE68A',
-              }}>
+              <div style={{ flex: '1 1 220px', padding: 16, borderRadius: 12, background: '#FEF3C7', border: '1px solid #FDE68A' }}>
                 <div style={{ fontSize: 13, color: '#92400E', fontWeight: 600, marginBottom: 4 }}>Общий % NG</div>
                 <div style={{ fontSize: 26, fontWeight: 800, color: '#D97706' }}>{elecTotalNgShare}%</div>
               </div>
             </div>
 
-            {/* График — столбчатый stacked bar по категориям */}
+            {/* Stacked bar по категориям */}
             <ResponsiveContainer width="100%" height={260}>
               <BarChart
                 layout="vertical"
@@ -752,31 +722,69 @@ export default function DefectElectronicsTopPage() {
               </BarChart>
             </ResponsiveContainer>
 
-            {/* Доп. круговая — общая доля */}
-            <div style={{ display: 'flex', gap: 24, marginTop: 24, flexWrap: 'wrap', alignItems: 'center' }}>
-              <div style={{ width: 220, height: 220 }}>
+            {/* Donut NG/OK (стиль DRR CP7) + таблица-легенда */}
+            <div style={{ display: 'flex', gap: 32, marginTop: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ position: 'relative', width: 320, height: 320, flexShrink: 0 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={[
-                        { name: 'NG', value: elecTotals.NG },
                         { name: 'OK', value: elecTotals.OK },
+                        { name: 'NG', value: elecTotals.NG },
                       ]}
                       dataKey="value"
                       nameKey="name"
-                      cx="50%" cy="50%"
-                      outerRadius={80}
-                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
-                      labelLine={false}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius="72%"
+                      outerRadius="98%"
+                      paddingAngle={3}
+                      stroke="#FFFFFF"
+                      strokeWidth={4}
+                      startAngle={90}
+                      endAngle={-270}
                     >
-                      <Cell fill="#EF4444" />
                       <Cell fill="#10B981" />
+                      <Cell fill="#EF4444" />
                     </Pie>
-                    <Tooltip formatter={(v) => Number(v).toLocaleString()} />
+                    <Tooltip
+                      formatter={(value, name) => [
+                        Number(value).toLocaleString(),
+                        name === 'NG' ? 'NG (дефект)' : 'OK (успех)',
+                      ]}
+                      contentStyle={{ fontSize: 14, borderRadius: 12, border: '1px solid #E5E7EB' }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
+
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  textAlign: 'center',
+                  pointerEvents: 'none',
+                  width: '60%',
+                }}>
+                  <div style={{
+                    fontSize: 13, fontWeight: 700, color: '#64748B',
+                    letterSpacing: '0.5px', textTransform: 'uppercase', marginBottom: 4,
+                  }}>
+                    % NG
+                  </div>
+                  <div style={{
+                    fontSize: 52, fontWeight: 900, lineHeight: 1,
+                    color: elecTotalNgShare > 20 ? '#DC2626' : elecTotalNgShare > 5 ? '#D97706' : '#059669',
+                  }}>
+                    {elecTotalNgShare}%
+                  </div>
+                  <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 6, fontWeight: 600 }}>
+                    всего {elecTotals.total.toLocaleString()}
+                  </div>
+                </div>
               </div>
-              <div style={{ flex: '1 1 300px', minWidth: 260 }}>
+
+              <div style={{ flex: '1 1 320px', minWidth: 300 }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                   <thead>
                     <tr style={{ backgroundColor: '#F9FAFB' }}>
@@ -806,11 +814,22 @@ export default function DefectElectronicsTopPage() {
                     ))}
                   </tbody>
                 </table>
+
+                <div style={{ display: 'flex', gap: 20, marginTop: 16, fontSize: 13, color: '#475569' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: 3, background: '#10B981' }} />
+                    OK — {elecTotals.OK.toLocaleString()}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: 3, background: '#EF4444' }} />
+                    NG — {elecTotals.NG.toLocaleString()}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Блоки таблиц по категориям */}
+          {/* Таблицы по категориям */}
           <div style={cardStyle}>
             {elecLoading && <p style={{ textAlign: 'center', color: '#6B7280' }}>Загрузка...</p>}
             {!elecLoading && elecGrouped.length === 0 && (
@@ -838,7 +857,8 @@ export default function DefectElectronicsTopPage() {
                       <tr style={{ backgroundColor: '#F9FAFB' }}>
                         <th style={thStyle}>Модель</th>
                         <th style={{ ...thStyle, textAlign: 'center' }}>Дефектов NG</th>
-                        <th style={{ ...thStyle, textAlign: 'center' }}>Уник. VIN</th>
+                        <th style={{ ...thStyle, textAlign: 'center' }}>VIN с NG</th>
+                        <th style={{ ...thStyle, textAlign: 'center' }}>VIN всего</th>
                         <th style={{ ...thStyle, textAlign: 'center' }}>OK</th>
                         <th style={{ ...thStyle, textAlign: 'center' }}>% NG</th>
                         <th style={{ ...thStyle, textAlign: 'center' }}>DPU per 1000</th>
@@ -856,7 +876,8 @@ export default function DefectElectronicsTopPage() {
                             <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
                               <td style={{ ...tdStyle, fontWeight: 600 }}>{row.MODEL}</td>
                               <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#DC2626' }}>{row.DEFECT_COUNT}</td>
-                              <td style={{ ...tdStyle, textAlign: 'center' }}>{row.VIN_COUNT}</td>
+                              <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600 }}>{row.VIN_COUNT}</td>
+                              <td style={{ ...tdStyle, textAlign: 'center', color: '#6B7280' }}>{row.VIN_TOTAL_COUNT}</td>
                               <td style={{ ...tdStyle, textAlign: 'center', color: '#16A34A' }}>{row.OK_COUNT}</td>
                               <td style={{
                                 ...tdStyle, textAlign: 'center', fontWeight: 700,
@@ -881,14 +902,14 @@ export default function DefectElectronicsTopPage() {
                             </tr>
                             {elecExpandedKey === key && (
                               <tr>
-                                <td colSpan={7} style={{ padding: 0 }}>
+                                <td colSpan={8} style={{ padding: 0 }}>
                                   <div style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8, margin: '8px 0' }}>
                                     {elecVinLoading ? (
                                       <p style={{ margin: 0 }}>Загрузка VIN...</p>
                                     ) : (
                                       <>
                                         <div style={{ fontWeight: 600, marginBottom: 8 }}>
-                                          VIN ({elecVinData.length} шт.)
+                                          VIN с NG ({elecVinData.length} шт.)
                                         </div>
                                         <div style={{ maxHeight: 300, overflowY: 'auto', background: '#FFF', borderRadius: 8 }}>
                                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -909,7 +930,11 @@ export default function DefectElectronicsTopPage() {
                                                 </tr>
                                               ))}
                                               {!elecVinData.length && (
-                                                <tr><td colSpan={2} style={{ ...tdStyle, textAlign: 'center', color: '#6B7280' }}>Нет VIN</td></tr>
+                                                <tr>
+                                                  <td colSpan={2} style={{ ...tdStyle, textAlign: 'center', color: '#6B7280' }}>
+                                                    Нет VIN с NG
+                                                  </td>
+                                                </tr>
                                               )}
                                             </tbody>
                                           </table>
@@ -933,7 +958,7 @@ export default function DefectElectronicsTopPage() {
       )}
 
       {/* ============================================================
-          ТАБ 2: СТАРЫЙ ТОП ДЕФЕКТОВ ЭЛЕКТРОНИКИ
+          ТАБ 2: СТАРЫЙ ТОП ДЕФЕКТОВ
       ============================================================ */}
       {activeTab === 'top' && (
         <div style={cardStyle}>

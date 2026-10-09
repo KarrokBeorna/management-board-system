@@ -8996,8 +8996,8 @@ app.get('/api/drr-electronics-elec-vins', async (req, res) => {
       WHERE e.\`TYPE\` IN (${typePlaceholders})
         AND e.RESULT IN ('NG','NOK')
         AND wo.MODEL = ?
-        AND DATE(e.CREATION_TIME) BETWEEN ? AND ?
-    `, [...types, model, dateFrom, dateTo]);
+        AND e.CREATION_TIME BETWEEN ? AND ?
+    `, [...types, model, `${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
     res.json(rows);
   } catch (err) {
     console.error('Ошибка drr-electronics-elec-vins:', err);
@@ -9270,16 +9270,9 @@ app.get('/api/drr-electronics-defect-trend', async (req, res) => {
 app.get('/api/drr-electronics-top-elec-defects', async (req, res) => {
   try {
     const { dateFrom, dateTo, models, categories } = req.query;
-    if (!dateFrom || !dateTo) {
-      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
-    }
+    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
 
-    // ВАЖНО: TYPE='18' — дубликат '03'. Берём только '03'.
-    const TYPE_TO_CATEGORY = {
-      '03': 'Прошивка EOL NG',
-      '26': 'Прошивка ERA NG',
-      '17': 'Прошивка Запись/FLASH NG',
-    };
+    const TYPE_TO_CATEGORY = { '03': 'Прошивка EOL NG', '26': 'Прошивка ERA NG', '17': 'Прошивка Запись/FLASH NG' };
     const CATEGORY_TO_TYPES = {
       'Прошивка EOL NG': ['03'],
       'Прошивка ERA NG': ['26'],
@@ -9290,88 +9283,80 @@ app.get('/api/drr-electronics-top-elec-defects', async (req, res) => {
     const selectedCategories = (!categories || categories === 'ALL')
       ? ALL_CATEGORIES
       : categories.split(',').map(s => s.trim()).filter(c => CATEGORY_TO_TYPES[c]);
-
     const typesToQuery = selectedCategories.flatMap(c => CATEGORY_TO_TYPES[c]);
-    if (typesToQuery.length === 0) return res.json([]);
+    if (!typesToQuery.length) return res.json([]);
 
     const typePlaceholders = typesToQuery.map(() => '?').join(',');
-    const params = [
-      ...typesToQuery,
-      `${dateFrom} 00:00:00`,
-      `${dateTo} 23:59:59`,
-    ];
+    const params = [...typesToQuery, `${dateFrom} 00:00:00`, `${dateTo} 23:59:59`];
 
     let modelCondition = '';
     if (models && models !== 'ALL') {
       const modelList = models.split(',').map(s => s.trim()).filter(Boolean);
-      if (modelList.length > 0) {
+      if (modelList.length) {
         modelCondition = ` AND wo.MODEL IN (${modelList.map(() => '?').join(',')})`;
         params.push(...modelList);
       }
     }
 
+    // ── 1. Категорийная разбивка: MODEL × TYPE ──
     const [rows] = await pool.query(`
       SELECT
         wo.MODEL,
         e.\`TYPE\` AS TYPE_CODE,
         SUM(CASE WHEN e.RESULT IN ('NG','NOK') THEN 1 ELSE 0 END) AS NG_COUNT,
         SUM(CASE WHEN e.RESULT = 'OK' THEN 1 ELSE 0 END) AS OK_COUNT,
-        COUNT(DISTINCT CASE WHEN e.RESULT IN ('NG','NOK') THEN e.VIN END) AS VIN_COUNT
+        COUNT(DISTINCT CASE WHEN e.RESULT IN ('NG','NOK') THEN e.VIN END) AS VIN_NG_COUNT,
+        COUNT(DISTINCT e.VIN) AS VIN_TOTAL_COUNT
       FROM at_im_electrical_check_info e
       JOIN work_order wo ON wo.VIN = e.VIN
       WHERE e.\`TYPE\` IN (${typePlaceholders})
         AND e.CREATION_TIME BETWEEN ? AND ?
-        AND wo.MODEL IS NOT NULL
-        AND wo.MODEL <> '-'
+        AND wo.MODEL IS NOT NULL AND wo.MODEL <> '-'
         ${modelCondition}
       GROUP BY wo.MODEL, e.\`TYPE\`
     `, params);
 
-    // Группируем по категориям + считаем агрегат по моделям
-    const categoriesMap = new Map(); // category -> [{MODEL, DEFECT_COUNT, ...}]
-    const modelAggMap = new Map();   // model -> {DEFECT_COUNT, OK_COUNT, vinsSet}
+    // ── 2. Агрегат по моделям: DISTINCT VIN без разбивки по типу ──
+    const [aggRows] = await pool.query(`
+      SELECT
+        wo.MODEL,
+        SUM(CASE WHEN e.RESULT IN ('NG','NOK') THEN 1 ELSE 0 END) AS NG_COUNT,
+        SUM(CASE WHEN e.RESULT = 'OK' THEN 1 ELSE 0 END) AS OK_COUNT,
+        COUNT(DISTINCT CASE WHEN e.RESULT IN ('NG','NOK') THEN e.VIN END) AS VIN_NG_COUNT,
+        COUNT(DISTINCT e.VIN) AS VIN_TOTAL_COUNT
+      FROM at_im_electrical_check_info e
+      JOIN work_order wo ON wo.VIN = e.VIN
+      WHERE e.\`TYPE\` IN (${typePlaceholders})
+        AND e.CREATION_TIME BETWEEN ? AND ?
+        AND wo.MODEL IS NOT NULL AND wo.MODEL <> '-'
+        ${modelCondition}
+      GROUP BY wo.MODEL
+    `, params);
 
-    rows.forEach(r => {
-      const category = TYPE_TO_CATEGORY[r.TYPE_CODE];
-      if (!category || !selectedCategories.includes(category)) return;
-
+    const buildRow = (category, r) => {
       const ng = Number(r.NG_COUNT) || 0;
       const ok = Number(r.OK_COUNT) || 0;
-      const vins = Number(r.VIN_COUNT) || 0;
       const total = ng + ok;
-      const ngShare = total > 0 ? Number((ng * 100 / total).toFixed(1)) : 0;
-
-      if (!categoriesMap.has(category)) categoriesMap.set(category, []);
-      categoriesMap.get(category).push({
+      return {
         CATEGORY: category,
         MODEL: r.MODEL,
         DEFECT_COUNT: ng,
-        VIN_COUNT: vins,
+        VIN_COUNT: Number(r.VIN_NG_COUNT) || 0,          // VIN с NG
+        VIN_TOTAL_COUNT: Number(r.VIN_TOTAL_COUNT) || 0, // VIN всего
         OK_COUNT: ok,
         TOTAL_COUNT: total,
-        NG_SHARE: ngShare,
-      });
-
-      if (!modelAggMap.has(r.MODEL)) {
-        modelAggMap.set(r.MODEL, { DEFECT_COUNT: 0, OK_COUNT: 0, VIN_COUNT: 0 });
-      }
-      const agg = modelAggMap.get(r.MODEL);
-      agg.DEFECT_COUNT += ng;
-      agg.OK_COUNT += ok;
-      agg.VIN_COUNT += vins; // может пересекаться между категориями
-    });
-
-    const aggregateRows = Array.from(modelAggMap.entries()).map(([model, a]) => {
-      const total = a.DEFECT_COUNT + a.OK_COUNT;
-      return {
-        CATEGORY: 'Агрегат по моделям',
-        MODEL: model,
-        DEFECT_COUNT: a.DEFECT_COUNT,
-        VIN_COUNT: a.VIN_COUNT,
-        OK_COUNT: a.OK_COUNT,
-        TOTAL_COUNT: total,
-        NG_SHARE: total > 0 ? Number((a.DEFECT_COUNT * 100 / total).toFixed(1)) : 0,
+        NG_SHARE: total > 0 ? Number((ng * 100 / total).toFixed(1)) : 0,
       };
+    };
+
+    const aggregateRows = aggRows.map(r => buildRow('Агрегат по моделям', r));
+
+    const categoriesMap = new Map();
+    rows.forEach(r => {
+      const category = TYPE_TO_CATEGORY[r.TYPE_CODE];
+      if (!category || !selectedCategories.includes(category)) return;
+      if (!categoriesMap.has(category)) categoriesMap.set(category, []);
+      categoriesMap.get(category).push(buildRow(category, r));
     });
 
     const result = [...aggregateRows];
