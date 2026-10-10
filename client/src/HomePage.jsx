@@ -371,7 +371,9 @@ export default function HomePage() {
     { to: "/holds-sgp", imgSrc: HoldsSgpPage, caption: "Holds СГП", accentColor: "#EF4444" },
     { to: "http://10.27.195.16/reports/024", imgSrc: externalReportPreview, caption: "DRR по заводу", accentColor: "#EF4444" },
     { to: "/brigade-report", imgSrc: brigPreview, caption: "Brigade Report Service", accentColor: "#3B82F6" },
-    { to: "/vrt-report", imgSrc: vrtPreview, caption: "VRT Report Service", accentColor: "#7C3AED" }
+    { to: "/vrt-report", imgSrc: vrtPreview, caption: "VRT Report Service", accentColor: "#7C3AED" },
+    { to: "http://10.27.195.25:30000/defect-capture", imgSrc: defectCapturePreview, caption: "Defect Capture", accentColor: "#..." },
+    { to: "http://10.27.195.25:30000/line-defects-archive", imgSrc: lineDefectsArchivePreview, caption: "Line Defects Archive", accentColor: "#..." }
   ];
 
   // DRR-отчёты выносим в отдельную вкладку
