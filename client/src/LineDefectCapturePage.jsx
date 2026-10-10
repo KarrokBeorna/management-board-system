@@ -1,13 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
-import {
-  MultiFormatReader,
-  DecodeHintType,
-  BarcodeFormat,
-  BinaryBitmap,
-  HybridBinarizer,
-  RGBLuminanceSource,
-} from '@zxing/library';
 
 const API_BASE = '';
 const MAX_PHOTOS = 3;
@@ -94,10 +86,8 @@ const canUseLiveCamera = () => {
 };
 
 /* ============================================================
- * ДЕКОДЕР ШТРИХКОДА ИЗ ФОТО
- *   Генерируем варианты (повороты + предобработка) и кормим в ZXing.
+ * ДЕКОДЕР ШТРИХКОДА ИЗ ФОТО — только @zxing/browser
  * ============================================================ */
-const ROTATIONS = [90, 270, 0, 180]; // VIN-штрихкоды на машинах обычно вертикальные → сначала 90/270
 
 const rotateCanvas = (src, deg) => {
   if (deg === 0) return src;
@@ -109,29 +99,25 @@ const rotateCanvas = (src, deg) => {
     out.width = src.width;
     out.height = src.height;
   }
-  const ctx = out.getContext('2d', { willReadFrequently: true });
-  ctx.save();
+  const ctx = out.getContext('2d');
   ctx.translate(out.width / 2, out.height / 2);
   ctx.rotate((deg * Math.PI) / 180);
-  ctx.imageSmoothingEnabled = false;
   ctx.drawImage(src, -src.width / 2, -src.height / 2);
-  ctx.restore();
   return out;
 };
 
-const toGrayContrast = (src, k = 1.6) => {
+const toGrayContrast = (src, k = 1.8) => {
   const out = document.createElement('canvas');
   out.width = src.width;
   out.height = src.height;
-  const ctx = out.getContext('2d', { willReadFrequently: true });
+  const ctx = out.getContext('2d');
   ctx.drawImage(src, 0, 0);
   const im = ctx.getImageData(0, 0, out.width, out.height);
   const d = im.data;
   for (let i = 0; i < d.length; i += 4) {
     let g = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
     g = (g - 128) * k + 128;
-    g = g < 0 ? 0 : g > 255 ? 255 : g;
-    d[i] = d[i + 1] = d[i + 2] = g;
+    d[i] = d[i + 1] = d[i + 2] = g < 0 ? 0 : g > 255 ? 255 : g;
   }
   ctx.putImageData(im, 0, 0);
   return out;
@@ -141,7 +127,7 @@ const toBinarized = (src, threshold = 128) => {
   const out = document.createElement('canvas');
   out.width = src.width;
   out.height = src.height;
-  const ctx = out.getContext('2d', { willReadFrequently: true });
+  const ctx = out.getContext('2d');
   ctx.drawImage(src, 0, 0);
   const im = ctx.getImageData(0, 0, out.width, out.height);
   const d = im.data;
@@ -154,44 +140,6 @@ const toBinarized = (src, threshold = 128) => {
   return out;
 };
 
-// ZXing читатель с жёсткими hints (1D + TRY_HARDER)
-const makeZxingReader = () => {
-  const reader = new MultiFormatReader();
-  const hints = new Map();
-  hints.set(DecodeHintType.TRY_HARDER, true);
-  hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-    BarcodeFormat.CODE_128,
-    BarcodeFormat.CODE_39,
-    BarcodeFormat.CODE_93,
-    BarcodeFormat.ITF,
-    BarcodeFormat.CODABAR,
-  ]);
-  reader.setHints(hints);
-  return reader;
-};
-
-const decodeCanvasWithZxing = (reader, canvas) => {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const im = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const { width, height, data } = im;
-
-  // В ZXing JS RGBLuminanceSource принимает УЖЕ grayscale-массив (1 байт на пиксель)
-  const lum = new Uint8ClampedArray(width * height);
-  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-    lum[j] = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) | 0;
-  }
-
-  const source = new RGBLuminanceSource(lum, width, height);
-  const bitmap = new BinaryBitmap(new HybridBinarizer(source));
-  try {
-    const res = reader.decode(bitmap);
-    return res.getText();
-  } catch {
-    return null;
-  }
-};
-
-// Загрузка файла в <img>
 const fileToImage = (file) => new Promise((resolve, reject) => {
   const url = URL.createObjectURL(file);
   const img = new Image();
@@ -200,40 +148,68 @@ const fileToImage = (file) => new Promise((resolve, reject) => {
   img.src = url;
 });
 
-const decodeVinFromFile = async (file) => {
-  const img = await fileToImage(file);
+// Один проход: canvas → dataURL → BrowserMultiFormatReader.decodeFromImageUrl
+const tryDecodeCanvas = async (reader, canvas, label) => {
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+  try {
+    const result = await reader.decodeFromImageUrl(dataUrl);
+    if (result) {
+      const text = result.getText();
+      console.log(`[scanner] ✓ ${label} → "${text}"`);
+      return text;
+    }
+  } catch (e) {
+    // NotFoundException — норма, ZXing не нашёл код в этом варианте
+  }
+  return null;
+};
 
-  // Уменьшаем до 2000px по большей стороне (быстрее обработка, штрихкод читаем)
-  const maxDim = 2000;
+const decodeVinFromFile = async (file) => {
+  console.log('[scanner] start decode, file:', file.name, file.size, 'bytes');
+
+  const img = await fileToImage(file);
+  console.log('[scanner] image loaded:', img.width, 'x', img.height);
+
+  // Ужимаем до 2200px по большей стороне
+  const maxDim = 2200;
   const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
   const base = document.createElement('canvas');
   base.width = Math.round(img.width * scale);
   base.height = Math.round(img.height * scale);
-  const bctx = base.getContext('2d', { willReadFrequently: true });
-  bctx.drawImage(img, 0, 0, base.width, base.height);
+  base.getContext('2d').drawImage(img, 0, 0, base.width, base.height);
+  console.log('[scanner] resized to:', base.width, 'x', base.height);
 
-  // Предобработки
-  const variants = [];
-  variants.push({ name: 'raw', canvas: base });
-  variants.push({ name: 'gray', canvas: toGrayContrast(base, 1.6) });
-  variants.push({ name: 'bin96',  canvas: toBinarized(base, 96) });
-  variants.push({ name: 'bin128', canvas: toBinarized(base, 128) });
-  variants.push({ name: 'bin170', canvas: toBinarized(base, 170) });
+  // Варианты предобработки
+  const variants = [
+    { name: 'raw',    canvas: base },
+    { name: 'gray',   canvas: toGrayContrast(base, 1.8) },
+    { name: 'gray2',  canvas: toGrayContrast(base, 2.5) },
+    { name: 'bin110', canvas: toBinarized(base, 110) },
+    { name: 'bin140', canvas: toBinarized(base, 140) },
+    { name: 'bin170', canvas: toBinarized(base, 170) },
+  ];
 
-  const reader = makeZxingReader();
+  // Повороты: сначала 90/270 (вертикальные штрихкоды), потом 0/180
+  const rotations = [90, 270, 0, 180];
 
-  // Порядок: сначала 90° (вертикальные штрихкоды), потом остальные
+  // Reader с TRY_HARDER + ограничение на 1D-форматы
+  // Числа для POSSIBLE_FORMATS берём из BarcodeFormat zxing-js: CODE_128=5, CODE_39=3, CODE_93=4, ITF=7, CODABAR=2
+  const hints = new Map();
+  hints.set(2, [5, 3, 4, 7, 2]); // DecodeHintType.POSSIBLE_FORMATS
+  hints.set(3, true);            // DecodeHintType.TRY_HARDER
+  const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 100 });
+
+  let counter = 0;
   for (const v of variants) {
-    for (const deg of ROTATIONS) {
+    for (const deg of rotations) {
+      counter++;
       const rot = rotateCanvas(v.canvas, deg);
-      const text = decodeCanvasWithZxing(reader, rot);
-      if (text) {
-        // лог для отладки — уберите когда стабилизируется
-        console.log(`[scanner] ok via ${v.name}/${deg}°: "${text}"`);
-        return text;
-      }
+      const text = await tryDecodeCanvas(reader, rot, `${v.name}/${deg}° [#${counter}]`);
+      if (text) return text;
     }
   }
+
+  console.warn(`[scanner] all ${counter} variants failed`);
   throw new Error('not found');
 };
 
@@ -359,7 +335,7 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
   );
 }
 
-/* ================= Scanner (live + photo fallback с многоуровневым декодом) ================= */
+/* ================= Scanner (live + photo fallback) ================= */
 function BarcodeScannerModal({ onClose, onResult }) {
   const liveSupported = canUseLiveCamera();
 
@@ -451,6 +427,7 @@ function BarcodeScannerModal({ onClose, onResult }) {
 
   const handlePhotoFile = async (file) => {
     if (!file) return;
+    console.log('[scanner] photo picked:', file.name, file.type, file.size);
     setMode('processing');
     setPhotoError(null);
     try { setPreviewUrl(URL.createObjectURL(file)); } catch { setPreviewUrl(null); }
@@ -459,7 +436,7 @@ function BarcodeScannerModal({ onClose, onResult }) {
     try {
       const text = await decodeVinFromFile(file);
       const clean = sanitizeVin(text);
-      console.log(`[scanner] decoded in ${Date.now() - t0}ms:`, text);
+      console.log(`[scanner] total ${Date.now() - t0}ms, raw="${text}", clean="${clean}" (len=${clean.length})`);
       if (clean.length !== VIN_LEN) {
         setPhotoError(`Распознано «${text.slice(0, 28)}» — это не VIN. Переснимите, чтобы штрихкод был целиком в кадре.`);
         setMode('photo');
@@ -468,7 +445,7 @@ function BarcodeScannerModal({ onClose, onResult }) {
       beep(); vibrate(80);
       onResult(clean);
     } catch (e) {
-      console.warn('[scanner photo] decode failed:', e);
+      console.warn('[scanner photo] decode failed after', Date.now() - t0, 'ms:', e);
       setPhotoError('Не удалось распознать. Сфотографируйте ближе, штрихкод целиком в кадре, без бликов.');
       setMode('photo');
     }
@@ -897,6 +874,7 @@ export default function LineDefectCapturePage() {
           Фиксация дефекта
         </h1>
 
+        {/* Шаг 1 — VIN */}
         <div style={cardStyle}>
           <div style={stepLabel}>Шаг 1 — VIN</div>
           <input
@@ -973,6 +951,7 @@ export default function LineDefectCapturePage() {
           )}
         </div>
 
+        {/* Шаг 2 — Место занесения */}
         <div style={{ ...cardStyle, opacity: vinCheck.valid ? 1 : 0.5, pointerEvents: vinCheck.valid ? 'auto' : 'none' }}>
           <div style={stepLabel}>Шаг 2 — Место занесения</div>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 8 }}>
@@ -1004,6 +983,7 @@ export default function LineDefectCapturePage() {
           </div>
         </div>
 
+        {/* Шаг 3 — Part / Defect */}
         <div style={{ ...cardStyle, opacity: vinCheck.valid ? 1 : 0.5, pointerEvents: vinCheck.valid ? 'auto' : 'none' }}>
           <div style={stepLabel}>Шаг 3 — Что и где</div>
           <Autocomplete
@@ -1029,6 +1009,7 @@ export default function LineDefectCapturePage() {
           />
         </div>
 
+        {/* Шаг 4 — Фото и комментарий */}
         <div style={cardStyle}>
           <div style={stepLabel}>Шаг 4 — Фото и комментарий</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
