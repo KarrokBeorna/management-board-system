@@ -319,20 +319,20 @@ function VRTMPPTable({ allMpps, onCellClick, metric, userNotes = {}, onNoteSave 
       const dpuPrev = carsPrevSum > 0 ? (totalPrevCount * 1000) / carsPrevSum : 0;
       const dpuCurr = carsCurrSum > 0 ? (totalCurrCount * 1000) / carsCurrSum : 0;
 
-      // FIX: убрали некорректный "потолок 980", используем Math.min(..., 1000)
+      // Без обрезки на 1000 — показываем реальные значения
       const cellsPrev = countsPrev.map((count, i) => {
         if (!isDPU) return count;
         const ds = toLocalDateStr(prevWeekDays[i]);
         const cars = carsCounts[ds] || 0;
         if (cars === 0) return 0;
-        return Math.min((count * 1000) / cars, 1000);
+        return (count * 1000) / cars;
       });
       const cellsCurr = countsCurr.map((count, i) => {
         if (!isDPU) return count;
         const ds = toLocalDateStr(currWeekDays[i]);
         const cars = carsCounts[ds] || 0;
         if (cars === 0) return 0;
-        return Math.min((count * 1000) / cars, 1000);
+        return (count * 1000) / cars;
       });
 
       return {

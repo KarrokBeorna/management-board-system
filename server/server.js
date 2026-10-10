@@ -13139,6 +13139,7 @@ app.get('/api/vrt-report/models', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+
 // Главный отчёт (гистограмма + топ + счётчики)
 app.get('/api/vrt-report/data', async (req, res) => {
   try {
@@ -13291,16 +13292,13 @@ app.get('/api/vrt-report/data', async (req, res) => {
       vrtData.mppsMap.get(mppKey).count += 1;
     }
 
-    const calculateDpu = (count) => totalCars === 0 ? 0 : Number(Math.min((count / totalCars) * 1000, 1000).toFixed(2));
+    // Без обрезки на 1000
+    const calculateDpu = (count) => totalCars === 0 ? 0 : Number(((count / totalCars) * 1000).toFixed(2));
 
     for (const [, v] of vrtDataMap) {
-      // Сначала считаем DPU для каждого MPP (с потолком 1000)
+      v.dpu = calculateDpu(v.count);
       v.mpps = Array.from(v.mppsMap.values()).map(m => ({ ...m, dpu: calculateDpu(m.count) }));
       v.mpps.sort((a, b) => b.count - a.count);
-      // DPU для VRT = среднее от DPU его MPP (тоже гарантированно ≤ 1000)
-      v.dpu = v.mpps.length > 0
-        ? Number((v.mpps.reduce((s, m) => s + m.dpu, 0) / v.mpps.length).toFixed(2))
-        : 0;
     }
 
     const histogram = Array.from(vrtDataMap.entries())
@@ -13525,19 +13523,13 @@ app.get('/api/vrt-report/trend', async (req, res) => {
     const weekPeriods = generatePeriods('week', 4, endDateObj);
     const dayPeriods = generatePeriods('day', 14, endDateObj);
 
-    // period -> Map(mpp_key -> count)
-    const monthCounts = new Map(monthPeriods.map(p => [p, new Map()]));
-    const weekCounts = new Map(weekPeriods.map(p => [p, new Map()]));
-    const dayCounts = new Map(dayPeriods.map(p => [p, new Map()]));
+    // period -> count (общий по всем MPP выбранных VRT)
+    const monthCounts = new Map(monthPeriods.map(p => [p, 0]));
+    const weekCounts = new Map(weekPeriods.map(p => [p, 0]));
+    const dayCounts = new Map(dayPeriods.map(p => [p, 0]));
     const monthCars = new Map(monthPeriods.map(p => [p, new Set()]));
     const weekCars = new Map(weekPeriods.map(p => [p, new Set()]));
     const dayCars = new Map(dayPeriods.map(p => [p, new Set()]));
-
-    const bumpMpp = (map, periodKey, mppKey) => {
-      if (!map.has(periodKey)) return;
-      const m = map.get(periodKey);
-      m.set(mppKey, (m.get(mppKey) || 0) + 1);
-    };
 
     for (const defect of defectRows) {
       const key = `${defect.MODEL}|${defect.PART_NAME}|${defect.PROBLEM_TYPE}`;
@@ -13548,11 +13540,11 @@ app.get('/api/vrt-report/trend', async (req, res) => {
 
       const defDate = new Date(defect.CREATION_TIME);
       const mKey = getPeriodKey(defDate, 'month');
-      bumpMpp(monthCounts, mKey, key);
+      if (monthCounts.has(mKey)) monthCounts.set(mKey, monthCounts.get(mKey) + 1);
       const wKey = getPeriodKey(defDate, 'week');
-      bumpMpp(weekCounts, wKey, key);
+      if (weekCounts.has(wKey)) weekCounts.set(wKey, weekCounts.get(wKey) + 1);
       const dKey = getPeriodKey(defDate, 'day');
-      bumpMpp(dayCounts, dKey, key);
+      if (dayCounts.has(dKey)) dayCounts.set(dKey, dayCounts.get(dKey) + 1);
     }
 
     const [cp72Rows] = await pool.query(`
@@ -13572,28 +13564,15 @@ app.get('/api/vrt-report/trend', async (req, res) => {
       if (dayCars.has(dKey)) dayCars.get(dKey).add(car.VIN);
     }
 
+    // Без обрезки на 1000
     function buildResult(countsMap, carsMap) {
       const result = [];
       for (const period of countsMap.keys()) {
-        const mppCounts = countsMap.get(period); // Map(mpp_key -> count)
+        const defects = countsMap.get(period);
         const totalCars = carsMap.get(period).size;
         let value;
-        if (metric === 'dpu') {
-          // среднее DPU по всем MPP этого периода (каждый MPP с потолком 1000)
-          if (totalCars === 0 || mppCounts.size === 0) {
-            value = 0;
-          } else {
-            let sumDpu = 0;
-            for (const cnt of mppCounts.values()) {
-              sumDpu += Math.min((cnt / totalCars) * 1000, 1000);
-            }
-            value = Number((sumDpu / mppCounts.size).toFixed(2));
-          }
-        } else {
-          let totalDefects = 0;
-          for (const cnt of mppCounts.values()) totalDefects += cnt;
-          value = totalDefects;
-        }
+        if (metric === 'dpu') value = totalCars > 0 ? Number(((defects / totalCars) * 1000).toFixed(2)) : 0;
+        else value = defects;
         result.push({ period, value });
       }
       return result.sort((a, b) => a.period.localeCompare(b.period));
