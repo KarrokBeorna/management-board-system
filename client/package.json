@@ -5,6 +5,7 @@
   "dependencies": {
     "@vitejs/plugin-react": "^4.2.1",
     "@zxing/browser": "^0.2.1",
+    "@zxing/library": "^0.23.0",
     "axios": "^1.18.1",
     "file-saver": "^2.0.5",
     "html-docx-js": "^0.3.1",

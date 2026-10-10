@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
+import {
+  MultiFormatReader,
+  DecodeHintType,
+  BarcodeFormat,
+  BinaryBitmap,
+  HybridBinarizer,
+  RGBLuminanceSource,
+} from '@zxing/library';
 
 const API_BASE = '';
 const MAX_PHOTOS = 3;
@@ -85,36 +93,148 @@ const canUseLiveCamera = () => {
   );
 };
 
-/* ---- декодирование штрихкода из файла (fallback) ---- */
-const decodeVinFromFile = async (file, maxDim = 1800) => {
-  // 1. Файл → Image
-  const dataUrl = await new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(fr.result);
-    fr.onerror = reject;
-    fr.readAsDataURL(file);
-  });
+/* ============================================================
+ * ДЕКОДЕР ШТРИХКОДА ИЗ ФОТО
+ *   Генерируем варианты (повороты + предобработка) и кормим в ZXing.
+ * ============================================================ */
+const ROTATIONS = [90, 270, 0, 180]; // VIN-штрихкоды на машинах обычно вертикальные → сначала 90/270
 
-  const img = await new Promise((resolve, reject) => {
-    const i = new Image();
-    i.onload = () => resolve(i);
-    i.onerror = reject;
-    i.src = dataUrl;
-  });
+const rotateCanvas = (src, deg) => {
+  if (deg === 0) return src;
+  const out = document.createElement('canvas');
+  if (deg === 90 || deg === 270) {
+    out.width = src.height;
+    out.height = src.width;
+  } else {
+    out.width = src.width;
+    out.height = src.height;
+  }
+  const ctx = out.getContext('2d', { willReadFrequently: true });
+  ctx.save();
+  ctx.translate(out.width / 2, out.height / 2);
+  ctx.rotate((deg * Math.PI) / 180);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(src, -src.width / 2, -src.height / 2);
+  ctx.restore();
+  return out;
+};
 
-  // 2. Сжимаем до maxDim по большей стороне (иначе canvas тормозит на 12 Мп)
+const toGrayContrast = (src, k = 1.6) => {
+  const out = document.createElement('canvas');
+  out.width = src.width;
+  out.height = src.height;
+  const ctx = out.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(src, 0, 0);
+  const im = ctx.getImageData(0, 0, out.width, out.height);
+  const d = im.data;
+  for (let i = 0; i < d.length; i += 4) {
+    let g = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+    g = (g - 128) * k + 128;
+    g = g < 0 ? 0 : g > 255 ? 255 : g;
+    d[i] = d[i + 1] = d[i + 2] = g;
+  }
+  ctx.putImageData(im, 0, 0);
+  return out;
+};
+
+const toBinarized = (src, threshold = 128) => {
+  const out = document.createElement('canvas');
+  out.width = src.width;
+  out.height = src.height;
+  const ctx = out.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(src, 0, 0);
+  const im = ctx.getImageData(0, 0, out.width, out.height);
+  const d = im.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    const v = g > threshold ? 255 : 0;
+    d[i] = d[i + 1] = d[i + 2] = v;
+  }
+  ctx.putImageData(im, 0, 0);
+  return out;
+};
+
+// ZXing читатель с жёсткими hints (1D + TRY_HARDER)
+const makeZxingReader = () => {
+  const reader = new MultiFormatReader();
+  const hints = new Map();
+  hints.set(DecodeHintType.TRY_HARDER, true);
+  hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+    BarcodeFormat.CODE_128,
+    BarcodeFormat.CODE_39,
+    BarcodeFormat.CODE_93,
+    BarcodeFormat.ITF,
+    BarcodeFormat.CODABAR,
+  ]);
+  reader.setHints(hints);
+  return reader;
+};
+
+const decodeCanvasWithZxing = (reader, canvas) => {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const im = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const { width, height, data } = im;
+
+  // В ZXing JS RGBLuminanceSource принимает УЖЕ grayscale-массив (1 байт на пиксель)
+  const lum = new Uint8ClampedArray(width * height);
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+    lum[j] = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) | 0;
+  }
+
+  const source = new RGBLuminanceSource(lum, width, height);
+  const bitmap = new BinaryBitmap(new HybridBinarizer(source));
+  try {
+    const res = reader.decode(bitmap);
+    return res.getText();
+  } catch {
+    return null;
+  }
+};
+
+// Загрузка файла в <img>
+const fileToImage = (file) => new Promise((resolve, reject) => {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+  img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+  img.src = url;
+});
+
+const decodeVinFromFile = async (file) => {
+  const img = await fileToImage(file);
+
+  // Уменьшаем до 2000px по большей стороне (быстрее обработка, штрихкод читаем)
+  const maxDim = 2000;
   const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(img.width * scale);
-  canvas.height = Math.round(img.height * scale);
-  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-  const compressedUrl = canvas.toDataURL('image/jpeg', 0.9);
+  const base = document.createElement('canvas');
+  base.width = Math.round(img.width * scale);
+  base.height = Math.round(img.height * scale);
+  const bctx = base.getContext('2d', { willReadFrequently: true });
+  bctx.drawImage(img, 0, 0, base.width, base.height);
 
-  // 3. Декодируем через ZXing
-  const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanAttempts: 100 });
-  const result = await reader.decodeFromImageUrl(compressedUrl);
-  if (!result) throw new Error('empty result');
-  return result.getText();
+  // Предобработки
+  const variants = [];
+  variants.push({ name: 'raw', canvas: base });
+  variants.push({ name: 'gray', canvas: toGrayContrast(base, 1.6) });
+  variants.push({ name: 'bin96',  canvas: toBinarized(base, 96) });
+  variants.push({ name: 'bin128', canvas: toBinarized(base, 128) });
+  variants.push({ name: 'bin170', canvas: toBinarized(base, 170) });
+
+  const reader = makeZxingReader();
+
+  // Порядок: сначала 90° (вертикальные штрихкоды), потом остальные
+  for (const v of variants) {
+    for (const deg of ROTATIONS) {
+      const rot = rotateCanvas(v.canvas, deg);
+      const text = decodeCanvasWithZxing(reader, rot);
+      if (text) {
+        // лог для отладки — уберите когда стабилизируется
+        console.log(`[scanner] ok via ${v.name}/${deg}°: "${text}"`);
+        return text;
+      }
+    }
+  }
+  throw new Error('not found');
 };
 
 const loadState = () => {
@@ -239,13 +359,11 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
   );
 }
 
-/* ================= Scanner (live + photo fallback) ================= */
+/* ================= Scanner (live + photo fallback с многоуровневым декодом) ================= */
 function BarcodeScannerModal({ onClose, onResult }) {
   const liveSupported = canUseLiveCamera();
 
-  // режим: 'live' | 'photo' | 'processing'
   const [mode, setMode] = useState(liveSupported ? 'live' : 'photo');
-  const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(liveSupported);
   const [hint, setHint] = useState('Наведите камеру на штрихкод');
   const [photoError, setPhotoError] = useState(null);
@@ -256,30 +374,22 @@ function BarcodeScannerModal({ onClose, onResult }) {
   const streamRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // ---------- LIVE ----------
+  /* ---------- LIVE ---------- */
   useEffect(() => {
     if (mode !== 'live') return;
     let cancelled = false;
 
     (async () => {
-      if (!liveSupported) {
-        setMode('photo');
-        return;
-      }
+      if (!liveSupported) { setMode('photo'); return; }
 
       let stream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         });
       } catch (e) {
         const name = e?.name || '';
-        // не смогли открыть live → уходим в фото-режим, не ругаемся
         if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
           setPhotoError('Live-камера запрещена — используйте снимок.');
         } else if (name === 'NotReadableError' || name === 'TrackStartError') {
@@ -303,9 +413,7 @@ function BarcodeScannerModal({ onClose, onResult }) {
       }
 
       try {
-        const reader = new BrowserMultiFormatReader(undefined, {
-          delayBetweenScanAttempts: 120,
-        });
+        const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanAttempts: 120 });
         const controls = await reader.decodeFromStream(stream, videoRef.current, (result) => {
           if (cancelled) return;
           if (result) {
@@ -338,29 +446,30 @@ function BarcodeScannerModal({ onClose, onResult }) {
     };
   }, [mode, onResult, liveSupported]);
 
-  // ---------- PHOTO ----------
+  /* ---------- PHOTO ---------- */
   const openFilePicker = () => fileInputRef.current?.click();
 
   const handlePhotoFile = async (file) => {
     if (!file) return;
     setMode('processing');
     setPhotoError(null);
-    // превью текущего файла (что именно распознаём)
     try { setPreviewUrl(URL.createObjectURL(file)); } catch { setPreviewUrl(null); }
 
+    const t0 = Date.now();
     try {
       const text = await decodeVinFromFile(file);
       const clean = sanitizeVin(text);
+      console.log(`[scanner] decoded in ${Date.now() - t0}ms:`, text);
       if (clean.length !== VIN_LEN) {
-        setPhotoError(`Распознано «${text.slice(0, 24)}» — это не VIN. Переснимите, чтобы штрихкод был в центре кадра.`);
+        setPhotoError(`Распознано «${text.slice(0, 28)}» — это не VIN. Переснимите, чтобы штрихкод был целиком в кадре.`);
         setMode('photo');
         return;
       }
       beep(); vibrate(80);
       onResult(clean);
     } catch (e) {
-      console.warn('[scanner photo] decode error:', e);
-      setPhotoError('Не удалось распознать штрихкод. Сфотографируйте ближе и резче, штрихкод целиком в кадре.');
+      console.warn('[scanner photo] decode failed:', e);
+      setPhotoError('Не удалось распознать. Сфотографируйте ближе, штрихкод целиком в кадре, без бликов.');
       setMode('photo');
     }
   };
@@ -374,10 +483,7 @@ function BarcodeScannerModal({ onClose, onResult }) {
   /* ---------- UI: PHOTO / PROCESSING ---------- */
   if (mode === 'photo' || mode === 'processing') {
     return (
-      <div style={{
-        position: 'fixed', inset: 0, background: '#0F172A', zIndex: 9000,
-        display: 'flex', flexDirection: 'column',
-      }}>
+      <div style={{ position: 'fixed', inset: 0, background: '#0F172A', zIndex: 9000, display: 'flex', flexDirection: 'column' }}>
         <div style={{
           flex: 1, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center',
@@ -448,10 +554,7 @@ function BarcodeScannerModal({ onClose, onResult }) {
           />
         </div>
 
-        <div style={{
-          padding: 20, background: '#020617',
-          display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap',
-        }}>
+        <div style={{ padding: 20, background: '#020617', display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
           {liveSupported && (
             <button
               onClick={() => { setMode('live'); setBusy(true); setPhotoError(null); }}
@@ -596,11 +699,7 @@ export default function LineDefectCapturePage() {
   }, [vin, partName, problemType, comment, clientId, photos, scannedRaw, captureLocation]);
 
   useEffect(() => {
-    if (pickingRef.current) {
-      pickingRef.current = false;
-      return;
-    }
-
+    if (pickingRef.current) { pickingRef.current = false; return; }
     const clean = sanitizeVin(vin);
 
     if (clean.length === 0) {
@@ -610,10 +709,7 @@ export default function LineDefectCapturePage() {
     }
 
     if (clean.length < MIN_SUFFIX_LEN) {
-      setVinCheck({
-        state: 'idle', valid: false, model: '',
-        reason: `Ещё ${MIN_SUFFIX_LEN - clean.length} символ(ов) для поиска`,
-      });
+      setVinCheck({ state: 'idle', valid: false, model: '', reason: `Ещё ${MIN_SUFFIX_LEN - clean.length} символ(ов) для поиска` });
       setSuffixMatches([]);
       return;
     }
@@ -642,10 +738,7 @@ export default function LineDefectCapturePage() {
             pickingRef.current = true;
             setVin(data.vin);
           }
-          setVinCheck({
-            state: 'ok', valid: true, reason: '', model: data.model || '',
-            matched: data.matched,
-          });
+          setVinCheck({ state: 'ok', valid: true, reason: '', model: data.model || '', matched: data.matched });
         } else if (data.multiple && Array.isArray(data.matches)) {
           setVinCheck({ state: 'idle', valid: false, reason: data.reason || '', model: '' });
           setSuffixMatches(data.matches);
@@ -653,9 +746,7 @@ export default function LineDefectCapturePage() {
           setVinCheck({ state: 'err', valid: false, reason: data.reason || 'Не найден', model: '' });
         }
       } catch (e) {
-        if (e.name !== 'AbortError') {
-          setVinCheck({ state: 'err', valid: false, reason: e.message, model: '' });
-        }
+        if (e.name !== 'AbortError') setVinCheck({ state: 'err', valid: false, reason: e.message, model: '' });
       }
     }, delay);
 
@@ -806,7 +897,6 @@ export default function LineDefectCapturePage() {
           Фиксация дефекта
         </h1>
 
-        {/* Шаг 1 — VIN */}
         <div style={cardStyle}>
           <div style={stepLabel}>Шаг 1 — VIN</div>
           <input
@@ -857,22 +947,8 @@ export default function LineDefectCapturePage() {
           )}
 
           {suffixMatches.length > 0 && (
-            <div style={{
-              marginTop: 10,
-              border: '1px solid #E2E8F0',
-              borderRadius: 10,
-              overflow: 'hidden',
-              background: '#FFFFFF',
-            }}>
-              <div style={{
-                padding: '8px 12px',
-                background: '#F1F5F9',
-                fontSize: 11,
-                fontWeight: 800,
-                color: '#475569',
-                textTransform: 'uppercase',
-                letterSpacing: 0.3,
-              }}>
+            <div style={{ marginTop: 10, border: '1px solid #E2E8F0', borderRadius: 10, overflow: 'hidden', background: '#FFFFFF' }}>
+              <div style={{ padding: '8px 12px', background: '#F1F5F9', fontSize: 11, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.3 }}>
                 Найдено {suffixMatches.length} — выберите VIN
               </div>
               <div style={{ maxHeight: 240, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
@@ -881,31 +957,15 @@ export default function LineDefectCapturePage() {
                     key={m.vin}
                     onClick={() => pickSuffixMatch(m)}
                     style={{
-                      padding: '12px 14px',
-                      borderBottom: '1px solid #F1F5F9',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      gap: 10,
-                      minHeight: 44,
+                      padding: '12px 14px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      gap: 10, minHeight: 44,
                     }}
                     onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
                     onMouseLeave={(e) => e.currentTarget.style.background = '#FFFFFF'}
                   >
-                    <span style={{
-                      fontFamily: 'monospace',
-                      fontSize: 13,
-                      color: '#2563EB',
-                      fontWeight: 700,
-                      letterSpacing: 0.5,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}>{m.vin}</span>
-                    <span style={{ fontSize: 12, color: '#64748B', whiteSpace: 'nowrap' }}>
-                      {m.model}
-                    </span>
+                    <span style={{ fontFamily: 'monospace', fontSize: 13, color: '#2563EB', fontWeight: 700, letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.vin}</span>
+                    <span style={{ fontSize: 12, color: '#64748B', whiteSpace: 'nowrap' }}>{m.model}</span>
                   </div>
                 ))}
               </div>
@@ -913,14 +973,9 @@ export default function LineDefectCapturePage() {
           )}
         </div>
 
-        {/* Шаг 2 — Место занесения */}
         <div style={{ ...cardStyle, opacity: vinCheck.valid ? 1 : 0.5, pointerEvents: vinCheck.valid ? 'auto' : 'none' }}>
           <div style={stepLabel}>Шаг 2 — Место занесения</div>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)',
-            gap: 8,
-          }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 8 }}>
             {LOCATIONS.map(loc => {
               const active = captureLocation === loc.code;
               return (
@@ -939,22 +994,16 @@ export default function LineDefectCapturePage() {
                     cursor: 'pointer',
                     transition: 'all 0.15s',
                     minHeight: isMobile ? 60 : 72,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    textAlign: 'center',
-                    lineHeight: 1.2,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    textAlign: 'center', lineHeight: 1.2,
                     boxShadow: active ? `0 6px 16px ${loc.color}40` : '0 2px 6px rgba(0,0,0,0.04)',
                   }}
-                >
-                  {loc.label}
-                </button>
+                >{loc.label}</button>
               );
             })}
           </div>
         </div>
 
-        {/* Шаг 3 — Part / Defect */}
         <div style={{ ...cardStyle, opacity: vinCheck.valid ? 1 : 0.5, pointerEvents: vinCheck.valid ? 'auto' : 'none' }}>
           <div style={stepLabel}>Шаг 3 — Что и где</div>
           <Autocomplete
@@ -980,20 +1029,15 @@ export default function LineDefectCapturePage() {
           />
         </div>
 
-        {/* Шаг 4 — Фото и комментарий */}
         <div style={cardStyle}>
           <div style={stepLabel}>Шаг 4 — Фото и комментарий</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {photos.map(p => (
               <div key={p.id} style={{ position: 'relative', width: isMobile ? 84 : 100, height: isMobile ? 84 : 100 }}>
                 <img
-                  src={`${API_BASE}${p.url}`}
-                  alt=""
+                  src={`${API_BASE}${p.url}`} alt=""
                   onClick={() => setLightbox(`${API_BASE}${p.url}`)}
-                  style={{
-                    width: '100%', height: '100%', objectFit: 'cover',
-                    borderRadius: 10, border: '1px solid #E2E8F0', cursor: 'zoom-in',
-                  }}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 10, border: '1px solid #E2E8F0', cursor: 'zoom-in' }}
                 />
                 <button
                   onClick={() => confirmRemove(p.id)}
@@ -1044,10 +1088,9 @@ export default function LineDefectCapturePage() {
         </div>
 
         {error && (
-          <div style={{
-            padding: 12, background: '#FEF2F2', color: '#991B1B',
-            borderRadius: 10, marginBottom: 10, fontSize: 13, border: '1px solid #FECACA',
-          }}>⚠ {error}</div>
+          <div style={{ padding: 12, background: '#FEF2F2', color: '#991B1B', borderRadius: 10, marginBottom: 10, fontSize: 13, border: '1px solid #FECACA' }}>
+            ⚠ {error}
+          </div>
         )}
 
         <button
