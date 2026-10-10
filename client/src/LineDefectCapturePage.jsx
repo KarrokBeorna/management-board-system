@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } from '@zxing/browser';
+import { BrowserMultiFormatReader } from '@zxing/browser';
 
 const API_BASE = '';
 const MAX_PHOTOS = 3;
@@ -8,18 +8,6 @@ const VIN_LEN = 17;
 const VIN_ALLOWED = /[^A-HJ-NPR-Z0-9]/g;
 const STATE_KEY = 'line-defect-capture-state-v1';
 const MIN_SUFFIX_LEN = 6;
-
-/* Размер, до которого ужимаем фото перед декодированием.
-   1200 по большей стороне достаточно для DataMatrix/Code128 и в 3 раза меньше памяти. */
-const DECODE_MAX_SIDE = 1200;
-
-/* Форматы, которые нас реально интересуют. Уберите лишние, если знаете точный. */
-const DECODE_FORMATS = [
-  BarcodeFormat.DATA_MATRIX,
-  BarcodeFormat.CODE_128,
-  BarcodeFormat.CODE_39,
-  BarcodeFormat.ITF,
-];
 
 const LOCATIONS = [
   { code: 'CP7',    label: 'CP7',                  color: '#2563EB' },
@@ -98,23 +86,8 @@ const canUseLiveCamera = () => {
 };
 
 /* ============================================================
- * ДЕКОДЕР ШТРИХКОДА ИЗ ФОТО
+ * ДЕКОДЕР ШТРИХКОДА ИЗ ФОТО — только @zxing/browser
  * ============================================================ */
-
-// Проверка, что ошибка — это «не нашли код», а не реальная проблема
-const isBenignScanError = (e) => {
-  const n = e?.name || e?.constructor?.name || '';
-  if (n === 'NotFoundException' || n === 'ChecksumException' || n === 'FormatException') return true;
-  const msg = String(e?.message || '');
-  return /NotFoundException|ChecksumException|FormatException/.test(msg);
-};
-
-const makeHints = () => {
-  const hints = new Map();
-  hints.set(DecodeHintType.POSSIBLE_FORMATS, DECODE_FORMATS);
-  hints.set(DecodeHintType.TRY_HARDER, false); // без «изо всех сил» — меньше поворотов и canvas
-  return hints;
-};
 
 const rotateCanvas = (src, deg) => {
   if (deg === 0) return src;
@@ -175,7 +148,7 @@ const fileToImage = (file) => new Promise((resolve, reject) => {
   img.src = url;
 });
 
-// Один проход: canvas → dataURL → decodeFromImageUrl
+// Один проход: canvas → dataURL → BrowserMultiFormatReader.decodeFromImageUrl
 const tryDecodeCanvas = async (reader, canvas, label) => {
   const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
   try {
@@ -186,9 +159,7 @@ const tryDecodeCanvas = async (reader, canvas, label) => {
       return text;
     }
   } catch (e) {
-    if (!isBenignScanError(e)) {
-      console.warn(`[scanner] не-NotFound ошибка (${label}):`, e?.name, e?.message);
-    }
+    // NotFoundException — норма, ZXing не нашёл код в этом варианте
   }
   return null;
 };
@@ -199,47 +170,42 @@ const decodeVinFromFile = async (file) => {
   const img = await fileToImage(file);
   console.log('[scanner] image loaded:', img.width, 'x', img.height);
 
-  // Ужимаем до DECODE_MAX_SIDE по большей стороне (это ключевое для «Could not create Canvas»)
-  const scale = Math.min(1, DECODE_MAX_SIDE / Math.max(img.width, img.height));
+  // Ужимаем до 2200px по большей стороне
+  const maxDim = 2200;
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
   const base = document.createElement('canvas');
   base.width = Math.round(img.width * scale);
   base.height = Math.round(img.height * scale);
   base.getContext('2d').drawImage(img, 0, 0, base.width, base.height);
   console.log('[scanner] resized to:', base.width, 'x', base.height);
 
-  const reader = new BrowserMultiFormatReader(makeHints(), { delayBetweenScanAttempts: 100 });
-
-  // Ленивая генерация вариантов: сначала raw, потом gray/bin. Так не держим все canvas в памяти.
-  const variantFactories = [
-    { name: 'raw',    make: () => base },
-    { name: 'gray',   make: () => toGrayContrast(base, 1.8) },
-    { name: 'gray25', make: () => toGrayContrast(base, 2.5) },
-    { name: 'bin110', make: () => toBinarized(base, 110) },
-    { name: 'bin140', make: () => toBinarized(base, 140) },
-    { name: 'bin170', make: () => toBinarized(base, 170) },
+  // Варианты предобработки
+  const variants = [
+    { name: 'raw',    canvas: base },
+    { name: 'gray',   canvas: toGrayContrast(base, 1.8) },
+    { name: 'gray2',  canvas: toGrayContrast(base, 2.5) },
+    { name: 'bin110', canvas: toBinarized(base, 110) },
+    { name: 'bin140', canvas: toBinarized(base, 140) },
+    { name: 'bin170', canvas: toBinarized(base, 170) },
   ];
 
-  // Сначала без поворота (для DataMatrix и горизонтального Code128),
-  // потом 90/270/180 — только если не сработало.
-  const rotations = [0, 90, 270, 180];
+  // Повороты: сначала 90/270 (вертикальные штрихкоды), потом 0/180
+  const rotations = [90, 270, 0, 180];
+
+  // Reader с TRY_HARDER + ограничение на 1D-форматы
+  // Числа для POSSIBLE_FORMATS берём из BarcodeFormat zxing-js: CODE_128=5, CODE_39=3, CODE_93=4, ITF=7, CODABAR=2
+  const hints = new Map();
+  hints.set(2, [5, 3, 4, 7, 2]); // DecodeHintType.POSSIBLE_FORMATS
+  hints.set(3, true);            // DecodeHintType.TRY_HARDER
+  const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 100 });
 
   let counter = 0;
-  for (const v of variantFactories) {
-    const variantCanvas = v.make();
+  for (const v of variants) {
     for (const deg of rotations) {
       counter++;
-      const rot = rotateCanvas(variantCanvas, deg);
+      const rot = rotateCanvas(v.canvas, deg);
       const text = await tryDecodeCanvas(reader, rot, `${v.name}/${deg}° [#${counter}]`);
       if (text) return text;
-      // Освобождаем память от повёрнутого canvas, если он не равен исходному
-      if (rot !== variantCanvas && rot.width * rot.height > 0) {
-        // Явно «забываем» ссылку — GC подберёт
-        rot.width = 1; rot.height = 1;
-      }
-    }
-    // Освобождаем вариант после использования (кроме base — он ещё пригодится)
-    if (variantCanvas !== base) {
-      variantCanvas.width = 1; variantCanvas.height = 1;
     }
   }
 
@@ -383,7 +349,6 @@ function BarcodeScannerModal({ onClose, onResult }) {
   const controlsRef = useRef(null);
   const streamRef = useRef(null);
   const fileInputRef = useRef(null);
-  const previewUrlRef = useRef(null);
 
   /* ---------- LIVE ---------- */
   useEffect(() => {
@@ -424,8 +389,7 @@ function BarcodeScannerModal({ onClose, onResult }) {
       }
 
       try {
-        // LIVE — тоже ограничиваем форматы, чтобы не перебирал всё
-        const reader = new BrowserMultiFormatReader(makeHints(), { delayBetweenScanAttempts: 120 });
+        const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanAttempts: 120 });
         const controls = await reader.decodeFromStream(stream, videoRef.current, (result) => {
           if (cancelled) return;
           if (result) {
@@ -458,16 +422,6 @@ function BarcodeScannerModal({ onClose, onResult }) {
     };
   }, [mode, onResult, liveSupported]);
 
-  /* ---------- Освобождение preview URL ---------- */
-  useEffect(() => {
-    previewUrlRef.current = previewUrl;
-  }, [previewUrl]);
-  useEffect(() => () => {
-    if (previewUrlRef.current) {
-      try { URL.revokeObjectURL(previewUrlRef.current); } catch {}
-    }
-  }, []);
-
   /* ---------- PHOTO ---------- */
   const openFilePicker = () => fileInputRef.current?.click();
 
@@ -476,16 +430,7 @@ function BarcodeScannerModal({ onClose, onResult }) {
     console.log('[scanner] photo picked:', file.name, file.type, file.size);
     setMode('processing');
     setPhotoError(null);
-
-    // Освобождаем предыдущий preview
-    if (previewUrlRef.current) {
-      try { URL.revokeObjectURL(previewUrlRef.current); } catch {}
-    }
-    let newPreview = null;
-    try {
-      newPreview = URL.createObjectURL(file);
-      setPreviewUrl(newPreview);
-    } catch { setPreviewUrl(null); }
+    try { setPreviewUrl(URL.createObjectURL(file)); } catch { setPreviewUrl(null); }
 
     const t0 = Date.now();
     try {
@@ -500,7 +445,7 @@ function BarcodeScannerModal({ onClose, onResult }) {
       beep(); vibrate(80);
       onResult(clean);
     } catch (e) {
-      console.warn('[scanner photo] decode failed after', Date.now() - t0, 'ms:', e?.message);
+      console.warn('[scanner photo] decode failed after', Date.now() - t0, 'ms:', e);
       setPhotoError('Не удалось распознать. Сфотографируйте ближе, штрихкод целиком в кадре, без бликов.');
       setMode('photo');
     }
