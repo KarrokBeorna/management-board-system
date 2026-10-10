@@ -97,6 +97,13 @@ const ELEC_CATEGORY_COLORS = {
   'Прошивка ERA NG': '#F59E0B',
   'Прошивка Запись/FLASH NG': '#8B5CF6',
 };
+// Пояснения к категориям
+const ELEC_CATEGORY_DESC = {
+  'Агрегат по моделям': 'Сводные данные по всем трём категориям: EOL + ERA + FLASH. Показывает общую картину по каждой модели.',
+  'Прошивка EOL NG': 'Проверка прошивки в конце линии (End of Line, TYPE=03). NG — неудачная прошивка блока.',
+  'Прошивка ERA NG': 'Прошивка блока ERA (TYPE=26). NG — неудачная прошивка.',
+  'Прошивка Запись/FLASH NG': 'Запись / прошивка FLASH (TYPE=17). NG — неудачная запись.',
+};
 
 const AVAILABLE_MODELS = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 const AVAILABLE_GRADES = ['A', 'B', 'C'];
@@ -216,7 +223,7 @@ function MultiSelect({ options, selected, onChange, placeholder, width = 120 }) 
 //  ОСНОВНОЙ КОМПОНЕНТ
 // ============================================================
 export default function DefectElectronicsTopPage() {
-  const [activeTab, setActiveTab] = useState('elec'); // 'elec' | 'top'
+  const [activeTab, setActiveTab] = useState('elec');
 
   // ─── Старый отчёт ───
   const [dateFrom, setDateFrom] = useState('');
@@ -709,18 +716,18 @@ export default function DefectElectronicsTopPage() {
                 <div style={{ fontSize: 13, color: '#166534', fontWeight: 600, marginBottom: 4 }}>Успешные OK (всего)</div>
                 <div style={{ fontSize: 26, fontWeight: 800, color: '#16A34A' }}>{elecTotals.OK.toLocaleString()}</div>
               </div>
-              <div style={{ flex: '1 1 220px', padding: 16, borderRadius: 12, background: '#FEF3C7', border: '1px solid #FDE68A' }}>
-                <div style={{ fontSize: 13, color: '#92400E', fontWeight: 600, marginBottom: 4 }}>Общий % NG</div>
-                <div style={{ fontSize: 26, fontWeight: 800, color: '#D97706' }}>{elecTotalNgShare}%</div>
+              <div style={{ flex: '1 1 220px', padding: 16, borderRadius: 12, background: '#FEF2F2', border: '1px solid #FECACA' }}>
+                <div style={{ fontSize: 13, color: '#991B1B', fontWeight: 600, marginBottom: 4 }}>Общий % NG</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: '#DC2626' }}>{elecTotalNgShare}%</div>
               </div>
             </div>
 
-            {/* Stacked bar по категориям */}
+            {/* Stacked bar по категориям: слева NG, справа OK, справа от стека — итог */}
             <ResponsiveContainer width="100%" height={260}>
               <BarChart
                 layout="vertical"
                 data={elecOkNgSummary}
-                margin={{ top: 10, right: 40, left: 20, bottom: 10 }}
+                margin={{ top: 10, right: 80, left: 20, bottom: 10 }}
                 barCategoryGap={20}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -736,10 +743,33 @@ export default function DefectElectronicsTopPage() {
                   contentStyle={{ borderRadius: 10, border: '1px solid #E5E7EB', fontSize: 13 }}
                 />
                 <Legend wrapperStyle={{ fontSize: 13 }} />
+
                 <Bar dataKey="NG" stackId="a" fill="#EF4444" name="NG (дефект)">
                   <LabelList dataKey="NG" position="inside" style={{ fontSize: 12, fill: '#fff', fontWeight: 700 }} />
                 </Bar>
-                <Bar dataKey="OK" stackId="a" fill="#10B981" name="OK (успех)">
+                <Bar
+                  dataKey="OK"
+                  stackId="a"
+                  fill="#10B981"
+                  name="OK (успех)"
+                  // кастомный label справа от стека — итог (NG + OK)
+                  label={({ x, y, width, height, index }) => {
+                    if (index == null) return null;
+                    const total = elecOkNgSummary[index]?.total;
+                    if (!total) return null;
+                    return (
+                      <text
+                        x={x + width + 10}
+                        y={y + height / 2}
+                        dy={5}
+                        textAnchor="start"
+                        style={{ fontSize: 14, fontWeight: 800, fill: '#111827' }}
+                      >
+                        {total.toLocaleString()}
+                      </text>
+                    );
+                  }}
+                >
                   <LabelList dataKey="OK" position="inside" style={{ fontSize: 12, fill: '#fff', fontWeight: 700 }} />
                 </Bar>
               </BarChart>
@@ -795,10 +825,7 @@ export default function DefectElectronicsTopPage() {
                   }}>
                     % NG
                   </div>
-                  <div style={{
-                    fontSize: 52, fontWeight: 900, lineHeight: 1,
-                    color: elecTotalNgShare > 20 ? '#DC2626' : elecTotalNgShare > 5 ? '#D97706' : '#059669',
-                  }}>
+                  <div style={{ fontSize: 52, fontWeight: 900, lineHeight: 1, color: '#DC2626' }}>
                     {elecTotalNgShare}%
                   </div>
                   <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 6, fontWeight: 600 }}>
@@ -829,10 +856,8 @@ export default function DefectElectronicsTopPage() {
                         </td>
                         <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: '#DC2626' }}>{s.NG.toLocaleString()}</td>
                         <td style={{ ...tdStyle, textAlign: 'right', color: '#16A34A' }}>{s.OK.toLocaleString()}</td>
-                        <td style={{
-                          ...tdStyle, textAlign: 'right', fontWeight: 700,
-                          color: s.ngShare > 20 ? '#DC2626' : s.ngShare > 5 ? '#D97706' : '#374151',
-                        }}>{s.ngShare}%</td>
+                        {/* % NG — всегда красный */}
+                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#DC2626' }}>{s.ngShare}%</td>
                       </tr>
                     ))}
                   </tbody>
@@ -841,10 +866,7 @@ export default function DefectElectronicsTopPage() {
                       <td style={{ ...tdStyle, fontWeight: 800, color: '#111827' }}>Всего</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, color: '#DC2626' }}>{elecTotals.NG.toLocaleString()}</td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, color: '#16A34A' }}>{elecTotals.OK.toLocaleString()}</td>
-                      <td style={{
-                        ...tdStyle, textAlign: 'right', fontWeight: 800,
-                        color: elecTotalNgShare > 20 ? '#DC2626' : elecTotalNgShare > 5 ? '#D97706' : '#374151',
-                      }}>{elecTotalNgShare}%</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 800, color: '#DC2626' }}>{elecTotalNgShare}%</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -865,16 +887,42 @@ export default function DefectElectronicsTopPage() {
 
           {/* Таблицы по категориям */}
           <div style={cardStyle}>
+            {/* Пояснение для читателя */}
+            <div style={{
+              padding: '14px 18px',
+              background: '#EFF6FF',
+              borderLeft: '4px solid #2563EB',
+              borderRadius: 8,
+              marginBottom: 24,
+              fontSize: 13,
+              color: '#1E3A8A',
+              lineHeight: 1.6,
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14 }}>
+                ℹ️ Как читать отчёт
+              </div>
+              <div style={{ marginBottom: 4 }}>
+                Каждая строка таблицы — это <b>одна модель</b> в рамках <b>одной категории проверки</b>.
+              </div>
+              <ul style={{ margin: '6px 0 0 20px', padding: 0 }}>
+                <li><b>Попытки проверки</b> — сколько раз запускалась проверка: <span style={{ color: '#DC2626', fontWeight: 600 }}>NG</span> (неуспех) / <span style={{ color: '#16A34A', fontWeight: 600 }}>OK</span> (успех) / Всего. Один автомобиль может проходить проверку несколько раз.</li>
+                <li><b>Уникальные VIN</b> — сколько <i>разных машин</i> фигурировали: <b>VIN с NG</b> — с хотя бы одной неудачей, <b>VIN всего</b> — все машины, прошедшие проверку.</li>
+                <li><b>% NG</b> — доля неудачных попыток от всех попыток по этой модели.</li>
+                <li><b>DPU / 1000</b> — сколько NG приходится на 1000 проверок (мера «плотности» дефектов).</li>
+              </ul>
+            </div>
+
             {elecLoading && <p style={{ textAlign: 'center', color: '#6B7280' }}>Загрузка...</p>}
             {!elecLoading && elecGrouped.length === 0 && (
               <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Нет данных</p>
             )}
 
             {elecGrouped.map(group => (
-              <div key={group.category} style={{ marginBottom: 32 }}>
+              <div key={group.category} style={{ marginBottom: 36 }}>
+                {/* Заголовок категории */}
                 <h3 style={{
-                  fontSize: 16, fontWeight: 700, color: '#1F2937',
-                  margin: '0 0 12px', paddingBottom: 8,
+                  fontSize: 17, fontWeight: 700, color: '#1F2937',
+                  margin: '0 0 4px', paddingBottom: 6,
                   borderBottom: `2px solid ${ELEC_CATEGORY_COLORS[group.category] || '#2563EB'}`,
                   display: 'flex', alignItems: 'center', gap: 8,
                 }}>
@@ -884,11 +932,21 @@ export default function DefectElectronicsTopPage() {
                   }} />
                   {group.category}
                 </h3>
+                {/* Пояснение к категории */}
+                {ELEC_CATEGORY_DESC[group.category] && (
+                  <div style={{
+                    fontSize: 13,
+                    color: '#64748B',
+                    marginBottom: 14,
+                    lineHeight: 1.5,
+                  }}>
+                    {ELEC_CATEGORY_DESC[group.category]}
+                  </div>
+                )}
 
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                     <thead>
-                      {/* Верхний уровень группировки */}
                       <tr style={{ backgroundColor: '#F9FAFB' }}>
                         <th rowSpan={2} style={{ ...thStyle, verticalAlign: 'bottom' }}>Модель</th>
                         <th colSpan={4} style={{
@@ -908,7 +966,6 @@ export default function DefectElectronicsTopPage() {
                         <th rowSpan={2} style={{ ...thStyle, textAlign: 'center', verticalAlign: 'bottom' }}>DPU / 1000</th>
                         <th rowSpan={2} style={{ ...thStyle, verticalAlign: 'bottom' }}></th>
                       </tr>
-                      {/* Нижний уровень */}
                       <tr style={{ backgroundColor: '#F9FAFB' }}>
                         <th style={{ ...thStyle, textAlign: 'center', background: '#EEF2FF', color: '#DC2626' }}>NG</th>
                         <th style={{ ...thStyle, textAlign: 'center', background: '#EEF2FF', color: '#16A34A' }}>OK</th>
@@ -924,7 +981,6 @@ export default function DefectElectronicsTopPage() {
                         const dpu = row.TOTAL_COUNT > 0
                           ? ((row.DEFECT_COUNT * 1000) / row.TOTAL_COUNT).toFixed(1)
                           : '—';
-                        const barColor = row.NG_SHARE > 20 ? '#DC2626' : row.NG_SHARE > 5 ? '#F59E0B' : '#10B981';
                         return (
                           <React.Fragment key={key}>
                             <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
@@ -941,13 +997,13 @@ export default function DefectElectronicsTopPage() {
                                     <div style={{
                                       width: `${Math.min(100, row.NG_SHARE)}%`,
                                       height: '100%',
-                                      background: barColor,
+                                      background: '#DC2626',
                                       transition: 'width 0.3s ease',
                                     }} />
                                   </div>
                                   <span style={{
                                     fontWeight: 700, minWidth: 46, textAlign: 'right',
-                                    color: row.NG_SHARE > 20 ? '#DC2626' : row.NG_SHARE > 5 ? '#D97706' : '#059669',
+                                    color: '#DC2626',
                                     fontSize: 13,
                                   }}>
                                     {row.NG_SHARE}%
@@ -1263,7 +1319,7 @@ export default function DefectElectronicsTopPage() {
                 style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280' }}>✕</button>
             </div>
 
-            {/* Предупреждение про периоды + фильтр таблицы */}
+            {/* Пояснение про периоды */}
             <div style={{
               padding: '10px 14px',
               background: '#FEF3C7',
@@ -1300,7 +1356,6 @@ export default function DefectElectronicsTopPage() {
             ) : (
               trendData && (
                 <div style={{ display: 'flex', flexDirection: 'row', gap: 20, flexWrap: 'nowrap' }}>
-                  {/* Месяцы */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 2px' }}>Последние 3 месяца</h4>
                     <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
@@ -1319,7 +1374,6 @@ export default function DefectElectronicsTopPage() {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* Недели */}
                   <div style={{ flex: '1 1 0', minWidth: 250 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 2px' }}>Последние 4 недели</h4>
                     <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
@@ -1338,7 +1392,6 @@ export default function DefectElectronicsTopPage() {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* Дни */}
                   <div style={{ flex: '2 1 0', minWidth: 350 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 2px' }}>Последние 14 дней</h4>
                     <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
