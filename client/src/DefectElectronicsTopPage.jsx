@@ -97,12 +97,13 @@ const ELEC_CATEGORY_COLORS = {
   'Прошивка ERA NG': '#F59E0B',
   'Прошивка Запись/FLASH NG': '#8B5CF6',
 };
-// Пояснения к категориям
+
+// Без «неудачная прошивка блока» — только что за проверка + TYPE
 const ELEC_CATEGORY_DESC = {
-  'Агрегат по моделям': 'Сводные данные по всем трём категориям: EOL + ERA + FLASH. Показывает общую картину по каждой модели.',
-  'Прошивка EOL NG': 'Проверка прошивки в конце линии (End of Line, TYPE=03). NG — неудачная прошивка блока.',
-  'Прошивка ERA NG': 'Прошивка блока ERA (TYPE=26). NG — неудачная прошивка.',
-  'Прошивка Запись/FLASH NG': 'Запись / прошивка FLASH (TYPE=17). NG — неудачная запись.',
+  'Агрегат по моделям': 'Сводные данные по всем трём категориям: EOL + ERA + FLASH. Общая картина по каждой модели.',
+  'Прошивка EOL NG': 'Проверка прошивки в конце линии (End of Line). Тип проверки в системе — TYPE=03.',
+  'Прошивка ERA NG': 'Прошивка блока ERA. Тип проверки в системе — TYPE=26.',
+  'Прошивка Запись/FLASH NG': 'Запись / прошивка FLASH. Тип проверки в системе — TYPE=17.',
 };
 
 const AVAILABLE_MODELS = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
@@ -136,6 +137,11 @@ const getPeriodRange = (arr) => {
   const first = formatPeriodLabel(arr[0].period);
   const last = formatPeriodLabel(arr[arr.length - 1].period);
   return first === last ? first : `${first} — ${last}`;
+};
+
+const calcVinNgShare = (vinNg, vinTotal) => {
+  if (!vinTotal || vinTotal <= 0) return 0;
+  return Number(((vinNg * 100) / vinTotal).toFixed(1));
 };
 
 // ============================================================
@@ -224,6 +230,7 @@ function MultiSelect({ options, selected, onChange, placeholder, width = 120 }) 
 // ============================================================
 export default function DefectElectronicsTopPage() {
   const [activeTab, setActiveTab] = useState('elec');
+  const [showHelp, setShowHelp] = useState(false);
 
   // ─── Старый отчёт ───
   const [dateFrom, setDateFrom] = useState('');
@@ -571,17 +578,21 @@ export default function DefectElectronicsTopPage() {
     if (!elecData.length) return;
     const wb = XLSX.utils.book_new();
 
-    const ws = XLSX.utils.json_to_sheet(elecData.map(r => ({
-      Категория: r.CATEGORY,
-      Модель: r.MODEL,
-      'Дефектов NG': r.DEFECT_COUNT,
-      'VIN с NG': r.VIN_COUNT,
-      'VIN всего': r.VIN_TOTAL_COUNT,
-      'OK': r.OK_COUNT,
-      'Всего проверок': r.TOTAL_COUNT,
-      '% NG': r.NG_SHARE,
-      'DPU per 1000': r.TOTAL_COUNT > 0 ? Number(((r.DEFECT_COUNT * 1000) / r.TOTAL_COUNT).toFixed(2)) : 0,
-    })));
+    const ws = XLSX.utils.json_to_sheet(elecData.map(r => {
+      const vinShare = calcVinNgShare(r.VIN_COUNT, r.VIN_TOTAL_COUNT);
+      return {
+        Категория: r.CATEGORY,
+        Модель: r.MODEL,
+        'Дефектов NG': r.DEFECT_COUNT,
+        'VIN с NG': r.VIN_COUNT,
+        'VIN всего': r.VIN_TOTAL_COUNT,
+        'VIN % NG': vinShare,
+        'OK': r.OK_COUNT,
+        'Всего проверок': r.TOTAL_COUNT,
+        '% NG попыток': r.NG_SHARE,
+        'DPU per 1000': r.TOTAL_COUNT > 0 ? Number(((r.DEFECT_COUNT * 1000) / r.TOTAL_COUNT).toFixed(2)) : 0,
+      };
+    }));
     XLSX.utils.book_append_sheet(wb, ws, 'Elec top defect');
 
     const summary = ELEC_ALL_CATEGORIES.map(cat => {
@@ -722,7 +733,7 @@ export default function DefectElectronicsTopPage() {
               </div>
             </div>
 
-            {/* Stacked bar по категориям: слева NG, справа OK, справа от стека — итог */}
+            {/* Stacked bar по категориям */}
             <ResponsiveContainer width="100%" height={260}>
               <BarChart
                 layout="vertical"
@@ -743,7 +754,6 @@ export default function DefectElectronicsTopPage() {
                   contentStyle={{ borderRadius: 10, border: '1px solid #E5E7EB', fontSize: 13 }}
                 />
                 <Legend wrapperStyle={{ fontSize: 13 }} />
-
                 <Bar dataKey="NG" stackId="a" fill="#EF4444" name="NG (дефект)">
                   <LabelList dataKey="NG" position="inside" style={{ fontSize: 12, fill: '#fff', fontWeight: 700 }} />
                 </Bar>
@@ -752,7 +762,6 @@ export default function DefectElectronicsTopPage() {
                   stackId="a"
                   fill="#10B981"
                   name="OK (успех)"
-                  // кастомный label справа от стека — итог (NG + OK)
                   label={({ x, y, width, height, index }) => {
                     if (index == null) return null;
                     const total = elecOkNgSummary[index]?.total;
@@ -856,7 +865,6 @@ export default function DefectElectronicsTopPage() {
                         </td>
                         <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, color: '#DC2626' }}>{s.NG.toLocaleString()}</td>
                         <td style={{ ...tdStyle, textAlign: 'right', color: '#16A34A' }}>{s.OK.toLocaleString()}</td>
-                        {/* % NG — всегда красный */}
                         <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#DC2626' }}>{s.ngShare}%</td>
                       </tr>
                     ))}
@@ -887,30 +895,71 @@ export default function DefectElectronicsTopPage() {
 
           {/* Таблицы по категориям */}
           <div style={cardStyle}>
-            {/* Пояснение для читателя */}
-            <div style={{
-              padding: '14px 18px',
-              background: '#EFF6FF',
-              borderLeft: '4px solid #2563EB',
-              borderRadius: 8,
-              marginBottom: 24,
-              fontSize: 13,
-              color: '#1E3A8A',
-              lineHeight: 1.6,
-            }}>
-              <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14 }}>
-                ℹ️ Как читать отчёт
+            {/* Кнопка-тоггл для пояснения */}
+            <button
+              onClick={() => setShowHelp(!showHelp)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '10px 16px',
+                marginBottom: showHelp ? 14 : 24,
+                background: showHelp ? '#DBEAFE' : '#F1F5F9',
+                color: showHelp ? '#1E40AF' : '#475569',
+                border: 'none',
+                borderRadius: 10,
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+            >
+              <span style={{
+                display: 'inline-block',
+                transition: 'transform 0.2s',
+                transform: showHelp ? 'rotate(90deg)' : 'rotate(0)',
+                fontSize: 11,
+              }}>▶</span>
+              ℹ️ Как читать отчёт
+            </button>
+
+            {/* Пояснение (раскрывается) */}
+            {showHelp && (
+              <div style={{
+                padding: '14px 18px',
+                background: '#EFF6FF',
+                borderLeft: '4px solid #2563EB',
+                borderRadius: 8,
+                marginBottom: 24,
+                fontSize: 13,
+                color: '#1E3A8A',
+                lineHeight: 1.6,
+              }}>
+                <div style={{ marginBottom: 4 }}>
+                  Каждая строка таблицы — это <b>одна модель</b> в рамках <b>одной категории проверки</b>.
+                </div>
+                <div style={{ fontWeight: 700, marginTop: 12, marginBottom: 4, color: '#1E3A8A' }}>
+                  Блок «ПОПЫТКИ ПРОВЕРКИ»
+                </div>
+                <ul style={{ margin: '0 0 0 20px', padding: 0 }}>
+                  <li>Сколько раз запускалась проверка: <span style={{ color: '#DC2626', fontWeight: 600 }}>NG</span> (неуспех), <span style={{ color: '#16A34A', fontWeight: 600 }}>OK</span> (успех), <b>Всего</b>.</li>
+                  <li><b>% NG</b> = NG / Всего × 100% — доля неудачных <i>попыток</i>.</li>
+                  <li>Один автомобиль может проходить проверку несколько раз (перепрошивка, retry) — поэтому попыток обычно больше, чем машин.</li>
+                </ul>
+                <div style={{ fontWeight: 700, marginTop: 12, marginBottom: 4, color: '#166534' }}>
+                  Блок «УНИКАЛЬНЫЕ VIN»
+                </div>
+                <ul style={{ margin: '0 0 0 20px', padding: 0 }}>
+                  <li><b>VIN с NG</b> — сколько <i>разных машин</i> имели хотя бы одну неудачу.</li>
+                  <li><b>VIN всего</b> — все машины, прошедшие проверку.</li>
+                  <li><b>VIN % NG</b> = VIN с NG / VIN всего × 100% — доля <i>машин</i> с дефектом (может отличаться от % NG попыток).</li>
+                </ul>
+                <div style={{ fontWeight: 700, marginTop: 12, marginBottom: 4, color: '#1E3A8A' }}>
+                  DPU / 1000
+                </div>
+                <div>Сколько NG приходится на 1000 проверок — «плотность» дефектов. Чем выше, тем чаще сбой.</div>
               </div>
-              <div style={{ marginBottom: 4 }}>
-                Каждая строка таблицы — это <b>одна модель</b> в рамках <b>одной категории проверки</b>.
-              </div>
-              <ul style={{ margin: '6px 0 0 20px', padding: 0 }}>
-                <li><b>Попытки проверки</b> — сколько раз запускалась проверка: <span style={{ color: '#DC2626', fontWeight: 600 }}>NG</span> (неуспех) / <span style={{ color: '#16A34A', fontWeight: 600 }}>OK</span> (успех) / Всего. Один автомобиль может проходить проверку несколько раз.</li>
-                <li><b>Уникальные VIN</b> — сколько <i>разных машин</i> фигурировали: <b>VIN с NG</b> — с хотя бы одной неудачей, <b>VIN всего</b> — все машины, прошедшие проверку.</li>
-                <li><b>% NG</b> — доля неудачных попыток от всех попыток по этой модели.</li>
-                <li><b>DPU / 1000</b> — сколько NG приходится на 1000 проверок (мера «плотности» дефектов).</li>
-              </ul>
-            </div>
+            )}
 
             {elecLoading && <p style={{ textAlign: 'center', color: '#6B7280' }}>Загрузка...</p>}
             {!elecLoading && elecGrouped.length === 0 && (
@@ -919,7 +968,6 @@ export default function DefectElectronicsTopPage() {
 
             {elecGrouped.map(group => (
               <div key={group.category} style={{ marginBottom: 36 }}>
-                {/* Заголовок категории */}
                 <h3 style={{
                   fontSize: 17, fontWeight: 700, color: '#1F2937',
                   margin: '0 0 4px', paddingBottom: 6,
@@ -932,14 +980,8 @@ export default function DefectElectronicsTopPage() {
                   }} />
                   {group.category}
                 </h3>
-                {/* Пояснение к категории */}
                 {ELEC_CATEGORY_DESC[group.category] && (
-                  <div style={{
-                    fontSize: 13,
-                    color: '#64748B',
-                    marginBottom: 14,
-                    lineHeight: 1.5,
-                  }}>
+                  <div style={{ fontSize: 13, color: '#64748B', marginBottom: 14, lineHeight: 1.5 }}>
                     {ELEC_CATEGORY_DESC[group.category]}
                   </div>
                 )}
@@ -956,7 +998,7 @@ export default function DefectElectronicsTopPage() {
                         }}>
                           ПОПЫТКИ ПРОВЕРКИ
                         </th>
-                        <th colSpan={2} style={{
+                        <th colSpan={3} style={{
                           ...thStyle, textAlign: 'center',
                           background: '#F0FDF4', color: '#166534',
                           borderBottom: '1px solid #BBF7D0', fontSize: 12, letterSpacing: '0.5px',
@@ -973,6 +1015,7 @@ export default function DefectElectronicsTopPage() {
                         <th style={{ ...thStyle, textAlign: 'center', background: '#EEF2FF', color: '#1E40AF', minWidth: 140 }}>% NG</th>
                         <th style={{ ...thStyle, textAlign: 'center', background: '#F0FDF4', color: '#166534' }}>VIN с NG</th>
                         <th style={{ ...thStyle, textAlign: 'center', background: '#F0FDF4', color: '#166534' }}>VIN всего</th>
+                        <th style={{ ...thStyle, textAlign: 'center', background: '#F0FDF4', color: '#166534', minWidth: 140 }}>VIN % NG</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -981,6 +1024,7 @@ export default function DefectElectronicsTopPage() {
                         const dpu = row.TOTAL_COUNT > 0
                           ? ((row.DEFECT_COUNT * 1000) / row.TOTAL_COUNT).toFixed(1)
                           : '—';
+                        const vinShare = calcVinNgShare(row.VIN_COUNT, row.VIN_TOTAL_COUNT);
                         return (
                           <React.Fragment key={key}>
                             <tr style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
@@ -988,12 +1032,11 @@ export default function DefectElectronicsTopPage() {
                               <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#DC2626' }}>{row.DEFECT_COUNT}</td>
                               <td style={{ ...tdStyle, textAlign: 'center', color: '#16A34A', fontWeight: 600 }}>{row.OK_COUNT}</td>
                               <td style={{ ...tdStyle, textAlign: 'center', color: '#6B7280' }}>{row.TOTAL_COUNT}</td>
+
+                              {/* % NG попыток */}
                               <td style={{ ...tdStyle, minWidth: 140 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                  <div style={{
-                                    flex: 1, height: 6, background: '#F1F5F9',
-                                    borderRadius: 3, overflow: 'hidden', minWidth: 50,
-                                  }}>
+                                  <div style={{ flex: 1, height: 6, background: '#F1F5F9', borderRadius: 3, overflow: 'hidden', minWidth: 50 }}>
                                     <div style={{
                                       width: `${Math.min(100, row.NG_SHARE)}%`,
                                       height: '100%',
@@ -1001,17 +1044,32 @@ export default function DefectElectronicsTopPage() {
                                       transition: 'width 0.3s ease',
                                     }} />
                                   </div>
-                                  <span style={{
-                                    fontWeight: 700, minWidth: 46, textAlign: 'right',
-                                    color: '#DC2626',
-                                    fontSize: 13,
-                                  }}>
+                                  <span style={{ fontWeight: 700, minWidth: 46, textAlign: 'right', color: '#DC2626', fontSize: 13 }}>
                                     {row.NG_SHARE}%
                                   </span>
                                 </div>
                               </td>
+
                               <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600 }}>{row.VIN_COUNT}</td>
                               <td style={{ ...tdStyle, textAlign: 'center', color: '#6B7280' }}>{row.VIN_TOTAL_COUNT}</td>
+
+                              {/* VIN % NG — новый столбец */}
+                              <td style={{ ...tdStyle, minWidth: 140 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <div style={{ flex: 1, height: 6, background: '#F1F5F9', borderRadius: 3, overflow: 'hidden', minWidth: 50 }}>
+                                    <div style={{
+                                      width: `${Math.min(100, vinShare)}%`,
+                                      height: '100%',
+                                      background: '#DC2626',
+                                      transition: 'width 0.3s ease',
+                                    }} />
+                                  </div>
+                                  <span style={{ fontWeight: 700, minWidth: 46, textAlign: 'right', color: '#DC2626', fontSize: 13 }}>
+                                    {vinShare}%
+                                  </span>
+                                </div>
+                              </td>
+
                               <td style={{ ...tdStyle, textAlign: 'center' }}>{dpu}</td>
                               <td style={tdStyle}>
                                 <div style={{ display: 'flex', gap: 6 }}>
@@ -1031,7 +1089,7 @@ export default function DefectElectronicsTopPage() {
                             </tr>
                             {elecExpandedKey === key && (
                               <tr>
-                                <td colSpan={9} style={{ padding: 0 }}>
+                                <td colSpan={10} style={{ padding: 0 }}>
                                   <div style={{ padding: 12, backgroundColor: '#F3F4F6', borderRadius: 8, margin: '8px 0' }}>
                                     {elecVinLoading ? (
                                       <p style={{ margin: 0 }}>Загрузка VIN...</p>
@@ -1319,7 +1377,6 @@ export default function DefectElectronicsTopPage() {
                 style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280' }}>✕</button>
             </div>
 
-            {/* Пояснение про периоды */}
             <div style={{
               padding: '10px 14px',
               background: '#FEF3C7',
