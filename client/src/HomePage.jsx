@@ -30,6 +30,8 @@ import drrCp5Preview from './assets/drrcp5.png';
 import allDrrPreview from './assets/alldrrcomp.png';
 import vrtPreview from './assets/vrt.png';
 import drrShiftPreview from './assets/drrshift.png';
+import defectCapturePreview from './assets/defph.png';
+import lineDefectsArchivePreview from './assets/archph.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -351,7 +353,7 @@ export default function HomePage() {
     { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR ADAS Dashboard", accentColor: "#0ea5e9" },
     { to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "DRR PIP Dashboard", accentColor: "#0EA5E9" },
     { to: "/drr-wt-portal", imgSrc: drrWtPortalPreview, caption: "DRR CPFinal Dashboard", accentColor: "#0EA5E9" },//это новый спфинал
-    //{ to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Electronics Defects Top", accentColor: "#8B5CF6" },
+    { to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Electronics Defects Top", accentColor: "#8B5CF6" },
     { to: "/remzone-work-status", imgSrc: RemPreview, caption: "Remzone Work Status", accentColor: "#8B5CF6" },
     { to: "/vehicle-on-wheels", imgSrc: VehPreview, caption: "Vehicle on Wheels", accentColor: "#e22910" },
     { to: "/drr-cp6", imgSrc: drrCp6Preview, caption: "DRR CP6 Dashboard", accentColor: "#0EA5E9" },
