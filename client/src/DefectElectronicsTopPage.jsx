@@ -754,14 +754,14 @@ export default function DefectElectronicsTopPage() {
                   contentStyle={{ borderRadius: 10, border: '1px solid #E5E7EB', fontSize: 13 }}
                 />
                 <Legend wrapperStyle={{ fontSize: 13 }} />
-                <Bar dataKey="NG" stackId="a" fill="#EF4444" name="NG (дефект)">
+                <Bar dataKey="NG" stackId="a" fill="#EF4444" name="NG">
                   <LabelList dataKey="NG" position="inside" style={{ fontSize: 12, fill: '#fff', fontWeight: 700 }} />
                 </Bar>
                 <Bar
                   dataKey="OK"
                   stackId="a"
                   fill="#10B981"
-                  name="OK (успех)"
+                  name="OK"
                   label={({ x, y, width, height, index }) => {
                     if (index == null) return null;
                     const total = elecOkNgSummary[index]?.total;
@@ -812,7 +812,7 @@ export default function DefectElectronicsTopPage() {
                     <Tooltip
                       formatter={(value, name) => [
                         Number(value).toLocaleString(),
-                        name === 'NG' ? 'NG (дефект)' : 'OK (успех)',
+                        name === 'NG' ? 'NG' : 'OK',
                       ]}
                       contentStyle={{ fontSize: 14, borderRadius: 12, border: '1px solid #E5E7EB' }}
                     />
