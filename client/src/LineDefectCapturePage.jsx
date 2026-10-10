@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrowserMultiFormatReader } from '@zxing/browser';
-import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 
 const API_BASE = '';
 const MAX_PHOTOS = 3;
@@ -9,18 +7,6 @@ const VIN_LEN = 17;
 const VIN_ALLOWED = /[^A-HJ-NPR-Z0-9]/g;
 const STATE_KEY = 'line-defect-capture-state-v1';
 const MIN_SUFFIX_LEN = 6;
-
-/* Размер, до которого ужимаем фото перед декодированием.
-   1200 по большей стороне достаточно для DataMatrix/Code128 и в 3 раза меньше памяти. */
-const DECODE_MAX_SIDE = 1200;
-
-/* Форматы, которые нас реально интересуют. Уберите лишние, если знаете точный. */
-const DECODE_FORMATS = [
-  BarcodeFormat.DATA_MATRIX,
-  BarcodeFormat.CODE_128,
-  BarcodeFormat.CODE_39,
-  BarcodeFormat.ITF,
-];
 
 const LOCATIONS = [
   { code: 'CP7',    label: 'CP7',                  color: '#2563EB' },
@@ -86,164 +72,6 @@ const beep = () => {
   } catch {}
 };
 const vibrate = (ms = 60) => { try { navigator.vibrate?.(ms); } catch {} };
-
-const canUseLiveCamera = () => {
-  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return false;
-  return (
-    window.isSecureContext ||
-    window.location.protocol === 'https:' ||
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1'
-  );
-};
-
-/* ============================================================
- * ДЕКОДЕР ШТРИХКОДА ИЗ ФОТО
- * ============================================================ */
-
-// Проверка, что ошибка — это «не нашли код», а не реальная проблема
-const isBenignScanError = (e) => {
-  const n = e?.name || e?.constructor?.name || '';
-  if (n === 'NotFoundException' || n === 'ChecksumException' || n === 'FormatException') return true;
-  const msg = String(e?.message || '');
-  return /NotFoundException|ChecksumException|FormatException/.test(msg);
-};
-
-const makeHints = () => {
-  const hints = new Map();
-  hints.set(DecodeHintType.POSSIBLE_FORMATS, DECODE_FORMATS);
-  hints.set(DecodeHintType.TRY_HARDER, false); // без «изо всех сил» — меньше поворотов и canvas
-  return hints;
-};
-
-const rotateCanvas = (src, deg) => {
-  if (deg === 0) return src;
-  const out = document.createElement('canvas');
-  if (deg === 90 || deg === 270) {
-    out.width = src.height;
-    out.height = src.width;
-  } else {
-    out.width = src.width;
-    out.height = src.height;
-  }
-  const ctx = out.getContext('2d');
-  ctx.translate(out.width / 2, out.height / 2);
-  ctx.rotate((deg * Math.PI) / 180);
-  ctx.drawImage(src, -src.width / 2, -src.height / 2);
-  return out;
-};
-
-const toGrayContrast = (src, k = 1.8) => {
-  const out = document.createElement('canvas');
-  out.width = src.width;
-  out.height = src.height;
-  const ctx = out.getContext('2d');
-  ctx.drawImage(src, 0, 0);
-  const im = ctx.getImageData(0, 0, out.width, out.height);
-  const d = im.data;
-  for (let i = 0; i < d.length; i += 4) {
-    let g = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
-    g = (g - 128) * k + 128;
-    d[i] = d[i + 1] = d[i + 2] = g < 0 ? 0 : g > 255 ? 255 : g;
-  }
-  ctx.putImageData(im, 0, 0);
-  return out;
-};
-
-const toBinarized = (src, threshold = 128) => {
-  const out = document.createElement('canvas');
-  out.width = src.width;
-  out.height = src.height;
-  const ctx = out.getContext('2d');
-  ctx.drawImage(src, 0, 0);
-  const im = ctx.getImageData(0, 0, out.width, out.height);
-  const d = im.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    const v = g > threshold ? 255 : 0;
-    d[i] = d[i + 1] = d[i + 2] = v;
-  }
-  ctx.putImageData(im, 0, 0);
-  return out;
-};
-
-const fileToImage = (file) => new Promise((resolve, reject) => {
-  const url = URL.createObjectURL(file);
-  const img = new Image();
-  img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-  img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
-  img.src = url;
-});
-
-// Один проход: canvas → dataURL → decodeFromImageUrl
-const tryDecodeCanvas = async (reader, canvas, label) => {
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-  try {
-    const result = await reader.decodeFromImageUrl(dataUrl);
-    if (result) {
-      const text = result.getText();
-      console.log(`[scanner] ✓ ${label} → "${text}"`);
-      return text;
-    }
-  } catch (e) {
-    if (!isBenignScanError(e)) {
-      console.warn(`[scanner] не-NotFound ошибка (${label}):`, e?.name, e?.message);
-    }
-  }
-  return null;
-};
-
-const decodeVinFromFile = async (file) => {
-  console.log('[scanner] start decode, file:', file.name, file.size, 'bytes');
-
-  const img = await fileToImage(file);
-  console.log('[scanner] image loaded:', img.width, 'x', img.height);
-
-  // Ужимаем до DECODE_MAX_SIDE по большей стороне (это ключевое для «Could not create Canvas»)
-  const scale = Math.min(1, DECODE_MAX_SIDE / Math.max(img.width, img.height));
-  const base = document.createElement('canvas');
-  base.width = Math.round(img.width * scale);
-  base.height = Math.round(img.height * scale);
-  base.getContext('2d').drawImage(img, 0, 0, base.width, base.height);
-  console.log('[scanner] resized to:', base.width, 'x', base.height);
-
-  const reader = new BrowserMultiFormatReader(makeHints(), { delayBetweenScanAttempts: 100 });
-
-  // Ленивая генерация вариантов: сначала raw, потом gray/bin. Так не держим все canvas в памяти.
-  const variantFactories = [
-    { name: 'raw',    make: () => base },
-    { name: 'gray',   make: () => toGrayContrast(base, 1.8) },
-    { name: 'gray25', make: () => toGrayContrast(base, 2.5) },
-    { name: 'bin110', make: () => toBinarized(base, 110) },
-    { name: 'bin140', make: () => toBinarized(base, 140) },
-    { name: 'bin170', make: () => toBinarized(base, 170) },
-  ];
-
-  // Сначала без поворота (для DataMatrix и горизонтального Code128),
-  // потом 90/270/180 — только если не сработало.
-  const rotations = [0, 90, 270, 180];
-
-  let counter = 0;
-  for (const v of variantFactories) {
-    const variantCanvas = v.make();
-    for (const deg of rotations) {
-      counter++;
-      const rot = rotateCanvas(variantCanvas, deg);
-      const text = await tryDecodeCanvas(reader, rot, `${v.name}/${deg}° [#${counter}]`);
-      if (text) return text;
-      if (rot !== variantCanvas) {
-        rot.width = 1; rot.height = 1;
-      }
-    }
-    if (variantCanvas !== base) {
-      variantCanvas.width = 1; variantCanvas.height = 1;
-    }
-  }
-
-  console.warn(`[scanner] all ${counter} variants failed`);
-  throw new Error('not found');
-};
 
 const loadState = () => {
   try { const raw = sessionStorage.getItem(STATE_KEY); return raw ? JSON.parse(raw) : null; }
@@ -367,295 +195,6 @@ function Autocomplete({ value, onChange, fetchUrl, placeholder, disabled, label 
   );
 }
 
-/* ================= Scanner (live + photo fallback) ================= */
-function BarcodeScannerModal({ onClose, onResult }) {
-  const liveSupported = canUseLiveCamera();
-
-  const [mode, setMode] = useState(liveSupported ? 'live' : 'photo');
-  const [busy, setBusy] = useState(liveSupported);
-  const [hint, setHint] = useState('Наведите камеру на штрихкод');
-  const [photoError, setPhotoError] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState(null);
-
-  const videoRef = useRef(null);
-  const controlsRef = useRef(null);
-  const streamRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const previewUrlRef = useRef(null);
-
-  /* ---------- LIVE ---------- */
-  useEffect(() => {
-    if (mode !== 'live') return;
-    let cancelled = false;
-
-    (async () => {
-      if (!liveSupported) { setMode('photo'); return; }
-
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
-        });
-      } catch (e) {
-        const name = e?.name || '';
-        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-          setPhotoError('Live-камера запрещена — используйте снимок.');
-        } else if (name === 'NotReadableError' || name === 'TrackStartError') {
-          setPhotoError('Камера занята — используйте снимок.');
-        } else {
-          setPhotoError(e?.message || 'Live-камера недоступна — используйте снимок.');
-        }
-        setMode('photo');
-        return;
-      }
-
-      if (cancelled) {
-        stream.getTracks().forEach(t => { try { t.stop(); } catch {} });
-        return;
-      }
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        try { await videoRef.current.play(); } catch {}
-      }
-
-      try {
-        const reader = new BrowserMultiFormatReader(makeHints(), { delayBetweenScanAttempts: 120 });
-        const controls = await reader.decodeFromStream(stream, videoRef.current, (result) => {
-          if (cancelled) return;
-          if (result) {
-            const text = result.getText().trim();
-            const clean = sanitizeVin(text);
-            if (clean.length !== VIN_LEN) {
-              setHint(`Считано «${text.slice(0, 24)}» — не VIN, продолжаем…`);
-              return;
-            }
-            cancelled = true;
-            try { controls.stop(); } catch {}
-            try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
-            beep(); vibrate(80);
-            onResult(clean);
-          }
-        });
-        controlsRef.current = controls;
-        setBusy(false);
-      } catch (e) {
-        console.error('[scanner] decode error:', e);
-        setPhotoError('Live-распознавание не запустилось — используйте снимок.');
-        setMode('photo');
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      try { controlsRef.current?.stop(); } catch {}
-      try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
-    };
-  }, [mode, onResult, liveSupported]);
-
-  /* ---------- Освобождение preview URL ---------- */
-  useEffect(() => {
-    previewUrlRef.current = previewUrl;
-  }, [previewUrl]);
-  useEffect(() => () => {
-    if (previewUrlRef.current) {
-      try { URL.revokeObjectURL(previewUrlRef.current); } catch {}
-    }
-  }, []);
-
-  /* ---------- PHOTO ---------- */
-  const openFilePicker = () => fileInputRef.current?.click();
-
-  const handlePhotoFile = async (file) => {
-    if (!file) return;
-    console.log('[scanner] photo picked:', file.name, file.type, file.size);
-    setMode('processing');
-    setPhotoError(null);
-
-    if (previewUrlRef.current) {
-      try { URL.revokeObjectURL(previewUrlRef.current); } catch {}
-    }
-    let newPreview = null;
-    try {
-      newPreview = URL.createObjectURL(file);
-      setPreviewUrl(newPreview);
-    } catch { setPreviewUrl(null); }
-
-    const t0 = Date.now();
-    try {
-      const text = await decodeVinFromFile(file);
-      const clean = sanitizeVin(text);
-      console.log(`[scanner] total ${Date.now() - t0}ms, raw="${text}", clean="${clean}" (len=${clean.length})`);
-      if (clean.length !== VIN_LEN) {
-        setPhotoError(`Распознано «${text.slice(0, 28)}» — это не VIN. Переснимите, чтобы штрихкод был целиком в кадре.`);
-        setMode('photo');
-        return;
-      }
-      beep(); vibrate(80);
-      onResult(clean);
-    } catch (e) {
-      console.warn('[scanner photo] decode failed after', Date.now() - t0, 'ms:', e?.message);
-      setPhotoError('Не удалось распознать. Сфотографируйте ближе, штрихкод целиком в кадре, без бликов.');
-      setMode('photo');
-    }
-  };
-
-  const onFileChange = (e) => {
-    const f = e.target.files?.[0];
-    e.target.value = '';
-    if (f) handlePhotoFile(f);
-  };
-
-  /* ---------- UI: PHOTO / PROCESSING ---------- */
-  if (mode === 'photo' || mode === 'processing') {
-    return (
-      <div style={{ position: 'fixed', inset: 0, background: '#0F172A', zIndex: 9000, display: 'flex', flexDirection: 'column' }}>
-        <div style={{
-          flex: 1, display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center',
-          padding: 24, color: '#FFFFFF', textAlign: 'center', overflow: 'auto',
-        }}>
-          <div style={{ fontSize: 60, marginBottom: 12 }}>📷</div>
-          <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 10 }}>
-            {mode === 'processing' ? 'Распознавание…' : 'Фото штрихкода'}
-          </div>
-          <div style={{ fontSize: 14, color: '#94A3B8', maxWidth: 320, lineHeight: 1.5, marginBottom: 20 }}>
-            {mode === 'processing'
-              ? 'Пожалуйста, подождите'
-              : 'Сфотографируйте штрихкод на машине — камера откроется автоматически.'}
-          </div>
-
-          {previewUrl && mode === 'photo' && (
-            <div style={{
-              width: 240, height: 240, borderRadius: 12, overflow: 'hidden',
-              border: '2px solid #334155', marginBottom: 16,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: '#1E293B',
-            }}>
-              <img src={previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            </div>
-          )}
-
-          {mode === 'photo' && (
-            <button
-              onClick={openFilePicker}
-              style={{
-                padding: '16px 32px', fontSize: 17, fontWeight: 800,
-                borderRadius: 14, border: 'none', cursor: 'pointer',
-                background: '#2563EB', color: '#FFFFFF',
-                boxShadow: '0 6px 14px rgba(37,99,235,0.5)',
-                display: 'inline-flex', alignItems: 'center', gap: 10,
-                minWidth: 240, justifyContent: 'center',
-              }}
-            >
-              📸 {previewUrl ? 'Переснять' : 'Сфотографировать'}
-            </button>
-          )}
-
-          {mode === 'processing' && (
-            <div style={{
-              width: 40, height: 40, borderRadius: '50%',
-              border: '4px solid #1E293B', borderTopColor: '#2563EB',
-              animation: 'ldspin 0.8s linear infinite',
-              marginTop: 10,
-            }} />
-          )}
-
-          {photoError && mode === 'photo' && (
-            <div style={{
-              marginTop: 20, padding: '12px 16px', borderRadius: 10,
-              background: 'rgba(239,68,68,0.15)', color: '#FCA5A5',
-              border: '1px solid rgba(239,68,68,0.4)',
-              fontSize: 13, maxWidth: 340, lineHeight: 1.5,
-            }}>⚠ {photoError}</div>
-          )}
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            style={{ display: 'none' }}
-            onChange={onFileChange}
-          />
-        </div>
-
-        <div style={{ padding: 20, background: '#020617', display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
-          {liveSupported && (
-            <button
-              onClick={() => { setMode('live'); setBusy(true); setPhotoError(null); }}
-              style={{
-                padding: '12px 24px', borderRadius: 12, border: '1px solid #334155',
-                background: 'transparent', color: '#CBD5E1',
-                fontSize: 14, fontWeight: 700, cursor: 'pointer',
-              }}
-            >🎥 Живая камера</button>
-          )}
-          <button
-            onClick={onClose}
-            style={{
-              padding: '12px 32px', borderRadius: 12, border: 'none',
-              background: '#374151', color: '#FFF',
-              fontSize: 15, fontWeight: 700, cursor: 'pointer',
-            }}
-          >Отмена</button>
-        </div>
-
-        <style>{`@keyframes ldspin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
-
-  /* ---------- UI: LIVE ---------- */
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 9000, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>
-        <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline autoPlay />
-        <div style={{
-          position: 'absolute', inset: '30% 8%',
-          border: '2px solid #22C55E', borderRadius: 12,
-          boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)',
-          pointerEvents: 'none',
-        }} />
-        {busy && (
-          <div style={{
-            position: 'absolute', inset: 0, display: 'flex',
-            alignItems: 'center', justifyContent: 'center',
-            color: '#FFF', fontSize: 16, background: 'rgba(0,0,0,0.4)',
-          }}>Запуск камеры…</div>
-        )}
-        {!busy && (
-          <div style={{
-            position: 'absolute', bottom: 20, left: 0, right: 0,
-            textAlign: 'center', color: '#FFF', fontSize: 14,
-            textShadow: '0 1px 4px rgba(0,0,0,0.8)',
-          }}>{hint}</div>
-        )}
-      </div>
-      <div style={{ padding: 16, background: '#111', display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <button
-          onClick={() => { setMode('photo'); setPhotoError(null); }}
-          style={{
-            padding: '12px 24px', borderRadius: 12, border: '1px solid #334155',
-            background: 'transparent', color: '#CBD5E1',
-            fontSize: 14, fontWeight: 700, cursor: 'pointer',
-          }}
-        >📷 Снимок</button>
-        <button
-          onClick={onClose}
-          style={{
-            padding: '12px 32px', borderRadius: 12, border: 'none',
-            background: '#374151', color: '#FFF',
-            fontSize: 15, fontWeight: 700, cursor: 'pointer',
-          }}
-        >Отмена</button>
-      </div>
-    </div>
-  );
-}
-
 /* ================= Confirm ================= */
 function ConfirmModal({ text, onConfirm, onCancel }) {
   return (
@@ -679,8 +218,6 @@ export default function LineDefectCapturePage() {
   const [vin, setVin] = useState(boot?.vin || '');
   const [vinCheck, setVinCheck] = useState({ state: 'idle', valid: false, reason: '', model: '' });
   const [suffixMatches, setSuffixMatches] = useState([]);
-  const [scannerOpen, setScannerOpen] = useState(false);
-  const [scannedRaw, setScannedRaw] = useState(boot?.scannedRaw || null);
 
   const [captureLocation, setCaptureLocation] = useState(boot?.captureLocation || '');
 
@@ -723,8 +260,8 @@ export default function LineDefectCapturePage() {
   }, []);
 
   useEffect(() => {
-    saveState({ vin, partName, problemType, comment, clientId, photos, scannedRaw, captureLocation });
-  }, [vin, partName, problemType, comment, clientId, photos, scannedRaw, captureLocation]);
+    saveState({ vin, partName, problemType, comment, clientId, photos, captureLocation });
+  }, [vin, partName, problemType, comment, clientId, photos, captureLocation]);
 
   useEffect(() => {
     if (pickingRef.current) { pickingRef.current = false; return; }
@@ -843,8 +380,8 @@ export default function LineDefectCapturePage() {
           part_name: partName.trim(),
           problem_type: problemType.trim(),
           comment: comment.trim(),
-          entry_mode: scannedRaw ? 'barcode' : 'manual',
-          barcode_raw: scannedRaw || null,
+          entry_mode: 'manual',
+          barcode_raw: null,
           photo_ids: photos.map(p => p.id),
           client_id: clientId,
         }),
@@ -861,7 +398,7 @@ export default function LineDefectCapturePage() {
     clearState();
     setVin(''); setVinCheck({ state: 'idle', valid: false, reason: '', model: '' });
     setSuffixMatches([]);
-    setScannedRaw(null); setCaptureLocation('');
+    setCaptureLocation('');
     setPartName(''); setProblemType('');
     setPhotos([]); setComment('');
     setDone(null); setError(null);
@@ -878,10 +415,6 @@ export default function LineDefectCapturePage() {
     borderRadius: 12, border: 'none', cursor: 'pointer',
     background: '#2563EB', color: '#FFFFFF',
     boxShadow: '0 6px 14px rgba(37,99,235,0.3)',
-  };
-  const secondaryButton = {
-    ...bigButton, background: '#F1F5F9', color: '#1E293B',
-    boxShadow: 'none', border: '1px solid #E2E8F0',
   };
   const stepLabel = {
     fontSize: 11, fontWeight: 800, color: '#94A3B8',
@@ -930,7 +463,7 @@ export default function LineDefectCapturePage() {
           <div style={stepLabel}>Шаг 1 — VIN</div>
           <input
             value={vin}
-            onChange={(e) => { setVin(sanitizeVin(e.target.value)); setScannedRaw(null); setSuffixMatches([]); }}
+            onChange={(e) => { setVin(sanitizeVin(e.target.value)); setSuffixMatches([]); }}
             onPaste={(e) => {
               e.preventDefault();
               setVin(sanitizeVin(e.clipboardData.getData('text')));
@@ -947,16 +480,10 @@ export default function LineDefectCapturePage() {
               boxSizing: 'border-box', marginBottom: 10,
             }}
           />
-          <button
-            onClick={() => setScannerOpen(true)}
-            style={{ ...secondaryButton, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-          >
-            📷 Сканировать штрихкод
-          </button>
 
           {(vinCheck.state !== 'idle' || vinCheck.reason) && suffixMatches.length === 0 && (
             <div style={{
-              marginTop: 10, padding: '10px 12px', borderRadius: 10,
+              padding: '10px 12px', borderRadius: 10,
               background: vinCheck.state === 'ok' ? '#ECFDF5' : vinCheck.state === 'err' ? '#FEF2F2' : vinCheck.state === 'checking' ? '#F1F5F9' : 'transparent',
               color: vinCheck.state === 'ok' ? '#166534' : vinCheck.state === 'err' ? '#991B1B' : '#475569',
               fontSize: 13,
@@ -965,7 +492,6 @@ export default function LineDefectCapturePage() {
               {vinCheck.state === 'ok' && (
                 <>
                   ✔ Модель: <b>{vinCheck.model}</b>
-                  {scannedRaw && ' · сканер'}
                   {vinCheck.matched === 'suffix' && ' · найдено по 6 символам'}
                 </>
               )}
@@ -1146,17 +672,6 @@ export default function LineDefectCapturePage() {
 
         {confirmPhotoId && (
           <ConfirmModal text="Удалить это фото?" onConfirm={doRemove} onCancel={() => setConfirmPhotoId(null)} />
-        )}
-
-        {scannerOpen && (
-          <BarcodeScannerModal
-            onClose={() => setScannerOpen(false)}
-            onResult={(clean) => {
-              setScannerOpen(false);
-              setScannedRaw(clean);
-              setVin(clean);
-            }}
-          />
         )}
       </div>
     </div>
