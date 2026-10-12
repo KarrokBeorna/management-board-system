@@ -14935,6 +14935,7 @@ app.get('/api/repps-retrospective', async (req, res) => {
 /* ====================================================================== */
 /* VIN-детали для модалки: клик по числу в таблице                          */
 /* category: total | no_paint | paint_closed_only | paint_open | paint_all */
+/* Для paint_open показываются только VIN, прошедшие PSOUT (AGMPS01002)     */
 /* ====================================================================== */
 app.get('/api/repps-vins-details', async (req, res) => {
   try {
@@ -14943,7 +14944,7 @@ app.get('/api/repps-vins-details', async (req, res) => {
       return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
     }
 
-    // 1. VIN + первое время REPPS за период
+    // 1. VIN + первое время REPPS
     let sql = `
       SELECT t.vin, t.first_repps, too.product AS MODEL
       FROM (
@@ -14967,7 +14968,17 @@ app.get('/api/repps-vins-details', async (req, res) => {
     const vins = rows.map(r => r.vin);
     const ph = vins.map(() => '?').join(',');
 
-    // 2. Все дефекты окраски этих VIN
+    // 2. Время PSOUT (AGMPS01002) для этих VIN
+    const [psoutRows] = await mesPool.query(`
+      SELECT vin, MAX(scan_time) AS psout_time
+      FROM ti_mes_movement
+      WHERE uloc_no = 'AGMPS01002' AND is_deleted = 0 AND vin IN (${ph})
+      GROUP BY vin
+    `, vins);
+
+    const psoutByVin = new Map(psoutRows.map(r => [r.vin, r.psout_time]));
+
+    // 3. Все дефекты окраски
     const [defectRows] = await pool.query(`
       SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, STATUS, CREATION_TIME
       FROM at_paint_qm_defect_info
@@ -14996,19 +15007,19 @@ app.get('/api/repps-vins-details', async (req, res) => {
       });
     });
 
-    // 3. Фильтр по категории
+    // 4. Фильтр по категории
     let filtered = rows;
     if (category === 'no_paint') {
       filtered = rows.filter(r => !vinHasPaint.has(r.vin));
     } else if (category === 'paint_closed_only') {
       filtered = rows.filter(r => vinHasPaint.has(r.vin) && !vinHasOpenPaint.has(r.vin));
     } else if (category === 'paint_open') {
-      filtered = rows.filter(r => vinHasOpenPaint.has(r.vin));
+      // только VIN, прошедшие PSOUT и с ≥1 незакрытым дефектом окраски
+      filtered = rows.filter(r => vinHasOpenPaint.has(r.vin) && psoutByVin.has(r.vin));
     } else if (category === 'paint_all') {
       filtered = rows.filter(r => vinHasPaint.has(r.vin));
     }
 
-    // 4. Формируем ответ: открытые дефекты вперёд
     const result = filtered.map(r => {
       const defects = (defectsByVin.get(r.vin) || [])
         .sort((a, b) => (b.is_open ? 1 : 0) - (a.is_open ? 1 : 0));
@@ -15016,6 +15027,7 @@ app.get('/api/repps-vins-details', async (req, res) => {
         vin: r.vin,
         model: r.MODEL || '—',
         repps_time: r.first_repps,
+        psout_time: psoutByVin.get(r.vin) || null,
         defects,
       };
     });

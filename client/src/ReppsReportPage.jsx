@@ -6,7 +6,10 @@ import {
 
 const API_BASE = '';
 
-/* ===================== ЦВЕТА ===================== */
+/* ===================== ЦВЕТА (теория цвета для дашборда) ===================== */
+/*  зелёный  = хорошо (нет проблем)
+    жёлтый   = внимание (дефекты были, но решены)
+    красный  = плохо   (есть незакрытые дефекты) */
 const reppsBarTypeColors = {
   year: '#7C3AED',
   month: '#0EA5E9',
@@ -22,9 +25,9 @@ const reppsTypeBgColors = {
 };
 
 const stackColors = {
-  no_paint:          '#94A3B8',   // серый — нет дефектов окраски
-  paint_closed_only: '#F9A8D4',   // светло-розовый — все закрыты
-  paint_open:        '#EC4899',   // ярко-розовый — есть незакрытые
+  no_paint:          '#10B981',  // зелёный
+  paint_closed_only: '#F59E0B',  // жёлтый
+  paint_open:        '#DC2626',  // красный
 };
 
 const modelColors = {
@@ -46,8 +49,7 @@ const modelShortNames = {
 
 const H_SECTION_TITLE = 26;
 const H_CHART_TITLE = 22;
-const H_CHART_1 = 200;
-const H_CHART_2 = 220;
+const H_CHART_2 = 260;
 
 const cardStyle = {
   backgroundColor: '#FFFFFF',
@@ -128,29 +130,26 @@ const sectionTitleStyle = {
 };
 
 const chartTitleStyle = {
-  fontSize: 12,
+  fontSize: 13,
   fontWeight: 700,
   color: '#374151',
-  margin: '6px 0 6px 0',
+  margin: '6px 0 8px 0',
   height: H_CHART_TITLE,
   display: 'flex',
   alignItems: 'center',
 };
 
-const splitTitleStyle = {
-  ...chartTitleStyle,
-  marginTop: 16,
-  paddingTop: 14,
-  borderTop: '2px dashed #CBD5E1',
-  height: H_CHART_TITLE + 30,
-  boxSizing: 'border-box',
-};
-
 const tableWrapStyle = {
-  marginTop: 8,
+  marginTop: 6,
   border: '1px solid #E5E7EB',
   borderRadius: 6,
   overflow: 'hidden',
+};
+
+const dashDividerStyle = {
+  borderTop: '2px dashed #CBD5E1',
+  marginTop: 12,
+  marginBottom: 8,
 };
 
 /* ===================== Хелперы ===================== */
@@ -163,6 +162,11 @@ const shortenLabel = (label, type) => {
     return label.split(' ')[0];
   }
   return label;
+};
+
+const formatDateTime = (str) => {
+  if (!str) return '—';
+  try { return new Date(str).toLocaleString('ru-RU'); } catch { return String(str); }
 };
 
 export default function ReppsReportPage() {
@@ -224,10 +228,9 @@ export default function ReppsReportPage() {
     };
   }, [chartData, period]);
 
-  const barDataKey = selectedModel === 'ALL' ? 'total' : selectedModel;
-  const stackKeyNoPaint      = selectedModel === 'ALL' ? 'no_paint'          : `${selectedModel}_no_paint`;
-  const stackKeyClosed       = selectedModel === 'ALL' ? 'paint_closed_only' : `${selectedModel}_paint_closed_only`;
-  const stackKeyOpen         = selectedModel === 'ALL' ? 'paint_open'        : `${selectedModel}_paint_open`;
+  const stackKeyNoPaint = selectedModel === 'ALL' ? 'no_paint'          : `${selectedModel}_no_paint`;
+  const stackKeyClosed  = selectedModel === 'ALL' ? 'paint_closed_only' : `${selectedModel}_paint_closed_only`;
+  const stackKeyOpen    = selectedModel === 'ALL' ? 'paint_open'        : `${selectedModel}_paint_open`;
 
   const modelKeys = Object.keys(modelColors);
 
@@ -250,35 +253,6 @@ export default function ReppsReportPage() {
   const closeModal = () => {
     setModalOpen(false);
     setModalVins([]);
-  };
-
-  /* ===================== CHART 1 ===================== */
-  const renderBasicChart = (points) => {
-    if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
-    const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
-
-    return (
-      <ResponsiveContainer width="100%" height={H_CHART_1}>
-        <BarChart data={displayData} margin={{ top: 20, right: 8, left: -18, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-          <XAxis dataKey="displayLabel" tick={{ fontSize: 10 }} interval={0} height={28} />
-          <YAxis domain={[0, 'auto']} tick={{ fontSize: 10 }} allowDecimals={false} width={30} />
-          <Bar
-            dataKey={barDataKey}
-            barSize={22}
-            radius={[4, 4, 0, 0]}
-            label={{
-              fill: '#111827', fontSize: 10, fontWeight: 700, position: 'top',
-              formatter: (v) => v !== null && v !== undefined && v > 0 ? v : '',
-            }}
-          >
-            {displayData.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={reppsBarTypeColors[entry.type]} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    );
   };
 
   /* ===================== CHART 2 — 3-стек ===================== */
@@ -310,65 +284,8 @@ export default function ReppsReportPage() {
     );
   };
 
-  /* ===================== Таблица под CHART 1 ===================== */
-  const renderBasicTable = (points) => {
-    if (!points.length) return null;
-    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
-
-    return (
-      <div style={tableWrapStyle}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-          <thead>
-            <tr style={{ backgroundColor: '#F9FAFB' }}>
-              <th style={{ ...thStyle, width: 40, paddingLeft: 6, textAlign: 'left' }}>Мод.</th>
-              {points.map((point, idx) => (
-                <th key={idx} style={{ ...thStyle, backgroundColor: reppsTypeBgColors[point.type] }}>
-                  {displayLabels[idx]}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {(selectedModel === 'ALL' ? [...modelKeys, 'total'] : [selectedModel]).map(modelKey => (
-              <tr key={modelKey} style={{
-                backgroundColor: modelKey === 'total' ? '#F3F4F6' : 'white',
-                fontWeight: modelKey === 'total' ? 700 : 400,
-                display: (selectedModel !== 'ALL' && modelKey === 'total') ? 'none' : undefined,
-              }}>
-                <td style={{ ...tdStyle, paddingLeft: 6, textAlign: 'left', fontWeight: 600 }}>
-                  {modelShortNames[modelKey] || modelKey}
-                </td>
-                {points.map((point, idx) => {
-                  const val = modelKey === 'total' ? point.total : point[modelKey];
-                  const modelParam = modelKey === 'total' ? 'ALL' : modelKey;
-                  return (
-                    <td
-                      key={idx}
-                      style={{
-                        ...clickableTdStyle,
-                        backgroundColor: reppsTypeBgColors[point.type],
-                        color: val !== null && val !== undefined && val > 0 ? '#1F2937' : '#9CA3AF',
-                        fontWeight: val > 0 ? 600 : 400,
-                      }}
-                      onClick={() => val > 0 && openVinsModal(point.startDate, point.endDate, 'total', modelParam, point.label)}
-                      onMouseEnter={(e) => { if (val > 0) e.currentTarget.style.backgroundColor = '#BFDBFE'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = reppsTypeBgColors[point.type]; }}
-                      title={val > 0 ? 'Клик — показать VIN' : ''}
-                    >
-                      {val !== null && val !== undefined ? val : ''}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
-
-  /* ===================== Таблица под CHART 2 ===================== */
-  const renderStackTable = (points) => {
+  /* ===================== Таблица категорий ===================== */
+  const renderCategoryTable = (points) => {
     if (!points.length) return null;
     const displayLabels = points.map(p => shortenLabel(p.label, p.type));
 
@@ -441,26 +358,83 @@ export default function ReppsReportPage() {
     );
   };
 
+  /* ===================== Таблица по моделям ===================== */
+  const renderModelTable = (points) => {
+    if (!points.length) return null;
+    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
+
+    return (
+      <div style={tableWrapStyle}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+          <thead>
+            <tr style={{ backgroundColor: '#F9FAFB' }}>
+              <th style={{ ...thStyle, width: 60, paddingLeft: 6, textAlign: 'left' }}>Мод.</th>
+              {points.map((point, idx) => (
+                <th key={idx} style={{ ...thStyle, backgroundColor: reppsTypeBgColors[point.type] }}>
+                  {displayLabels[idx]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(selectedModel === 'ALL' ? [...modelKeys, 'total'] : [selectedModel]).map(modelKey => (
+              <tr key={modelKey} style={{
+                backgroundColor: modelKey === 'total' ? '#F3F4F6' : 'white',
+                fontWeight: modelKey === 'total' ? 700 : 400,
+                display: (selectedModel !== 'ALL' && modelKey === 'total') ? 'none' : undefined,
+              }}>
+                <td style={{ ...tdStyle, paddingLeft: 6, textAlign: 'left', fontWeight: 600 }}>
+                  {modelShortNames[modelKey] || modelKey}
+                </td>
+                {points.map((point, idx) => {
+                  const val = modelKey === 'total' ? point.total : point[modelKey];
+                  const modelParam = modelKey === 'total' ? 'ALL' : modelKey;
+                  return (
+                    <td
+                      key={idx}
+                      style={{
+                        ...clickableTdStyle,
+                        backgroundColor: reppsTypeBgColors[point.type],
+                        color: val !== null && val !== undefined && val > 0 ? '#1F2937' : '#9CA3AF',
+                        fontWeight: val > 0 ? 600 : 400,
+                      }}
+                      onClick={() => val > 0 && openVinsModal(point.startDate, point.endDate, 'total', modelParam, point.label)}
+                      onMouseEnter={(e) => { if (val > 0) e.currentTarget.style.backgroundColor = '#BFDBFE'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = reppsTypeBgColors[point.type]; }}
+                    >
+                      {val !== null && val !== undefined ? val : ''}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
   /* ===================== Секция ===================== */
   const renderSection = (title, points, accent) => (
     <div key={title} style={sectionCardStyle}>
       <h2 style={{ ...sectionTitleStyle, color: accent }}>{title}</h2>
 
-      <h3 style={chartTitleStyle}>🛠️ Зашло в REPPS</h3>
-      {renderBasicChart(points)}
-      {renderBasicTable(points)}
-
-      <h3 style={splitTitleStyle}>🎨 Сплит paint shop</h3>
+      <h3 style={chartTitleStyle}>🚦 Статус дефектов окраски у авто в REPPS</h3>
       {renderStackChart(points)}
-      {renderStackTable(points)}
+
+      {renderCategoryTable(points)}
+
+      <div style={dashDividerStyle} />
+
+      {renderModelTable(points)}
     </div>
   );
 
   const categoryLabels = {
     total: 'всего зашло',
-    no_paint: 'без дефектов PS',
-    paint_closed_only: 'дефекты PS закрыты',
-    paint_open: 'незакрытые дефекты PS',
+    no_paint: 'без дефектов окраски',
+    paint_closed_only: 'дефекты окраски закрыты',
+    paint_open: 'незакрытые дефекты окраски',
   };
 
   return (
@@ -514,6 +488,21 @@ export default function ReppsReportPage() {
               {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
             </select>
           </label>
+
+          <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#4B5563', marginLeft: 'auto', flexWrap: 'wrap' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, backgroundColor: stackColors.no_paint, borderRadius: 3, display: 'inline-block' }} />
+              Без PS дефектов
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint_closed_only, borderRadius: 3, display: 'inline-block' }} />
+              PS закрыты
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint_open, borderRadius: 3, display: 'inline-block' }} />
+              PS открыты
+            </span>
+          </div>
         </div>
       </div>
 
@@ -534,37 +523,13 @@ export default function ReppsReportPage() {
           {renderSection('📊 14 дней',   groupedByType.days,   '#F59E0B')}
         </div>
       ) : (
-        <>
-          <div style={cardStyle}>
-            <h2 style={sectionTitleStyle}>🛠️ Зашло в ремзону REPPS</h2>
-            {renderBasicChart(chartData)}
-            {renderBasicTable(chartData)}
-          </div>
-
-          <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-              <h2 style={{ ...splitTitleStyle, margin: 0, border: 'none', borderTop: '2px dashed #CBD5E1', paddingTop: 14 }}>
-                🎨 Сплит по paint shop дефектам
-              </h2>
-              <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#4B5563', marginTop: 14, flexWrap: 'wrap' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 12, height: 12, backgroundColor: stackColors.no_paint, borderRadius: 3, display: 'inline-block' }} />
-                  Без PS дефектов
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint_closed_only, borderRadius: 3, display: 'inline-block' }} />
-                  PS закрыты
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint_open, borderRadius: 3, display: 'inline-block' }} />
-                  PS открыты
-                </span>
-              </div>
-            </div>
-            {renderStackChart(chartData)}
-            {renderStackTable(chartData)}
-          </div>
-        </>
+        <div style={cardStyle}>
+          <h2 style={sectionTitleStyle}>🚦 Статус дефектов окраски у авто в REPPS</h2>
+          {renderStackChart(chartData)}
+          {renderCategoryTable(chartData)}
+          <div style={dashDividerStyle} />
+          {renderModelTable(chartData)}
+        </div>
       )}
 
       {/* ============ МОДАЛКА ============ */}
@@ -581,7 +546,7 @@ export default function ReppsReportPage() {
           <div
             style={{
               backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20,
-              width: '100%', maxWidth: 1100, maxHeight: '85vh',
+              width: '100%', maxWidth: 1200, maxHeight: '85vh',
               display: 'flex', flexDirection: 'column',
               boxShadow: '0 25px 50px rgba(0,0,0,0.25)',
             }}
@@ -615,6 +580,7 @@ export default function ReppsReportPage() {
                       <th style={{ padding: '10px 12px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 2 }}>VIN</th>
                       <th style={{ padding: '10px 12px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 2 }}>Модель</th>
                       <th style={{ padding: '10px 12px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 2 }}>Время REPPS</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 2 }}>Время PSOUT</th>
                       <th style={{ padding: '10px 12px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 2 }}>Дефекты окраски</th>
                     </tr>
                   </thead>
@@ -623,8 +589,9 @@ export default function ReppsReportPage() {
                       <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
                         <td style={{ padding: '8px 12px', borderBottom: '1px solid #F0F0F5', fontFamily: 'monospace', fontWeight: 600 }}>{item.vin}</td>
                         <td style={{ padding: '8px 12px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
-                        <td style={{ padding: '8px 12px', borderBottom: '1px solid #F0F0F5', fontSize: 12 }}>
-                          {item.repps_time ? new Date(item.repps_time).toLocaleString('ru-RU') : '—'}
+                        <td style={{ padding: '8px 12px', borderBottom: '1px solid #F0F0F5', fontSize: 12 }}>{formatDateTime(item.repps_time)}</td>
+                        <td style={{ padding: '8px 12px', borderBottom: '1px solid #F0F0F5', fontSize: 12, color: item.psout_time ? '#1F2937' : '#9CA3AF' }}>
+                          {formatDateTime(item.psout_time)}
                         </td>
                         <td style={{ padding: '8px 12px', borderBottom: '1px solid #F0F0F5' }}>
                           {item.defects && item.defects.length > 0 ? (
