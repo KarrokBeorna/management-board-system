@@ -14635,6 +14635,279 @@ app.delete('/api/defect-notes/:mpp', async (req, res) => {
   }
 });
 
+
+/* ====================================================================== */
+/* ===================== REPPS REPORT =================================== */
+/* ====================================================================== */
+
+const REPPS_NODE = 'REPPS';
+
+app.get('/api/repps-retrospective', async (req, res) => {
+  try {
+    const { period = 'all', count, fromDate, toDate } = req.query;
+
+    /* ------------------------------------------------------------------ */
+    /* Хелпер: посчитать данные за один период                            */
+    /* ------------------------------------------------------------------ */
+    const getReps = async (startDate, endDate, label, type) => {
+      // 1. Уникальные VIN + их РАННЕЕ время захода в REPPS.
+      //    VIN попадает в период, только если первое вхождение внутри периода.
+      const [rows] = await mesPool.query(`
+        SELECT t.vin, t.first_repps, too.product AS MODEL
+        FROM (
+          SELECT vin, MIN(gmt_create) AS first_repps
+          FROM tm_vhc_test_line_movement
+          WHERE node_nature = ?
+            AND is_deleted = 0
+          GROUP BY vin
+        ) t
+        LEFT JOIN tm_ofm_order too ON too.vin = t.vin
+        WHERE DATE(t.first_repps) BETWEEN ? AND ?
+      `, [REPPS_NODE, startDate, endDate]);
+
+      const vinModel = new Map();
+      rows.forEach(r => {
+        if (!vinModel.has(r.vin)) {
+          vinModel.set(r.vin, r.MODEL || 'UNKNOWN');
+        }
+      });
+
+      const total = vinModel.size;
+      const modelCount = {};
+      vinModel.forEach(m => { modelCount[m] = (modelCount[m] || 0) + 1; });
+
+      // 2. Из этих VIN — какие имеют paint shop дефект
+      //    (таблица at_paint_qm_defect_info — цех окраски)
+      let paintTotal = 0;
+      const modelPaint = {};
+
+      if (total > 0) {
+        const vins = [...vinModel.keys()];
+        const ph = vins.map(() => '?').join(',');
+        const [paintRows] = await pool.query(`
+          SELECT DISTINCT VIN
+          FROM at_paint_qm_defect_info
+          WHERE VIN IN (${ph})
+        `, vins);
+
+        const paintSet = new Set(paintRows.map(r => r.VIN));
+        paintTotal = paintSet.size;
+
+        vinModel.forEach((m, vin) => {
+          if (paintSet.has(vin)) {
+            modelPaint[m] = (modelPaint[m] || 0) + 1;
+          }
+        });
+      }
+
+      // 3. Собираем результат
+      const result = {
+        label,
+        type,
+        total,
+        paint: paintTotal,
+        total_minus_paint: total - paintTotal,
+      };
+
+      Object.keys(modelCount).forEach(m => {
+        result[m] = modelCount[m];
+        result[`${m}_paint`] = modelPaint[m] || 0;
+        result[`${m}_minus_paint`] = modelCount[m] - (modelPaint[m] || 0);
+      });
+
+      return result;
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Генерация периодов                                                 */
+    /* ------------------------------------------------------------------ */
+    const formatDate = (date) => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
+    const pad = (num) => String(num).padStart(2, '0');
+    const getISOWeek = (date) => {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    };
+
+    const now = new Date();
+    const periods = [];
+    const typeOrder = { year: 0, month: 1, week: 2, day: 3 };
+
+    if (period === 'all') {
+      // 3 месяца назад
+      for (let i = 2; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+        const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+        periods.push({
+          label: `${monthName} ${y}`,
+          startDate: `${y}-${m}-01`,
+          endDate: `${y}-${m}-${pad(lastDay)}`,
+          type: 'month',
+        });
+      }
+      // 4 недели
+      const dayOfWeek = now.getDay();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      for (let i = 3; i >= 0; i--) {
+        const start = new Date(monday);
+        start.setDate(monday.getDate() - i * 7);
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        periods.push({
+          label: `W${getISOWeek(start)} ${start.getFullYear()}`,
+          startDate: formatDate(start),
+          endDate: formatDate(end),
+          type: 'week',
+        });
+      }
+      // 14 дней
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        periods.push({
+          label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`,
+          startDate: formatDate(d),
+          endDate: formatDate(d),
+          type: 'day',
+        });
+      }
+    } else if (fromDate && toDate) {
+      let from = new Date(fromDate + 'T00:00:00');
+      let to = new Date(toDate + 'T00:00:00');
+      if (from > to) [from, to] = [to, from];
+
+      if (period === 'day') {
+        for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+          const dateStr = formatDate(d);
+          periods.push({
+            label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`,
+            startDate: dateStr,
+            endDate: dateStr,
+            type: 'day',
+          });
+        }
+      } else if (period === 'month') {
+        let d = new Date(from.getFullYear(), from.getMonth(), 1);
+        while (d <= to) {
+          const y = d.getFullYear();
+          const m = d.getMonth() + 1;
+          const lastDay = new Date(y, m, 0).getDate();
+          const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+          periods.push({
+            label: `${monthName} ${y}`,
+            startDate: `${y}-${pad(m)}-01`,
+            endDate: `${y}-${pad(m)}-${lastDay}`,
+            type: 'month',
+          });
+          d.setMonth(d.getMonth() + 1);
+        }
+      } else if (period === 'week') {
+        const day = from.getDay();
+        const monday = new Date(from);
+        monday.setDate(from.getDate() - (day === 0 ? 6 : day - 1));
+        for (let start = new Date(monday); start <= to; start.setDate(start.getDate() + 7)) {
+          const end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          periods.push({
+            label: `W${getISOWeek(start)} ${start.getFullYear()}`,
+            startDate: formatDate(start),
+            endDate: formatDate(end),
+            type: 'week',
+          });
+        }
+      } else if (period === 'year') {
+        for (let y = from.getFullYear(); y <= to.getFullYear(); y++) {
+          periods.push({
+            label: String(y),
+            startDate: `${y}-01-01`,
+            endDate: `${y}-12-31`,
+            type: 'year',
+          });
+        }
+      }
+    } else {
+      const defaultCount = { year: 2, month: 3, week: 4, day: 14 }[period] || 7;
+      const limit = parseInt(count, 10) || defaultCount;
+      if (period === 'year') {
+        for (let i = limit - 1; i >= 0; i--) {
+          const y = now.getFullYear() - i;
+          periods.push({
+            label: String(y),
+            startDate: `${y}-01-01`,
+            endDate: `${y}-12-31`,
+            type: 'year',
+          });
+        }
+      } else if (period === 'month') {
+        for (let i = limit - 1; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+          const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+          periods.push({
+            label: `${monthName} ${y}`,
+            startDate: `${y}-${m}-01`,
+            endDate: `${y}-${m}-${pad(lastDay)}`,
+            type: 'month',
+          });
+        }
+      } else if (period === 'week') {
+        const dayOfWeek = now.getDay();
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+        for (let i = limit - 1; i >= 0; i--) {
+          const start = new Date(monday);
+          start.setDate(monday.getDate() - i * 7);
+          const end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          periods.push({
+            label: `W${getISOWeek(start)} ${start.getFullYear()}`,
+            startDate: formatDate(start),
+            endDate: formatDate(end),
+            type: 'week',
+          });
+        }
+      } else if (period === 'day') {
+        for (let i = limit - 1; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(now.getDate() - i);
+          periods.push({
+            label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`,
+            startDate: formatDate(d),
+            endDate: formatDate(d),
+            type: 'day',
+          });
+        }
+      }
+    }
+
+    periods.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || a.startDate.localeCompare(b.startDate));
+
+    const result = [];
+    for (const p of periods) {
+      result.push(await getReps(p.startDate, p.endDate, p.label, p.type));
+    }
+
+    res.json({ dataPoints: result });
+  } catch (err) {
+    console.error('Ошибка /api/repps-retrospective:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 /* ====================================================================== */
 /* ============ DRR SHIFT — ФОТОГРАФИИ И МЕТКИ ========================== */
 /* ====================================================================== */

@@ -32,6 +32,7 @@ import vrtPreview from './assets/vrt.png';
 import drrShiftPreview from './assets/drrshift.png';
 import defectCapturePreview from './assets/defph.png';
 import lineDefectsArchivePreview from './assets/archph.png';
+import reppsPreview from './assets/cp8drr.png'; // временно, потом заменить на свою
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -359,7 +360,8 @@ export default function HomePage() {
     { to: "/drr-cp6", imgSrc: drrCp6Preview, caption: "DRR CP6 Dashboard", accentColor: "#0EA5E9" },
     { to: "/drr-cp5", imgSrc: drrCp5Preview, caption: "DRR CP5 Dashboard", accentColor: "#8B5CF6" },
     { to: "/all-drr-dashboard", imgSrc: allDrrPreview, caption: "All DRR Dashboard", accentColor: "#0EA5E9" },
-    { to: "/drr-shift-dashboard", imgSrc: drrShiftPreview, caption: "DRR Shift Dashboard", accentColor: "#7C3AED" }
+    { to: "/drr-shift-dashboard", imgSrc: drrShiftPreview, caption: "DRR Shift Dashboard", accentColor: "#7C3AED" },
+    //{ to: "/repps-report", imgSrc: reppsPreview, caption: "REPPS Report", accentColor: "#EC4899" }
   ];
 
   const allServiceCards = [

@@ -34,6 +34,7 @@ import VrtReportPage from './VrtReportPage';
 import DrrShiftDashboardPage from './DrrShiftDashboardPage';
 import LineDefectCapturePage from './LineDefectCapturePage';
 import LineDefectsArchivePage from './LineDefectsArchivePage';
+import ReppsReportPage from './ReppsReportPage';
 
 export default function App() {
   return (
@@ -71,6 +72,7 @@ export default function App() {
         <Route path="/drr-shift-dashboard" element={<DrrShiftDashboardPage />} />
         <Route path="/defect-capture" element={<LineDefectCapturePage />} />
         <Route path="/line-defects-archive" element={<LineDefectsArchivePage />} />
+        <Route path="/repps-report" element={<ReppsReportPage />} />
       </Route>
     </Routes>
   );
