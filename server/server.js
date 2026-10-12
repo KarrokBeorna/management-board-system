@@ -8691,7 +8691,7 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
           'ROBOT' AS POST_NAME
         FROM at_im_electrical_check_info
         WHERE RESULT IN ('NOK','NG')
-          AND \`TYPE\` <> '01'
+          AND \`TYPE\` IN ('03','05','17','21','26','27')
       `);
       allRows.push(...electricalRows);
 
@@ -8891,7 +8891,7 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
       FROM at_im_electrical_check_info e
       JOIN work_order wo ON wo.VIN = e.VIN
       WHERE e.RESULT IN ('NOK','NG')
-        AND e.\`TYPE\` <> '01'
+        AND e.\`TYPE\` IN ('03','05','17','21','26','27')
         AND CASE
           WHEN e.\`TYPE\` = '03' THEN 'Прошивка EOL - NG'
           WHEN e.\`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
@@ -9223,7 +9223,7 @@ app.get('/api/drr-electronics-defect-trend', async (req, res) => {
         SELECT ${makePeriodExpr('e.CREATION_TIME')} AS period, COUNT(*) AS cnt
         FROM at_im_electrical_check_info e
         JOIN work_order wo ON wo.VIN = e.VIN
-        WHERE e.RESULT IN ('NOK','NG') AND e.\`TYPE\` <> '01'
+        WHERE e.RESULT IN ('NOK','NG') AND \`TYPE\` IN ('03','05','17','21','26','27')
           AND (CASE
             WHEN \`TYPE\` = '03' THEN 'Прошивка EOL - NG'
             WHEN e.\`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
