@@ -361,7 +361,7 @@ export default function HomePage() {
     { to: "/drr-cp5", imgSrc: drrCp5Preview, caption: "DRR CP5 Dashboard", accentColor: "#8B5CF6" },
     { to: "/all-drr-dashboard", imgSrc: allDrrPreview, caption: "All DRR Dashboard", accentColor: "#0EA5E9" },
     { to: "/drr-shift-dashboard", imgSrc: drrShiftPreview, caption: "DRR Shift Dashboard", accentColor: "#7C3AED" },
-    //{ to: "/repps-report", imgSrc: reppsPreview, caption: "REPPS Report", accentColor: "#EC4899" }
+    { to: "/repps-report", imgSrc: reppsPreview, caption: "REPPS Report", accentColor: "#EC4899" }
   ];
 
   const allServiceCards = [

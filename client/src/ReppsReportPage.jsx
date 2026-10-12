@@ -91,8 +91,8 @@ const thStyle = {
   borderBottom: '2px solid #E5E7EB',
   background: '#F9FAFB',
   whiteSpace: 'nowrap',
-  padding: '6px 6px',
-  fontSize: '11px',
+  padding: '5px 4px',
+  fontSize: '10px',
 };
 
 const tdStyle = {
@@ -100,15 +100,15 @@ const tdStyle = {
   borderBottom: '1px solid #F0F0F5',
   color: '#1F2937',
   whiteSpace: 'nowrap',
-  padding: '4px 6px',
-  fontSize: '12px',
+  padding: '3px 4px',
+  fontSize: '11px',
 };
 
 const sectionTitleStyle = {
   fontSize: 15,
   fontWeight: 700,
   color: '#111827',
-  margin: '0 0 12px 0',
+  margin: '0 0 10px 0',
   paddingBottom: 6,
   borderBottom: '2px solid #E5E7EB',
 };
@@ -117,17 +117,18 @@ const chartTitleStyle = {
   fontSize: 12,
   fontWeight: 700,
   color: '#374151',
-  margin: '8px 0 6px 0',
+  margin: '6px 0 6px 0',
 };
 
+/* Таблица БЕЗ скролл-бара — min-width убран, всё влезает */
 const tableWrapStyle = {
-  overflowX: 'auto',
   marginTop: 8,
   border: '1px solid #E5E7EB',
-  borderRadius: 8,
+  borderRadius: 6,
+  overflow: 'hidden',
 };
 
-/* ===================== Хелпер: короткие названия колонок ===================== */
+/* ===================== Хелперы ===================== */
 const shortenLabel = (label, type) => {
   if (type === 'month') {
     const [m, y] = label.split(' ');
@@ -138,6 +139,9 @@ const shortenLabel = (label, type) => {
   }
   return label;
 };
+
+/* Для дней оставляем "дд.мм", но компактнее */
+const shortenDayLabel = (label) => label; // "29.09"
 
 export default function ReppsReportPage() {
   const [period, setPeriod] = useState('all');
@@ -199,18 +203,29 @@ export default function ReppsReportPage() {
   const modelKeys = Object.keys(modelColors);
 
   /* ===================== CHART 1 — обычные бары ===================== */
-  const renderBasicChart = (points, height = 240) => {
+  const renderBasicChart = (points, height = 220, isDay = false) => {
     if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
-    const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
+    const displayData = points.map(p => ({
+      ...p,
+      displayLabel: p.type === 'day' ? shortenDayLabel(p.label) : shortenLabel(p.label, p.type),
+    }));
+
     return (
       <ResponsiveContainer width="100%" height={height}>
-        <BarChart data={displayData} margin={{ top: 20, right: 12, left: -10, bottom: 0 }}>
+        <BarChart data={displayData} margin={{ top: 20, right: 8, left: -14, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-          <XAxis dataKey="displayLabel" tick={{ fontSize: 10 }} interval={0} />
+          <XAxis
+            dataKey="displayLabel"
+            tick={{ fontSize: isDay ? 9 : 11 }}
+            interval={0}
+            angle={isDay ? -45 : 0}
+            textAnchor={isDay ? 'end' : 'middle'}
+            height={isDay ? 40 : 30}
+          />
           <YAxis domain={[0, 'auto']} tick={{ fontSize: 10 }} allowDecimals={false} width={32} />
           <Bar
             dataKey={barDataKey}
-            barSize={20}
+            barSize={isDay ? 12 : 22}
             radius={[4, 4, 0, 0]}
             label={{
               fill: '#111827', fontSize: 10, fontWeight: 700, position: 'top',
@@ -227,21 +242,32 @@ export default function ReppsReportPage() {
   };
 
   /* ===================== CHART 2 — стек ===================== */
-  const renderStackChart = (points, height = 260) => {
+  const renderStackChart = (points, height = 240, isDay = false) => {
     if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
-    const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
+    const displayData = points.map(p => ({
+      ...p,
+      displayLabel: p.type === 'day' ? shortenDayLabel(p.label) : shortenLabel(p.label, p.type),
+    }));
+
     return (
       <ResponsiveContainer width="100%" height={height}>
-        <BarChart data={displayData} margin={{ top: 20, right: 12, left: -10, bottom: 0 }}>
+        <BarChart data={displayData} margin={{ top: 20, right: 8, left: -14, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-          <XAxis dataKey="displayLabel" tick={{ fontSize: 10 }} interval={0} />
+          <XAxis
+            dataKey="displayLabel"
+            tick={{ fontSize: isDay ? 9 : 11 }}
+            interval={0}
+            angle={isDay ? -45 : 0}
+            textAnchor={isDay ? 'end' : 'middle'}
+            height={isDay ? 40 : 30}
+          />
           <YAxis domain={[0, 'auto']} tick={{ fontSize: 10 }} allowDecimals={false} width={32} />
-          <Bar dataKey={stackPart1Key} stackId="split" fill={stackColors.before} barSize={20} />
+          <Bar dataKey={stackPart1Key} stackId="split" fill={stackColors.before} barSize={isDay ? 12 : 22} />
           <Bar
             dataKey={stackPart2Key}
             stackId="split"
             fill={stackColors.paint}
-            barSize={20}
+            barSize={isDay ? 12 : 22}
             radius={[4, 4, 0, 0]}
             label={{
               fill: '#111827',
@@ -259,14 +285,14 @@ export default function ReppsReportPage() {
   /* ===================== Таблица под CHART 1 ===================== */
   const renderBasicTable = (points) => {
     if (!points.length) return null;
-    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
+    const displayLabels = points.map(p => p.type === 'day' ? p.label : shortenLabel(p.label, p.type));
 
     return (
       <div style={tableWrapStyle}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: points.length * 40 + 60 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
           <thead>
             <tr style={{ backgroundColor: '#F9FAFB' }}>
-              <th style={{ ...thStyle, minWidth: 60, paddingLeft: 8, textAlign: 'left' }}>Модель</th>
+              <th style={{ ...thStyle, width: 50, paddingLeft: 6, textAlign: 'left' }}>Мод.</th>
               {points.map((point, idx) => (
                 <th key={idx} style={{ ...thStyle, backgroundColor: reppsTypeBgColors[point.type] }}>
                   {displayLabels[idx]}
@@ -281,7 +307,7 @@ export default function ReppsReportPage() {
                 fontWeight: modelKey === 'total' ? 700 : 400,
                 display: (selectedModel !== 'ALL' && modelKey === 'total') ? 'none' : undefined,
               }}>
-                <td style={{ ...tdStyle, paddingLeft: 8, textAlign: 'left', fontWeight: 600 }}>
+                <td style={{ ...tdStyle, paddingLeft: 6, textAlign: 'left', fontWeight: 600 }}>
                   {modelShortNames[modelKey] || modelKey}
                 </td>
                 {points.map((point, idx) => {
@@ -307,14 +333,14 @@ export default function ReppsReportPage() {
   /* ===================== Таблица под CHART 2 ===================== */
   const renderStackTable = (points) => {
     if (!points.length) return null;
-    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
+    const displayLabels = points.map(p => p.type === 'day' ? p.label : shortenLabel(p.label, p.type));
 
     return (
       <div style={tableWrapStyle}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: points.length * 40 + 100 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
           <thead>
             <tr style={{ backgroundColor: '#F9FAFB' }}>
-              <th style={{ ...thStyle, minWidth: 100, paddingLeft: 8, textAlign: 'left' }}>Категория</th>
+              <th style={{ ...thStyle, width: 50, paddingLeft: 6, textAlign: 'left' }}>Кат.</th>
               {points.map((point, idx) => (
                 <th key={idx} style={{ ...thStyle, backgroundColor: reppsTypeBgColors[point.type] }}>
                   {displayLabels[idx]}
@@ -324,7 +350,7 @@ export default function ReppsReportPage() {
           </thead>
           <tbody>
             <tr style={{ backgroundColor: 'white' }}>
-              <td style={{ ...tdStyle, paddingLeft: 8, textAlign: 'left', color: stackColors.before, fontWeight: 700 }}>
+              <td style={{ ...tdStyle, paddingLeft: 6, textAlign: 'left', color: stackColors.before, fontWeight: 700 }}>
                 Без PS
               </td>
               {points.map((point, idx) => {
@@ -341,7 +367,7 @@ export default function ReppsReportPage() {
               })}
             </tr>
             <tr style={{ backgroundColor: 'white' }}>
-              <td style={{ ...tdStyle, paddingLeft: 8, textAlign: 'left', color: stackColors.paint, fontWeight: 700 }}>
+              <td style={{ ...tdStyle, paddingLeft: 6, textAlign: 'left', color: stackColors.paint, fontWeight: 700 }}>
                 С PS
               </td>
               {points.map((point, idx) => {
@@ -358,7 +384,7 @@ export default function ReppsReportPage() {
               })}
             </tr>
             <tr style={{ backgroundColor: '#F3F4F6', fontWeight: 700 }}>
-              <td style={{ ...tdStyle, paddingLeft: 8, textAlign: 'left' }}>Всего</td>
+              <td style={{ ...tdStyle, paddingLeft: 6, textAlign: 'left' }}>Всего</td>
               {points.map((point, idx) => {
                 const val = selectedModel === 'ALL' ? point.total : point[selectedModel];
                 return (
@@ -374,23 +400,23 @@ export default function ReppsReportPage() {
     );
   };
 
-  /* ===================== Секция (для режима «Все») ===================== */
-  const renderSection = (title, points, accent) => (
+  /* ===================== Секция ===================== */
+  const renderSection = (title, points, accent, isDay = false) => (
     <div key={title} style={sectionCardStyle}>
       <h2 style={{ ...sectionTitleStyle, color: accent }}>{title}</h2>
 
       <h3 style={chartTitleStyle}>🛠️ Зашло в REPPS</h3>
-      {renderBasicChart(points, 220)}
+      {renderBasicChart(points, isDay ? 240 : 200, isDay)}
       {renderBasicTable(points)}
 
-      <h3 style={{ ...chartTitleStyle, marginTop: 12 }}>🎨 Сплит paint shop</h3>
-      {renderStackChart(points, 240)}
+      <h3 style={{ ...chartTitleStyle, marginTop: 10 }}>🎨 Сплит paint shop</h3>
+      {renderStackChart(points, isDay ? 260 : 220, isDay)}
       {renderStackTable(points)}
     </div>
   );
 
   return (
-    <div style={{ padding: '20px 30px 20px 16px', fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
+    <div style={{ padding: '20px 30px 20px 16px', fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1500, margin: '0 auto' }}>
       <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 20 }}>REPPS Report</h1>
 
       {/* ============ ФИЛЬТРЫ ============ */}
@@ -449,18 +475,22 @@ export default function ReppsReportPage() {
           <p style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Загрузка данных...</p>
         </div>
       ) : period === 'all' ? (
-        /* ===== 3 колонки в одну строку ===== */
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
-          {renderSection('📅 3 месяца', groupedByType.months, '#0EA5E9')}
-          {renderSection('📆 4 недели',  groupedByType.weeks,  '#14B8A6')}
-          {renderSection('📊 14 дней',   groupedByType.days,   '#F59E0B')}
+        /* 3 колонки: месяц/неделя узкие, дни широкие */
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 0.85fr) minmax(0, 0.85fr) minmax(0, 2.3fr)',
+          gap: 16,
+          alignItems: 'start',
+        }}>
+          {renderSection('📅 3 месяца', groupedByType.months, '#0EA5E9', false)}
+          {renderSection('📆 4 недели',  groupedByType.weeks,  '#14B8A6', false)}
+          {renderSection('📊 14 дней',   groupedByType.days,   '#F59E0B', true)}
         </div>
       ) : (
-        /* ===== Обычный режим — 2 карточки друг под другом ===== */
         <>
           <div style={cardStyle}>
             <h2 style={sectionTitleStyle}>🛠️ Зашло в ремзону REPPS</h2>
-            {renderBasicChart(chartData, 300)}
+            {renderBasicChart(chartData, 300, period === 'day')}
             {renderBasicTable(chartData)}
           </div>
 
@@ -480,7 +510,7 @@ export default function ReppsReportPage() {
                 </span>
               </div>
             </div>
-            {renderStackChart(chartData, 340)}
+            {renderStackChart(chartData, 340, period === 'day')}
             {renderStackTable(chartData)}
           </div>
         </>
