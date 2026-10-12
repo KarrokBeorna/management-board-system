@@ -43,11 +43,10 @@ const modelShortNames = {
   'total': 'Total',
 };
 
-/* ============ ФИКСИРОВАННЫЕ ВЫСОТЫ (для выравнивания колонок) ============ */
+/* ============ ФИКСИРОВАННЫЕ ВЫСОТЫ ============ */
 const H_SECTION_TITLE = 26;
 const H_CHART_TITLE = 22;
 const H_CHART_1 = 200;
-const H_TABLE_1 = 130;
 const H_CHART_2 = 220;
 
 const cardStyle = {
@@ -130,6 +129,16 @@ const chartTitleStyle = {
   height: H_CHART_TITLE,
   display: 'flex',
   alignItems: 'center',
+};
+
+/* Раздел «Сплит» — с верхней разделительной линией */
+const splitTitleStyle = {
+  ...chartTitleStyle,
+  marginTop: 16,
+  paddingTop: 14,
+  borderTop: '2px dashed #CBD5E1',
+  height: H_CHART_TITLE + 30,
+  boxSizing: 'border-box',
 };
 
 const tableWrapStyle = {
@@ -219,12 +228,7 @@ export default function ReppsReportPage() {
       <ResponsiveContainer width="100%" height={H_CHART_1}>
         <BarChart data={displayData} margin={{ top: 20, right: 8, left: -18, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-          <XAxis
-            dataKey="displayLabel"
-            tick={{ fontSize: 10 }}
-            interval={0}
-            height={28}
-          />
+          <XAxis dataKey="displayLabel" tick={{ fontSize: 10 }} interval={0} height={28} />
           <YAxis domain={[0, 'auto']} tick={{ fontSize: 10 }} allowDecimals={false} width={30} />
           <Bar
             dataKey={barDataKey}
@@ -253,12 +257,7 @@ export default function ReppsReportPage() {
       <ResponsiveContainer width="100%" height={H_CHART_2}>
         <BarChart data={displayData} margin={{ top: 20, right: 8, left: -18, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-          <XAxis
-            dataKey="displayLabel"
-            tick={{ fontSize: 10 }}
-            interval={0}
-            height={28}
-          />
+          <XAxis dataKey="displayLabel" tick={{ fontSize: 10 }} interval={0} height={28} />
           <YAxis domain={[0, 'auto']} tick={{ fontSize: 10 }} allowDecimals={false} width={30} />
           <Bar dataKey={stackPart1Key} stackId="split" fill={stackColors.before} barSize={22} />
           <Bar
@@ -397,17 +396,11 @@ export default function ReppsReportPage() {
       <h2 style={{ ...sectionTitleStyle, color: accent }}>{title}</h2>
 
       <h3 style={chartTitleStyle}>🛠️ Зашло в REPPS</h3>
-      <div style={{ height: H_CHART_1 }}>
-        {renderBasicChart(points)}
-      </div>
-      <div style={{ height: H_TABLE_1 }}>
-        {renderBasicTable(points)}
-      </div>
+      {renderBasicChart(points)}
+      {renderBasicTable(points)}
 
-      <h3 style={{ ...chartTitleStyle, marginTop: 10 }}>🎨 Сплит paint shop</h3>
-      <div style={{ height: H_CHART_2 }}>
-        {renderStackChart(points)}
-      </div>
+      <h3 style={splitTitleStyle}>🎨 Сплит paint shop</h3>
+      {renderStackChart(points)}
       {renderStackTable(points)}
     </div>
   );
@@ -486,18 +479,16 @@ export default function ReppsReportPage() {
         <>
           <div style={cardStyle}>
             <h2 style={sectionTitleStyle}>🛠️ Зашло в ремзону REPPS</h2>
-            <div style={{ height: 320 }}>
-              {renderBasicChart(chartData)}
-            </div>
+            {renderBasicChart(chartData)}
             {renderBasicTable(chartData)}
           </div>
 
           <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 8 }}>
-              <h2 style={{ ...sectionTitleStyle, margin: 0, border: 'none', padding: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <h2 style={{ ...splitTitleStyle, margin: 0, border: 'none', borderTop: '2px dashed #CBD5E1', paddingTop: 14 }}>
                 🎨 Сплит по paint shop дефектам
               </h2>
-              <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#4B5563' }}>
+              <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#4B5563', marginTop: 14 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 12, height: 12, backgroundColor: stackColors.before, borderRadius: 3, display: 'inline-block' }} />
                   Без paint shop дефекта
@@ -508,9 +499,7 @@ export default function ReppsReportPage() {
                 </span>
               </div>
             </div>
-            <div style={{ height: 340 }}>
-              {renderStackChart(chartData)}
-            </div>
+            {renderStackChart(chartData)}
             {renderStackTable(chartData)}
           </div>
         </>
