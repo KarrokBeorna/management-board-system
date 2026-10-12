@@ -692,9 +692,10 @@ export default function HoldsSgpPage() {
   };
 
   // ====== ЭКСПОРТ ОТЧЁТА ======
-  const handleExport = () => {
+  const handleExport = async () => {
     const data = reportView === 'batch' ? filteredData : filteredDataAggregated;
 
+    // ====== Лист 1: основная таблица (10 колонок, как в эталоне) ======
     const exportData = data.map(d => ({
       'Модель': d.model,
       'Описание': d.issue_desc,
@@ -702,8 +703,10 @@ export default function HoldsSgpPage() {
       'Дата постановки на Холд': formatDate(d.hold_date),
       'Дней ожидания': d.days_waiting,
       'Ответственный': '',
+      'Действия': '',
       'Плановая дата': formatDate(d.planned_date),
       'Статус': d.status || 'В процессе',
+      'Комментарий': '',
     }));
 
     const totalQuantity = data.reduce((sum, d) => sum + (d.quantity || 0), 0);
@@ -714,23 +717,83 @@ export default function HoldsSgpPage() {
       'Дата постановки на Холд': '',
       'Дней ожидания': '',
       'Ответственный': '',
+      'Действия': '',
       'Плановая дата': '',
       'Статус': '',
+      'Комментарий': '',
     });
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     const sheetName =
-      reportView === 'batch' ? 'Holds SGP' : 'Агрегированные холды';
+      reportView === 'batch' ? 'Холды по батчам' : 'Агрегированные холды';
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
     ws['!cols'] = [
-      { wch: 20 }, { wch: 60 }, { wch: 10 }, { wch: 18 },
-      { wch: 12 }, { wch: 15 }, { wch: 12 }, { wch: 15 },
+      { wch: 20 }, // Модель
+      { wch: 70 }, // Описание
+      { wch: 12 }, // Количество
+      { wch: 22 }, // Дата постановки на Холд
+      { wch: 14 }, // Дней ожидания
+      { wch: 16 }, // Ответственный
+      { wch: 12 }, // Действия
+      { wch: 14 }, // Плановая дата
+      { wch: 14 }, // Статус
+      { wch: 22 }, // Комментарий
     ];
+
+    // ====== Лист 2: VIN список ======
+    try {
+      const params = new URLSearchParams();
+      if (selectedModels.length > 0 && selectedModels.length < allModels.length) {
+        params.set('models', selectedModels.join(','));
+      }
+
+      const res = await fetch(
+        `${API_BASE}/api/holds-sgp-all-vins?${params.toString()}`,
+      );
+
+      if (res.ok) {
+        const allVins = await res.json();
+
+        // Причина холда — ВСЕГДА исходная, как в БД
+        const vinsSheetData = allVins.map(r => ({
+          'VIN': r.vin,
+          'Модель': r.model,
+          'Причина холда': r.issue_desc,
+          'Статус': r.status || 'В процессе',
+          'Дата постановки': formatDate(r.hold_date),
+          'Ответственный': r.responsible || '',
+        }));
+
+        const ws2 = XLSX.utils.json_to_sheet(vinsSheetData);
+        ws2['!cols'] = [
+          { wch: 22 }, // VIN
+          { wch: 14 }, // Модель
+          { wch: 70 }, // Причина холда
+          { wch: 14 }, // Статус
+          { wch: 18 }, // Дата постановки
+          { wch: 16 }, // Ответственный
+        ];
+        XLSX.utils.book_append_sheet(wb, ws2, 'VIN список');
+      } else {
+        console.warn('Не удалось загрузить VIN для второго листа');
+      }
+    } catch (err) {
+      console.error('Ошибка выгрузки VIN списка:', err);
+    }
+
+    // ====== Имя файла ======
     const now = new Date();
-    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const suffix = reportView === 'batch' ? 'batches' : 'aggregated';
-    XLSX.writeFile(wb, `Holds_SGP_${suffix}_${dateStr}.xlsx`);
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+    const dateStr = `${String(now.getDate()).padStart(2, '0')} ${months[now.getMonth()]}`;
+    const fileName =
+      reportView === 'batch'
+        ? `Holds SGP (по батчам)_${dateStr}.xlsx`
+        : `Compound Quality Holds_${dateStr}.xlsx`;
+    XLSX.writeFile(wb, fileName);
   };
 
   // ====== ЭКСПОРТ РЕТРОСПЕКТИВЫ ======

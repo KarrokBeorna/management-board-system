@@ -4789,7 +4789,42 @@ app.get('/api/holds-sgp', async (req, res) => {
   }
 });
 
+app.get('/api/holds-sgp-all-vins', async (req, res) => {
+  try {
+    const { models } = req.query;
 
+    let sql = `
+      SELECT
+        qid.vin                                 AS vin,
+        qid.model                               AS model,
+        qid.issue_desc                          AS issue_desc,
+        COALESCE(qid.clear_man, qid.create_man) AS responsible,
+        qid.gmt_create                          AS hold_date,
+        'В процессе'                            AS status
+      FROM higoplat_fusion_les.tv_quality_issue_detail qid
+      WHERE qid.is_deleted = 0
+        AND qid.status = 0
+        AND qid.clear_time IS NULL
+    `;
+    const params = [];
+
+    if (models && models !== '') {
+      const list = models.split(',').map(m => m.trim()).filter(Boolean);
+      if (list.length) {
+        sql += ` AND qid.model IN (${list.map(() => '?').join(',')})`;
+        params.push(...list);
+      }
+    }
+
+    sql += ` ORDER BY qid.model, qid.issue_desc, qid.vin, qid.gmt_create`;
+
+    const [rows] = await lesPool.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка holds-sgp-all-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/api/holds-sgp-retrospective', async (req, res) => {
   try {
