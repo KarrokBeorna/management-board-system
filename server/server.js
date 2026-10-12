@@ -8679,7 +8679,7 @@ app.get('/api/drr-electronics-top-defects', async (req, res) => {
       const [electricalRows] = await pool.query(`
         SELECT VIN, CREATION_TIME,
           CASE
-            WHEN \`TYPE\` = '03' OR \`TYPE\` = '18' THEN 'Прошивка EOL - NG'
+            WHEN \`TYPE\` = '03' THEN 'Прошивка EOL - NG'
             WHEN \`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
             WHEN \`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
             WHEN \`TYPE\` = '21' THEN 'МДВШ - Прошивка TMPS - NG'
@@ -8893,7 +8893,7 @@ app.get('/api/drr-electronics-vins-top-mpp', async (req, res) => {
       WHERE e.RESULT IN ('NOK','NG')
         AND e.\`TYPE\` <> '01'
         AND CASE
-          WHEN e.\`TYPE\` = '03' OR e.\`TYPE\` = '18' THEN 'Прошивка EOL - NG'
+          WHEN e.\`TYPE\` = '03' THEN 'Прошивка EOL - NG'
           WHEN e.\`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
           WHEN e.\`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
           WHEN e.\`TYPE\` = '21' THEN 'МДВШ - Прошивка TMPS - NG'
@@ -9225,7 +9225,7 @@ app.get('/api/drr-electronics-defect-trend', async (req, res) => {
         JOIN work_order wo ON wo.VIN = e.VIN
         WHERE e.RESULT IN ('NOK','NG') AND e.\`TYPE\` <> '01'
           AND (CASE
-            WHEN e.\`TYPE\` = '03' OR e.\`TYPE\` = '18' THEN 'Прошивка EOL - NG'
+            WHEN \`TYPE\` = '03' THEN 'Прошивка EOL - NG'
             WHEN e.\`TYPE\` = '05' THEN 'ЭП4К - Проверка TMPS – NG'
             WHEN e.\`TYPE\` = '17' THEN 'Запись - Прошивка FLASH – NG'
             WHEN e.\`TYPE\` = '21' THEN 'МДВШ - Прошивка TMPS - NG'
