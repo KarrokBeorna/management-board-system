@@ -6,12 +6,12 @@ import {
 
 const API_BASE = '';
 
-/* ===================== ЦВЕТА (отличные от DRR Report) ===================== */
+/* ===================== ЦВЕТА ===================== */
 const reppsBarTypeColors = {
-  year: '#7C3AED',   // фиолетовый
-  month: '#0EA5E9',  // голубой
-  week: '#14B8A6',   // бирюзовый
-  day: '#F59E0B',    // янтарный
+  year: '#7C3AED',
+  month: '#0EA5E9',
+  week: '#14B8A6',
+  day: '#F59E0B',
 };
 
 const reppsTypeBgColors = {
@@ -22,8 +22,8 @@ const reppsTypeBgColors = {
 };
 
 const stackColors = {
-  before: '#94A3B8',   // без paint shop дефекта
-  paint: '#EC4899',    // с paint shop дефектом
+  before: '#94A3B8',
+  paint: '#EC4899',
 };
 
 const modelColors = {
@@ -49,6 +49,14 @@ const cardStyle = {
   padding: 24,
   marginBottom: 30,
   boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+  border: '1px solid #F0F0F5',
+};
+
+const subCardStyle = {
+  backgroundColor: '#FFFFFF',
+  borderRadius: 12,
+  padding: 16,
+  marginTop: 16,
   border: '1px solid #F0F0F5',
 };
 
@@ -80,7 +88,7 @@ const thStyle = {
   borderBottom: '2px solid #E5E7EB',
   background: '#F9FAFB',
   whiteSpace: 'nowrap',
-  padding: '6px 4px',
+  padding: '6px 6px',
   fontSize: '11px',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -91,8 +99,8 @@ const tdStyle = {
   borderBottom: '1px solid #F0F0F5',
   color: '#1F2937',
   whiteSpace: 'nowrap',
-  padding: '4px 4px',
-  fontSize: '14px',
+  padding: '4px 6px',
+  fontSize: '13px',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
 };
@@ -103,6 +111,34 @@ const legendItemStyle = {
   gap: 6,
   fontSize: 13,
   color: '#4B5563',
+};
+
+const sectionTitleStyle = {
+  fontSize: 18,
+  fontWeight: 700,
+  color: '#111827',
+  margin: '0 0 16px 0',
+  paddingBottom: 8,
+  borderBottom: '2px solid #E5E7EB',
+};
+
+const chartTitleStyle = {
+  fontSize: 15,
+  fontWeight: 700,
+  color: '#374151',
+  margin: '12px 0 10px 0',
+};
+
+/* ===================== Хелпер: короткие названия колонок ===================== */
+const shortenLabel = (label, type) => {
+  if (type === 'month') {
+    const [m, y] = label.split(' ');
+    return y ? `${m}'${y.slice(2)}` : m;
+  }
+  if (type === 'week') {
+    return label.split(' ')[0]; // "W39 2026" → "W39"
+  }
+  return label;
 };
 
 export default function ReppsReportPage() {
@@ -127,7 +163,7 @@ export default function ReppsReportPage() {
     }
   };
 
-  // ============ Загрузка данных ============
+  // Загрузка
   useEffect(() => {
     setLoading(true);
     const params = new URLSearchParams({ period });
@@ -150,13 +186,230 @@ export default function ReppsReportPage() {
 
   const chartData = useMemo(() => dataPoints.map(p => ({ ...p })), [dataPoints]);
 
+  // Разбиение по типам для режима «Все»
+  const groupedByType = useMemo(() => {
+    if (period !== 'all') return null;
+    return {
+      months: chartData.filter(p => p.type === 'month'),
+      weeks:  chartData.filter(p => p.type === 'week'),
+      days:   chartData.filter(p => p.type === 'day'),
+    };
+  }, [chartData, period]);
+
   const barDataKey = selectedModel === 'ALL' ? 'total' : selectedModel;
   const stackPart1Key = selectedModel === 'ALL' ? 'total_minus_paint' : `${selectedModel}_minus_paint`;
   const stackPart2Key = selectedModel === 'ALL' ? 'paint' : `${selectedModel}_paint`;
 
-  const totalCols = chartData.length + 1;
-  const colWidth = `${100 / totalCols}%`;
   const modelKeys = Object.keys(modelColors);
+
+  /* ===================== Рендер одного столбчатого графика ===================== */
+  const renderBasicChart = (points) => {
+    if (!points.length) return <p style={{ padding: 20, color: '#6B7280', textAlign: 'center' }}>Нет данных</p>;
+    const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
+    return (
+      <ResponsiveContainer width="100%" height={300}>
+        <BarChart data={displayData} margin={{ top: 20, right: 24, left: 0, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+          <XAxis dataKey="displayLabel" tick={{ fontSize: 12 }} />
+          <YAxis domain={[0, 'auto']} tick={{ fontSize: 12 }} allowDecimals={false} width={40} />
+          <Tooltip />
+          <Bar
+            dataKey={barDataKey}
+            barSize={32}
+            radius={[6, 6, 0, 0]}
+            label={{
+              fill: '#111827', fontSize: 12, fontWeight: 600, position: 'top',
+              formatter: (v) => v !== null && v !== undefined && v > 0 ? v : '',
+            }}
+          >
+            {displayData.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={reppsBarTypeColors[entry.type]} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  };
+
+  /* ===================== Рендер стека (со сплитом paint shop) ===================== */
+  const renderStackChart = (points) => {
+    if (!points.length) return <p style={{ padding: 20, color: '#6B7280', textAlign: 'center' }}>Нет данных</p>;
+    const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
+    return (
+      <ResponsiveContainer width="100%" height={340}>
+        <BarChart data={displayData} margin={{ top: 20, right: 24, left: 0, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+          <XAxis dataKey="displayLabel" tick={{ fontSize: 12 }} />
+          <YAxis domain={[0, 'auto']} tick={{ fontSize: 12 }} allowDecimals={false} width={40} />
+          <Tooltip />
+          <Bar dataKey={stackPart1Key} stackId="split" fill={stackColors.before} barSize={32} />
+          <Bar
+            dataKey={stackPart2Key}
+            stackId="split"
+            fill={stackColors.paint}
+            barSize={32}
+            radius={[6, 6, 0, 0]}
+            label={{
+              fill: '#FFFFFF', fontSize: 11, fontWeight: 700, position: 'top',
+              formatter: (v) => v !== null && v !== undefined && v > 0 ? v : '',
+            }}
+          />
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  };
+
+  /* ===================== Рендер таблицы под графиком 1 ===================== */
+  const renderBasicTable = (points) => {
+    if (!points.length) return null;
+    const colWidth = `${100 / (points.length + 1)}%`;
+    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
+
+    return (
+      <div style={{ overflowX: 'auto', marginTop: 12 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+          <thead>
+            <tr style={{ backgroundColor: '#F9FAFB' }}>
+              <th style={{ ...thStyle, width: colWidth, paddingLeft: 12 }}>Модель</th>
+              {points.map((point, idx) => (
+                <th key={idx} style={{ ...thStyle, width: colWidth, backgroundColor: reppsTypeBgColors[point.type] }}>
+                  {displayLabels[idx]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(selectedModel === 'ALL' ? [...modelKeys, 'total'] : [selectedModel]).map(modelKey => (
+              <tr key={modelKey} style={{
+                backgroundColor: modelKey === 'total' ? '#F3F4F6' : 'white',
+                fontWeight: modelKey === 'total' ? 700 : 400,
+                display: (selectedModel !== 'ALL' && modelKey === 'total') ? 'none' : undefined,
+              }}>
+                <td style={{ ...tdStyle, width: colWidth, paddingLeft: 12 }}>
+                  {modelShortNames[modelKey] || modelKey}
+                </td>
+                {points.map((point, idx) => {
+                  const val = modelKey === 'total' ? point.total : point[modelKey];
+                  return (
+                    <td key={idx} style={{
+                      ...tdStyle,
+                      width: colWidth,
+                      backgroundColor: reppsTypeBgColors[point.type],
+                      color: val !== null && val !== undefined ? '#1F2937' : '#9CA3AF',
+                    }}>
+                      {val !== null && val !== undefined ? val : ''}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  /* ===================== Рендер таблицы под графиком 2 ===================== */
+  const renderStackTable = (points) => {
+    if (!points.length) return null;
+    const colWidth = `${100 / (points.length + 1)}%`;
+    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
+
+    return (
+      <div style={{ overflowX: 'auto', marginTop: 12 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+          <thead>
+            <tr style={{ backgroundColor: '#F9FAFB' }}>
+              <th style={{ ...thStyle, width: colWidth, paddingLeft: 12 }}>Модель</th>
+              {points.map((point, idx) => (
+                <th key={idx} style={{ ...thStyle, width: colWidth, backgroundColor: reppsTypeBgColors[point.type] }}>
+                  {displayLabels[idx]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr style={{ backgroundColor: 'white' }}>
+              <td style={{ ...tdStyle, width: colWidth, paddingLeft: 12, color: stackColors.before, fontWeight: 700 }}>
+                Без paint shop
+              </td>
+              {points.map((point, idx) => {
+                const val = selectedModel === 'ALL' ? point.total_minus_paint : point[stackPart1Key];
+                return (
+                  <td key={idx} style={{
+                    ...tdStyle, width: colWidth,
+                    backgroundColor: reppsTypeBgColors[point.type],
+                    fontWeight: 700, color: stackColors.before,
+                  }}>
+                    {val !== null && val !== undefined ? val : ''}
+                  </td>
+                );
+              })}
+            </tr>
+            <tr style={{ backgroundColor: 'white' }}>
+              <td style={{ ...tdStyle, width: colWidth, paddingLeft: 12, color: stackColors.paint, fontWeight: 700 }}>
+                С paint shop
+              </td>
+              {points.map((point, idx) => {
+                const val = selectedModel === 'ALL' ? point.paint : point[stackPart2Key];
+                return (
+                  <td key={idx} style={{
+                    ...tdStyle, width: colWidth,
+                    backgroundColor: reppsTypeBgColors[point.type],
+                    fontWeight: 700, color: stackColors.paint,
+                  }}>
+                    {val !== null && val !== undefined ? val : ''}
+                  </td>
+                );
+              })}
+            </tr>
+            <tr style={{ backgroundColor: '#F3F4F6', fontWeight: 700 }}>
+              <td style={{ ...tdStyle, width: colWidth, paddingLeft: 12 }}>Всего</td>
+              {points.map((point, idx) => {
+                const val = selectedModel === 'ALL' ? point.total : point[selectedModel];
+                return (
+                  <td key={idx} style={{ ...tdStyle, width: colWidth }}>
+                    {val !== null && val !== undefined ? val : ''}
+                  </td>
+                );
+              })}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  /* ===================== Рендер секции (график 1 + график 2 + таблицы) ===================== */
+  const renderSection = (title, points, accent) => (
+    <div key={title} style={cardStyle}>
+      <h2 style={{ ...sectionTitleStyle, color: accent }}>{title}</h2>
+
+      <div style={subCardStyle}>
+        <h3 style={chartTitleStyle}>🛠️ Зашло в ремзону REPPS</h3>
+        {renderBasicChart(points)}
+        {renderBasicTable(points)}
+      </div>
+
+      <div style={subCardStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <h3 style={chartTitleStyle}>🎨 Сплит по paint shop дефектам</h3>
+          <div style={{ display: 'flex', gap: 16 }}>
+            <span style={legendItemStyle}>
+              <span style={{ width: 12, height: 12, backgroundColor: stackColors.before, borderRadius: 3, display: 'inline-block' }} />
+              Без paint shop дефекта
+            </span>
+            <span style={legendItemStyle}>
+              <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint, borderRadius: 3, display: 'inline-block' }} />
+              С paint shop дефектом
+            </span>
+          </div>
+        </div>
+        {renderStackChart(points)}
+        {renderStackTable(points)}
+      </div>
+    </div>
+  );
 
   return (
     <div style={{ padding: '20px 30px 20px 16px', fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
@@ -167,7 +420,7 @@ export default function ReppsReportPage() {
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
-            <button onClick={() => handlePeriodChange('all')} style={tabStyle(period === 'all')}>3м+4н+14д</button>
+            <button onClick={() => handlePeriodChange('all')} style={tabStyle(period === 'all')}>Все</button>
             <button onClick={() => handlePeriodChange('year')} style={tabStyle(period === 'year')}>Год</button>
             <button onClick={() => handlePeriodChange('month')} style={tabStyle(period === 'month')}>Месяц</button>
             <button onClick={() => handlePeriodChange('week')} style={tabStyle(period === 'week')}>Неделя</button>
@@ -212,200 +465,48 @@ export default function ReppsReportPage() {
         </div>
       </div>
 
-      {/* ============ CHART 1: всего зашло в REPPS ============ */}
-      <div style={cardStyle}>
-        <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1F2937', marginBottom: 20 }}>
-          🛠️ Зашло в ремзону REPPS
-        </h2>
-
-        {loading ? (
+      {/* ============ СОДЕРЖИМОЕ ============ */}
+      {loading ? (
+        <div style={cardStyle}>
           <p style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Загрузка данных...</p>
-        ) : (
-          <>
-            <ResponsiveContainer width="100%" height={350}>
-              <BarChart data={chartData} margin={{ top: 20, right: 48, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                <YAxis domain={[0, 'auto']} tick={{ fontSize: 12 }} allowDecimals={false} />
-                <Tooltip />
-                <Bar
-                  dataKey={barDataKey}
-                  barSize={28}
-                  radius={[6, 6, 0, 0]}
-                  label={{
-                    fill: '#111827',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    position: 'top',
-                    formatter: (v) => v !== null && v !== undefined && v > 0 ? v : '',
-                  }}
-                >
-                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={reppsBarTypeColors[entry.type]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-
-            <div style={{ overflowX: 'auto', marginTop: 12, paddingRight: 45 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#F9FAFB' }}>
-                    <th style={{ ...thStyle, width: colWidth, paddingLeft: 16 }}>Модель</th>
-                    {chartData.map((point, idx) => (
-                      <th key={idx} style={{ ...thStyle, width: colWidth, backgroundColor: reppsTypeBgColors[point.type] }}>
-                        {point.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(selectedModel === 'ALL' ? [...modelKeys, 'total'] : [selectedModel]).map(modelKey => (
-                    <tr key={modelKey} style={{
-                      backgroundColor: modelKey === 'total' ? '#F3F4F6' : 'white',
-                      fontWeight: modelKey === 'total' ? 700 : 400,
-                      display: (selectedModel !== 'ALL' && modelKey === 'total') ? 'none' : undefined,
-                    }}>
-                      <td style={{ ...tdStyle, width: colWidth, paddingLeft: 16 }}>
-                        {modelShortNames[modelKey] || modelKey}
-                      </td>
-                      {chartData.map((point, idx) => {
-                        const val = modelKey === 'total' ? point.total : point[modelKey];
-                        return (
-                          <td key={idx} style={{
-                            ...tdStyle,
-                            width: colWidth,
-                            backgroundColor: reppsTypeBgColors[point.type],
-                            color: val !== null && val !== undefined ? '#1F2937' : '#9CA3AF',
-                          }}>
-                            {val !== null && val !== undefined ? val : ''}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* ============ CHART 2: со сплитом paint shop ============ */}
-      <div style={cardStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1F2937', margin: 0 }}>
-            🎨 Зашло в REPPS — сплит по paint shop дефектам
-          </h2>
-          <div style={{ display: 'flex', gap: 16 }}>
-            <span style={legendItemStyle}>
-              <span style={{ width: 12, height: 12, backgroundColor: stackColors.before, borderRadius: 3, display: 'inline-block' }} />
-              Без paint shop дефекта
-            </span>
-            <span style={legendItemStyle}>
-              <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint, borderRadius: 3, display: 'inline-block' }} />
-              С paint shop дефектом
-            </span>
-          </div>
         </div>
+      ) : period === 'all' ? (
+        /* ===== Режим «Все» — 3 секции ===== */
+        <>
+          {renderSection('📅 3 месяца',  groupedByType.months, '#0EA5E9')}
+          {renderSection('📆 4 недели',  groupedByType.weeks,  '#14B8A6')}
+          {renderSection('📊 14 дней',   groupedByType.days,   '#F59E0B')}
+        </>
+      ) : (
+        /* ===== Обычный режим — один график ===== */
+        <>
+          <div style={cardStyle}>
+            <h2 style={sectionTitleStyle}>🛠️ Зашло в ремзону REPPS</h2>
+            {renderBasicChart(chartData)}
+            {renderBasicTable(chartData)}
+          </div>
 
-        {loading ? (
-          <p style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Загрузка данных...</p>
-        ) : (
-          <>
-            <ResponsiveContainer width="100%" height={400}>
-              <BarChart data={chartData} margin={{ top: 20, right: 48, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                <YAxis domain={[0, 'auto']} tick={{ fontSize: 12 }} allowDecimals={false} />
-                <Tooltip />
-                <Bar
-                  dataKey={stackPart1Key}
-                  stackId="split"
-                  fill={stackColors.before}
-                  barSize={28}
-                />
-                <Bar
-                  dataKey={stackPart2Key}
-                  stackId="split"
-                  fill={stackColors.paint}
-                  barSize={28}
-                  radius={[6, 6, 0, 0]}
-                  label={{
-                    fill: '#FFFFFF',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    position: 'top',
-                    formatter: (v) => v !== null && v !== undefined && v > 0 ? v : '',
-                  }}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-
-            <div style={{ overflowX: 'auto', marginTop: 12, paddingRight: 45 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#F9FAFB' }}>
-                    <th style={{ ...thStyle, width: colWidth, paddingLeft: 16 }}>Модель</th>
-                    {chartData.map((point, idx) => (
-                      <th key={idx} style={{ ...thStyle, width: colWidth, backgroundColor: reppsTypeBgColors[point.type] }}>
-                        {point.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr style={{ backgroundColor: 'white' }}>
-                    <td style={{ ...tdStyle, width: colWidth, paddingLeft: 16, color: stackColors.before, fontWeight: 700 }}>
-                      Без paint shop
-                    </td>
-                    {chartData.map((point, idx) => {
-                      const val = selectedModel === 'ALL' ? point.total_minus_paint : point[stackPart1Key];
-                      return (
-                        <td key={idx} style={{
-                          ...tdStyle, width: colWidth,
-                          backgroundColor: reppsTypeBgColors[point.type],
-                          fontWeight: 700, color: stackColors.before,
-                        }}>
-                          {val !== null && val !== undefined ? val : ''}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                  <tr style={{ backgroundColor: 'white' }}>
-                    <td style={{ ...tdStyle, width: colWidth, paddingLeft: 16, color: stackColors.paint, fontWeight: 700 }}>
-                      С paint shop
-                    </td>
-                    {chartData.map((point, idx) => {
-                      const val = selectedModel === 'ALL' ? point.paint : point[stackPart2Key];
-                      return (
-                        <td key={idx} style={{
-                          ...tdStyle, width: colWidth,
-                          backgroundColor: reppsTypeBgColors[point.type],
-                          fontWeight: 700, color: stackColors.paint,
-                        }}>
-                          {val !== null && val !== undefined ? val : ''}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                  <tr style={{ backgroundColor: '#F3F4F6', fontWeight: 700 }}>
-                    <td style={{ ...tdStyle, width: colWidth, paddingLeft: 16 }}>Всего (= Chart 1)</td>
-                    {chartData.map((point, idx) => {
-                      const val = selectedModel === 'ALL' ? point.total : point[selectedModel];
-                      return (
-                        <td key={idx} style={{ ...tdStyle, width: colWidth }}>
-                          {val !== null && val !== undefined ? val : ''}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                </tbody>
-              </table>
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <h2 style={{ ...sectionTitleStyle, margin: 0, border: 'none', padding: 0 }}>
+                🎨 Сплит по paint shop дефектам
+              </h2>
+              <div style={{ display: 'flex', gap: 16 }}>
+                <span style={legendItemStyle}>
+                  <span style={{ width: 12, height: 12, backgroundColor: stackColors.before, borderRadius: 3, display: 'inline-block' }} />
+                  Без paint shop дефекта
+                </span>
+                <span style={legendItemStyle}>
+                  <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint, borderRadius: 3, display: 'inline-block' }} />
+                  С paint shop дефектом
+                </span>
+              </div>
             </div>
-          </>
-        )}
-      </div>
+            {renderStackChart(chartData)}
+            {renderStackTable(chartData)}
+          </div>
+        </>
+      )}
     </div>
   );
 }
