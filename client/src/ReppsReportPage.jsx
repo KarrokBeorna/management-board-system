@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  ResponsiveContainer, Cell, Tooltip,
+  ResponsiveContainer, Cell,
 } from 'recharts';
 
 const API_BASE = '';
@@ -46,18 +46,21 @@ const modelShortNames = {
 const cardStyle = {
   backgroundColor: '#FFFFFF',
   borderRadius: 16,
-  padding: 24,
-  marginBottom: 30,
+  padding: 20,
+  marginBottom: 20,
   boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
   border: '1px solid #F0F0F5',
 };
 
-const subCardStyle = {
+const sectionCardStyle = {
   backgroundColor: '#FFFFFF',
-  borderRadius: 12,
-  padding: 16,
-  marginTop: 16,
+  borderRadius: 14,
+  padding: 14,
+  boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
   border: '1px solid #F0F0F5',
+  display: 'flex',
+  flexDirection: 'column',
+  minWidth: 0,
 };
 
 const tabStyle = (active) => ({
@@ -90,8 +93,6 @@ const thStyle = {
   whiteSpace: 'nowrap',
   padding: '6px 6px',
   fontSize: '11px',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
 };
 
 const tdStyle = {
@@ -100,33 +101,30 @@ const tdStyle = {
   color: '#1F2937',
   whiteSpace: 'nowrap',
   padding: '4px 6px',
-  fontSize: '13px',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-};
-
-const legendItemStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  fontSize: 13,
-  color: '#4B5563',
+  fontSize: '12px',
 };
 
 const sectionTitleStyle = {
-  fontSize: 18,
+  fontSize: 15,
   fontWeight: 700,
   color: '#111827',
-  margin: '0 0 16px 0',
-  paddingBottom: 8,
+  margin: '0 0 12px 0',
+  paddingBottom: 6,
   borderBottom: '2px solid #E5E7EB',
 };
 
 const chartTitleStyle = {
-  fontSize: 15,
+  fontSize: 12,
   fontWeight: 700,
   color: '#374151',
-  margin: '12px 0 10px 0',
+  margin: '8px 0 6px 0',
+};
+
+const tableWrapStyle = {
+  overflowX: 'auto',
+  marginTop: 8,
+  border: '1px solid #E5E7EB',
+  borderRadius: 8,
 };
 
 /* ===================== Хелпер: короткие названия колонок ===================== */
@@ -136,7 +134,7 @@ const shortenLabel = (label, type) => {
     return y ? `${m}'${y.slice(2)}` : m;
   }
   if (type === 'week') {
-    return label.split(' ')[0]; // "W39 2026" → "W39"
+    return label.split(' ')[0];
   }
   return label;
 };
@@ -163,7 +161,6 @@ export default function ReppsReportPage() {
     }
   };
 
-  // Загрузка
   useEffect(() => {
     setLoading(true);
     const params = new URLSearchParams({ period });
@@ -186,7 +183,6 @@ export default function ReppsReportPage() {
 
   const chartData = useMemo(() => dataPoints.map(p => ({ ...p })), [dataPoints]);
 
-  // Разбиение по типам для режима «Все»
   const groupedByType = useMemo(() => {
     if (period !== 'all') return null;
     return {
@@ -202,23 +198,22 @@ export default function ReppsReportPage() {
 
   const modelKeys = Object.keys(modelColors);
 
-  /* ===================== Рендер одного столбчатого графика ===================== */
-  const renderBasicChart = (points) => {
-    if (!points.length) return <p style={{ padding: 20, color: '#6B7280', textAlign: 'center' }}>Нет данных</p>;
+  /* ===================== CHART 1 — обычные бары ===================== */
+  const renderBasicChart = (points, height = 240) => {
+    if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
     const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
     return (
-      <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={displayData} margin={{ top: 20, right: 24, left: 0, bottom: 5 }}>
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={displayData} margin={{ top: 20, right: 12, left: -10, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-          <XAxis dataKey="displayLabel" tick={{ fontSize: 12 }} />
-          <YAxis domain={[0, 'auto']} tick={{ fontSize: 12 }} allowDecimals={false} width={40} />
-          <Tooltip />
+          <XAxis dataKey="displayLabel" tick={{ fontSize: 10 }} interval={0} />
+          <YAxis domain={[0, 'auto']} tick={{ fontSize: 10 }} allowDecimals={false} width={32} />
           <Bar
             dataKey={barDataKey}
-            barSize={32}
-            radius={[6, 6, 0, 0]}
+            barSize={20}
+            radius={[4, 4, 0, 0]}
             label={{
-              fill: '#111827', fontSize: 12, fontWeight: 600, position: 'top',
+              fill: '#111827', fontSize: 10, fontWeight: 700, position: 'top',
               formatter: (v) => v !== null && v !== undefined && v > 0 ? v : '',
             }}
           >
@@ -231,26 +226,28 @@ export default function ReppsReportPage() {
     );
   };
 
-  /* ===================== Рендер стека (со сплитом paint shop) ===================== */
-  const renderStackChart = (points) => {
-    if (!points.length) return <p style={{ padding: 20, color: '#6B7280', textAlign: 'center' }}>Нет данных</p>;
+  /* ===================== CHART 2 — стек ===================== */
+  const renderStackChart = (points, height = 260) => {
+    if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
     const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
     return (
-      <ResponsiveContainer width="100%" height={340}>
-        <BarChart data={displayData} margin={{ top: 20, right: 24, left: 0, bottom: 5 }}>
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={displayData} margin={{ top: 20, right: 12, left: -10, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-          <XAxis dataKey="displayLabel" tick={{ fontSize: 12 }} />
-          <YAxis domain={[0, 'auto']} tick={{ fontSize: 12 }} allowDecimals={false} width={40} />
-          <Tooltip />
-          <Bar dataKey={stackPart1Key} stackId="split" fill={stackColors.before} barSize={32} />
+          <XAxis dataKey="displayLabel" tick={{ fontSize: 10 }} interval={0} />
+          <YAxis domain={[0, 'auto']} tick={{ fontSize: 10 }} allowDecimals={false} width={32} />
+          <Bar dataKey={stackPart1Key} stackId="split" fill={stackColors.before} barSize={20} />
           <Bar
             dataKey={stackPart2Key}
             stackId="split"
             fill={stackColors.paint}
-            barSize={32}
-            radius={[6, 6, 0, 0]}
+            barSize={20}
+            radius={[4, 4, 0, 0]}
             label={{
-              fill: '#FFFFFF', fontSize: 11, fontWeight: 700, position: 'top',
+              fill: '#111827',
+              fontSize: 10,
+              fontWeight: 700,
+              position: 'top',
               formatter: (v) => v !== null && v !== undefined && v > 0 ? v : '',
             }}
           />
@@ -259,20 +256,19 @@ export default function ReppsReportPage() {
     );
   };
 
-  /* ===================== Рендер таблицы под графиком 1 ===================== */
+  /* ===================== Таблица под CHART 1 ===================== */
   const renderBasicTable = (points) => {
     if (!points.length) return null;
-    const colWidth = `${100 / (points.length + 1)}%`;
     const displayLabels = points.map(p => shortenLabel(p.label, p.type));
 
     return (
-      <div style={{ overflowX: 'auto', marginTop: 12 }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+      <div style={tableWrapStyle}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: points.length * 40 + 60 }}>
           <thead>
             <tr style={{ backgroundColor: '#F9FAFB' }}>
-              <th style={{ ...thStyle, width: colWidth, paddingLeft: 12 }}>Модель</th>
+              <th style={{ ...thStyle, minWidth: 60, paddingLeft: 8, textAlign: 'left' }}>Модель</th>
               {points.map((point, idx) => (
-                <th key={idx} style={{ ...thStyle, width: colWidth, backgroundColor: reppsTypeBgColors[point.type] }}>
+                <th key={idx} style={{ ...thStyle, backgroundColor: reppsTypeBgColors[point.type] }}>
                   {displayLabels[idx]}
                 </th>
               ))}
@@ -285,7 +281,7 @@ export default function ReppsReportPage() {
                 fontWeight: modelKey === 'total' ? 700 : 400,
                 display: (selectedModel !== 'ALL' && modelKey === 'total') ? 'none' : undefined,
               }}>
-                <td style={{ ...tdStyle, width: colWidth, paddingLeft: 12 }}>
+                <td style={{ ...tdStyle, paddingLeft: 8, textAlign: 'left', fontWeight: 600 }}>
                   {modelShortNames[modelKey] || modelKey}
                 </td>
                 {points.map((point, idx) => {
@@ -293,7 +289,6 @@ export default function ReppsReportPage() {
                   return (
                     <td key={idx} style={{
                       ...tdStyle,
-                      width: colWidth,
                       backgroundColor: reppsTypeBgColors[point.type],
                       color: val !== null && val !== undefined ? '#1F2937' : '#9CA3AF',
                     }}>
@@ -309,20 +304,19 @@ export default function ReppsReportPage() {
     );
   };
 
-  /* ===================== Рендер таблицы под графиком 2 ===================== */
+  /* ===================== Таблица под CHART 2 ===================== */
   const renderStackTable = (points) => {
     if (!points.length) return null;
-    const colWidth = `${100 / (points.length + 1)}%`;
     const displayLabels = points.map(p => shortenLabel(p.label, p.type));
 
     return (
-      <div style={{ overflowX: 'auto', marginTop: 12 }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+      <div style={tableWrapStyle}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: points.length * 40 + 100 }}>
           <thead>
             <tr style={{ backgroundColor: '#F9FAFB' }}>
-              <th style={{ ...thStyle, width: colWidth, paddingLeft: 12 }}>Модель</th>
+              <th style={{ ...thStyle, minWidth: 100, paddingLeft: 8, textAlign: 'left' }}>Категория</th>
               {points.map((point, idx) => (
-                <th key={idx} style={{ ...thStyle, width: colWidth, backgroundColor: reppsTypeBgColors[point.type] }}>
+                <th key={idx} style={{ ...thStyle, backgroundColor: reppsTypeBgColors[point.type] }}>
                   {displayLabels[idx]}
                 </th>
               ))}
@@ -330,14 +324,14 @@ export default function ReppsReportPage() {
           </thead>
           <tbody>
             <tr style={{ backgroundColor: 'white' }}>
-              <td style={{ ...tdStyle, width: colWidth, paddingLeft: 12, color: stackColors.before, fontWeight: 700 }}>
-                Без paint shop
+              <td style={{ ...tdStyle, paddingLeft: 8, textAlign: 'left', color: stackColors.before, fontWeight: 700 }}>
+                Без PS
               </td>
               {points.map((point, idx) => {
                 const val = selectedModel === 'ALL' ? point.total_minus_paint : point[stackPart1Key];
                 return (
                   <td key={idx} style={{
-                    ...tdStyle, width: colWidth,
+                    ...tdStyle,
                     backgroundColor: reppsTypeBgColors[point.type],
                     fontWeight: 700, color: stackColors.before,
                   }}>
@@ -347,14 +341,14 @@ export default function ReppsReportPage() {
               })}
             </tr>
             <tr style={{ backgroundColor: 'white' }}>
-              <td style={{ ...tdStyle, width: colWidth, paddingLeft: 12, color: stackColors.paint, fontWeight: 700 }}>
-                С paint shop
+              <td style={{ ...tdStyle, paddingLeft: 8, textAlign: 'left', color: stackColors.paint, fontWeight: 700 }}>
+                С PS
               </td>
               {points.map((point, idx) => {
                 const val = selectedModel === 'ALL' ? point.paint : point[stackPart2Key];
                 return (
                   <td key={idx} style={{
-                    ...tdStyle, width: colWidth,
+                    ...tdStyle,
                     backgroundColor: reppsTypeBgColors[point.type],
                     fontWeight: 700, color: stackColors.paint,
                   }}>
@@ -364,11 +358,11 @@ export default function ReppsReportPage() {
               })}
             </tr>
             <tr style={{ backgroundColor: '#F3F4F6', fontWeight: 700 }}>
-              <td style={{ ...tdStyle, width: colWidth, paddingLeft: 12 }}>Всего</td>
+              <td style={{ ...tdStyle, paddingLeft: 8, textAlign: 'left' }}>Всего</td>
               {points.map((point, idx) => {
                 const val = selectedModel === 'ALL' ? point.total : point[selectedModel];
                 return (
-                  <td key={idx} style={{ ...tdStyle, width: colWidth }}>
+                  <td key={idx} style={tdStyle}>
                     {val !== null && val !== undefined ? val : ''}
                   </td>
                 );
@@ -380,43 +374,27 @@ export default function ReppsReportPage() {
     );
   };
 
-  /* ===================== Рендер секции (график 1 + график 2 + таблицы) ===================== */
+  /* ===================== Секция (для режима «Все») ===================== */
   const renderSection = (title, points, accent) => (
-    <div key={title} style={cardStyle}>
+    <div key={title} style={sectionCardStyle}>
       <h2 style={{ ...sectionTitleStyle, color: accent }}>{title}</h2>
 
-      <div style={subCardStyle}>
-        <h3 style={chartTitleStyle}>🛠️ Зашло в ремзону REPPS</h3>
-        {renderBasicChart(points)}
-        {renderBasicTable(points)}
-      </div>
+      <h3 style={chartTitleStyle}>🛠️ Зашло в REPPS</h3>
+      {renderBasicChart(points, 220)}
+      {renderBasicTable(points)}
 
-      <div style={subCardStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-          <h3 style={chartTitleStyle}>🎨 Сплит по paint shop дефектам</h3>
-          <div style={{ display: 'flex', gap: 16 }}>
-            <span style={legendItemStyle}>
-              <span style={{ width: 12, height: 12, backgroundColor: stackColors.before, borderRadius: 3, display: 'inline-block' }} />
-              Без paint shop дефекта
-            </span>
-            <span style={legendItemStyle}>
-              <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint, borderRadius: 3, display: 'inline-block' }} />
-              С paint shop дефектом
-            </span>
-          </div>
-        </div>
-        {renderStackChart(points)}
-        {renderStackTable(points)}
-      </div>
+      <h3 style={{ ...chartTitleStyle, marginTop: 12 }}>🎨 Сплит paint shop</h3>
+      {renderStackChart(points, 240)}
+      {renderStackTable(points)}
     </div>
   );
 
   return (
     <div style={{ padding: '20px 30px 20px 16px', fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1300, margin: '0 auto' }}>
-      <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 30 }}>REPPS Report</h1>
+      <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 20 }}>REPPS Report</h1>
 
       {/* ============ ФИЛЬТРЫ ============ */}
-      <div style={{ ...cardStyle, marginBottom: 20 }}>
+      <div style={{ ...cardStyle, marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
@@ -471,38 +449,38 @@ export default function ReppsReportPage() {
           <p style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Загрузка данных...</p>
         </div>
       ) : period === 'all' ? (
-        /* ===== Режим «Все» — 3 секции ===== */
-        <>
-          {renderSection('📅 3 месяца',  groupedByType.months, '#0EA5E9')}
+        /* ===== 3 колонки в одну строку ===== */
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+          {renderSection('📅 3 месяца', groupedByType.months, '#0EA5E9')}
           {renderSection('📆 4 недели',  groupedByType.weeks,  '#14B8A6')}
           {renderSection('📊 14 дней',   groupedByType.days,   '#F59E0B')}
-        </>
+        </div>
       ) : (
-        /* ===== Обычный режим — один график ===== */
+        /* ===== Обычный режим — 2 карточки друг под другом ===== */
         <>
           <div style={cardStyle}>
             <h2 style={sectionTitleStyle}>🛠️ Зашло в ремзону REPPS</h2>
-            {renderBasicChart(chartData)}
+            {renderBasicChart(chartData, 300)}
             {renderBasicTable(chartData)}
           </div>
 
           <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 8 }}>
               <h2 style={{ ...sectionTitleStyle, margin: 0, border: 'none', padding: 0 }}>
                 🎨 Сплит по paint shop дефектам
               </h2>
-              <div style={{ display: 'flex', gap: 16 }}>
-                <span style={legendItemStyle}>
+              <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#4B5563' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 12, height: 12, backgroundColor: stackColors.before, borderRadius: 3, display: 'inline-block' }} />
                   Без paint shop дефекта
                 </span>
-                <span style={legendItemStyle}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint, borderRadius: 3, display: 'inline-block' }} />
                   С paint shop дефектом
                 </span>
               </div>
             </div>
-            {renderStackChart(chartData)}
+            {renderStackChart(chartData, 340)}
             {renderStackTable(chartData)}
           </div>
         </>
