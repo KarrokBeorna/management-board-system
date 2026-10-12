@@ -14651,14 +14651,12 @@ app.get('/api/repps-retrospective', async (req, res) => {
     /* ------------------------------------------------------------------ */
     const getReps = async (startDate, endDate, label, type) => {
       // 1. Уникальные VIN + их РАННЕЕ время захода в REPPS.
-      //    VIN попадает в период, только если первое вхождение внутри периода.
       const [rows] = await mesPool.query(`
         SELECT t.vin, t.first_repps, too.product AS MODEL
         FROM (
           SELECT vin, MIN(gmt_create) AS first_repps
           FROM tm_vhc_test_line_movement
-          WHERE node_nature = ?
-            AND is_deleted = 0
+          WHERE node_nature = ? AND is_deleted = 0
           GROUP BY vin
         ) t
         LEFT JOIN tm_ofm_order too ON too.vin = t.vin
@@ -14673,46 +14671,72 @@ app.get('/api/repps-retrospective', async (req, res) => {
       });
 
       const total = vinModel.size;
-      const modelCount = {};
-      vinModel.forEach(m => { modelCount[m] = (modelCount[m] || 0) + 1; });
 
-      // 2. Из этих VIN — какие имеют paint shop дефект
-      //    (таблица at_paint_qm_defect_info — цех окраски)
-      let paintTotal = 0;
-      const modelPaint = {};
+      // Категории PS:
+      //   paint_all          — есть любой дефект окраски
+      //   paint_open         — есть ≥1 незакрытый дефект окраски
+      //   paint_closed_only  — есть дефекты, но все закрыты
+      //   no_paint           — дефектов окраски нет вообще
+      let paintAll = 0;
+      let paintOpen = 0;
+      let paintClosedOnly = 0;
+
+      const modelTotal = {};
+      const modelPaintOpen = {};
+      const modelPaintClosedOnly = {};
 
       if (total > 0) {
         const vins = [...vinModel.keys()];
         const ph = vins.map(() => '?').join(',');
         const [paintRows] = await pool.query(`
-          SELECT DISTINCT VIN
+          SELECT VIN, STATUS
           FROM at_paint_qm_defect_info
           WHERE VIN IN (${ph})
         `, vins);
 
-        const paintSet = new Set(paintRows.map(r => r.VIN));
-        paintTotal = paintSet.size;
+        const vinHasPaint = new Set();
+        const vinHasOpenPaint = new Set();
+
+        paintRows.forEach(r => {
+          vinHasPaint.add(r.VIN);
+          const s = (r.STATUS || '').toUpperCase();
+          if (s !== 'CLOSED') vinHasOpenPaint.add(r.VIN);
+        });
+
+        paintAll = vinHasPaint.size;
+        paintOpen = vinHasOpenPaint.size;
+        paintClosedOnly = paintAll - paintOpen;
 
         vinModel.forEach((m, vin) => {
-          if (paintSet.has(vin)) {
-            modelPaint[m] = (modelPaint[m] || 0) + 1;
+          modelTotal[m] = (modelTotal[m] || 0) + 1;
+          if (vinHasOpenPaint.has(vin)) {
+            modelPaintOpen[m] = (modelPaintOpen[m] || 0) + 1;
+          } else if (vinHasPaint.has(vin)) {
+            modelPaintClosedOnly[m] = (modelPaintClosedOnly[m] || 0) + 1;
           }
         });
       }
 
-      // 3. Собираем результат
       const result = {
         label,
         type,
+        startDate,
+        endDate,
         total,
-        paint: paintTotal,
-        total_minus_paint: total - paintTotal,
+        paint_all: paintAll,
+        paint_open: paintOpen,
+        paint_closed_only: paintClosedOnly,
+        no_paint: total - paintAll,
       };
 
-      Object.keys(modelCount).forEach(m => {
-        result[m] = modelCount[m];
-        result[`${m}_paint`] = modelPaint[m] || 0;
-        result[`${m}_minus_paint`] = modelCount[m] - (modelPaint[m] || 0);
+      Object.keys(modelTotal).forEach(m => {
+        const totalM = modelTotal[m];
+        const openM = modelPaintOpen[m] || 0;
+        const closedM = modelPaintClosedOnly[m] || 0;
+        result[m] = totalM;
+        result[`${m}_paint_open`] = openM;
+        result[`${m}_paint_closed_only`] = closedM;
+        result[`${m}_no_paint`] = totalM - openM - closedM;
       });
 
       return result;
@@ -14907,6 +14931,101 @@ app.get('/api/repps-retrospective', async (req, res) => {
   }
 });
 
+
+/* ====================================================================== */
+/* VIN-детали для модалки: клик по числу в таблице                          */
+/* category: total | no_paint | paint_closed_only | paint_open | paint_all */
+/* ====================================================================== */
+app.get('/api/repps-vins-details', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, category = 'total', model } = req.query;
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
+    }
+
+    // 1. VIN + первое время REPPS за период
+    let sql = `
+      SELECT t.vin, t.first_repps, too.product AS MODEL
+      FROM (
+        SELECT vin, MIN(gmt_create) AS first_repps
+        FROM tm_vhc_test_line_movement
+        WHERE node_nature = ? AND is_deleted = 0
+        GROUP BY vin
+      ) t
+      LEFT JOIN tm_ofm_order too ON too.vin = t.vin
+      WHERE DATE(t.first_repps) BETWEEN ? AND ?
+    `;
+    const params = [REPPS_NODE, dateFrom, dateTo];
+    if (model && model !== 'ALL') {
+      sql += ' AND too.product = ?';
+      params.push(model);
+    }
+
+    const [rows] = await mesPool.query(sql, params);
+    if (rows.length === 0) return res.json([]);
+
+    const vins = rows.map(r => r.vin);
+    const ph = vins.map(() => '?').join(',');
+
+    // 2. Все дефекты окраски этих VIN
+    const [defectRows] = await pool.query(`
+      SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, STATUS, CREATION_TIME
+      FROM at_paint_qm_defect_info
+      WHERE VIN IN (${ph})
+      ORDER BY VIN, CREATION_TIME DESC
+    `, vins);
+
+    const defectsByVin = new Map();
+    const vinHasPaint = new Set();
+    const vinHasOpenPaint = new Set();
+
+    defectRows.forEach(d => {
+      vinHasPaint.add(d.VIN);
+      const s = (d.STATUS || '').toUpperCase();
+      const isOpen = s !== 'CLOSED';
+      if (isOpen) vinHasOpenPaint.add(d.VIN);
+
+      if (!defectsByVin.has(d.VIN)) defectsByVin.set(d.VIN, []);
+      defectsByVin.get(d.VIN).push({
+        part_name: d.PART_NAME || '',
+        problem_type: d.PROBLEM_TYPE || '',
+        grade: d.PROBLEM_GRADE || '',
+        status: d.STATUS || '',
+        is_open: isOpen,
+        creation_time: d.CREATION_TIME,
+      });
+    });
+
+    // 3. Фильтр по категории
+    let filtered = rows;
+    if (category === 'no_paint') {
+      filtered = rows.filter(r => !vinHasPaint.has(r.vin));
+    } else if (category === 'paint_closed_only') {
+      filtered = rows.filter(r => vinHasPaint.has(r.vin) && !vinHasOpenPaint.has(r.vin));
+    } else if (category === 'paint_open') {
+      filtered = rows.filter(r => vinHasOpenPaint.has(r.vin));
+    } else if (category === 'paint_all') {
+      filtered = rows.filter(r => vinHasPaint.has(r.vin));
+    }
+
+    // 4. Формируем ответ: открытые дефекты вперёд
+    const result = filtered.map(r => {
+      const defects = (defectsByVin.get(r.vin) || [])
+        .sort((a, b) => (b.is_open ? 1 : 0) - (a.is_open ? 1 : 0));
+      return {
+        vin: r.vin,
+        model: r.MODEL || '—',
+        repps_time: r.first_repps,
+        defects,
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка /api/repps-vins-details:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 /* ====================================================================== */
 /* ============ DRR SHIFT — ФОТОГРАФИИ И МЕТКИ ========================== */
