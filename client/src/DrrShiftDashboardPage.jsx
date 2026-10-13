@@ -3,7 +3,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 const PIE_COLORS = ['#10B981', '#EF4444'];
-const MAX_PHOTOS_PER_BLOCK = 6;
+const MAX_PHOTOS_PER_BLOCK = 5;
 
 /* ===================== СТИЛИ ===================== */
 const containerStyle = {
