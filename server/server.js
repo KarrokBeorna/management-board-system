@@ -424,7 +424,6 @@ app.get('/api/defects-dashboard', async (req, res) => {
       WHERE t.SHIFT_DATE IS NOT NULL
       GROUP BY t.PART_NAME, t.PROBLEM_TYPE, t.SHIFT_DATE, t.MODEL, t.VIN, t.POST_NAME
       ORDER BY t.SHIFT_DATE DESC
-      LIMIT 5000
     `;
 
     const [rows] = await pool.query(query);
