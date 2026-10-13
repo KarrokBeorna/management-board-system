@@ -222,7 +222,8 @@ const normalizeReport = (reportName, dash) => {
   };
 };
 
-const loadAllReports = async (start, end) => {
+/* ============ LIVE: тянем актуальные данные из API ============ */
+const loadAllReportsLive = async (start, end) => {
   const params = new URLSearchParams({ startTime: start, endTime: end });
   const [cp7, cp7top, adas, adasTop, cpfinal, cpfinalTop] = await Promise.all([
     fetch(`${API_BASE}/api/drr-cp7-dashboard?${params}`).then(r => r.json()),
@@ -236,6 +237,61 @@ const loadAllReports = async (start, end) => {
     cp7: { dash: normalizeReport('cp7', cp7), top: Array.isArray(cp7top) ? cp7top.slice(0, 20) : [] },
     adas: { dash: normalizeReport('adas', adas), top: Array.isArray(adasTop) ? adasTop.slice(0, 20) : [] },
     cpfinal: { dash: normalizeReport('cpfinal', cpfinal), top: Array.isArray(cpfinalTop) ? cpfinalTop.slice(0, 20) : [] },
+  };
+};
+
+/* ============ ARCHIVE: читаем сохранённые снимки ============ */
+const fetchSnapshotFromList = async (listUrl, detailUrl, dateStr, shiftType) => {
+  try {
+    const res = await fetch(`${API_BASE}${listUrl}`);
+    if (!res.ok) return null;
+    const list = await res.json();
+    if (!Array.isArray(list)) return null;
+    const found = list.find(s => s.shiftDate === dateStr && s.shift === shiftType);
+    if (!found) return null;
+    const detRes = await fetch(`${API_BASE}${detailUrl}/${found.id}`);
+    if (!detRes.ok) return null;
+    return await detRes.json();
+  } catch {
+    return null;
+  }
+};
+
+const loadAllReportsArchive = async (dateStr, shiftType) => {
+  const [cp7, adas, cpfinal] = await Promise.all([
+    fetchSnapshotFromList(
+      '/api/drr-cp7-snapshots?days=60&filter=all',
+      '/api/drr-cp7-snapshot',
+      dateStr,
+      shiftType
+    ),
+    fetchSnapshotFromList(
+      '/api/drr-tl-snapshots?days=60',
+      '/api/drr-tl-snapshot',
+      dateStr,
+      shiftType
+    ),
+    fetchSnapshotFromList(
+      '/api/drr-cpfinal-snapshots?days=60',
+      '/api/drr-cpfinal-snapshot',
+      dateStr,
+      shiftType
+    ),
+  ]);
+
+  return {
+    cp7: {
+      dash: normalizeReport('cp7', cp7),
+      top: Array.isArray(cp7?.topDefects) ? cp7.topDefects.slice(0, 20) : [],
+    },
+    adas: {
+      dash: normalizeReport('adas', adas),
+      top: Array.isArray(adas?.topDefects) ? adas.topDefects.slice(0, 20) : [],
+    },
+    cpfinal: {
+      dash: normalizeReport('cpfinal', cpfinal),
+      top: Array.isArray(cpfinal?.topDefects) ? cpfinal.topDefects.slice(0, 20) : [],
+    },
   };
 };
 
@@ -258,7 +314,6 @@ const parsePhotoKey = (key) => {
   };
 };
 
-// Ключ недели — CW41 2026
 const weekKeyOf = (w) => `CW${String(w.weekNumber).padStart(2, '0')} ${w.year}`;
 
 /* ===================== КОМПРЕССИЯ ФОТО ===================== */
@@ -546,18 +601,13 @@ function PhotoArea({ photoKey, photos, onPhotosChange }) {
               <img
                 src={`${API_BASE}${it.url}`}
                 alt="Фото"
-                style={{
-                  width: '100%', height: '100%',
-                  objectFit: 'cover',
-                  display: 'block',
-                }}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
               />
               <button
                 onClick={(e) => { e.stopPropagation(); handleDelete(it.id); }}
                 title="Удалить фото"
                 style={{
-                  position: 'absolute',
-                  top: 6, right: 6,
+                  position: 'absolute', top: 6, right: 6,
                   width: 24, height: 24, borderRadius: '50%',
                   border: 'none',
                   background: 'rgba(220,38,38,0.9)',
@@ -580,15 +630,7 @@ function PhotoArea({ photoKey, photos, onPhotosChange }) {
 }
 
 function ReportBlock({
-  title,
-  blockData,
-  markKeyPrefix,
-  photoKey,
-  marks,
-  onToggleMark,
-  photos,
-  onPhotosChange,
-  emptyMessage,
+  title, blockData, markKeyPrefix, photoKey, marks, onToggleMark, photos, onPhotosChange, emptyMessage,
 }) {
   const isEmpty = !blockData || blockData.dash.totalVins === 0;
 
@@ -606,9 +648,7 @@ function ReportBlock({
 
   return (
     <div style={reportBlockStyle}>
-      <div style={reportTitleStyle}>
-        <span>{title}</span>
-      </div>
+      <div style={reportTitleStyle}><span>{title}</span></div>
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <PieBlock
           drrPercent={blockData.dash.drrPercent}
@@ -616,12 +656,8 @@ function ReportBlock({
           totalVins={blockData.dash.totalVins}
         />
         <div style={{
-          flex: 1,
-          minWidth: 0,
-          height: 320,
-          overflowY: 'auto',
-          border: '1px solid #F1F5F9',
-          borderRadius: 8,
+          flex: 1, minWidth: 0, height: 320, overflowY: 'auto',
+          border: '1px solid #F1F5F9', borderRadius: 8,
         }}>
           <DefectsTable
             topDefects={blockData.top}
@@ -636,9 +672,7 @@ function ReportBlock({
   );
 }
 
-function ShiftColumn({
-  shiftInfo, columnLabel, isDark, marks, onToggleMark, photos, onPhotosChange, baseDate,
-}) {
+function ShiftColumn({ shiftInfo, columnLabel, isDark, marks, onToggleMark, photos, onPhotosChange, baseDate }) {
   const isEmptyColumn = !shiftInfo || !shiftInfo.started || !shiftInfo.data;
   const letterKey = shiftInfo?.letter || columnLabel;
 
@@ -689,7 +723,6 @@ function ShiftColumn({
 
 /* ===================== НЕДЕЛЬНАЯ АНАЛИТИКА ===================== */
 
-// Блок readonly фото недели — всегда максимум 10 последних
 function WeeklyPhotosBlock({ photos, loading, shiftLetter }) {
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const MAX_PHOTOS = 10;
@@ -709,9 +742,7 @@ function WeeklyPhotosBlock({ photos, loading, shiftLetter }) {
         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
           Фото периода ({filteredPhotos.length}/{MAX_PHOTOS})
         </span>
-        <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
-          Только для просмотра
-        </span>
+        <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>Только для просмотра</span>
       </div>
 
       {loading ? (
@@ -727,24 +758,16 @@ function WeeklyPhotosBlock({ photos, loading, shiftLetter }) {
           {filteredPhotos.map((it) => {
             const parsed = parsePhotoKey(it.photoKey);
             const dateLabel = parsed.date ? formatDateShort(parsed.date) : '';
-            const shiftLabel = parsed.letter === 'ALL'
-              ? 'сутки'
-              : parsed.letter
-                ? `смена ${parsed.letter}`
-                : '';
+            const shiftLabel = parsed.letter === 'ALL' ? 'сутки' : parsed.letter ? `смена ${parsed.letter}` : '';
             return (
               <div
                 key={it.id}
                 onClick={() => setLightboxUrl(`${API_BASE}${it.url}`)}
                 style={{
                   position: 'relative',
-                  width: 140,
-                  height: 140,
-                  borderRadius: 12,
-                  overflow: 'hidden',
-                  border: '1px solid #E2E8F0',
-                  background: '#F1F5F9',
-                  cursor: 'zoom-in',
+                  width: 140, height: 140, borderRadius: 12,
+                  overflow: 'hidden', border: '1px solid #E2E8F0',
+                  background: '#F1F5F9', cursor: 'zoom-in',
                   transition: 'transform 0.15s, box-shadow 0.15s',
                   boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
                 }}
@@ -756,28 +779,18 @@ function WeeklyPhotosBlock({ photos, loading, shiftLetter }) {
                   e.currentTarget.style.transform = 'scale(1)';
                   e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.06)';
                 }}
-                title="Нажмите для увеличения"
               >
                 <img
                   src={`${API_BASE}${it.url}`}
                   alt="Фото"
-                  style={{
-                    width: '100%', height: '100%',
-                    objectFit: 'cover',
-                    display: 'block',
-                  }}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                 />
                 <div style={{
-                  position: 'absolute',
-                  bottom: 0, left: 0, right: 0,
+                  position: 'absolute', bottom: 0, left: 0, right: 0,
                   padding: '4px 8px',
                   background: 'linear-gradient(to top, rgba(15,23,42,0.9), rgba(15,23,42,0))',
-                  color: '#FFFFFF',
-                  fontSize: '0.7rem',
-                  fontWeight: 700,
-                  textAlign: 'left',
-                  pointerEvents: 'none',
-                  lineHeight: 1.2,
+                  color: '#FFFFFF', fontSize: '0.7rem', fontWeight: 700,
+                  pointerEvents: 'none', lineHeight: 1.2,
                 }}>
                   <div>{dateLabel}</div>
                   <div style={{ opacity: 0.8, fontWeight: 500 }}>{shiftLabel}</div>
@@ -795,7 +808,6 @@ function WeeklyPhotosBlock({ photos, loading, shiftLetter }) {
   );
 }
 
-// Один блок недельной аналитики для конкретного чекпоинта (cp7 / adas / cpfinal)
 function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter }) {
   const [matrix, setMatrix] = useState({ weeks: [], rows: [] });
   const [loadingTop, setLoadingTop] = useState(false);
@@ -841,9 +853,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
         results.forEach(({ week, list }) => {
           const key = weekKeyOf(week);
           list.forEach(item => {
-            if (!mppMap.has(item.mpp)) {
-              mppMap.set(item.mpp, { mpp: item.mpp, counts: {} });
-            }
+            if (!mppMap.has(item.mpp)) mppMap.set(item.mpp, { mpp: item.mpp, counts: {} });
             mppMap.get(item.mpp).counts[key] = item.defectCount;
           });
         });
@@ -851,7 +861,6 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
           .map(r => ({ ...r, total: Object.values(r.counts).reduce((s, v) => s + v, 0) }))
           .sort((a, b) => b.total - a.total);
 
-        // Заголовки колонок — CW вместо W
         const weeksOrder = weeks.map(w => ({
           key: weekKeyOf(w),
           label: `CW${w.weekNumber}`,
@@ -871,12 +880,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
     }
     const weekStart = weeks[0].weekStart;
     const weekEnd = weeks[weeks.length - 1].weekEnd;
-    const params = new URLSearchParams({
-      checkpoint: type,
-      weekStart,
-      weekEnd,
-      limit: 60,
-    });
+    const params = new URLSearchParams({ checkpoint: type, weekStart, weekEnd, limit: 60 });
     setLoadingPhotos(true);
     fetch(`${API_BASE}/api/drr-weekly-photos?${params}`)
       .then(r => r.json())
@@ -893,28 +897,16 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
       </div>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        <PieBlock
-          drrPercent={avgDrr}
-          okVins={periodClosedVins}
-          totalVins={periodTotalVins}
-        />
+        <PieBlock drrPercent={avgDrr} okVins={periodClosedVins} totalVins={periodTotalVins} />
 
         <div style={{
-          flex: 1,
-          minWidth: 0,
-          height: 320,
-          overflow: 'auto',
-          border: '1px solid #F1F5F9',
-          borderRadius: 8,
+          flex: 1, minWidth: 0, height: 320, overflow: 'auto',
+          border: '1px solid #F1F5F9', borderRadius: 8,
         }}>
           {loadingTop ? (
-            <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>
-              Загрузка...
-            </p>
+            <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>Загрузка...</p>
           ) : matrix.rows.length === 0 ? (
-            <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>
-              Нет данных
-            </p>
+            <p style={{ textAlign: 'center', padding: '20px 0', color: '#94A3B8', fontSize: '0.85rem' }}>Нет данных</p>
           ) : matrix.weeks.length === 1 ? (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
@@ -956,12 +948,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
                         {row.counts[w.key] || ''}
                       </td>
                     ))}
-                    <td style={{
-                      ...tdStyleSmall,
-                      textAlign: 'center',
-                      fontWeight: 700,
-                      color: i < 3 ? '#DC2626' : '#1E293B',
-                    }}>
+                    <td style={{ ...tdStyleSmall, textAlign: 'center', fontWeight: 700, color: i < 3 ? '#DC2626' : '#1E293B' }}>
                       {row.total}
                     </td>
                   </tr>
@@ -986,7 +973,7 @@ function WeeklyAnalyticsView() {
 
   const [fromWeekStart, setFromWeekStart] = useState('');
   const [toWeekStart, setToWeekStart] = useState('');
-  const [shiftLetter, setShiftLetter] = useState('ALL'); // ALL | A | B | C
+  const [shiftLetter, setShiftLetter] = useState('ALL');
 
   useEffect(() => {
     setLoading(true);
@@ -1031,7 +1018,6 @@ function WeeklyAnalyticsView() {
   const adasFiltered = filterByWeeks(adasData);
   const cpFinalFiltered = filterByWeeks(cpFinalData);
 
-  // Заголовок периода — CW вместо W
   const periodLabel = selectedWeeks.length === 0
     ? '—'
     : selectedWeeks.length === 1
@@ -1040,15 +1026,10 @@ function WeeklyAnalyticsView() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Управление */}
       <div style={{ ...reportBlockStyle, display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
         <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
           Смена:
-          <select
-            value={shiftLetter}
-            onChange={(e) => setShiftLetter(e.target.value)}
-            style={{ ...dateSelectStyle, padding: '8px 14px' }}
-          >
+          <select value={shiftLetter} onChange={(e) => setShiftLetter(e.target.value)} style={{ ...dateSelectStyle, padding: '8px 14px' }}>
             <option value="ALL">Сутки</option>
             <option value="A">Смена A</option>
             <option value="B">Смена B</option>
@@ -1058,12 +1039,7 @@ function WeeklyAnalyticsView() {
 
         <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
           С недели:
-          <select
-            value={fromWeekStart}
-            onChange={(e) => setFromWeekStart(e.target.value)}
-            style={{ ...dateSelectStyle, padding: '8px 14px', minWidth: 220 }}
-            disabled={weeksList.length === 0}
-          >
+          <select value={fromWeekStart} onChange={(e) => setFromWeekStart(e.target.value)} style={{ ...dateSelectStyle, padding: '8px 14px', minWidth: 220 }} disabled={weeksList.length === 0}>
             {weeksList.length === 0 && <option value="">Нет данных</option>}
             {weeksList.map(w => (
               <option key={w.weekStart} value={w.weekStart}>
@@ -1075,12 +1051,7 @@ function WeeklyAnalyticsView() {
 
         <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
           По неделю:
-          <select
-            value={toWeekStart}
-            onChange={(e) => setToWeekStart(e.target.value)}
-            style={{ ...dateSelectStyle, padding: '8px 14px', minWidth: 220 }}
-            disabled={weeksList.length === 0}
-          >
+          <select value={toWeekStart} onChange={(e) => setToWeekStart(e.target.value)} style={{ ...dateSelectStyle, padding: '8px 14px', minWidth: 220 }} disabled={weeksList.length === 0}>
             {weeksList.length === 0 && <option value="">Нет данных</option>}
             {weeksList.map(w => (
               <option key={w.weekStart} value={w.weekStart}>
@@ -1092,36 +1063,14 @@ function WeeklyAnalyticsView() {
       </div>
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: 60, color: '#64748B', fontSize: '1.2rem' }}>
-          Загрузка...
-        </div>
+        <div style={{ textAlign: 'center', padding: 60, color: '#64748B', fontSize: '1.2rem' }}>Загрузка...</div>
       ) : selectedWeeks.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 60, color: '#94A3B8', fontSize: '1.2rem' }}>
-          Нет данных
-        </div>
+        <div style={{ textAlign: 'center', padding: 60, color: '#94A3B8', fontSize: '1.2rem' }}>Нет данных</div>
       ) : (
         <>
-          <WeeklyCheckpointBlock
-            type="cp7"
-            title="DRR CP7"
-            periodLabel={periodLabel}
-            weeks={cp7Filtered}
-            shiftLetter={shiftLetter}
-          />
-          <WeeklyCheckpointBlock
-            type="adas"
-            title="DRR ADAS"
-            periodLabel={periodLabel}
-            weeks={adasFiltered}
-            shiftLetter={shiftLetter}
-          />
-          <WeeklyCheckpointBlock
-            type="cpfinal"
-            title="DRR CPFinal"
-            periodLabel={periodLabel}
-            weeks={cpFinalFiltered}
-            shiftLetter={shiftLetter}
-          />
+          <WeeklyCheckpointBlock type="cp7" title="DRR CP7" periodLabel={periodLabel} weeks={cp7Filtered} shiftLetter={shiftLetter} />
+          <WeeklyCheckpointBlock type="adas" title="DRR ADAS" periodLabel={periodLabel} weeks={adasFiltered} shiftLetter={shiftLetter} />
+          <WeeklyCheckpointBlock type="cpfinal" title="DRR CPFinal" periodLabel={periodLabel} weeks={cpFinalFiltered} shiftLetter={shiftLetter} />
         </>
       )}
     </div>
@@ -1130,7 +1079,7 @@ function WeeklyAnalyticsView() {
 
 /* ===================== ГЛАВНЫЙ КОМПОНЕНТ ===================== */
 export default function DrrShiftDashboardPage() {
-  const [pageMode, setPageMode] = useState('shift'); // 'shift' | 'weekly'
+  const [pageMode, setPageMode] = useState('shift');
 
   const [periodMode, setPeriodMode] = useState('live');
   const [selectedDate, setSelectedDate] = useState(todayMoscowStr());
@@ -1204,28 +1153,46 @@ export default function DrrShiftDashboardPage() {
       const baseDate = periodMode === 'live' ? todayMoscowStr() : selectedDate;
 
       if (viewType === 'all') {
-        const start = `${baseDate} 00:00:00`;
-        const end = `${baseDate} 23:59:59`;
-        const data = await loadAllReports(start, end);
+        // Режим «Сутки»
+        let data;
+        if (periodMode === 'archive') {
+          // Читаем снимок shift='all'
+          data = await loadAllReportsArchive(baseDate, 'all');
+        } else {
+          const start = `${baseDate} 00:00:00`;
+          const end = `${baseDate} 23:59:59`;
+          data = await loadAllReportsLive(start, end);
+        }
         setAllData({ date: baseDate, ...data });
       } else {
+        // Режим «Смены A / B»
         const shifts = getShiftsForDate(baseDate);
-        let aStarted = true, bStarted = true;
+        let aData = null;
+        let bData = null;
 
-        if (periodMode === 'live') {
+        if (periodMode === 'archive') {
+          // Читаем снимки по типу смены (day / evening)
+          const [a, b] = await Promise.all([
+            shifts.a.type ? loadAllReportsArchive(baseDate, shifts.a.type) : Promise.resolve(null),
+            shifts.b.type ? loadAllReportsArchive(baseDate, shifts.b.type) : Promise.resolve(null),
+          ]);
+          aData = a;
+          bData = b;
+        } else {
+          // Live: проверяем, началась ли смена
           const now = nowMoscowStr();
-          aStarted = now >= shifts.a.start;
-          bStarted = now >= shifts.b.start;
+          const aStarted = now >= shifts.a.start;
+          const bStarted = now >= shifts.b.start;
+
+          [aData, bData] = await Promise.all([
+            aStarted ? loadAllReportsLive(shifts.a.start, shifts.a.end) : Promise.resolve(null),
+            bStarted ? loadAllReportsLive(shifts.b.start, shifts.b.end) : Promise.resolve(null),
+          ]);
         }
 
-        const [aData, bData] = await Promise.all([
-          aStarted ? loadAllReports(shifts.a.start, shifts.a.end) : Promise.resolve(null),
-          bStarted ? loadAllReports(shifts.b.start, shifts.b.end) : Promise.resolve(null),
-        ]);
-
         setShiftData({
-          a: { ...shifts.a, started: aStarted, data: aData },
-          b: { ...shifts.b, started: bStarted, data: bData },
+          a: { ...shifts.a, started: periodMode === 'archive' ? !!aData : (nowMoscowStr() >= shifts.a.start), data: aData },
+          b: { ...shifts.b, started: periodMode === 'archive' ? !!bData : (nowMoscowStr() >= shifts.b.start), data: bData },
         });
       }
     } catch (err) {
@@ -1261,34 +1228,18 @@ export default function DrrShiftDashboardPage() {
         <h1 style={titleStyle}>DRR Shift Dashboard</h1>
 
         <div style={filterGroupStyle}>
-          <button
-            style={filterButtonStyle(pageMode === 'shift', '#2563EB')}
-            onClick={() => setPageMode('shift')}
-          >Смены</button>
-          <button
-            style={filterButtonStyle(pageMode === 'weekly', '#10B981')}
-            onClick={() => setPageMode('weekly')}
-          >📊 Недельная аналитика</button>
+          <button style={filterButtonStyle(pageMode === 'shift', '#2563EB')} onClick={() => setPageMode('shift')}>Смены</button>
+          <button style={filterButtonStyle(pageMode === 'weekly', '#10B981')} onClick={() => setPageMode('weekly')}>📊 Недельная аналитика</button>
 
           {pageMode === 'shift' && (
             <>
               <div style={{ width: 1, height: 32, background: '#E2E8F0', margin: '0 4px' }} />
 
-              <button
-                style={filterButtonStyle(periodMode === 'live', '#2563EB')}
-                onClick={() => setPeriodMode('live')}
-              >Live</button>
-              <button
-                style={filterButtonStyle(periodMode === 'archive', '#2563EB')}
-                onClick={() => setPeriodMode('archive')}
-              >Архив</button>
+              <button style={filterButtonStyle(periodMode === 'live', '#2563EB')} onClick={() => setPeriodMode('live')}>Live</button>
+              <button style={filterButtonStyle(periodMode === 'archive', '#2563EB')} onClick={() => setPeriodMode('archive')}>Архив</button>
 
               {periodMode === 'archive' && (
-                <select
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  style={dateSelectStyle}
-                >
+                <select value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={dateSelectStyle}>
                   {dateOptions.map(d => (
                     <option key={d} value={d}>{formatDateShort(d)}</option>
                   ))}
@@ -1297,14 +1248,8 @@ export default function DrrShiftDashboardPage() {
 
               <div style={{ width: 1, height: 32, background: '#E2E8F0', margin: '0 4px' }} />
 
-              <button
-                style={filterButtonStyle(viewType === 'shifts', '#7C3AED')}
-                onClick={() => setViewType('shifts')}
-              >Смены A / B</button>
-              <button
-                style={filterButtonStyle(viewType === 'all', '#6B7280')}
-                onClick={() => setViewType('all')}
-              >Сутки</button>
+              <button style={filterButtonStyle(viewType === 'shifts', '#7C3AED')} onClick={() => setViewType('shifts')}>Смены A / B</button>
+              <button style={filterButtonStyle(viewType === 'all', '#6B7280')} onClick={() => setViewType('all')}>Сутки</button>
             </>
           )}
         </div>
@@ -1315,13 +1260,9 @@ export default function DrrShiftDashboardPage() {
       {pageMode === 'shift' && (
         <>
           {loading ? (
-            <div style={{ fontSize: '1.5rem', textAlign: 'center', padding: '60px', color: '#64748B' }}>
-              Загрузка данных...
-            </div>
+            <div style={{ fontSize: '1.5rem', textAlign: 'center', padding: '60px', color: '#64748B' }}>Загрузка данных...</div>
           ) : error ? (
-            <div style={{ fontSize: '1.5rem', textAlign: 'center', padding: '60px', color: '#DC2626' }}>
-              ❌ {error}
-            </div>
+            <div style={{ fontSize: '1.5rem', textAlign: 'center', padding: '60px', color: '#DC2626' }}>❌ {error}</div>
           ) : viewType === 'all' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {allData && (
