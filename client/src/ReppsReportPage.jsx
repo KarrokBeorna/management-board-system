@@ -7,6 +7,7 @@ import {
 const API_BASE = '';
 
 /* ===================== ЦВЕТА ===================== */
+/* Циклический сдвиг: зелёный → красный, красный → жёлтый, жёлтый → зелёный */
 const reppsBarTypeColors = {
   year: '#7C3AED',
   month: '#0EA5E9',
@@ -22,9 +23,9 @@ const reppsTypeBgColors = {
 };
 
 const stackColors = {
-  no_paint:          '#10B981',
-  paint_closed_only: '#F59E0B',
-  paint_open:        '#DC2626',
+  no_paint:          '#DC2626',  // красный — Без PS  (был зелёный)
+  paint_closed_only: '#10B981',  // зелёный — PS закрыты (был жёлтый)
+  paint_open:        '#F59E0B',  // жёлтый — PS открыты (был красный)
 };
 
 const modelColors = {
@@ -135,7 +136,7 @@ const reportHeaderStyle = {
   borderBottom: '2px solid #E5E7EB',
 };
 
-/* Заголовок таблицы «Категория / Модель» */
+/* Заголовок таблицы «По категориям» / «По моделям» */
 const tableHeaderStyle = {
   fontSize: 12,
   fontWeight: 700,
@@ -154,6 +155,24 @@ const dashDividerStyle = {
   borderTop: '2px dashed #CBD5E1',
   marginTop: 12,
   marginBottom: 8,
+};
+
+/* Стили для модальной таблицы */
+const modalThStyle = {
+  padding: '10px 12px',
+  textAlign: 'left',
+  background: '#F9FAFB',
+  borderBottom: '2px solid #E5E7EB',
+  position: 'sticky',
+  top: 0,
+  zIndex: 2,
+  whiteSpace: 'nowrap',
+};
+
+const modalTdStyle = {
+  padding: '8px 12px',
+  borderBottom: '1px solid #F0F0F5',
+  verticalAlign: 'top',
 };
 
 /* ===================== Хелперы ===================== */
@@ -454,6 +473,9 @@ export default function ReppsReportPage() {
     paint_open: 'незакрытые дефекты окраски',
   };
 
+  /* Колонка «Дефекты окраски после PS» показывается только для no_paint */
+  const showPostPs = modalMeta.category === 'no_paint';
+
   return (
     <div style={{ padding: '20px 30px 20px 16px', fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1500, margin: '0 auto' }}>
       <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 20 }}>REPPS Report</h1>
@@ -509,7 +531,7 @@ export default function ReppsReportPage() {
           <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#4B5563', marginLeft: 'auto', flexWrap: 'wrap' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ width: 12, height: 12, backgroundColor: stackColors.no_paint, borderRadius: 3, display: 'inline-block' }} />
-              Без PS дефектов
+              Без PS
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint_closed_only, borderRadius: 3, display: 'inline-block' }} />
@@ -566,7 +588,7 @@ export default function ReppsReportPage() {
           <div
             style={{
               backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20,
-              width: '100%', maxWidth: 1200, maxHeight: '85vh',
+              width: '100%', maxWidth: 1400, maxHeight: '85vh',
               display: 'flex', flexDirection: 'column',
               boxShadow: '0 25px 50px rgba(0,0,0,0.25)',
             }}
@@ -597,23 +619,26 @@ export default function ReppsReportPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                   <thead>
                     <tr>
-                      <th style={{ padding: '10px 12px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 2 }}>VIN</th>
-                      <th style={{ padding: '10px 12px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 2 }}>Модель</th>
-                      <th style={{ padding: '10px 12px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 2 }}>Время REPPS</th>
-                      <th style={{ padding: '10px 12px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 2 }}>Время PSOUT</th>
-                      <th style={{ padding: '10px 12px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 2 }}>Дефекты окраски</th>
+                      <th style={modalThStyle}>VIN</th>
+                      <th style={modalThStyle}>Модель</th>
+                      <th style={modalThStyle}>Время REPPS</th>
+                      <th style={modalThStyle}>Время PSOUT</th>
+                      <th style={modalThStyle}>Дефекты окраски</th>
+                      {showPostPs && (
+                        <th style={modalThStyle}>Дефекты окраски после PS</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
                     {modalVins.map((item, idx) => (
                       <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                        <td style={{ padding: '8px 12px', borderBottom: '1px solid #F0F0F5', fontFamily: 'monospace', fontWeight: 600 }}>{item.vin}</td>
-                        <td style={{ padding: '8px 12px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
-                        <td style={{ padding: '8px 12px', borderBottom: '1px solid #F0F0F5', fontSize: 12 }}>{formatDateTime(item.repps_time)}</td>
-                        <td style={{ padding: '8px 12px', borderBottom: '1px solid #F0F0F5', fontSize: 12, color: item.psout_time ? '#1F2937' : '#9CA3AF' }}>
+                        <td style={{ ...modalTdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{item.vin}</td>
+                        <td style={modalTdStyle}>{item.model}</td>
+                        <td style={{ ...modalTdStyle, fontSize: 12 }}>{formatDateTime(item.repps_time)}</td>
+                        <td style={{ ...modalTdStyle, fontSize: 12, color: item.psout_time ? '#1F2937' : '#9CA3AF' }}>
                           {formatDateTime(item.psout_time)}
                         </td>
-                        <td style={{ padding: '8px 12px', borderBottom: '1px solid #F0F0F5' }}>
+                        <td style={modalTdStyle}>
                           {item.defects && item.defects.length > 0 ? (
                             <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
                               {item.defects.map((d, i) => (
@@ -624,6 +649,7 @@ export default function ReppsReportPage() {
                                   {d.part_name} · {d.problem_type}
                                   {d.grade ? ` · ${d.grade}` : ''}
                                   {' · '}<span style={{ fontStyle: 'italic' }}>{d.status || '—'}</span>
+                                  {d.is_open && <span style={{ marginLeft: 4 }}>🔴</span>}
                                 </li>
                               ))}
                             </ul>
@@ -631,6 +657,27 @@ export default function ReppsReportPage() {
                             <span style={{ color: '#9CA3AF', fontSize: 12 }}>Нет дефектов</span>
                           )}
                         </td>
+                        {showPostPs && (
+                          <td style={modalTdStyle}>
+                            {item.post_ps_defects && item.post_ps_defects.length > 0 ? (
+                              <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                                {item.post_ps_defects.map((d, i) => (
+                                  <li key={i} style={{
+                                    color: d.is_open ? '#DC2626' : '#6B7280',
+                                    fontWeight: d.is_open ? 600 : 400,
+                                  }}>
+                                    {d.part_name} · {d.problem_type}
+                                    {d.grade ? ` · ${d.grade}` : ''}
+                                    {' · '}<span style={{ fontStyle: 'italic' }}>{d.status || '—'}</span>
+                                    {d.is_open && <span style={{ marginLeft: 4 }}>🔴</span>}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <span style={{ color: '#9CA3AF', fontSize: 12 }}>—</span>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

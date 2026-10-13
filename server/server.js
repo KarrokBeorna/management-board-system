@@ -14933,10 +14933,118 @@ app.get('/api/repps-retrospective', async (req, res) => {
 
 
 /* ====================================================================== */
-/* VIN-детали для модалки: клик по числу в таблице                          */
-/* category: total | no_paint | paint_closed_only | paint_open | paint_all */
-/* Для paint_open показываются только VIN, прошедшие PSOUT (AGMPS01002)     */
+/* Типы дефектов, которые считаются «окрасочными» и появившимися ПОСЛЕ PS */
+/* Используются только для категории no_paint -> «Дефекты окраски после PS» */
 /* ====================================================================== */
+const POST_PS_DEFECT_TYPES = [
+  // Лак / база / эмаль
+  'Загрязнение в лаке',
+  'Инородные включения в ЛКП',
+  'Потёки лака',
+  'Потёки базовой эмали',
+  'Кратер в лаке',
+  'Непрокрас лака',
+  'Непрокрашенные места',
+  'Прикосновение на базовом слое',
+  'Потеки, капли прозрачного лака',
+  'Пузыри в лаке',
+  'Orange peel',
+  'Непрокрас базовой эмали',
+  'Цветное пятно в базе',
+  'Ворс в лаке',
+  'Прикосновение на лаке',
+  'Кратер в базовой эмали',
+  'Отклонение цвета',
+  'Ворс в базовой эмали',
+  'Непрокрас лаком',
+  'Дефект окраски',
+  'Отслоение краски',
+  'Капля растворителя на лаке',
+  'Потускнение в лаке',
+  'PIN-hole в лаке',
+  'Отслаивание прозрачного лака',
+  'Повреждение ЛКП (хим. повреждение)',
+  'Растрескивание ЛКП',
+  'Потеря блеска',
+  'Голограмма',
+  'Отслоение КТФ',
+  // КТФ / грунт / праймер
+  'Следы шлифовки в КТФ',
+  'Потёки катафорезного грунта',
+  'Посторонние включения (КТФ)',
+  'Печной конденсат (КТФ)',
+  'Дефект шероховатости КТФ',
+  'Кратер в КТФ грунте',
+  'Подтек первичного грунта (KTL)',
+  'Недопекание слоя КТФ',
+  'Пятна на поверхности КТФ',
+  'PIN-hole в КТФ',
+  'Тонкий слой КТФ',
+  'Проблема с адгезией в КТФ',
+  'Шагрень из-за рем.грунта',
+  'Кратеры в грунте',
+  'Дефект грунта',
+  'Кратеры в первичном грунте (KTL)',
+  'Отсутствие праймера',
+  // Герметики / клеи / антикор
+  'Остаточный/избыточный герметик',
+  'Остатки герметика',
+  'Загрязнение герметиком',
+  'Выступание / отсутствие герметика / клея',
+  'Остатки кузовного герметика',
+  'Нарушена технология нанесения герметика',
+  'Плохая герметизация шва',
+  'Неправильно нанесён герметик',
+  'Повреждение герметика',
+  'Дефект герметика',
+  'Отсутствие герметика',
+  'Пропуск нанесения герметика',
+  'Пузыри в герметике (FAD)',
+  'Дефект клеевого соединения',
+  'Загрязнение герметика',
+  'Выдавливание клея',
+  'Пузыри в герметике',
+  'Трещины в герметике',
+  'Чрезмерная сушка герметика',
+  'Отсутствует антикоррозийное покрытие днища',
+  'Отсутствие цинкового покрытия',
+  // Царапины / сколы / потёртости
+  'Царапина',
+  'Царапины',
+  'Царапины на ЛКП',
+  'Повреждение (Скол)',
+  'Скол',
+  'Сколы',
+  'Повреждение (Царапины/Потёртости)',
+  'Царапина на базовом слое краски',
+  'Легко царапается',
+  'Следы от ударов камней',
+  'Шлифовка насквозь',
+  // Полировка / шлифовка
+  'Следы полировки',
+  'Следы шлифовки',
+  'Следы шлифовки в лаке',
+  'Следы шлифовки (неровность в лаке)',
+  'Переполирован/пробит лак',
+  'След полировки',
+  'Следы зачисток',
+  'Следы зачисток цеха сварки',
+  'Зачистка до металла',
+  // Цвет / текстура
+  'Несоответствие цвета',
+  'Нарушение цветности',
+  'Неверный цвет',
+  'Отклонения цвета (пластик)',
+  'Цветное пятно',
+  'Эффект апельсиновой корки',
+  'Волнистость',
+  'Шершавость',
+  'Помутнение',
+  'Неровность',
+  'Несоответствие фактуры',
+  'Белесые полосы',
+];
+
 app.get('/api/repps-vins-details', async (req, res) => {
   try {
     const { dateFrom, dateTo, category = 'total', model } = req.query;
@@ -14968,7 +15076,7 @@ app.get('/api/repps-vins-details', async (req, res) => {
     const vins = rows.map(r => r.vin);
     const ph = vins.map(() => '?').join(',');
 
-    // 2. Время PSOUT (AGMPS01002) для этих VIN
+    // 2. Время PSOUT (AGMPS01002)
     const [psoutRows] = await mesPool.query(`
       SELECT vin, MAX(scan_time) AS psout_time
       FROM ti_mes_movement
@@ -14978,7 +15086,7 @@ app.get('/api/repps-vins-details', async (req, res) => {
 
     const psoutByVin = new Map(psoutRows.map(r => [r.vin, r.psout_time]));
 
-    // 3. Все дефекты окраски
+    // 3. Дефекты окраски (at_paint_qm_defect_info)
     const [defectRows] = await pool.query(`
       SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, STATUS, CREATION_TIME
       FROM at_paint_qm_defect_info
@@ -15007,14 +15115,47 @@ app.get('/api/repps-vins-details', async (req, res) => {
       });
     });
 
-    // 4. Фильтр по категории
+    // 4. «Дефекты окраски после PS» — только для no_paint
+    const postPsDefectsByVin = new Map();
+
+    if (category === 'no_paint' && POST_PS_DEFECT_TYPES.length > 0) {
+      const noPaintVins = rows
+        .filter(r => !vinHasPaint.has(r.vin))
+        .map(r => r.vin);
+
+      if (noPaintVins.length > 0) {
+        const ph2 = noPaintVins.map(() => '?').join(',');
+        const ph3 = POST_PS_DEFECT_TYPES.map(() => '?').join(',');
+
+        const [postPsRows] = await pool.query(`
+          SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, STATUS, CREATION_TIME
+          FROM at_qm_defect_info
+          WHERE VIN IN (${ph2})
+            AND PROBLEM_TYPE IN (${ph3})
+          ORDER BY VIN, CREATION_TIME DESC
+        `, [...noPaintVins, ...POST_PS_DEFECT_TYPES]);
+
+        postPsRows.forEach(d => {
+          if (!postPsDefectsByVin.has(d.VIN)) postPsDefectsByVin.set(d.VIN, []);
+          postPsDefectsByVin.get(d.VIN).push({
+            part_name: d.PART_NAME || '',
+            problem_type: d.PROBLEM_TYPE || '',
+            grade: d.PROBLEM_GRADE || '',
+            status: d.STATUS || '',
+            is_open: (d.STATUS || '').toUpperCase() !== 'CLOSED',
+            creation_time: d.CREATION_TIME,
+          });
+        });
+      }
+    }
+
+    // 5. Фильтр по категории
     let filtered = rows;
     if (category === 'no_paint') {
       filtered = rows.filter(r => !vinHasPaint.has(r.vin));
     } else if (category === 'paint_closed_only') {
       filtered = rows.filter(r => vinHasPaint.has(r.vin) && !vinHasOpenPaint.has(r.vin));
     } else if (category === 'paint_open') {
-      // только VIN, прошедшие PSOUT и с ≥1 незакрытым дефектом окраски
       filtered = rows.filter(r => vinHasOpenPaint.has(r.vin) && psoutByVin.has(r.vin));
     } else if (category === 'paint_all') {
       filtered = rows.filter(r => vinHasPaint.has(r.vin));
@@ -15023,12 +15164,15 @@ app.get('/api/repps-vins-details', async (req, res) => {
     const result = filtered.map(r => {
       const defects = (defectsByVin.get(r.vin) || [])
         .sort((a, b) => (b.is_open ? 1 : 0) - (a.is_open ? 1 : 0));
+      const postPsDefects = (postPsDefectsByVin.get(r.vin) || [])
+        .sort((a, b) => (b.is_open ? 1 : 0) - (a.is_open ? 1 : 0));
       return {
         vin: r.vin,
         model: r.MODEL || '—',
         repps_time: r.first_repps,
         psout_time: psoutByVin.get(r.vin) || null,
         defects,
+        post_ps_defects: postPsDefects,
       };
     });
 
