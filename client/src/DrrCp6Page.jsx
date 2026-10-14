@@ -37,7 +37,7 @@ const filterGroupStyle = {
   gap: '10px',
 };
 
-const timeFilterButtonStyle = (active, activeColor) => ({
+const timeFilterButtonStyle = (active, activeColor, disabled = false) => ({
   padding: '12px 24px',
   borderRadius: '12px',
   border: 'none',
@@ -45,10 +45,31 @@ const timeFilterButtonStyle = (active, activeColor) => ({
   fontSize: '1.4rem',
   background: active ? activeColor : '#FFFFFF',
   color: active ? '#FFFFFF' : '#64748B',
-  cursor: 'pointer',
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  opacity: disabled ? 0.5 : 1,
   boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
   transition: 'all 0.2s',
 });
+
+const snapshotSelectStyle = {
+  padding: '12px 44px 12px 24px',
+  borderRadius: '12px',
+  border: 'none',
+  fontWeight: 700,
+  fontSize: '1.4rem',
+  background: '#FFFFFF',
+  color: '#64748B',
+  cursor: 'pointer',
+  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+  minWidth: 220,
+  appearance: 'none',
+  WebkitAppearance: 'none',
+  MozAppearance: 'none',
+  backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>")`,
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'right 16px center',
+  transition: 'all 0.2s',
+};
 
 const dashboardGridStyle = {
   display: 'flex',
@@ -194,6 +215,19 @@ const getTimeRange = (timeFilter) => {
   return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
 };
 
+const getArchiveRange = (shiftDate, shift) => {
+  if (shift === 'all')     return { start: `${shiftDate} 00:00:00`, end: `${shiftDate} 23:59:59` };
+  if (shift === 'day')     return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
+  if (shift === 'night')   return { start: `${shiftDate} 01:31:00`, end: `${shiftDate} 07:50:00` };
+  if (shift === 'evening') {
+    const next = new Date(`${shiftDate}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    const nextStr = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+    return { start: `${shiftDate} 16:41:00`, end: `${nextStr} 01:30:00` };
+  }
+  return null;
+};
+
 const getWeekNumber = (date) => {
   const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -265,11 +299,18 @@ export default function DrrCp6Page() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const [snapshots, setSnapshots] = useState([]);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState('live');
+  const [archiveMeta, setArchiveMeta] = useState(null); // { shiftDate, shift }
+
   const [vinList, setVinList] = useState([]);
   const [vinListStatus, setVinListStatus] = useState('');
   const [showVinModal, setShowVinModal] = useState(false);
   const [vinModalLoading, setVinModalLoading] = useState(false);
 
+  const isArchive = selectedSnapshotId !== 'live';
+
+  /* ===================== Загрузка live-данных ===================== */
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -298,6 +339,7 @@ export default function DrrCp6Page() {
 
       setSpotRows(Array.isArray(spotRes) ? spotRes : []);
       setRepaintRows(Array.isArray(repaintRes) ? repaintRes : []);
+      setArchiveMeta(null);
     } catch (err) {
       setError(err.message);
       setSpotRows([]);
@@ -307,7 +349,95 @@ export default function DrrCp6Page() {
     }
   };
 
+  /* ===================== Загрузка снимка ===================== */
+  const loadSnapshot = async (id) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/drr-cp6-snapshot/${id}`);
+      if (!res.ok) throw new Error('Ошибка загрузки снимка');
+      const json = await res.json();
+
+      setData({
+        totalRecords: json.totalRecords || 0,
+        totalVins: json.totalVins || 0,
+        okVins: json.okVins || 0,
+        nokVins: json.nokVins || 0,
+        drrPercent: json.drrPercent || 0,
+        spotVins: json.spotVins || 0,
+        repaintVins: json.repaintVins || 0,
+        otherVins: json.otherVins || 0,
+        transitCount: json.transitCount || 0,
+        activeAtPaint: json.activeAtPaint || 0,
+      });
+
+      setSpotRows(Array.isArray(json.spotRows) ? json.spotRows : []);
+      setRepaintRows(Array.isArray(json.repaintRows) ? json.repaintRows : []);
+
+      setShiftInfo({
+        weekNumber: json.weekNumber != null ? json.weekNumber : '—',
+        shiftLetter: json.shiftLetter != null ? json.shiftLetter : '—',
+        shiftType: json.shift || 'all',
+      });
+      setArchiveMeta({ shiftDate: json.shiftDate, shift: json.shift });
+    } catch (err) {
+      setError(err.message);
+      setSpotRows([]);
+      setRepaintRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* ===================== Загрузка списка снимков ===================== */
+  useEffect(() => {
+    fetch(`${API_BASE}/api/drr-cp6-snapshots?days=14`)
+      .then(res => res.json())
+      .then(json => {
+        const list = Array.isArray(json) ? json : [];
+        setSnapshots(list);
+        if (selectedSnapshotId !== 'live' && !list.some(s => String(s.id) === String(selectedSnapshotId))) {
+          setSelectedSnapshotId('live');
+        }
+      })
+      .catch(() => setSnapshots([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ===================== Главный эффект: live vs архив ===================== */
+  useEffect(() => {
+    if (selectedSnapshotId === 'live') {
+      loadData();
+    } else {
+      loadSnapshot(selectedSnapshotId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSnapshotId, timeFilter]);
+
+  /* ===================== Обновление смены и авто-refresh ===================== */
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (selectedSnapshotId === 'live') {
+        setShiftInfo(getCurrentShiftInfo());
+        if (!isManualFilter) setTimeFilter(getDefaultTimeFilter());
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [isManualFilter, selectedSnapshotId]);
+
+  useEffect(() => {
+    if (selectedSnapshotId !== 'live') return;
+    const interval = setInterval(loadData, 30000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeFilter, selectedSnapshotId]);
+
+  /* ===================== Модалка VIN ===================== */
   const loadVinList = async (status) => {
+    if (isArchive) {
+      alert('В архиве список VIN недоступен — переключитесь на «Сейчас (live)».');
+      return;
+    }
     setVinModalLoading(true);
     try {
       const { start, end } = getTimeRange(timeFilter);
@@ -326,6 +456,10 @@ export default function DrrCp6Page() {
   };
 
   const loadTransitList = async () => {
+    if (isArchive) {
+      alert('В архиве список VIN недоступен — переключитесь на «Сейчас (live)».');
+      return;
+    }
     setVinModalLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/drr-cp6-transit-vins`);
@@ -341,41 +475,26 @@ export default function DrrCp6Page() {
     }
   };
 
-  useEffect(() => { loadData(); }, [timeFilter]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setShiftInfo(getCurrentShiftInfo());
-      if (!isManualFilter) setTimeFilter(getDefaultTimeFilter());
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [isManualFilter]);
-
-  useEffect(() => {
-    const interval = setInterval(loadData, 30000);
-    return () => clearInterval(interval);
-  }, [timeFilter]);
-
   const pieData = [
     { name: 'DRR (OK)', value: data.drrPercent },
     { name: 'NOK', value: Math.max(0, 100 - data.drrPercent) },
   ];
 
   const handleFilterClick = (filter) => {
+    if (isArchive) return;
     setIsManualFilter(true);
     setTimeFilter(filter);
   };
 
   const uniqueSpotVins = new Set(spotRows.map(r => r.vin)).size;
   const uniqueRepaintVins = new Set(repaintRows.map(r => r.vin)).size;
-
   const spotDefects = spotRows.length;
   const repaintDefects = repaintRows.length;
 
   return (
     <div style={containerStyle}>
       <div style={headerStyle}>
-        <h1 style={titleStyle}>DRR CP6</h1>
+        <h1 style={titleStyle}>DRR CP6{isArchive && ' · архив'}</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginRight: '20px' }}>
             <div style={{
@@ -402,10 +521,49 @@ export default function DrrCp6Page() {
           <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
 
           <div style={filterGroupStyle}>
-            <button style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280')} onClick={() => handleFilterClick('all')}>Сутки</button>
-            <button style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B')} onClick={() => handleFilterClick('day')}>День</button>
-            <button style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6')} onClick={() => handleFilterClick('evening')}>Вечер</button>
-            <button style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937')} onClick={() => handleFilterClick('night')}>Ночь</button>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280', isArchive)}
+              onClick={() => handleFilterClick('all')}
+              disabled={isArchive}
+            >Сутки</button>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B', isArchive)}
+              onClick={() => handleFilterClick('day')}
+              disabled={isArchive}
+            >День</button>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6', isArchive)}
+              onClick={() => handleFilterClick('evening')}
+              disabled={isArchive}
+            >Вечер</button>
+            <button
+              style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937', isArchive)}
+              onClick={() => handleFilterClick('night')}
+              disabled={isArchive}
+            >Ночь</button>
+
+            <select
+              value={selectedSnapshotId}
+              onChange={(e) => setSelectedSnapshotId(e.target.value)}
+              style={snapshotSelectStyle}
+            >
+              <option value="live">Сейчас (live)</option>
+              {snapshots.map(s => {
+                const shiftLabel =
+                  s.shift === 'all' ? 'Сутки' :
+                  s.shift === 'day' ? 'День' :
+                  s.shift === 'evening' ? 'Вечер' :
+                  'Ночь';
+                const dateObj = new Date(s.shiftDate + 'T12:00:00');
+                const dd = String(dateObj.getDate()).padStart(2, '0');
+                const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                return (
+                  <option key={s.id} value={s.id}>
+                    {dd}.{mm} · {shiftLabel} ({s.drrPercent}%)
+                  </option>
+                );
+              })}
+            </select>
           </div>
         </div>
       </div>
@@ -420,7 +578,6 @@ export default function DrrCp6Page() {
         </div>
       ) : (
         <div style={dashboardGridStyle}>
-          {/* ============ ЛЕВАЯ КОЛОНКА ============ */}
           <div style={chartColumnStyle}>
             <div style={{ position: 'relative', width: '100%', height: '440px', flexShrink: 0 }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -450,36 +607,27 @@ export default function DrrCp6Page() {
                 position: 'absolute', top: '50%', left: '50%',
                 transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none',
               }}>
-                <div style={{ fontSize: '2rem', fontWeight: 800, color: '#1E293B', marginBottom: '6px' }}>DRR</div>
+                <div style={{ fontSize: '2rem', fontWeight: 800, color: '#1E293B', marginBottom: '6px' }}>
+                  DRR{isArchive && ' · архив'}
+                </div>
                 <div style={{ fontSize: '5.4rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
                   {data.drrPercent.toFixed(1)}%
                 </div>
               </div>
             </div>
 
-            {/* ============ Нижний ряд: System Fill / Buffer / NOK ============ */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px', flexWrap: 'nowrap', alignItems: 'stretch' }}>
-
-              {/* === System Fill: активные между AGMPS01001 и AGMPS01002 === */}
+              {/* System Fill */}
               <div style={{
-                flex: '0 0 20%',
-                backgroundColor: '#1E293B',
-                borderRadius: 12,
-                padding: '14px 12px',
-                color: '#FFFFFF',
-                minHeight: 150,
-                display: 'flex',
-                flexDirection: 'column',
-                boxSizing: 'border-box',
+                flex: '0 0 20%', backgroundColor: '#1E293B',
+                borderRadius: 12, padding: '14px 12px', color: '#FFFFFF',
+                minHeight: 150, display: 'flex', flexDirection: 'column', boxSizing: 'border-box',
               }}>
                 <div style={{ textAlign: 'center', height: LABEL_SECTION_HEIGHT, flexShrink: 0 }}>
                   <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>System Fill</div>
                   <div style={{ width: '55%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto', borderRadius: 1 }} />
                 </div>
-                <div style={{
-                  height: VALUE_SECTION_HEIGHT,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
+                <div style={{ height: VALUE_SECTION_HEIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>
                     {Math.max(0, data.activeAtPaint - 4)}
                   </div>
@@ -489,18 +637,14 @@ export default function DrrCp6Page() {
                 </div>
               </div>
 
-              {/* === Buffer: между AGMPS01004 и AGMAS01001 (30 дней) === */}
+              {/* Buffer */}
               <div
                 style={{
-                  flex: '0 0 20%',
-                  backgroundColor: '#059669',
-                  borderRadius: 12,
-                  padding: '14px 12px',
-                  color: '#FFFFFF',
-                  minHeight: 150,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  cursor: 'pointer',
+                  flex: '0 0 20%', backgroundColor: '#059669',
+                  borderRadius: 12, padding: '14px 12px', color: '#FFFFFF',
+                  minHeight: 150, display: 'flex', flexDirection: 'column',
+                  cursor: isArchive ? 'not-allowed' : 'pointer',
+                  opacity: isArchive ? 0.7 : 1,
                   boxSizing: 'border-box',
                 }}
                 onClick={loadTransitList}
@@ -509,10 +653,7 @@ export default function DrrCp6Page() {
                   <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>Buffer</div>
                   <div style={{ width: '55%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto', borderRadius: 1 }} />
                 </div>
-                <div style={{
-                  height: VALUE_SECTION_HEIGHT,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
+                <div style={{ height: VALUE_SECTION_HEIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.transitCount}</div>
                 </div>
                 <div style={{ fontSize: '0.68rem', opacity: 0.85, fontWeight: 600, textAlign: 'center', marginTop: 'auto' }}>
@@ -520,18 +661,14 @@ export default function DrrCp6Page() {
                 </div>
               </div>
 
-              {/* === NOK === */}
+              {/* NOK */}
               <div
                 style={{
-                  flex: 1,
-                  backgroundColor: '#DC2626',
-                  borderRadius: 12,
-                  padding: '14px 16px',
-                  color: '#FFFFFF',
-                  minHeight: 150,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  cursor: 'pointer',
+                  flex: 1, backgroundColor: '#DC2626',
+                  borderRadius: 12, padding: '14px 16px', color: '#FFFFFF',
+                  minHeight: 150, display: 'flex', flexDirection: 'column',
+                  cursor: isArchive ? 'not-allowed' : 'pointer',
+                  opacity: isArchive ? 0.7 : 1,
                   boxSizing: 'border-box',
                 }}
                 onClick={() => loadVinList('NOK')}
@@ -540,10 +677,7 @@ export default function DrrCp6Page() {
                   <div style={{ fontSize: '0.95rem', fontWeight: 700, opacity: 0.95, marginBottom: 6 }}>NOK</div>
                   <div style={{ width: '30%', height: 2, backgroundColor: 'rgba(255,255,255,0.3)', margin: '0 auto', borderRadius: 1 }} />
                 </div>
-                <div style={{
-                  height: VALUE_SECTION_HEIGHT,
-                  display: 'flex', alignItems: 'center', gap: 12,
-                }}>
+                <div style={{ height: VALUE_SECTION_HEIGHT, display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1, minWidth: 60, textAlign: 'center' }}>
                     {data.nokVins}
                   </div>
@@ -566,13 +700,11 @@ export default function DrrCp6Page() {
             </div>
           </div>
 
-          {/* ============ ПРАВАЯ КОЛОНКА ============ */}
           <div style={rightColumnStyle}>
-
             {/* Spot */}
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>
-                <span>Spot</span>
+                <span>Spot{isArchive && ' · архив'}</span>
                 <span style={{ fontSize: '0.85rem', color: '#64748B', fontWeight: 600 }}>
                   Уник. VIN: {uniqueSpotVins} · Дефектов незакрытых: {spotDefects}
                 </span>
@@ -610,7 +742,7 @@ export default function DrrCp6Page() {
             {/* Перекрас */}
             <div style={tableCardStyle}>
               <h2 style={tableTitleStyle}>
-                <span>Перекрас</span>
+                <span>Перекрас{isArchive && ' · архив'}</span>
                 <span style={{ fontSize: '0.85rem', color: '#64748B', fontWeight: 600 }}>
                   Уник. VIN: {uniqueRepaintVins} · Дефектов незакрытых: {repaintDefects}
                 </span>
