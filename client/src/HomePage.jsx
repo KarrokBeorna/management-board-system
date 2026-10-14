@@ -32,7 +32,7 @@ import vrtPreview from './assets/vrt.png';
 import drrShiftPreview from './assets/drrshift.png';
 import defectCapturePreview from './assets/defph.png';
 import lineDefectsArchivePreview from './assets/archph.png';
-import reppsPreview from './assets/cp8drr.png'; // временно, потом заменить на свою
+import reppsPreview from './assets/repps.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {
