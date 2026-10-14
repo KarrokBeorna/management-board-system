@@ -175,6 +175,8 @@ const wideModalStyle = {
   maxWidth: '720px',
 };
 
+const ALL_MODELS_VALUE = '__ALL_MODELS__';
+
 /* ===================== ХЕЛПЕРЫ ДЛЯ ДАТ И ЦВЕТА ===================== */
 function toLocalDateStr(d) {
   const date = new Date(d);
@@ -2234,31 +2236,66 @@ function DictionaryPanel({
   const visibleEntries = filteredDictionary.slice(startIndex, endIndex);
 
   const handleSaveEntry = (entry) => {
-    executeWithPassword(async (pwd) => {
-      try {
-        const res = await fetch(`${API_BASE}/api/brigade-report/dictionary`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: entry.model,
-            part_name: entry.part_name,
-            problem_type: entry.problem_type,
-            brigadeName: entry.brigadeName,
-            password: pwd,
-          }),
-        });
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.error || 'Ошибка сохранения');
+        if (!entry.part_name || !entry.problem_type) {
+            alert('Заполните «Деталь» и «Дефект»');
+            return;
         }
-        onDataChanged();
-        setNewEntry({ model: '', part_name: '', problem_type: '', brigadeName: '' });
-        setEditEntry(null);
-      } catch (err) {
-        alert(err.message);
-      }
-    });
-  };
+        if (!entry.brigadeName) {
+            alert('Выберите бригаду');
+            return;
+        }
+        if (!entry.model) {
+            alert('Выберите модель или «Все модели»');
+            return;
+        }
+
+        const isAllModels = entry.model === ALL_MODELS_VALUE;
+
+        executeWithPassword(async (pwd) => {
+            try {
+            const url = isAllModels
+                ? `${API_BASE}/api/brigade-report/assign-all-models`
+                : `${API_BASE}/api/brigade-report/dictionary`;
+
+            const body = isAllModels
+                ? {
+                    part_name: entry.part_name,
+                    problem_type: entry.problem_type,
+                    brigadeName: entry.brigadeName,
+                    password: pwd,
+                }
+                : {
+                    model: entry.model,
+                    part_name: entry.part_name,
+                    problem_type: entry.problem_type,
+                    brigadeName: entry.brigadeName,
+                    password: pwd,
+                };
+
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || 'Ошибка сохранения');
+            }
+
+            const data = await res.json();
+            if (isAllModels) {
+                alert(`Связка добавлена для ${data.models} моделей ✅`);
+            }
+
+            onDataChanged();
+            setNewEntry({ model: '', part_name: '', problem_type: '', brigadeName: '' });
+            setEditEntry(null);
+            } catch (err) {
+            alert(err.message);
+            }
+        });
+    };
 
   const handleDeleteEntry = (id) => {
     executeWithPassword(async (pwd) => {
@@ -2493,12 +2530,15 @@ function DictionaryPanel({
           }}>
             <span style={{ fontWeight: 600, color: BRAND.textSecondary, fontSize: '1rem' }}>Новая связка дефект-бригада:</span>
             <select
-              value={newEntry.model}
-              onChange={(e) => setNewEntry({ ...newEntry, model: e.target.value })}
-              style={{ ...inputStyle, minWidth: '150px' }}
+                value={newEntry.model}
+                onChange={(e) => setNewEntry({ ...newEntry, model: e.target.value })}
+                style={{ ...inputStyle, minWidth: '180px' }}
             >
-              <option value="">Модель</option>
-              {models.map(model => <option key={model} value={model}>{model}</option>)}
+                <option value="">Модель</option>
+                <option value={ALL_MODELS_VALUE}>⭐ Все модели</option>
+                {models.map(model => (
+                    <option key={model} value={model}>{model}</option>
+                ))}
             </select>
             <input
               type="text"
