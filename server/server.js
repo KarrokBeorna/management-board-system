@@ -13229,40 +13229,59 @@ async function classifyVinsSpotRepaintCp6(psoutRows) {
 /* ---------------------------------------------------------------------- */
 /* Хелпер: расчёт одного периода                                           */
 /* ---------------------------------------------------------------------- */
-async function computeSpotRepaintPeriod(startTime, endTime) {
-  const { vins: psoutRows } = await getCp6PsoutVins(startTime, endTime);
+async function computeSpotRepaintPeriods(periods) {
+  if (!periods.length) return [];
 
+  // 1. Общий диапазон = min(start) .. max(end)
+  const minStart = periods.reduce((a, p) => a < p.startDate ? a : p.startDate, periods[0].startDate);
+  const maxEnd   = periods.reduce((a, p) => a > p.endDate   ? a : p.endDate,   periods[0].endDate);
+
+  // 2. Все PSOUT-VIN за весь диапазон — ОДИН раз
+  const { vins: psoutRows } = await getCp6PsoutVins(minStart, maxEnd);
+
+  // 3. Классификация — ОДИН раз
   const { spotSet, repaintSet, modelsByVin } = await classifyVinsSpotRepaintCp6(psoutRows);
+
+  // 4. psout_time по каждому VIN (для раскладки по периодам)
+  const psoutTimeByVin = new Map(psoutRows.map(r => [r.vin, r.psout_last_time]));
 
   const ALL_MODELS = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
-  const byModelSpot    = {};
-  const byModelRepaint = {};
+  // 5. Раскладываем по периодам в памяти — БЕЗ новых SQL-запросов
+  return periods.map(p => {
+    const pStart = new Date(p.startDate);
+    const pEnd   = new Date(p.endDate);
 
-  for (const v of spotSet) {
-    const m = modelsByVin.get(v) || 'UNKNOWN';
-    byModelSpot[m] = (byModelSpot[m] || 0) + 1;
-  }
-  for (const v of repaintSet) {
-    const m = modelsByVin.get(v) || 'UNKNOWN';
-    byModelRepaint[m] = (byModelRepaint[m] || 0) + 1;
-  }
+    const inRange = (v) => {
+      const t = psoutTimeByVin.get(v);
+      if (!t) return false;
+      const d = new Date(t);
+      return d >= pStart && d <= pEnd;
+    };
 
-  const point = {
-    spot:    spotSet.size,
-    repaint: repaintSet.size,
-  };
-  point.total = point.spot + point.repaint;
+    const spotInPeriod    = [...spotSet].filter(inRange);
+    const repaintInPeriod = [...repaintSet].filter(inRange);
 
-  for (const m of ALL_MODELS) {
-    const s = byModelSpot[m] || 0;
-    const r = byModelRepaint[m] || 0;
-    point[m]              = s + r;
-    point[`${m}_spot`]    = s;
-    point[`${m}_repaint`] = r;
-  }
+    const point = {
+      type: p.type,
+      label: p.label,
+      startDate: p.startDate,
+      endDate: p.endDate,
+      spot:    spotInPeriod.length,
+      repaint: repaintInPeriod.length,
+    };
+    point.total = point.spot + point.repaint;
 
-  return point;
+    for (const m of ALL_MODELS) {
+      const s = spotInPeriod.filter(v => (modelsByVin.get(v) || 'UNKNOWN') === m).length;
+      const r = repaintInPeriod.filter(v => (modelsByVin.get(v) || 'UNKNOWN') === m).length;
+      point[m]              = s + r;
+      point[`${m}_spot`]    = s;
+      point[`${m}_repaint`] = r;
+    }
+
+    return point;
+  });
 }
 
 /* ---------------------------------------------------------------------- */
@@ -13405,17 +13424,11 @@ app.get('/api/repps-spot-repaint', async (req, res) => {
 
     const periods = buildPeriods({ period, count, fromDate, toDate });
 
-    const dataPoints = [];
-    for (const p of periods) {
-      const stats = await computeSpotRepaintPeriod(p.startDate, p.endDate);
-      dataPoints.push({
-        type: p.type,
-        label: p.label,
-        startDate: p.startDate,
-        endDate: p.endDate,
-        ...stats,
-      });
+    if (periods.length === 0) {
+      return res.json({ dataPoints: [] });
     }
+
+    const dataPoints = await computeSpotRepaintPeriods(periods);
 
     res.json({ dataPoints });
   } catch (err) {
