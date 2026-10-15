@@ -27,7 +27,6 @@ const stackColors = {
   paint_open:        '#F59E0B',
 };
 
-/* Цвета для Spot-Перекрас */
 const SPOT_COLOR    = '#F59E0B';
 const REPAINT_COLOR = '#DC2626';
 
@@ -177,13 +176,24 @@ const modalTdStyle = {
 
 /* ===================== Хелперы ===================== */
 const shortenLabel = (label, type) => {
+  if (!label) return '';
+
+  // День: '2026-10-02' → '02.10'; если уже '02.10' — вернёт как есть
+  if (type === 'day') {
+    const m = String(label).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}.${m[2]}`;
+    return label;
+  }
+
   if (type === 'month') {
-    const [m, y] = label.split(' ');
+    const [m, y] = String(label).split(' ');
     return y ? `${m}'${y.slice(2)}` : m;
   }
+
   if (type === 'week') {
-    return label.split(' ')[0];
+    return String(label).split(' ')[0];
   }
+
   return label;
 };
 
@@ -309,7 +319,7 @@ function SpotRepaintReport() {
   /* ---------- CHART ---------- */
   const renderStackChart = (points) => {
     if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
-    const displayData = points.map(p => ({ ...p, displayLabel: p.label }));
+    const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
 
     return (
       <ResponsiveContainer width="100%" height={H_CHART_2}>
@@ -340,7 +350,7 @@ function SpotRepaintReport() {
   /* ---------- ТАБЛИЦА КАТЕГОРИЙ ---------- */
   const renderCategoryTable = (points) => {
     if (!points.length) return null;
-    const displayLabels = points.map(p => p.label);
+    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
 
     const rows = [
       { key: stackKeySpot,    label: 'Spot',     color: SPOT_COLOR,    category: 'spot' },
@@ -416,7 +426,7 @@ function SpotRepaintReport() {
   /* ---------- ТАБЛИЦА ПО МОДЕЛЯМ ---------- */
   const renderModelTable = (points) => {
     if (!points.length) return null;
-    const displayLabels = points.map(p => p.label);
+    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
     const modelsToShow = selectedModel === 'ALL' ? [...modelKeys, 'total'] : [selectedModel];
 
     return (
@@ -785,6 +795,7 @@ export default function ReppsReportPage() {
     setModalVins([]);
   };
 
+  /* ===================== CHART 2 — 3-стек ===================== */
   const renderStackChart = (points) => {
     if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
     const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
@@ -803,16 +814,21 @@ export default function ReppsReportPage() {
             fill={stackColors.paint_open}
             barSize={22}
             radius={[4, 4, 0, 0]}
-            label={{
-              fill: '#111827', fontSize: 10, fontWeight: 700, position: 'top',
-              formatter: (v) => v !== null && v !== undefined && v > 0 ? v : '',
-            }}
-          />
+          >
+            {/* Подпись = total (не зависит от верхнего сегмента) */}
+            <LabelList
+              dataKey="total"
+              position="top"
+              style={{ fontSize: 10, fontWeight: 700, fill: '#111827' }}
+              formatter={(v) => (v !== null && v !== undefined && v > 0 ? v : '')}
+            />
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     );
   };
 
+  /* ===================== Таблица категорий ===================== */
   const renderCategoryTable = (points) => {
     if (!points.length) return null;
     const displayLabels = points.map(p => shortenLabel(p.label, p.type));
@@ -889,6 +905,7 @@ export default function ReppsReportPage() {
     );
   };
 
+  /* ===================== Таблица по моделям ===================== */
   const renderModelTable = (points) => {
     if (!points.length) return null;
     const displayLabels = points.map(p => shortenLabel(p.label, p.type));
