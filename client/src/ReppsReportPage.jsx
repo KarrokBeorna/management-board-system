@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  ResponsiveContainer, Cell,
+  ResponsiveContainer, Cell, LabelList,
 } from 'recharts';
 
 const API_BASE = '';
@@ -309,7 +309,7 @@ function SpotRepaintReport() {
   /* ---------- CHART ---------- */
   const renderStackChart = (points) => {
     if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
-    const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
+    const displayData = points.map(p => ({ ...p, displayLabel: p.label }));
 
     return (
       <ResponsiveContainer width="100%" height={H_CHART_2}>
@@ -317,18 +317,21 @@ function SpotRepaintReport() {
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
           <XAxis dataKey="displayLabel" tick={{ fontSize: 10 }} interval={0} height={28} />
           <YAxis domain={[0, 'auto']} tick={{ fontSize: 10 }} allowDecimals={false} width={30} />
-          <Bar dataKey={stackKeySpot}    stackId="s" fill={SPOT_COLOR}    barSize={22} />
+          <Bar dataKey={stackKeySpot} stackId="s" fill={SPOT_COLOR} barSize={22} />
           <Bar
             dataKey={stackKeyRepaint}
             stackId="s"
             fill={REPAINT_COLOR}
             barSize={22}
             radius={[4, 4, 0, 0]}
-            label={{
-              fill: '#111827', fontSize: 10, fontWeight: 700, position: 'top',
-              formatter: (v) => v !== null && v !== undefined && v > 0 ? v : '',
-            }}
-          />
+          >
+            <LabelList
+              dataKey="total"
+              position="top"
+              style={{ fontSize: 10, fontWeight: 700, fill: '#111827' }}
+              formatter={(v) => (v !== null && v !== undefined && v > 0 ? v : '')}
+            />
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     );
@@ -337,7 +340,7 @@ function SpotRepaintReport() {
   /* ---------- ТАБЛИЦА КАТЕГОРИЙ ---------- */
   const renderCategoryTable = (points) => {
     if (!points.length) return null;
-    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
+    const displayLabels = points.map(p => p.label);
 
     const rows = [
       { key: stackKeySpot,    label: 'Spot',     color: SPOT_COLOR,    category: 'spot' },
@@ -413,7 +416,7 @@ function SpotRepaintReport() {
   /* ---------- ТАБЛИЦА ПО МОДЕЛЯМ ---------- */
   const renderModelTable = (points) => {
     if (!points.length) return null;
-    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
+    const displayLabels = points.map(p => p.label);
     const modelsToShow = selectedModel === 'ALL' ? [...modelKeys, 'total'] : [selectedModel];
 
     return (
@@ -698,7 +701,6 @@ export default function ReppsReportPage() {
   const [dataPoints, setDataPoints] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  /* ===== Modal ===== */
   const [modalOpen, setModalOpen] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
   const [modalVins, setModalVins] = useState([]);
@@ -783,7 +785,6 @@ export default function ReppsReportPage() {
     setModalVins([]);
   };
 
-  /* ===================== CHART 2 — 3-стек ===================== */
   const renderStackChart = (points) => {
     if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
     const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
@@ -812,7 +813,6 @@ export default function ReppsReportPage() {
     );
   };
 
-  /* ===================== Таблица категорий ===================== */
   const renderCategoryTable = (points) => {
     if (!points.length) return null;
     const displayLabels = points.map(p => shortenLabel(p.label, p.type));
@@ -889,7 +889,6 @@ export default function ReppsReportPage() {
     );
   };
 
-  /* ===================== Таблица по моделям ===================== */
   const renderModelTable = (points) => {
     if (!points.length) return null;
     const displayLabels = points.map(p => shortenLabel(p.label, p.type));
@@ -995,7 +994,6 @@ export default function ReppsReportPage() {
         <SpotRepaintReport />
       ) : (
         <>
-          {/* ============ ФИЛЬТРЫ ============ */}
           <div style={{ ...cardStyle, marginBottom: 16 }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1060,7 +1058,6 @@ export default function ReppsReportPage() {
             </div>
           </div>
 
-          {/* ============ СОДЕРЖИМОЕ ============ */}
           {loading ? (
             <div style={cardStyle}>
               <p style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Загрузка данных...</p>
@@ -1089,7 +1086,6 @@ export default function ReppsReportPage() {
             </div>
           )}
 
-          {/* ============ МОДАЛКА ============ */}
           {modalOpen && (
             <div
               style={{
