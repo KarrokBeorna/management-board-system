@@ -3,6 +3,15 @@ import * as XLSX from 'xlsx';
 
 const API_BASE = '';
 
+/* ===================== ХЕЛПЕРЫ ===================== */
+const getYesterdayStr = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const DEFAULT_RECHECK_PERSON = 'qc-gate14|Maxim Zykin';
+
 /* ===================== СТИЛИ ===================== */
 const cardStyle = {
   backgroundColor: '#FFFFFF',
@@ -80,21 +89,26 @@ export default function InspectionPage() {
   const [page, setPage] = useState(0);
   const pageSize = 100;
 
-  const [filters, setFilters] = useState({});
+  const [filters, setFilters] = useState({
+    RECHECK_PERSON: [DEFAULT_RECHECK_PERSON],
+  });
   const [vinSearch, setVinSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState(getYesterdayStr());
+  const [dateTo, setDateTo]     = useState(getYesterdayStr());
+
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
 
   /* ---- columns ---- */
   const columns = [
-    { key: 'VIN',               label: 'VIN',               filterable: true,  width: 200, mono: true },
-    { key: 'PROBLEM_DESCRIPTION', label: 'Описание дефекта', filterable: false, width: 420 },
-    { key: 'CREATION_TIME',     label: 'Время регистрации', filterable: false, isTime: true, width: 150 },
-    { key: 'REPAIR_TIME',       label: 'Время доработки',   filterable: false, isTime: true, width: 150 },
-    { key: 'REPAIR_PERSON',     label: 'ФИО ремонтника',    filterable: true,  width: 180 },
-    { key: 'RECHECK_PERSON',    label: 'ФИО качества',      filterable: true,  width: 180 },
-    { key: 'STATUS',            label: 'Статус',            filterable: true,  width: 110 },
-    { key: 'POST_NAME',         label: 'Пост',              filterable: true,  width: 110 },
+    { key: 'VIN',                 label: 'VIN',               filterable: true,  width: 200, mono: true },
+    { key: 'PROBLEM_DESCRIPTION', label: 'Описание дефекта',  filterable: false, width: 420 },
+    { key: 'CREATION_TIME',       label: 'Время регистрации', filterable: false, isTime: true, width: 150 },
+    { key: 'REPAIR_TIME',         label: 'Время доработки',   filterable: false, isTime: true, width: 150 },
+    { key: 'REPAIR_PERSON',       label: 'ФИО ремонтника',    filterable: true,  width: 180 },
+    { key: 'RECHECK_PERSON',      label: 'ФИО качества',      filterable: true,  width: 180 },
+    { key: 'STATUS',              label: 'Статус',            filterable: true,  width: 110 },
+    { key: 'POST_NAME',           label: 'Пост',              filterable: true,  width: 110 },
   ];
 
   /* ---- effects ---- */
@@ -124,6 +138,15 @@ export default function InspectionPage() {
     try {
       const params = new URLSearchParams();
       if (vinSearch.trim()) params.append('vin', vinSearch.trim());
+      if (dateFrom) params.append('dateFrom', dateFrom);
+      if (dateTo)   params.append('dateTo',   dateTo);
+
+      // Фильтр по RECHECK_PERSON отправляем на бэк, если в нём ровно одно значение
+      const rp = filters.RECHECK_PERSON;
+      if (Array.isArray(rp) && rp.length === 1) {
+        params.append('recheckPerson', rp[0]);
+      }
+
       const res = await fetch(`${API_BASE}/api/inspection-defects?${params.toString()}`);
       if (!res.ok) throw new Error(`Ошибка загрузки (${res.status})`);
       const json = await res.json();
@@ -138,7 +161,14 @@ export default function InspectionPage() {
     }
   };
 
+  // Первичная загрузка
   useEffect(() => { loadData(); }, []);
+
+  // Автоподгрузка при смене дат
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo]);
 
   /* ---- formatting ---- */
   const formatDateTime = (dt) => {
@@ -189,9 +219,12 @@ export default function InspectionPage() {
   };
 
   const clearAll = () => {
-    setFilters({});
+    setFilters({ RECHECK_PERSON: [DEFAULT_RECHECK_PERSON] });
     setVinSearch('');
+    setDateFrom(getYesterdayStr());
+    setDateTo(getYesterdayStr());
     setActiveFilterColumn(null);
+    setTimeout(loadData, 0);
   };
 
   const filtered = useMemo(() => {
@@ -239,7 +272,7 @@ export default function InspectionPage() {
     XLSX.writeFile(wb, `Проверка_${dateStr}.xlsx`);
   };
 
-  /* ---- table header style ---- */
+  /* ---- table styles ---- */
   const thStyle = {
     padding: '12px 14px',
     textAlign: 'left',
@@ -284,7 +317,27 @@ export default function InspectionPage() {
           </div>
         </div>
 
-        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {/* ===== ФИЛЬТРЫ ===== */}
+        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+            📅 С:
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              style={inputStyle}
+            />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+            По:
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              style={inputStyle}
+            />
+          </label>
+
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
             🔍 VIN:
             <input
@@ -296,11 +349,13 @@ export default function InspectionPage() {
               style={{ ...inputStyle, width: 220 }}
             />
           </label>
+
           <button style={buttonStyle} onClick={loadData}>
-            Обновить
+            Применить
           </button>
         </div>
 
+        {/* ===== ТАБЛИЦА ===== */}
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
             <style>{loadingAnimation}</style>
@@ -411,7 +466,7 @@ export default function InspectionPage() {
           </>
         )}
 
-        {/* ==== dropdown фильтра ==== */}
+        {/* ===== dropdown фильтра ===== */}
         {activeFilterColumn && (
           <div
             className="filter-dropdown"

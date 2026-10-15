@@ -16215,7 +16215,7 @@ app.get('/api/drr-weekly-photos', async (req, res) => {
 /* ====================================================================== */
 app.get('/api/inspection-defects', async (req, res) => {
   try {
-    const { vin, dateFrom, dateTo, limit = 5000 } = req.query;
+    const { vin, dateFrom, dateTo, recheckPerson, limit = 5000 } = req.query;
 
     const conditions = [
       `PROBLEM_DESCRIPTION LIKE '%AGM%'`,
@@ -16227,13 +16227,19 @@ app.get('/api/inspection-defects', async (req, res) => {
       conditions.push(`VIN LIKE ?`);
       params.push(`%${String(vin).trim()}%`);
     }
+
     if (dateFrom) {
       conditions.push(`CREATION_TIME >= ?`);
-      params.push(dateFrom);
+      params.push(`${dateFrom} 00:00:00`);
     }
     if (dateTo) {
       conditions.push(`CREATION_TIME <= ?`);
-      params.push(dateTo);
+      params.push(`${dateTo} 23:59:59`);
+    }
+
+    if (recheckPerson && String(recheckPerson).trim()) {
+      conditions.push(`COALESCE(RECHECK_PERSON, RECHECK_PERSON1) = ?`);
+      params.push(String(recheckPerson).trim());
     }
 
     const where = conditions.join(' AND ');
