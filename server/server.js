@@ -13158,8 +13158,17 @@ app.get('/api/drr-cp6-snapshot/:id', async (req, res) => {
 });
 
 /* ====================================================================== */
-/* ================ REPPS SPOT-ПЕРЕКРАС — ПОЛНЫЙ БЭК ==================== */
+/* ============ REPPS SPOT-ПЕРЕКРАС — ПОЛНЫЙ БЭК (ИСПРАВЛЕННЫЙ) ========= */
 /* ====================================================================== */
+
+/* ---------------------------------------------------------------------- */
+/* Хелпер: разбить массив на чанки                                         */
+/* ---------------------------------------------------------------------- */
+function chunkArray(arr, size = 1000) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 /* ---------------------------------------------------------------------- */
 /* Хелпер: классификация одного дефекта                                    */
@@ -13174,9 +13183,8 @@ function classifySpotRepaintDefect(measureStr) {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: классификация VIN по PSOUT-строкам                              */
+/* Хелпер: классификация VIN по PSOUT-строкам (с чанкингом)                */
 /* Возвращает { spotSet, repaintSet, modelsByVin }                         */
-/* Приоритет: repaint > spot > не идёт                                     */
 /* ---------------------------------------------------------------------- */
 async function classifyVinsSpotRepaintCp6(psoutRows) {
   const allVins = psoutRows.map(r => r.vin);
@@ -13187,112 +13195,59 @@ async function classifyVinsSpotRepaintCp6(psoutRows) {
 
   if (allVins.length === 0) return { spotSet, repaintSet, modelsByVin };
 
-  const ph = allVins.map(() => '?').join(',');
-
-  // Дефекты
-  const [defectRows] = await pool.query(`
-    SELECT VIN, REPAIR_MEASURE, REPAIR_MEASURE1
-    FROM at_paint_qm_defect_info
-    WHERE VIN IN (${ph})
-  `, allVins);
-
   const spotDefectVins    = new Set();
   const repaintDefectVins = new Set();
 
-  defectRows.forEach(d => {
-    const m1 = Buffer.isBuffer(d.REPAIR_MEASURE)  ? d.REPAIR_MEASURE.toString('utf8')  : d.REPAIR_MEASURE;
-    const m2 = Buffer.isBuffer(d.REPAIR_MEASURE1) ? d.REPAIR_MEASURE1.toString('utf8') : d.REPAIR_MEASURE1;
-    const combined = `${m1 || ''} ${m2 || ''}`.toLowerCase().trim();
+  const chunks = chunkArray(allVins, 1000);
 
-    if (!combined) return;
-    if (combined.includes('перекрас') || combined.includes('repaint') || combined.includes('re-paint')) {
-      repaintDefectVins.add(d.VIN);
-    } else if (combined.includes('spot')) {
-      spotDefectVins.add(d.VIN);
-    }
-  });
+  // --- Дефекты ---
+  for (const chunk of chunks) {
+    const ph = chunk.map(() => '?').join(',');
+    const [defectRows] = await pool.query(`
+      SELECT VIN, REPAIR_MEASURE, REPAIR_MEASURE1
+      FROM at_paint_qm_defect_info
+      WHERE VIN IN (${ph})
+    `, chunk);
+
+    defectRows.forEach(d => {
+      const m1 = Buffer.isBuffer(d.REPAIR_MEASURE)  ? d.REPAIR_MEASURE.toString('utf8')  : d.REPAIR_MEASURE;
+      const m2 = Buffer.isBuffer(d.REPAIR_MEASURE1) ? d.REPAIR_MEASURE1.toString('utf8') : d.REPAIR_MEASURE1;
+      const combined = `${m1 || ''} ${m2 || ''}`.toLowerCase().trim();
+
+      if (!combined) return;
+      if (combined.includes('перекрас') || combined.includes('repaint') || combined.includes('re-paint')) {
+        repaintDefectVins.add(d.VIN);
+      } else if (combined.includes('spot')) {
+        spotDefectVins.add(d.VIN);
+      }
+    });
+  }
 
   allVins.forEach(v => {
     if (repaintDefectVins.has(v))   repaintSet.add(v);
     else if (spotDefectVins.has(v)) spotSet.add(v);
   });
 
-  // Модели
-  const [modelRows] = await pool.query(`
-    SELECT VIN, MODEL FROM work_order WHERE VIN IN (${ph})
-  `, allVins);
-  modelRows.forEach(r => modelsByVin.set(r.VIN, r.MODEL));
+  // --- Модели ---
+  for (const chunk of chunks) {
+    const ph = chunk.map(() => '?').join(',');
+    const [modelRows] = await pool.query(`
+      SELECT VIN, MODEL FROM work_order WHERE VIN IN (${ph})
+    `, chunk);
+    modelRows.forEach(r => modelsByVin.set(r.VIN, r.MODEL));
+  }
 
   return { spotSet, repaintSet, modelsByVin };
 }
 
 /* ---------------------------------------------------------------------- */
-/* Хелпер: расчёт одного периода                                           */
-/* ---------------------------------------------------------------------- */
-async function computeSpotRepaintPeriods(periods) {
-  if (!periods.length) return [];
-
-  // 1. Общий диапазон = min(start) .. max(end)
-  const minStart = periods.reduce((a, p) => a < p.startDate ? a : p.startDate, periods[0].startDate);
-  const maxEnd   = periods.reduce((a, p) => a > p.endDate   ? a : p.endDate,   periods[0].endDate);
-
-  // 2. Все PSOUT-VIN за весь диапазон — ОДИН раз
-  const { vins: psoutRows } = await getCp6PsoutVins(minStart, maxEnd);
-
-  // 3. Классификация — ОДИН раз
-  const { spotSet, repaintSet, modelsByVin } = await classifyVinsSpotRepaintCp6(psoutRows);
-
-  // 4. psout_time по каждому VIN (для раскладки по периодам)
-  const psoutTimeByVin = new Map(psoutRows.map(r => [r.vin, r.psout_last_time]));
-
-  const ALL_MODELS = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
-
-  // 5. Раскладываем по периодам в памяти — БЕЗ новых SQL-запросов
-  return periods.map(p => {
-    const pStart = new Date(p.startDate);
-    const pEnd   = new Date(p.endDate);
-
-    const inRange = (v) => {
-      const t = psoutTimeByVin.get(v);
-      if (!t) return false;
-      const d = new Date(t);
-      return d >= pStart && d <= pEnd;
-    };
-
-    const spotInPeriod    = [...spotSet].filter(inRange);
-    const repaintInPeriod = [...repaintSet].filter(inRange);
-
-    const point = {
-      type: p.type,
-      label: p.label,
-      startDate: p.startDate,
-      endDate: p.endDate,
-      spot:    spotInPeriod.length,
-      repaint: repaintInPeriod.length,
-    };
-    point.total = point.spot + point.repaint;
-
-    for (const m of ALL_MODELS) {
-      const s = spotInPeriod.filter(v => (modelsByVin.get(v) || 'UNKNOWN') === m).length;
-      const r = repaintInPeriod.filter(v => (modelsByVin.get(v) || 'UNKNOWN') === m).length;
-      point[m]              = s + r;
-      point[`${m}_spot`]    = s;
-      point[`${m}_repaint`] = r;
-    }
-
-    return point;
-  });
-}
-
-/* ---------------------------------------------------------------------- */
 /* Хелпер: генерация периодов                                              */
-/* Возвращает [{ type, label, startDate, endDate }, ...]                   */
 /* ---------------------------------------------------------------------- */
 function buildPeriods({ period, count, fromDate, toDate }) {
   const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const now = new Date();
 
-  // Произвольный диапазон — детализация по дням
+  // Диапазон дат — детализация по дням
   if (fromDate && toDate) {
     const out = [];
     const start = new Date(fromDate + 'T00:00:00');
@@ -13314,52 +13269,53 @@ function buildPeriods({ period, count, fromDate, toDate }) {
 
   // 'all' — 3 месяца + 4 недели + 14 дней
   if (period === 'all') {
-    const out = [];
+    const months = [];
+    const weeks  = [];
+    const days   = [];
 
     const curM = new Date(now.getFullYear(), now.getMonth(), 1);
     for (let i = 0; i < 3; i++) {
       const s = new Date(curM.getFullYear(), curM.getMonth() - i, 1);
       const e = new Date(curM.getFullYear(), curM.getMonth() - i + 1, 0);
-      out.push({
+      months.push({
         type: 'month',
         label: `${s.toLocaleString('en-US', { month: 'short' })} ${s.getFullYear()}`,
         startDate: `${fmt(s)} 00:00:00`,
         endDate:   `${fmt(e)} 23:59:59`,
       });
     }
+    months.reverse();
 
     const curW = new Date(now);
     curW.setDate(curW.getDate() - ((curW.getDay() + 6) % 7));
     for (let i = 0; i < 4; i++) {
       const s = new Date(curW); s.setDate(s.getDate() - i * 7);
       const e = new Date(s);    e.setDate(e.getDate() + 6);
-      out.push({
+      weeks.push({
         type: 'week',
         label: `W${getWeekNumber(s)} ${s.getFullYear()}`,
         startDate: `${fmt(s)} 00:00:00`,
         endDate:   `${fmt(e)} 23:59:59`,
       });
     }
+    weeks.reverse();
 
     for (let i = 0; i < 14; i++) {
       const d = new Date(now); d.setDate(d.getDate() - i);
       const ds = fmt(d);
-      out.push({
+      days.push({
         type: 'day',
         label: ds,
         startDate: `${ds} 00:00:00`,
         endDate:   `${ds} 23:59:59`,
       });
     }
+    days.reverse();
 
-    // месяцы и недели — от старых к новым; дни — тоже от старых к новым
-    const months = out.filter(p => p.type === 'month').reverse();
-    const weeks  = out.filter(p => p.type === 'week').reverse();
-    const days   = out.filter(p => p.type === 'day').reverse();
     return [...months, ...weeks, ...days];
   }
 
-  // year / month / week / day + count
+  // year / month / week / day
   const n = Math.max(1, Math.min(parseInt(count, 10) || 3, 50));
   const out = [];
   const cur = new Date(now);
@@ -13411,34 +13367,98 @@ function buildPeriods({ period, count, fromDate, toDate }) {
     }
   }
 
-  return out.reverse(); // от старых к новым
+  return out.reverse();
 }
 
 /* ====================================================================== */
-/* ЭНДПОИНТ 1: /api/repps-spot-repaint                                    */
-/* Данные для стек-чарта + таблиц                                          */
+/* ЭНДПОИНТ 1: /api/repps-spot-repaint                                     */
+/* Один запрос за общий диапазон, раскладка по периодам в памяти           */
 /* ====================================================================== */
 app.get('/api/repps-spot-repaint', async (req, res) => {
   try {
     const { period = 'all', count = 3, fromDate, toDate } = req.query;
 
     const periods = buildPeriods({ period, count, fromDate, toDate });
+    console.log(`[spot-repaint] periods=${periods.length}, period=${period}`);
 
     if (periods.length === 0) {
       return res.json({ dataPoints: [] });
     }
 
-    const dataPoints = await computeSpotRepaintPeriods(periods);
+    // Общий диапазон
+    const minStart = periods.reduce((a, p) => a < p.startDate ? a : p.startDate, periods[0].startDate);
+    const maxEnd   = periods.reduce((a, p) => a > p.endDate   ? a : p.endDate,   periods[0].endDate);
+    console.log(`[spot-repaint] range: ${minStart} .. ${maxEnd}`);
+
+    // PSOUT-VIN за весь диапазон — один раз
+    const { vins: psoutRows } = await getCp6PsoutVins(minStart, maxEnd);
+    console.log(`[spot-repaint] psout vins: ${psoutRows.length}`);
+
+    if (psoutRows.length === 0) {
+      const empty = periods.map(p => ({
+        type: p.type, label: p.label,
+        startDate: p.startDate, endDate: p.endDate,
+        spot: 0, repaint: 0, total: 0,
+        ...Object.fromEntries(
+          ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8']
+            .flatMap(m => [[m, 0], [`${m}_spot`, 0], [`${m}_repaint`, 0]])
+        ),
+      }));
+      return res.json({ dataPoints: empty });
+    }
+
+    // Классификация — один раз
+    const { spotSet, repaintSet, modelsByVin } = await classifyVinsSpotRepaintCp6(psoutRows);
+    console.log(`[spot-repaint] spot=${spotSet.size} repaint=${repaintSet.size}`);
+
+    const psoutTimeByVin = new Map(psoutRows.map(r => [r.vin, r.psout_last_time]));
+    const ALL_MODELS = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
+
+    const dataPoints = periods.map(p => {
+      const pStart = new Date(p.startDate);
+      const pEnd   = new Date(p.endDate);
+
+      const inRange = (v) => {
+        const t = psoutTimeByVin.get(v);
+        if (!t) return false;
+        const d = new Date(t);
+        return d >= pStart && d <= pEnd;
+      };
+
+      const spotInPeriod    = [...spotSet].filter(inRange);
+      const repaintInPeriod = [...repaintSet].filter(inRange);
+
+      const point = {
+        type: p.type,
+        label: p.label,
+        startDate: p.startDate,
+        endDate: p.endDate,
+        spot: spotInPeriod.length,
+        repaint: repaintInPeriod.length,
+      };
+      point.total = point.spot + point.repaint;
+
+      for (const m of ALL_MODELS) {
+        const s = spotInPeriod.filter(v => (modelsByVin.get(v) || 'UNKNOWN') === m).length;
+        const r = repaintInPeriod.filter(v => (modelsByVin.get(v) || 'UNKNOWN') === m).length;
+        point[m]              = s + r;
+        point[`${m}_spot`]    = s;
+        point[`${m}_repaint`] = r;
+      }
+
+      return point;
+    });
 
     res.json({ dataPoints });
   } catch (err) {
     console.error('Ошибка /api/repps-spot-repaint:', err.message);
+    console.error(err.stack);
     res.status(500).json({ error: err.message });
   }
 });
 
 /* ====================================================================== */
-/* ЭНДПОИНТ 2: /api/repps-spot-repaint-vins                               */
+/* ЭНДПОИНТ 2: /api/repps-spot-repaint-vins                                */
 /* Список VIN для модалки                                                  */
 /* category: 'spot' | 'repaint' | 'total'                                  */
 /* ====================================================================== */
@@ -13450,7 +13470,6 @@ app.get('/api/repps-spot-repaint-vins', async (req, res) => {
     }
 
     const { vins: psoutRows } = await getCp6PsoutVins(dateFrom, dateTo);
-
     const { spotSet, repaintSet, modelsByVin } = await classifyVinsSpotRepaintCp6(psoutRows);
 
     let vins;
@@ -13459,54 +13478,51 @@ app.get('/api/repps-spot-repaint-vins', async (req, res) => {
     else if (category === 'total')   vins = [...new Set([...spotSet, ...repaintSet])];
     else return res.status(400).json({ error: 'category: spot | repaint | total' });
 
-    // Фильтр по модели
     if (model && model !== 'ALL') {
       vins = vins.filter(v => (modelsByVin.get(v) || 'UNKNOWN') === model);
     }
 
     if (vins.length === 0) return res.json([]);
 
-    // Детали дефектов
-    const ph = vins.map(() => '?').join(',');
-    const [defects] = await pool.query(`
-      SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, STATUS,
-             REPAIR_MEASURE, REPAIR_MEASURE1
-      FROM at_paint_qm_defect_info
-      WHERE VIN IN (${ph})
-    `, vins);
-
+    // Детали дефектов — чанками
     const defectsByVin = new Map();
-    defects.forEach(d => {
-      const m1 = Buffer.isBuffer(d.REPAIR_MEASURE)  ? d.REPAIR_MEASURE.toString('utf8')  : d.REPAIR_MEASURE;
-      const m2 = Buffer.isBuffer(d.REPAIR_MEASURE1) ? d.REPAIR_MEASURE1.toString('utf8') : d.REPAIR_MEASURE1;
-      const combined = `${m1 || ''} ${m2 || ''}`.toLowerCase();
+    for (const chunk of chunkArray(vins, 1000)) {
+      const ph = chunk.map(() => '?').join(',');
+      const [defects] = await pool.query(`
+        SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, STATUS,
+               REPAIR_MEASURE, REPAIR_MEASURE1
+        FROM at_paint_qm_defect_info
+        WHERE VIN IN (${ph})
+      `, chunk);
 
-      let cat = 'other';
-      if (combined.includes('перекрас') || combined.includes('repaint') || combined.includes('re-paint')) cat = 'repaint';
-      else if (combined.includes('spot')) cat = 'spot';
-      if (cat === 'other') return;
+      defects.forEach(d => {
+        const m1 = Buffer.isBuffer(d.REPAIR_MEASURE)  ? d.REPAIR_MEASURE.toString('utf8')  : d.REPAIR_MEASURE;
+        const m2 = Buffer.isBuffer(d.REPAIR_MEASURE1) ? d.REPAIR_MEASURE1.toString('utf8') : d.REPAIR_MEASURE1;
+        const combined = `${m1 || ''} ${m2 || ''}`.toLowerCase();
 
-      if (!defectsByVin.has(d.VIN)) defectsByVin.set(d.VIN, []);
-      defectsByVin.get(d.VIN).push({
-        part_name: d.PART_NAME,
-        problem_type: d.PROBLEM_TYPE,
-        grade: d.PROBLEM_GRADE,
-        status: d.STATUS,
-        category: cat,
+        let cat = 'other';
+        if (combined.includes('перекрас') || combined.includes('repaint') || combined.includes('re-paint')) cat = 'repaint';
+        else if (combined.includes('spot')) cat = 'spot';
+        if (cat === 'other') return;
+
+        if (!defectsByVin.has(d.VIN)) defectsByVin.set(d.VIN, []);
+        defectsByVin.get(d.VIN).push({
+          part_name: d.PART_NAME,
+          problem_type: d.PROBLEM_TYPE,
+          grade: d.PROBLEM_GRADE,
+          status: d.STATUS,
+          category: cat,
+        });
       });
-    });
+    }
 
-    const result = vins.map(v => {
-      const isRepaint = repaintSet.has(v);
-      return {
-        vin: v,
-        model: modelsByVin.get(v) || '—',
-        category: isRepaint ? 'repaint' : 'spot',
-        defects: defectsByVin.get(v) || [],
-      };
-    });
+    const result = vins.map(v => ({
+      vin: v,
+      model: modelsByVin.get(v) || '—',
+      category: repaintSet.has(v) ? 'repaint' : 'spot',
+      defects: defectsByVin.get(v) || [],
+    }));
 
-    // Сортировка: сначала перекрасы, потом споты; внутри — по VIN
     result.sort((a, b) => {
       if (a.category !== b.category) return a.category === 'repaint' ? -1 : 1;
       return a.vin.localeCompare(b.vin);
@@ -13515,6 +13531,7 @@ app.get('/api/repps-spot-repaint-vins', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Ошибка /api/repps-spot-repaint-vins:', err.message);
+    console.error(err.stack);
     res.status(500).json({ error: err.message });
   }
 });
