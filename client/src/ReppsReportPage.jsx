@@ -7,7 +7,6 @@ import {
 const API_BASE = '';
 
 /* ===================== ЦВЕТА ===================== */
-/* Циклический сдвиг: зелёный → красный, красный → жёлтый, жёлтый → зелёный */
 const reppsBarTypeColors = {
   year: '#7C3AED',
   month: '#0EA5E9',
@@ -23,10 +22,14 @@ const reppsTypeBgColors = {
 };
 
 const stackColors = {
-  no_paint:          '#DC2626',  // красный — Без PS  (был зелёный)
-  paint_closed_only: '#10B981',  // зелёный — PS закрыты (был жёлтый)
-  paint_open:        '#F59E0B',  // жёлтый — PS открыты (был красный)
+  no_paint:          '#DC2626',
+  paint_closed_only: '#10B981',
+  paint_open:        '#F59E0B',
 };
+
+/* Цвета для Spot-Перекрас */
+const SPOT_COLOR    = '#F59E0B';
+const REPAINT_COLOR = '#DC2626';
 
 const modelColors = {
   'ESTEO MX': '#F59E0B',
@@ -126,7 +129,6 @@ const sectionTitleStyle = {
   boxSizing: 'border-box',
 };
 
-/* Заголовок отчёта над всеми секциями */
 const reportHeaderStyle = {
   fontSize: 20,
   fontWeight: 700,
@@ -136,7 +138,6 @@ const reportHeaderStyle = {
   borderBottom: '2px solid #E5E7EB',
 };
 
-/* Заголовок таблицы «По категориям» / «По моделям» */
 const tableHeaderStyle = {
   fontSize: 12,
   fontWeight: 700,
@@ -157,7 +158,6 @@ const dashDividerStyle = {
   marginBottom: 8,
 };
 
-/* Стили для модальной таблицы */
 const modalThStyle = {
   padding: '10px 12px',
   textAlign: 'left',
@@ -192,7 +192,31 @@ const formatDateTime = (str) => {
   try { return new Date(str).toLocaleString('ru-RU'); } catch { return String(str); }
 };
 
-export default function ReppsReportPage() {
+/* ===================== ПОДТАБЫ ===================== */
+const subTabBarStyle = {
+  display: 'flex',
+  gap: 4,
+  marginBottom: 20,
+  borderBottom: '2px solid #E5E7EB',
+};
+
+const subTabStyle = (active) => ({
+  padding: '12px 26px',
+  border: 'none',
+  background: 'transparent',
+  fontSize: 16,
+  fontWeight: 700,
+  color: active ? '#7C3AED' : '#6B7280',
+  cursor: 'pointer',
+  borderBottom: active ? '3px solid #7C3AED' : '3px solid transparent',
+  marginBottom: -2,
+  transition: 'all 0.15s',
+});
+
+/* ====================================================================== */
+/* ===================== SPOT-ПЕРЕКРАС ОТЧЁТ =========================== */
+/* ====================================================================== */
+function SpotRepaintReport() {
   const [period, setPeriod] = useState('all');
   const [count, setCount] = useState(3);
   const [fromDate, setFromDate] = useState('');
@@ -201,20 +225,19 @@ export default function ReppsReportPage() {
   const [dataPoints, setDataPoints] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  /* ===== Modal ===== */
   const [modalOpen, setModalOpen] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
   const [modalVins, setModalVins] = useState([]);
   const [modalMeta, setModalMeta] = useState({ label: '', category: '', model: '' });
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
+  const modelKeys = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
 
-  /* ==== Блокировка скролла страницы при открытой модалке ==== */
   useEffect(() => {
     if (modalOpen) {
-      const prevOverflow = document.body.style.overflow;
+      const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
-      return () => { document.body.style.overflow = prevOverflow; };
+      return () => { document.body.style.overflow = prev; };
     }
   }, [modalOpen]);
 
@@ -237,6 +260,480 @@ export default function ReppsReportPage() {
       params.append('fromDate', fromDate);
       params.append('toDate', toDate);
     }
+    fetch(`${API_BASE}/api/repps-spot-repaint?${params.toString()}`)
+      .then(res => res.json())
+      .then(json => {
+        setDataPoints(json.dataPoints || []);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Ошибка загрузки Spot-Перекрас:', err);
+        setLoading(false);
+      });
+  }, [period, count, fromDate, toDate]);
+
+  const chartData = useMemo(() => dataPoints.map(p => ({ ...p })), [dataPoints]);
+
+  const groupedByType = useMemo(() => {
+    if (period !== 'all') return null;
+    return {
+      months: chartData.filter(p => p.type === 'month'),
+      weeks:  chartData.filter(p => p.type === 'week'),
+      days:   chartData.filter(p => p.type === 'day'),
+    };
+  }, [chartData, period]);
+
+  const stackKeySpot    = selectedModel === 'ALL' ? 'spot'    : `${selectedModel}_spot`;
+  const stackKeyRepaint = selectedModel === 'ALL' ? 'repaint' : `${selectedModel}_repaint`;
+
+  const openVinsModal = (startDate, endDate, category, model, label) => {
+    setModalOpen(true);
+    setModalLoading(true);
+    setModalVins([]);
+    setModalMeta({ label, category, model });
+
+    const params = new URLSearchParams({ dateFrom: startDate, dateTo: endDate, category });
+    if (model && model !== 'ALL') params.append('model', model);
+
+    fetch(`${API_BASE}/api/repps-spot-repaint-vins?${params.toString()}`)
+      .then(res => res.json())
+      .then(json => { setModalVins(json || []); setModalLoading(false); })
+      .catch(() => { setModalVins([]); setModalLoading(false); });
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setModalVins([]);
+  };
+
+  /* ---------- CHART ---------- */
+  const renderStackChart = (points) => {
+    if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
+    const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
+
+    return (
+      <ResponsiveContainer width="100%" height={H_CHART_2}>
+        <BarChart data={displayData} margin={{ top: 20, right: 8, left: -18, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+          <XAxis dataKey="displayLabel" tick={{ fontSize: 10 }} interval={0} height={28} />
+          <YAxis domain={[0, 'auto']} tick={{ fontSize: 10 }} allowDecimals={false} width={30} />
+          <Bar dataKey={stackKeySpot}    stackId="s" fill={SPOT_COLOR}    barSize={22} />
+          <Bar
+            dataKey={stackKeyRepaint}
+            stackId="s"
+            fill={REPAINT_COLOR}
+            barSize={22}
+            radius={[4, 4, 0, 0]}
+            label={{
+              fill: '#111827', fontSize: 10, fontWeight: 700, position: 'top',
+              formatter: (v) => v !== null && v !== undefined && v > 0 ? v : '',
+            }}
+          />
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  };
+
+  /* ---------- ТАБЛИЦА КАТЕГОРИЙ ---------- */
+  const renderCategoryTable = (points) => {
+    if (!points.length) return null;
+    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
+
+    const rows = [
+      { key: stackKeySpot,    label: 'Spot',     color: SPOT_COLOR,    category: 'spot' },
+      { key: stackKeyRepaint, label: 'Перекрас', color: REPAINT_COLOR, category: 'repaint' },
+    ];
+
+    return (
+      <>
+        <h4 style={tableHeaderStyle}>По категориям</h4>
+        <div style={tableWrapStyle}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#F9FAFB' }}>
+                <th style={{ ...thStyle, width: 90, paddingLeft: 6, textAlign: 'left' }}>Кат.</th>
+                {points.map((point, idx) => (
+                  <th key={idx} style={{ ...thStyle, backgroundColor: reppsTypeBgColors[point.type] || '#F9FAFB' }}>
+                    {displayLabels[idx]}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(row => (
+                <tr key={row.key} style={{ backgroundColor: 'white' }}>
+                  <td style={{ ...tdStyle, paddingLeft: 6, textAlign: 'left', color: row.color, fontWeight: 700 }}>
+                    {row.label}
+                  </td>
+                  {points.map((point, idx) => {
+                    const val = point[row.key];
+                    return (
+                      <td
+                        key={idx}
+                        style={{
+                          ...clickableTdStyle,
+                          backgroundColor: reppsTypeBgColors[point.type] || '#F9FAFB',
+                          fontWeight: 700, color: row.color,
+                        }}
+                        onClick={() => val > 0 && openVinsModal(point.startDate, point.endDate, row.category, selectedModel, point.label)}
+                        onMouseEnter={(e) => { if (val > 0) e.currentTarget.style.backgroundColor = '#BFDBFE'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = reppsTypeBgColors[point.type] || '#F9FAFB'; }}
+                        title={val > 0 ? 'Клик — показать VIN' : ''}
+                      >
+                        {val !== null && val !== undefined ? val : ''}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              <tr style={{ backgroundColor: '#F3F4F6', fontWeight: 700 }}>
+                <td style={{ ...tdStyle, paddingLeft: 6, textAlign: 'left' }}>Всего</td>
+                {points.map((point, idx) => {
+                  const val = point.total;
+                  return (
+                    <td
+                      key={idx}
+                      style={{ ...clickableTdStyle, fontWeight: 700 }}
+                      onClick={() => val > 0 && openVinsModal(point.startDate, point.endDate, 'total', selectedModel, point.label)}
+                      onMouseEnter={(e) => { if (val > 0) e.currentTarget.style.backgroundColor = '#BFDBFE'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                    >
+                      {val !== null && val !== undefined ? val : ''}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </>
+    );
+  };
+
+  /* ---------- ТАБЛИЦА ПО МОДЕЛЯМ ---------- */
+  const renderModelTable = (points) => {
+    if (!points.length) return null;
+    const displayLabels = points.map(p => shortenLabel(p.label, p.type));
+    const modelsToShow = selectedModel === 'ALL' ? [...modelKeys, 'total'] : [selectedModel];
+
+    return (
+      <>
+        <h4 style={tableHeaderStyle}>По моделям (только авто со Spot / Перекрас)</h4>
+        <div style={tableWrapStyle}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#F9FAFB' }}>
+                <th style={{ ...thStyle, width: 60, paddingLeft: 6, textAlign: 'left' }}>Мод.</th>
+                {points.map((point, idx) => (
+                  <th key={idx} style={{ ...thStyle, backgroundColor: reppsTypeBgColors[point.type] || '#F9FAFB' }}>
+                    {displayLabels[idx]}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {modelsToShow.map(modelKey => {
+                const isTotal = modelKey === 'total';
+                return (
+                  <tr key={modelKey} style={{
+                    backgroundColor: isTotal ? '#F3F4F6' : 'white',
+                    fontWeight: isTotal ? 700 : 400,
+                  }}>
+                    <td style={{ ...tdStyle, paddingLeft: 6, textAlign: 'left', fontWeight: 600 }}>
+                      {modelShortNames[modelKey] || modelKey}
+                    </td>
+                    {points.map((point, idx) => {
+                      const val = isTotal ? point.total : point[modelKey];
+                      const modelParam = isTotal ? 'ALL' : modelKey;
+                      return (
+                        <td
+                          key={idx}
+                          style={{
+                            ...clickableTdStyle,
+                            backgroundColor: reppsTypeBgColors[point.type] || '#F9FAFB',
+                            color: val !== null && val !== undefined && val > 0 ? '#1F2937' : '#9CA3AF',
+                            fontWeight: val > 0 ? 600 : 400,
+                          }}
+                          onClick={() => val > 0 && openVinsModal(point.startDate, point.endDate, 'total', modelParam, point.label)}
+                          onMouseEnter={(e) => { if (val > 0) e.currentTarget.style.backgroundColor = '#BFDBFE'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = reppsTypeBgColors[point.type] || '#F9FAFB'; }}
+                        >
+                          {val !== null && val !== undefined ? val : ''}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </>
+    );
+  };
+
+  const renderSection = (title, points, accent) => (
+    <div key={title} style={sectionCardStyle}>
+      <h3 style={{ ...sectionTitleStyle, color: accent }}>{title}</h3>
+      {renderStackChart(points)}
+      {renderCategoryTable(points)}
+      <div style={dashDividerStyle} />
+      {renderModelTable(points)}
+    </div>
+  );
+
+  const categoryLabels = {
+    spot:    'Spot',
+    repaint: 'Перекрас',
+    total:   'всего (Spot + Перекрас)',
+  };
+
+  return (
+    <div>
+      {/* ==== ФИЛЬТРЫ ==== */}
+      <div style={{ ...cardStyle, marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
+            <button onClick={() => handlePeriodChange('all')} style={tabStyle(period === 'all')}>Все</button>
+            <button onClick={() => handlePeriodChange('year')} style={tabStyle(period === 'year')}>Год</button>
+            <button onClick={() => handlePeriodChange('month')} style={tabStyle(period === 'month')}>Месяц</button>
+            <button onClick={() => handlePeriodChange('week')} style={tabStyle(period === 'week')}>Неделя</button>
+            <button onClick={() => handlePeriodChange('day')} style={tabStyle(period === 'day')}>День</button>
+          </div>
+
+          {period !== 'all' && (
+            <>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
+                Кол-во периодов:
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={count}
+                  onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
+                  style={{ ...inputStyle, width: 80 }}
+                />
+              </label>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>От:</span>
+                <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={inputStyle} />
+                <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>По:</span>
+                <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={inputStyle} />
+                {(fromDate || toDate) && (
+                  <button
+                    onClick={() => { setFromDate(''); setToDate(''); }}
+                    style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: '#9CA3AF', color: '#FFF', cursor: 'pointer' }}
+                  >✕</button>
+                )}
+              </div>
+            </>
+          )}
+
+          <label style={{ fontSize: 14, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 6 }}>
+            Модель:
+            <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={inputStyle}>
+              {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
+            </select>
+          </label>
+
+          <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#4B5563', marginLeft: 'auto', flexWrap: 'wrap' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, backgroundColor: SPOT_COLOR, borderRadius: 3, display: 'inline-block' }} />
+              Spot
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, backgroundColor: REPAINT_COLOR, borderRadius: 3, display: 'inline-block' }} />
+              Перекрас
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ==== СОДЕРЖИМОЕ ==== */}
+      {loading ? (
+        <div style={cardStyle}>
+          <p style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Загрузка данных...</p>
+        </div>
+      ) : period === 'all' ? (
+        <div style={cardStyle}>
+          <h2 style={reportHeaderStyle}>Авто со Spot / Перекрасом</h2>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 2.3fr)',
+            gap: 16,
+            alignItems: 'start',
+          }}>
+            {renderSection('📅 3 месяца', groupedByType.months, '#0EA5E9')}
+            {renderSection('📆 4 недели',  groupedByType.weeks,  '#14B8A6')}
+            {renderSection('📊 14 дней',   groupedByType.days,   '#F59E0B')}
+          </div>
+        </div>
+      ) : (
+        <div style={cardStyle}>
+          <h2 style={reportHeaderStyle}>Авто со Spot / Перекрасом</h2>
+          {renderStackChart(chartData)}
+          {renderCategoryTable(chartData)}
+          <div style={dashDividerStyle} />
+          {renderModelTable(chartData)}
+        </div>
+      )}
+
+      {/* ==== МОДАЛКА ==== */}
+      {modalOpen && (
+        <div
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(15,23,42,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 2000, padding: 20,
+          }}
+          onClick={closeModal}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20,
+              width: '100%', maxWidth: 1200, maxHeight: '85vh',
+              display: 'flex', flexDirection: 'column',
+              boxShadow: '0 25px 50px rgba(0,0,0,0.25)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#111827' }}>
+                  {modalMeta.label} · {categoryLabels[modalMeta.category] || modalMeta.category}
+                  {modalMeta.model !== 'ALL' && ` · ${modalMeta.model}`}
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>
+                  Всего VIN: {modalVins.length}
+                </p>
+              </div>
+              <button
+                onClick={closeModal}
+                style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280', lineHeight: 1 }}
+              >×</button>
+            </div>
+
+            {modalLoading ? (
+              <p style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>Загрузка...</p>
+            ) : modalVins.length === 0 ? (
+              <p style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>Нет данных</p>
+            ) : (
+              <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #E5E7EB', borderRadius: 8 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={modalThStyle}>VIN</th>
+                      <th style={modalThStyle}>Модель</th>
+                      <th style={modalThStyle}>Категория</th>
+                      <th style={modalThStyle}>Дефекты (Spot / Перекрас)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modalVins.map((item, idx) => (
+                      <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                        <td style={{ ...modalTdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{item.vin}</td>
+                        <td style={modalTdStyle}>{item.model}</td>
+                        <td style={{
+                          ...modalTdStyle,
+                          fontWeight: 700,
+                          color: item.category === 'repaint' ? REPAINT_COLOR : SPOT_COLOR,
+                        }}>
+                          {item.category === 'repaint' ? 'Перекрас' : 'Spot'}
+                        </td>
+                        <td style={modalTdStyle}>
+                          {item.defects && item.defects.length > 0 ? (
+                            <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                              {item.defects.map((d, i) => (
+                                <li key={i} style={{
+                                  color: d.category === 'repaint' ? REPAINT_COLOR : SPOT_COLOR,
+                                  fontWeight: 600,
+                                }}>
+                                  <span style={{
+                                    display: 'inline-block',
+                                    padding: '1px 6px',
+                                    borderRadius: 4,
+                                    background: d.category === 'repaint' ? '#FEE2E2' : '#FEF3C7',
+                                    marginRight: 6,
+                                    fontSize: 11,
+                                  }}>
+                                    {d.category === 'repaint' ? 'Перекрас' : 'Spot'}
+                                  </span>
+                                  {d.part_name} · {d.problem_type}
+                                  {d.grade ? ` · ${d.grade}` : ''}
+                                  {' · '}<span style={{ fontStyle: 'italic' }}>{d.status || '—'}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <span style={{ color: '#9CA3AF', fontSize: 12 }}>Нет дефектов</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ====================================================================== */
+/* ===================== ОСНОВНАЯ СТРАНИЦА ============================== */
+/* ====================================================================== */
+export default function ReppsReportPage() {
+  const [activeSubTab, setActiveSubTab] = useState('repps');
+
+  const [period, setPeriod] = useState('all');
+  const [count, setCount] = useState(3);
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [selectedModel, setSelectedModel] = useState('ALL');
+  const [dataPoints, setDataPoints] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  /* ===== Modal ===== */
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalVins, setModalVins] = useState([]);
+  const [modalMeta, setModalMeta] = useState({ label: '', category: '', model: '' });
+
+  const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
+
+  useEffect(() => {
+    if (modalOpen) {
+      const prevOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prevOverflow; };
+    }
+  }, [modalOpen]);
+
+  const handlePeriodChange = (newPeriod) => {
+    setPeriod(newPeriod);
+    if (newPeriod === 'all') {
+      setFromDate('');
+      setToDate('');
+    } else {
+      const defaults = { year: 2, month: 3, week: 4, day: 14 };
+      setCount(defaults[newPeriod] || 3);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubTab !== 'repps') return;
+    setLoading(true);
+    const params = new URLSearchParams({ period });
+    if (period !== 'all' && count) params.append('count', count);
+    if (period !== 'all' && fromDate && toDate) {
+      params.append('fromDate', fromDate);
+      params.append('toDate', toDate);
+    }
     fetch(`${API_BASE}/api/repps-retrospective?${params.toString()}`)
       .then(res => res.json())
       .then(json => {
@@ -247,7 +744,7 @@ export default function ReppsReportPage() {
         console.error('Ошибка загрузки REPPS:', err);
         setLoading(false);
       });
-  }, [period, count, fromDate, toDate]);
+  }, [period, count, fromDate, toDate, activeSubTab]);
 
   const chartData = useMemo(() => dataPoints.map(p => ({ ...p })), [dataPoints]);
 
@@ -266,7 +763,6 @@ export default function ReppsReportPage() {
 
   const modelKeys = Object.keys(modelColors);
 
-  /* ===================== Открыть модалку ===================== */
   const openVinsModal = (startDate, endDate, category, model, label) => {
     setModalOpen(true);
     setModalLoading(true);
@@ -452,7 +948,6 @@ export default function ReppsReportPage() {
     );
   };
 
-  /* ===================== Секция ===================== */
   const renderSection = (title, points, accent) => (
     <div key={title} style={sectionCardStyle}>
       <h3 style={{ ...sectionTitleStyle, color: accent }}>{title}</h3>
@@ -473,219 +968,241 @@ export default function ReppsReportPage() {
     paint_open: 'незакрытые дефекты окраски',
   };
 
-  /* Колонка «Дефекты окраски после PS» показывается только для no_paint */
   const showPostPs = modalMeta.category === 'no_paint';
 
   return (
     <div style={{ padding: '20px 30px 20px 16px', fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1500, margin: '0 auto' }}>
       <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 20 }}>REPPS Report</h1>
 
-      {/* ============ ФИЛЬТРЫ ============ */}
-      <div style={{ ...cardStyle, marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
-            <button onClick={() => handlePeriodChange('all')} style={tabStyle(period === 'all')}>Все</button>
-            <button onClick={() => handlePeriodChange('year')} style={tabStyle(period === 'year')}>Год</button>
-            <button onClick={() => handlePeriodChange('month')} style={tabStyle(period === 'month')}>Месяц</button>
-            <button onClick={() => handlePeriodChange('week')} style={tabStyle(period === 'week')}>Неделя</button>
-            <button onClick={() => handlePeriodChange('day')} style={tabStyle(period === 'day')}>День</button>
-          </div>
-
-          {period !== 'all' && (
-            <>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
-                Кол-во периодов:
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={count}
-                  onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
-                  style={{ ...inputStyle, width: 80 }}
-                />
-              </label>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>От:</span>
-                <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={inputStyle} />
-                <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>По:</span>
-                <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={inputStyle} />
-                {(fromDate || toDate) && (
-                  <button
-                    onClick={() => { setFromDate(''); setToDate(''); }}
-                    style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: '#9CA3AF', color: '#FFF', cursor: 'pointer' }}
-                  >✕</button>
-                )}
-              </div>
-            </>
-          )}
-
-          <label style={{ fontSize: 14, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 6 }}>
-            Модель:
-            <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={inputStyle}>
-              {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
-            </select>
-          </label>
-
-          <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#4B5563', marginLeft: 'auto', flexWrap: 'wrap' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 12, height: 12, backgroundColor: stackColors.no_paint, borderRadius: 3, display: 'inline-block' }} />
-              Без PS
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint_closed_only, borderRadius: 3, display: 'inline-block' }} />
-              PS закрыты
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint_open, borderRadius: 3, display: 'inline-block' }} />
-              PS открыты
-            </span>
-          </div>
-        </div>
+      {/* ============ ПОДТАБЫ ============ */}
+      <div style={subTabBarStyle}>
+        <button
+          style={subTabStyle(activeSubTab === 'repps')}
+          onClick={() => setActiveSubTab('repps')}
+        >
+          Отчет REPPS
+        </button>
+        <button
+          style={subTabStyle(activeSubTab === 'spot-repaint')}
+          onClick={() => setActiveSubTab('spot-repaint')}
+        >
+          Отчет Spot-Перекрас
+        </button>
       </div>
 
-      {/* ============ СОДЕРЖИМОЕ ============ */}
-      {loading ? (
-        <div style={cardStyle}>
-          <p style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Загрузка данных...</p>
-        </div>
-      ) : period === 'all' ? (
-        <div style={cardStyle}>
-          <h2 style={reportHeaderStyle}>Статус дефектов окраски у авто в REPPS</h2>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 2.3fr)',
-            gap: 16,
-            alignItems: 'start',
-          }}>
-            {renderSection('📅 3 месяца', groupedByType.months, '#0EA5E9')}
-            {renderSection('📆 4 недели',  groupedByType.weeks,  '#14B8A6')}
-            {renderSection('📊 14 дней',   groupedByType.days,   '#F59E0B')}
-          </div>
-        </div>
+      {/* ============ СОДЕРЖИМОЕ ПО ПОДТАБУ ============ */}
+      {activeSubTab === 'spot-repaint' ? (
+        <SpotRepaintReport />
       ) : (
-        <div style={cardStyle}>
-          <h2 style={reportHeaderStyle}>Статус дефектов окраски у авто в REPPS</h2>
-          {renderStackChart(chartData)}
-          {renderCategoryTable(chartData)}
-          <div style={dashDividerStyle} />
-          {renderModelTable(chartData)}
-        </div>
-      )}
-
-      {/* ============ МОДАЛКА ============ */}
-      {modalOpen && (
-        <div
-          style={{
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            backgroundColor: 'rgba(15,23,42,0.55)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            zIndex: 2000, padding: 20,
-          }}
-          onClick={closeModal}
-        >
-          <div
-            style={{
-              backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20,
-              width: '100%', maxWidth: 1400, maxHeight: '85vh',
-              display: 'flex', flexDirection: 'column',
-              boxShadow: '0 25px 50px rgba(0,0,0,0.25)',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#111827' }}>
-                  {modalMeta.label} · {categoryLabels[modalMeta.category] || modalMeta.category}
-                  {modalMeta.model !== 'ALL' && ` · ${modalMeta.model}`}
-                </h3>
-                <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>
-                  Всего VIN: {modalVins.length}
-                </p>
+        <>
+          {/* ============ ФИЛЬТРЫ ============ */}
+          <div style={{ ...cardStyle, marginBottom: 16 }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
+                <button onClick={() => handlePeriodChange('all')} style={tabStyle(period === 'all')}>Все</button>
+                <button onClick={() => handlePeriodChange('year')} style={tabStyle(period === 'year')}>Год</button>
+                <button onClick={() => handlePeriodChange('month')} style={tabStyle(period === 'month')}>Месяц</button>
+                <button onClick={() => handlePeriodChange('week')} style={tabStyle(period === 'week')}>Неделя</button>
+                <button onClick={() => handlePeriodChange('day')} style={tabStyle(period === 'day')}>День</button>
               </div>
-              <button
-                onClick={closeModal}
-                style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280', lineHeight: 1 }}
-              >×</button>
+
+              {period !== 'all' && (
+                <>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
+                    Кол-во периодов:
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={count}
+                      onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
+                      style={{ ...inputStyle, width: 80 }}
+                    />
+                  </label>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>От:</span>
+                    <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={inputStyle} />
+                    <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>По:</span>
+                    <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={inputStyle} />
+                    {(fromDate || toDate) && (
+                      <button
+                        onClick={() => { setFromDate(''); setToDate(''); }}
+                        style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: '#9CA3AF', color: '#FFF', cursor: 'pointer' }}
+                      >✕</button>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <label style={{ fontSize: 14, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 6 }}>
+                Модель:
+                <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={inputStyle}>
+                  {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
+                </select>
+              </label>
+
+              <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#4B5563', marginLeft: 'auto', flexWrap: 'wrap' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 12, height: 12, backgroundColor: stackColors.no_paint, borderRadius: 3, display: 'inline-block' }} />
+                  Без PS
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint_closed_only, borderRadius: 3, display: 'inline-block' }} />
+                  PS закрыты
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 12, height: 12, backgroundColor: stackColors.paint_open, borderRadius: 3, display: 'inline-block' }} />
+                  PS открыты
+                </span>
+              </div>
             </div>
-
-            {modalLoading ? (
-              <p style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>Загрузка...</p>
-            ) : modalVins.length === 0 ? (
-              <p style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>Нет данных</p>
-            ) : (
-              <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #E5E7EB', borderRadius: 8 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr>
-                      <th style={modalThStyle}>VIN</th>
-                      <th style={modalThStyle}>Модель</th>
-                      <th style={modalThStyle}>Время REPPS</th>
-                      <th style={modalThStyle}>Время PSOUT</th>
-                      <th style={modalThStyle}>Дефекты окраски</th>
-                      {showPostPs && (
-                        <th style={modalThStyle}>Дефекты окраски после PS</th>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {modalVins.map((item, idx) => (
-                      <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                        <td style={{ ...modalTdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{item.vin}</td>
-                        <td style={modalTdStyle}>{item.model}</td>
-                        <td style={{ ...modalTdStyle, fontSize: 12 }}>{formatDateTime(item.repps_time)}</td>
-                        <td style={{ ...modalTdStyle, fontSize: 12, color: item.psout_time ? '#1F2937' : '#9CA3AF' }}>
-                          {formatDateTime(item.psout_time)}
-                        </td>
-                        <td style={modalTdStyle}>
-                          {item.defects && item.defects.length > 0 ? (
-                            <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
-                              {item.defects.map((d, i) => (
-                                <li key={i} style={{
-                                  color: d.is_open ? '#DC2626' : '#6B7280',
-                                  fontWeight: d.is_open ? 600 : 400,
-                                }}>
-                                  {d.part_name} · {d.problem_type}
-                                  {d.grade ? ` · ${d.grade}` : ''}
-                                  {' · '}<span style={{ fontStyle: 'italic' }}>{d.status || '—'}</span>
-                                  {d.is_open && <span style={{ marginLeft: 4 }}>🔴</span>}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <span style={{ color: '#9CA3AF', fontSize: 12 }}>Нет дефектов</span>
-                          )}
-                        </td>
-                        {showPostPs && (
-                          <td style={modalTdStyle}>
-                            {item.post_ps_defects && item.post_ps_defects.length > 0 ? (
-                              <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
-                                {item.post_ps_defects.map((d, i) => (
-                                  <li key={i} style={{
-                                    color: d.is_open ? '#DC2626' : '#6B7280',
-                                    fontWeight: d.is_open ? 600 : 400,
-                                  }}>
-                                    {d.part_name} · {d.problem_type}
-                                    {d.grade ? ` · ${d.grade}` : ''}
-                                    {' · '}<span style={{ fontStyle: 'italic' }}>{d.status || '—'}</span>
-                                    {d.is_open && <span style={{ marginLeft: 4 }}>🔴</span>}
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : (
-                              <span style={{ color: '#9CA3AF', fontSize: 12 }}>—</span>
-                            )}
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
-        </div>
+
+          {/* ============ СОДЕРЖИМОЕ ============ */}
+          {loading ? (
+            <div style={cardStyle}>
+              <p style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Загрузка данных...</p>
+            </div>
+          ) : period === 'all' ? (
+            <div style={cardStyle}>
+              <h2 style={reportHeaderStyle}>Статус дефектов окраски у авто в REPPS</h2>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 2.3fr)',
+                gap: 16,
+                alignItems: 'start',
+              }}>
+                {renderSection('📅 3 месяца', groupedByType.months, '#0EA5E9')}
+                {renderSection('📆 4 недели',  groupedByType.weeks,  '#14B8A6')}
+                {renderSection('📊 14 дней',   groupedByType.days,   '#F59E0B')}
+              </div>
+            </div>
+          ) : (
+            <div style={cardStyle}>
+              <h2 style={reportHeaderStyle}>Статус дефектов окраски у авто в REPPS</h2>
+              {renderStackChart(chartData)}
+              {renderCategoryTable(chartData)}
+              <div style={dashDividerStyle} />
+              {renderModelTable(chartData)}
+            </div>
+          )}
+
+          {/* ============ МОДАЛКА ============ */}
+          {modalOpen && (
+            <div
+              style={{
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                backgroundColor: 'rgba(15,23,42,0.55)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                zIndex: 2000, padding: 20,
+              }}
+              onClick={closeModal}
+            >
+              <div
+                style={{
+                  backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20,
+                  width: '100%', maxWidth: 1400, maxHeight: '85vh',
+                  display: 'flex', flexDirection: 'column',
+                  boxShadow: '0 25px 50px rgba(0,0,0,0.25)',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#111827' }}>
+                      {modalMeta.label} · {categoryLabels[modalMeta.category] || modalMeta.category}
+                      {modalMeta.model !== 'ALL' && ` · ${modalMeta.model}`}
+                    </h3>
+                    <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>
+                      Всего VIN: {modalVins.length}
+                    </p>
+                  </div>
+                  <button
+                    onClick={closeModal}
+                    style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280', lineHeight: 1 }}
+                  >×</button>
+                </div>
+
+                {modalLoading ? (
+                  <p style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>Загрузка...</p>
+                ) : modalVins.length === 0 ? (
+                  <p style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>Нет данных</p>
+                ) : (
+                  <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #E5E7EB', borderRadius: 8 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr>
+                          <th style={modalThStyle}>VIN</th>
+                          <th style={modalThStyle}>Модель</th>
+                          <th style={modalThStyle}>Время REPPS</th>
+                          <th style={modalThStyle}>Время PSOUT</th>
+                          <th style={modalThStyle}>Дефекты окраски</th>
+                          {showPostPs && (
+                            <th style={modalThStyle}>Дефекты окраски после PS</th>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {modalVins.map((item, idx) => (
+                          <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                            <td style={{ ...modalTdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{item.vin}</td>
+                            <td style={modalTdStyle}>{item.model}</td>
+                            <td style={{ ...modalTdStyle, fontSize: 12 }}>{formatDateTime(item.repps_time)}</td>
+                            <td style={{ ...modalTdStyle, fontSize: 12, color: item.psout_time ? '#1F2937' : '#9CA3AF' }}>
+                              {formatDateTime(item.psout_time)}
+                            </td>
+                            <td style={modalTdStyle}>
+                              {item.defects && item.defects.length > 0 ? (
+                                <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                                  {item.defects.map((d, i) => (
+                                    <li key={i} style={{
+                                      color: d.is_open ? '#DC2626' : '#6B7280',
+                                      fontWeight: d.is_open ? 600 : 400,
+                                    }}>
+                                      {d.part_name} · {d.problem_type}
+                                      {d.grade ? ` · ${d.grade}` : ''}
+                                      {' · '}<span style={{ fontStyle: 'italic' }}>{d.status || '—'}</span>
+                                      {d.is_open && <span style={{ marginLeft: 4 }}>🔴</span>}
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <span style={{ color: '#9CA3AF', fontSize: 12 }}>Нет дефектов</span>
+                              )}
+                            </td>
+                            {showPostPs && (
+                              <td style={modalTdStyle}>
+                                {item.post_ps_defects && item.post_ps_defects.length > 0 ? (
+                                  <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                                    {item.post_ps_defects.map((d, i) => (
+                                      <li key={i} style={{
+                                        color: d.is_open ? '#DC2626' : '#6B7280',
+                                        fontWeight: d.is_open ? 600 : 400,
+                                      }}>
+                                        {d.part_name} · {d.problem_type}
+                                        {d.grade ? ` · ${d.grade}` : ''}
+                                        {' · '}<span style={{ fontStyle: 'italic' }}>{d.status || '—'}</span>
+                                        {d.is_open && <span style={{ marginLeft: 4 }}>🔴</span>}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <span style={{ color: '#9CA3AF', fontSize: 12 }}>—</span>
+                                )}
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
