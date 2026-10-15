@@ -178,7 +178,6 @@ const modalTdStyle = {
 const shortenLabel = (label, type) => {
   if (!label) return '';
 
-  // День: '2026-10-02' → '02.10'; если уже '02.10' — вернёт как есть
   if (type === 'day') {
     const m = String(label).match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) return `${m[3]}.${m[2]}`;
@@ -319,7 +318,15 @@ function SpotRepaintReport() {
   /* ---------- CHART ---------- */
   const renderStackChart = (points) => {
     if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
-    const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
+
+    const displayData = points.map(p => {
+      const repaintVal = Number(p[stackKeyRepaint]) || 0;
+      return {
+        ...p,
+        displayLabel: shortenLabel(p.label, p.type),
+        [stackKeyRepaint]: repaintVal > 0 ? repaintVal : 0.001,
+      };
+    });
 
     return (
       <ResponsiveContainer width="100%" height={H_CHART_2}>
@@ -431,7 +438,7 @@ function SpotRepaintReport() {
 
     return (
       <>
-        <h4 style={tableHeaderStyle}>По моделям</h4>
+        <h4 style={tableHeaderStyle}>По моделям (только авто со Spot / Перекрас)</h4>
         <div style={tableWrapStyle}>
           <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <thead>
@@ -503,7 +510,6 @@ function SpotRepaintReport() {
 
   return (
     <div>
-      {/* ==== ФИЛЬТРЫ ==== */}
       <div style={{ ...cardStyle, marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -564,7 +570,6 @@ function SpotRepaintReport() {
         </div>
       </div>
 
-      {/* ==== СОДЕРЖИМОЕ ==== */}
       {loading ? (
         <div style={cardStyle}>
           <p style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Загрузка данных...</p>
@@ -593,7 +598,6 @@ function SpotRepaintReport() {
         </div>
       )}
 
-      {/* ==== МОДАЛКА ==== */}
       {modalOpen && (
         <div
           style={{
@@ -798,7 +802,15 @@ export default function ReppsReportPage() {
   /* ===================== CHART 2 — 3-стек ===================== */
   const renderStackChart = (points) => {
     if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
-    const displayData = points.map(p => ({ ...p, displayLabel: shortenLabel(p.label, p.type) }));
+
+    const displayData = points.map(p => {
+      const openVal = Number(p[stackKeyOpen]) || 0;
+      return {
+        ...p,
+        displayLabel: shortenLabel(p.label, p.type),
+        [stackKeyOpen]: openVal > 0 ? openVal : 0.001,
+      };
+    });
 
     return (
       <ResponsiveContainer width="100%" height={H_CHART_2}>
@@ -815,7 +827,6 @@ export default function ReppsReportPage() {
             barSize={22}
             radius={[4, 4, 0, 0]}
           >
-            {/* Подпись = total (не зависит от верхнего сегмента) */}
             <LabelList
               dataKey="total"
               position="top"
@@ -990,7 +1001,6 @@ export default function ReppsReportPage() {
     <div style={{ padding: '20px 30px 20px 16px', fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1500, margin: '0 auto' }}>
       <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 20 }}>REPPS Report</h1>
 
-      {/* ============ ПОДТАБЫ ============ */}
       <div style={subTabBarStyle}>
         <button
           style={subTabStyle(activeSubTab === 'repps')}
@@ -1006,7 +1016,6 @@ export default function ReppsReportPage() {
         </button>
       </div>
 
-      {/* ============ СОДЕРЖИМОЕ ПО ПОДТАБУ ============ */}
       {activeSubTab === 'spot-repaint' ? (
         <SpotRepaintReport />
       ) : (
