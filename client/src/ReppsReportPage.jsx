@@ -438,7 +438,7 @@ function SpotRepaintReport() {
 
     return (
       <>
-        <h4 style={tableHeaderStyle}>По моделям (только авто со Spot / Перекрас)</h4>
+        <h4 style={tableHeaderStyle}>По моделям</h4>
         <div style={tableWrapStyle}>
           <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <thead>
