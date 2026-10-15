@@ -36,6 +36,10 @@ import LineDefectCapturePage from './LineDefectCapturePage';
 import LineDefectsArchivePage from './LineDefectsArchivePage';
 import ReppsReportPage from './ReppsReportPage';
 
+
+import InspectionPage from './InspectionPage';
+
+
 export default function App() {
   return (
     <Routes>
@@ -73,6 +77,12 @@ export default function App() {
         <Route path="/defect-capture" element={<LineDefectCapturePage />} />
         <Route path="/line-defects-archive" element={<LineDefectsArchivePage />} />
         <Route path="/repps-report" element={<ReppsReportPage />} />
+
+
+
+
+
+        <Route path="/inspection" element={<InspectionPage />} />
       </Route>
     </Routes>
   );
