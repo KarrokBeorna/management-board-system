@@ -115,16 +115,23 @@ export default function VoltageSpcPage() {
   const [modalData, setModalData] = useState([]);
   const [modalLoading, setModalLoading] = useState(false);
 
-  // Колонки таблицы с новыми полями
+  // Сгруппированные колонки
   const columns = [
-    { key: 'VIN',             label: 'VIN',               filterable: true,  width: 200, mono: true },
-    { key: 'VOLTAGE',         label: 'Voltage (>= 13)',   filterable: false, width: 120 },
-    { key: 'CP8_DATE',        label: 'Дата CP8',          filterable: false, isTime: true, width: 150 },
-    { key: 'MEASURE_DATE',    label: 'Дата замера',       filterable: false, isTime: true, width: 150 },
-    { key: 'LAST_OK_DATE',    label: 'Дата посл. OK',     filterable: false, isTime: true, width: 150 },
-    { key: 'LAST_OK_VOLTAGE', label: 'Volt посл. OK',     filterable: false, width: 120 },
-    { key: 'TEN_MIN_NG',      label: '10 min NG',         filterable: true,  width: 100, align: 'center' },
-    { key: 'MODEL',           label: 'Модель',            filterable: true,  width: 120 },
+    // Группа 1: Автомобиль
+    { key: 'VIN',             label: 'VIN',               filterable: true,  width: 180, mono: true },
+    { key: 'MODEL',           label: 'Модель',            filterable: true,  width: 110 },
+    
+    // Группа 2: Текущий NOK (подсветка красным)
+    { key: 'VOLTAGE',         label: 'Voltage (>= 13)',   filterable: false, width: 110, groupColor: '#FEF2F2' },
+    { key: 'MEASURE_DATE',    label: 'Дата замера',       filterable: false, isTime: true, width: 140, groupColor: '#FEF2F2' },
+    
+    // Группа 3: Последний OK (подсветка зеленым)
+    { key: 'LAST_OK_VOLTAGE', label: 'Volt посл. OK',     filterable: false, width: 110, groupColor: '#F0FDF4' },
+    { key: 'LAST_OK_DATE',    label: 'Дата посл. OK',     filterable: false, isTime: true, width: 140, groupColor: '#F0FDF4' },
+    
+    // Группа 4: События
+    { key: 'TEN_MIN_NG',      label: '10 min NG',         filterable: true,  width: 90, align: 'center' },
+    { key: 'CP8_DATE',        label: 'Дата CP8',          filterable: false, isTime: true, width: 140 },
   ];
 
   // Блокировка фона при открытой модалке
@@ -283,17 +290,17 @@ export default function VoltageSpcPage() {
       'VIN': d.VIN,
       'Модель': d.MODEL || '—',
       'Voltage': d.VOLTAGE,
-      'Дата CP8': formatDateTime(d.CP8_DATE),
       'Дата замера': formatDateTime(d.MEASURE_DATE),
-      'Дата посл. OK': formatDateTime(d.LAST_OK_DATE),
       'Volt посл. OK': d.LAST_OK_VOLTAGE || '—',
+      'Дата посл. OK': formatDateTime(d.LAST_OK_DATE),
       '10 min NG': d.TEN_MIN_NG,
+      'Дата CP8': formatDateTime(d.CP8_DATE),
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Voltage');
     ws['!cols'] = [
-      { wch: 22 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 15 }, { wch: 10 }
+      { wch: 20 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 15 }, { wch: 20 }, { wch: 10 }, { wch: 20 }
     ];
     
     const now = new Date();
@@ -303,13 +310,16 @@ export default function VoltageSpcPage() {
 
   const thStyle = {
     padding: '12px 14px', textAlign: 'left', fontWeight: 700, color: '#374151',
-    borderBottom: '2px solid #E5E7EB', background: '#F9FAFB', whiteSpace: 'nowrap',
+    borderBottom: '2px solid #E5E7EB', whiteSpace: 'nowrap',
     fontSize: 12, position: 'sticky', top: 0, zIndex: 10,
   };
   const tdStyle = {
     padding: '10px 14px', borderBottom: '1px solid #F0F0F5', color: '#1F2937',
     fontSize: 13, verticalAlign: 'top',
   };
+
+  // Ключи, после которых нужно нарисовать толстую границу (конец группы)
+  const groupEndKeys = ['MODEL', 'MEASURE_DATE', 'LAST_OK_DATE'];
 
   return (
     <div style={{ padding: 30, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1600, margin: '0 auto' }}>
@@ -392,8 +402,17 @@ export default function VoltageSpcPage() {
                   <tr>
                     {columns.map(col => {
                       const hasFilter = col.filterable && filters[col.key]?.length > 0;
+                      const isGroupEnd = groupEndKeys.includes(col.key);
                       return (
-                        <th key={col.key} style={{ ...thStyle, width: col.width, textAlign: col.align || 'left', background: hasFilter ? '#DBEAFE' : '#F9FAFB', cursor: col.filterable ? 'pointer' : 'default' }}
+                        <th key={col.key} 
+                            style={{ 
+                              ...thStyle, 
+                              width: col.width, 
+                              textAlign: col.align || 'left', 
+                              background: hasFilter ? '#DBEAFE' : (col.groupColor || '#F9FAFB'), 
+                              cursor: col.filterable ? 'pointer' : 'default',
+                              borderRight: isGroupEnd ? '3px solid #E5E7EB' : '1px solid #F3F4F6'
+                            }}
                             onClick={col.filterable ? (e) => handleFilterHeaderClick(col.key, e) : undefined}>
                           {col.label}{hasFilter && ` (${filters[col.key].length})`}{col.filterable && ' ▼'}
                         </th>
@@ -406,25 +425,37 @@ export default function VoltageSpcPage() {
                     <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}
                         onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
                         onMouseLeave={e => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'}>
-                      <td style={tdStyle}>
-                        <span style={{ color: '#2563EB', cursor: 'pointer', textDecoration: 'underline', fontFamily: 'monospace', fontWeight: 600 }}
+                      
+                      {/* Блок 1: Идентификация */}
+                      <td style={{...tdStyle, fontFamily: 'monospace', fontWeight: 600}}>
+                        <span style={{ color: '#2563EB', cursor: 'pointer', textDecoration: 'underline' }}
                               onClick={() => openVinHistory(row.VIN)}>
                           {row.VIN}
                         </span>
                       </td>
-                      <td style={{ ...tdStyle, fontWeight: 700, color: '#DC2626' }}>
+                      <td style={{ ...tdStyle, borderRight: '3px solid #E5E7EB' }}>{row.MODEL || '—'}</td>
+
+                      {/* Блок 2: Текущий NOK замер */}
+                      <td style={{ ...tdStyle, fontWeight: 700, color: '#DC2626', background: 'rgba(254, 242, 242, 0.4)' }}>
                         {row.VOLTAGE}
                       </td>
-                      <td style={tdStyle}>{formatDateTime(row.CP8_DATE)}</td>
-                      <td style={tdStyle}>{formatDateTime(row.MEASURE_DATE)}</td>
-                      <td style={tdStyle}>{formatDateTime(row.LAST_OK_DATE)}</td>
-                      <td style={{ ...tdStyle, fontWeight: 600, color: '#059669' }}>
+                      <td style={{ ...tdStyle, background: 'rgba(254, 242, 242, 0.4)', borderRight: '3px solid #E5E7EB' }}>
+                        {formatDateTime(row.MEASURE_DATE)}
+                      </td>
+
+                      {/* Блок 3: Последний OK замер */}
+                      <td style={{ ...tdStyle, fontWeight: 600, color: '#059669', background: 'rgba(240, 253, 244, 0.4)' }}>
                         {row.LAST_OK_VOLTAGE || '—'}
                       </td>
+                      <td style={{ ...tdStyle, background: 'rgba(240, 253, 244, 0.4)', borderRight: '3px solid #E5E7EB' }}>
+                        {formatDateTime(row.LAST_OK_DATE)}
+                      </td>
+
+                      {/* Блок 4: События */}
                       <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: 16, color: row.TEN_MIN_NG === '+' ? '#059669' : '#DC2626' }}>
                         {row.TEN_MIN_NG}
                       </td>
-                      <td style={tdStyle}>{row.MODEL || '—'}</td>
+                      <td style={tdStyle}>{formatDateTime(row.CP8_DATE)}</td>
                     </tr>
                   )) : (
                     <tr><td colSpan={columns.length} style={{ textAlign: 'center', padding: 30, color: '#6B7280' }}>Нет данных за выбранный период</td></tr>
