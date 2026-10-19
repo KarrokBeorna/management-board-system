@@ -549,7 +549,7 @@ export default function VoltageSpcPage() {
                               background: isOk ? '#DCFCE7' : '#FEE2E2',
                               color: isOk ? '#166534' : '#991B1B'
                             }}>
-                              {isOk ? 'OK' : 'NOK'}
+                              {isOk ? 'OK' : 'NG'}
                             </span>
                           </td>
                         </tr>
