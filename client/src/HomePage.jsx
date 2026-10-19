@@ -33,6 +33,7 @@ import drrShiftPreview from './assets/drrshift.png';
 import defectCapturePreview from './assets/defph.png';
 import lineDefectsArchivePreview from './assets/archph.png';
 import reppsPreview from './assets/repps.png';
+import voltageSpcPreview from './assets/volt.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -361,7 +362,8 @@ export default function HomePage() {
     { to: "/drr-cp5", imgSrc: drrCp5Preview, caption: "DRR CP5 Dashboard", accentColor: "#8B5CF6" },
     { to: "/all-drr-dashboard", imgSrc: allDrrPreview, caption: "All DRR Dashboard", accentColor: "#0EA5E9" },
     { to: "/drr-shift-dashboard", imgSrc: drrShiftPreview, caption: "DRR Shift Dashboard", accentColor: "#7C3AED" },
-    { to: "/repps-report", imgSrc: reppsPreview, caption: "REPPS Report", accentColor: "#EC4899" }
+    { to: "/repps-report", imgSrc: reppsPreview, caption: "REPPS Report", accentColor: "#EC4899" },
+    { to: "/voltage-spc", imgSrc: voltageSpcPreview, caption: "Voltage SPC Report", accentColor: "#F59E0B" },
   ];
 
   const allServiceCards = [

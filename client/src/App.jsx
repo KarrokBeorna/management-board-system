@@ -35,6 +35,7 @@ import DrrShiftDashboardPage from './DrrShiftDashboardPage';
 import LineDefectCapturePage from './LineDefectCapturePage';
 import LineDefectsArchivePage from './LineDefectsArchivePage';
 import ReppsReportPage from './ReppsReportPage';
+import VoltageSpcPage from './VoltageSpcPage';
 
 
 import InspectionPage from './InspectionPage';
@@ -77,6 +78,7 @@ export default function App() {
         <Route path="/defect-capture" element={<LineDefectCapturePage />} />
         <Route path="/line-defects-archive" element={<LineDefectsArchivePage />} />
         <Route path="/repps-report" element={<ReppsReportPage />} />
+        <Route path="/voltage-spc" element={<VoltageSpcPage />} />
 
 
 

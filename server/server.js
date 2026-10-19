@@ -16203,6 +16203,111 @@ app.get('/api/drr-weekly-photos', async (req, res) => {
 
 
 
+/* ====================================================================== */
+/* VOLTAGE SPC REPORT                                                      */
+/* ====================================================================== */
+
+// 1. Основная таблица
+app.get('/api/voltage-spc', async (req, res) => {
+  try {
+    const { vin, dateFrom, dateTo, limit = 5000 } = req.query;
+
+    const conditions = [
+      `d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'`,
+      `CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) > 13.4`
+    ];
+    const params = [];
+
+    if (vin && String(vin).trim()) {
+      conditions.push(`i.VIN LIKE ?`);
+      params.push(`%${String(vin).trim()}%`);
+    }
+    if (dateFrom) {
+      conditions.push(`d.CREATION_TIME >= ?`);
+      params.push(`${dateFrom} 00:00:00`);
+    }
+    if (dateTo) {
+      conditions.push(`d.CREATION_TIME <= ?`);
+      params.push(`${dateTo} 23:59:59`);
+    }
+
+    const where = conditions.join(' AND ');
+    const lim = Math.min(parseInt(limit, 10) || 5000, 20000);
+
+    // Шаг 1: Берем данные из IoT (pool)
+    const [rows] = await pool.query(`
+      SELECT 
+        i.VIN,
+        wo.MODEL,
+        CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) AS VOLTAGE,
+        d.CREATION_TIME AS MEASURE_DATE
+      FROM at_im_electrical_check_dtl d
+      JOIN at_im_electrical_check_info i ON i.ID = d.MAIN_ID
+      LEFT JOIN work_order wo ON wo.VIN = i.VIN
+      WHERE ${where}
+      ORDER BY d.CREATION_TIME DESC
+      LIMIT ?
+    `, [...params, lim]);
+
+    if (rows.length === 0) {
+      return res.json([]);
+    }
+
+    // Шаг 2: Берем время CP8 из MES (mesPool)
+    const vins = [...new Set(rows.map(r => r.VIN))];
+    const placeholders = vins.map(() => '?').join(',');
+    
+    const [cp8Rows] = await mesPool.query(`
+      SELECT vin, MAX(scan_time) AS CP8_DATE
+      FROM ti_mes_movement
+      WHERE uloc_no = 'AGMAS01004'
+        AND is_deleted = 0
+        AND vin IN (${placeholders})
+      GROUP BY vin
+    `, vins);
+
+    // Шаг 3: Склеиваем данные
+    const cp8Map = new Map();
+    cp8Rows.forEach(r => cp8Map.set(r.vin, r.CP8_DATE));
+
+    const result = rows.map(r => ({
+      ...r,
+      CP8_DATE: cp8Map.get(r.VIN) || null
+    }));
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка /api/voltage-spc:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. История замеров по конкретному VIN (все замеры без фильтра > 13.4)
+app.get('/api/voltage-spc-vin-history', async (req, res) => {
+  try {
+    const { vin } = req.query;
+    if (!vin) return res.status(400).json({ error: 'vin обязателен' });
+
+    const [rows] = await pool.query(`
+      SELECT 
+        CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) AS VOLTAGE,
+        d.CREATION_TIME,
+        i.TYPE,
+        i.RESULT
+      FROM at_im_electrical_check_dtl d
+      JOIN at_im_electrical_check_info i ON i.ID = d.MAIN_ID
+      WHERE d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'
+        AND i.VIN = ?
+      ORDER BY d.CREATION_TIME DESC
+    `, [vin]);
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Ошибка /api/voltage-spc-vin-history:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 
