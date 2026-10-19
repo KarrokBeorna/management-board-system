@@ -102,8 +102,14 @@ export default function VoltageSpcPage() {
 
   const [filters, setFilters] = useState({});
   const [vinSearch, setVinSearch] = useState('');
+  
+  // Даты замера (ходят на бэкенд)
   const [dateFrom, setDateFrom] = useState(getYesterdayStr());
   const [dateTo, setDateTo]     = useState(getYesterdayStr());
+  
+  // Даты CP8 (фильтруются на клиенте)
+  const [cp8DateFrom, setCp8DateFrom] = useState('');
+  const [cp8DateTo, setCp8DateTo]     = useState('');
 
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
@@ -226,26 +232,45 @@ export default function VoltageSpcPage() {
     setVinSearch('');
     setDateFrom(getYesterdayStr());
     setDateTo(getYesterdayStr());
+    setCp8DateFrom('');
+    setCp8DateTo('');
     setActiveFilterColumn(null);
     setTimeout(loadData, 0);
   };
 
   const filtered = useMemo(() => {
     let result = data;
+
+    // Фильтр по VIN (клиентский)
     if (vinSearch.trim()) {
       const q = vinSearch.trim().toLowerCase();
       result = result.filter(d => d.VIN && String(d.VIN).toLowerCase().includes(q));
     }
-    if (Object.keys(filters).length === 0) return result;
-    return result.filter(row => {
-      for (const [col, values] of Object.entries(filters)) {
-        if (values.length > 0 && !values.includes(String(row[col] ?? ''))) return false;
-      }
-      return true;
-    });
-  }, [data, filters, vinSearch]);
 
-  useEffect(() => { setPage(0); }, [filters, vinSearch]);
+    // Фильтр по дате CP8 (клиентский)
+    if (cp8DateFrom) {
+      const from = new Date(`${cp8DateFrom}T00:00:00`);
+      result = result.filter(d => d.CP8_DATE && new Date(d.CP8_DATE) >= from);
+    }
+    if (cp8DateTo) {
+      const to = new Date(`${cp8DateTo}T23:59:59`);
+      result = result.filter(d => d.CP8_DATE && new Date(d.CP8_DATE) <= to);
+    }
+
+    // Фильтры из шапки таблицы (чекбоксы)
+    if (Object.keys(filters).length > 0) {
+      result = result.filter(row => {
+        for (const [col, values] of Object.entries(filters)) {
+          if (values.length > 0 && !values.includes(String(row[col] ?? ''))) return false;
+        }
+        return true;
+      });
+    }
+    
+    return result;
+  }, [data, filters, vinSearch, cp8DateFrom, cp8DateTo]);
+
+  useEffect(() => { setPage(0); }, [filters, vinSearch, cp8DateFrom, cp8DateTo]);
 
   const exportExcel = () => {
     if (!filtered.length) return;
@@ -293,17 +318,45 @@ export default function VoltageSpcPage() {
           </div>
         </div>
 
-        <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
-            📅 С: <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
-            По: <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
-            🔍 VIN: <input type="text" value={vinSearch} onChange={(e) => setVinSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && loadData()} placeholder="Введите VIN..." style={{ ...inputStyle, width: 200 }} />
-          </label>
-          <button style={buttonStyle} onClick={loadData}>Применить</button>
+        {/* БЛОК ФИЛЬТРОВ */}
+        <div style={{ marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          
+          {/* Ряд 1: Дата замера (ходит в бэк) + VIN */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#F0FDF4', padding: '6px 12px', borderRadius: 8, border: '1px solid #DCFCE7' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>📅 Дата замера:</span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
+                С <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
+                По <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
+              </label>
+            </div>
+            
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+              🔍 VIN: <input type="text" value={vinSearch} onChange={(e) => setVinSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && loadData()} placeholder="Введите VIN..." style={{ ...inputStyle, width: 200 }} />
+            </label>
+            
+            <button style={buttonStyle} onClick={loadData}>Применить</button>
+          </div>
+
+          {/* Ряд 2: Дата CP8 (фильтруется на клиенте) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#EFF6FF', padding: '6px 12px', borderRadius: 8, border: '1px solid #DBEAFE', alignSelf: 'flex-start' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#1E40AF' }}>🏁 Дата CP8:</span>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
+              С <input type="date" value={cp8DateFrom} onChange={(e) => setCp8DateFrom(e.target.value)} style={inputStyle} />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
+              По <input type="date" value={cp8DateTo} onChange={(e) => setCp8DateTo(e.target.value)} style={inputStyle} />
+            </label>
+            {(cp8DateFrom || cp8DateTo) && (
+              <button 
+                onClick={() => { setCp8DateFrom(''); setCp8DateTo(''); }} 
+                style={{ background: 'transparent', border: 'none', color: '#3B82F6', fontSize: 12, cursor: 'pointer', marginLeft: 8 }}>
+                Сбросить
+              </button>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -370,7 +423,7 @@ export default function VoltageSpcPage() {
           </>
         )}
 
-        {/* Dropdown фильтра */}
+        {/* Dropdown фильтра из шапки */}
         {activeFilterColumn && (
           <div className="filter-dropdown" style={{ ...filterDropdownStyle, top: filterDropdownPos.top, left: filterDropdownPos.left }}>
             <div style={{ ...filterOptionStyle, fontWeight: 700, borderBottom: '1px solid #E5E7EB', marginBottom: 4 }}
