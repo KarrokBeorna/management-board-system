@@ -3,9 +3,8 @@ import * as XLSX from 'xlsx';
 
 const API_BASE = '';
 
-const getYesterdayStr = () => {
+const getTodayStr = () => {
   const d = new Date();
-  d.setDate(d.getDate() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
@@ -103,30 +102,39 @@ export default function VoltageSpcPage() {
   const [filters, setFilters] = useState({});
   const [vinSearch, setVinSearch] = useState('');
   
-  // Даты замера (ходят на бэкенд)
-  const [dateFrom, setDateFrom] = useState(getYesterdayStr());
-  const [dateTo, setDateTo]     = useState(getYesterdayStr());
-  
-  // Даты CP8 (фильтруются на клиенте)
+  const [dateFrom, setDateFrom] = useState(getTodayStr());
+  const [dateTo, setDateTo]     = useState(getTodayStr());
   const [cp8DateFrom, setCp8DateFrom] = useState('');
   const [cp8DateTo, setCp8DateTo]     = useState('');
 
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
 
-  // Модалка истории по VIN
   const [modalOpen, setModalOpen] = useState(false);
   const [modalVin, setModalVin] = useState('');
   const [modalData, setModalData] = useState([]);
   const [modalLoading, setModalLoading] = useState(false);
 
+  // Колонки таблицы с новыми полями
   const columns = [
-    { key: 'VIN',          label: 'VIN',               filterable: true,  width: 220, mono: true },
-    { key: 'VOLTAGE',      label: 'Voltage (> 13.4)',  filterable: false, width: 140 },
-    { key: 'CP8_DATE',     label: 'Дата CP8',          filterable: false, isTime: true, width: 160 },
-    { key: 'MEASURE_DATE', label: 'Дата замера',       filterable: false, isTime: true, width: 160 },
-    { key: 'MODEL',        label: 'Модель',            filterable: true,  width: 150 },
+    { key: 'VIN',             label: 'VIN',               filterable: true,  width: 200, mono: true },
+    { key: 'VOLTAGE',         label: 'Voltage (>= 13)',   filterable: false, width: 120 },
+    { key: 'CP8_DATE',        label: 'Дата CP8',          filterable: false, isTime: true, width: 150 },
+    { key: 'MEASURE_DATE',    label: 'Дата замера',       filterable: false, isTime: true, width: 150 },
+    { key: 'LAST_OK_DATE',    label: 'Дата посл. OK',     filterable: false, isTime: true, width: 150 },
+    { key: 'LAST_OK_VOLTAGE', label: 'Volt посл. OK',     filterable: false, width: 120 },
+    { key: 'TEN_MIN_NG',      label: '10 min NG',         filterable: true,  width: 100, align: 'center' },
+    { key: 'MODEL',           label: 'Модель',            filterable: true,  width: 120 },
   ];
+
+  // Блокировка фона при открытой модалке
+  useEffect(() => {
+    if (modalOpen) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [modalOpen]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -230,8 +238,8 @@ export default function VoltageSpcPage() {
   const clearAll = () => {
     setFilters({});
     setVinSearch('');
-    setDateFrom(getYesterdayStr());
-    setDateTo(getYesterdayStr());
+    setDateFrom(getTodayStr());
+    setDateTo(getTodayStr());
     setCp8DateFrom('');
     setCp8DateTo('');
     setActiveFilterColumn(null);
@@ -241,13 +249,11 @@ export default function VoltageSpcPage() {
   const filtered = useMemo(() => {
     let result = data;
 
-    // Фильтр по VIN (клиентский)
     if (vinSearch.trim()) {
       const q = vinSearch.trim().toLowerCase();
       result = result.filter(d => d.VIN && String(d.VIN).toLowerCase().includes(q));
     }
 
-    // Фильтр по дате CP8 (клиентский)
     if (cp8DateFrom) {
       const from = new Date(`${cp8DateFrom}T00:00:00`);
       result = result.filter(d => d.CP8_DATE && new Date(d.CP8_DATE) >= from);
@@ -257,7 +263,6 @@ export default function VoltageSpcPage() {
       result = result.filter(d => d.CP8_DATE && new Date(d.CP8_DATE) <= to);
     }
 
-    // Фильтры из шапки таблицы (чекбоксы)
     if (Object.keys(filters).length > 0) {
       result = result.filter(row => {
         for (const [col, values] of Object.entries(filters)) {
@@ -280,11 +285,16 @@ export default function VoltageSpcPage() {
       'Voltage': d.VOLTAGE,
       'Дата CP8': formatDateTime(d.CP8_DATE),
       'Дата замера': formatDateTime(d.MEASURE_DATE),
+      'Дата посл. OK': formatDateTime(d.LAST_OK_DATE),
+      'Volt посл. OK': d.LAST_OK_VOLTAGE || '—',
+      '10 min NG': d.TEN_MIN_NG,
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Voltage');
-    ws['!cols'] = [{ wch: 22 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 20 }];
+    ws['!cols'] = [
+      { wch: 22 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 15 }, { wch: 10 }
+    ];
     
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -302,7 +312,7 @@ export default function VoltageSpcPage() {
   };
 
   return (
-    <div style={{ padding: 30, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1400, margin: '0 auto' }}>
+    <div style={{ padding: 30, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1600, margin: '0 auto' }}>
       <h1 style={{ color: '#1F2937', fontSize: 28, fontWeight: 700, marginBottom: 24 }}>
         ⚡ Voltage SPC Report
       </h1>
@@ -310,7 +320,7 @@ export default function VoltageSpcPage() {
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
           <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1F2937', margin: 0 }}>
-            Замеры напряжения (&gt; 13.4 V)
+            Замеры напряжения (&ge; 13 V)
           </h2>
           <div style={{ display: 'flex', gap: 8 }}>
             <button style={{ ...buttonStyle, background: '#059669' }} onClick={exportExcel}>📊 Excel</button>
@@ -318,13 +328,10 @@ export default function VoltageSpcPage() {
           </div>
         </div>
 
-        {/* БЛОК ФИЛЬТРОВ (ВЫРОВНЕН) */}
+        {/* БЛОК ФИЛЬТРОВ */}
         <div style={{ marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
           
-          {/* Ряд 1: Дата замера (ходит в бэк) + VIN */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-            
-            {/* Блок Даты замера */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#F0FDF4', padding: '6px 12px', borderRadius: 8, border: '1px solid #DCFCE7' }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: '#166534', width: 115, display: 'inline-block' }}>
                 📅 Дата замера:
@@ -339,7 +346,6 @@ export default function VoltageSpcPage() {
               </label>
             </div>
             
-            {/* VIN и Применить */}
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
               🔍 VIN: <input type="text" value={vinSearch} onChange={(e) => setVinSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && loadData()} placeholder="Введите VIN..." style={{ ...inputStyle, width: 200, padding: '6px 12px' }} />
             </label>
@@ -347,10 +353,7 @@ export default function VoltageSpcPage() {
             <button style={buttonStyle} onClick={loadData}>Применить</button>
           </div>
 
-          {/* Ряд 2: Дата CP8 (фильтруется на клиенте) */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
-            
-            {/* Блок Даты CP8 */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#EFF6FF', padding: '6px 12px', borderRadius: 8, border: '1px solid #DBEAFE' }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: '#1E40AF', width: 115, display: 'inline-block' }}>
                 🏁 Дата CP8:
@@ -372,7 +375,6 @@ export default function VoltageSpcPage() {
               )}
             </div>
           </div>
-          
         </div>
 
         {loading ? (
@@ -385,13 +387,13 @@ export default function VoltageSpcPage() {
         ) : (
           <>
             <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 400px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 1100 }}>
                 <thead>
                   <tr>
                     {columns.map(col => {
                       const hasFilter = col.filterable && filters[col.key]?.length > 0;
                       return (
-                        <th key={col.key} style={{ ...thStyle, width: col.width, background: hasFilter ? '#DBEAFE' : '#F9FAFB', cursor: col.filterable ? 'pointer' : 'default' }}
+                        <th key={col.key} style={{ ...thStyle, width: col.width, textAlign: col.align || 'left', background: hasFilter ? '#DBEAFE' : '#F9FAFB', cursor: col.filterable ? 'pointer' : 'default' }}
                             onClick={col.filterable ? (e) => handleFilterHeaderClick(col.key, e) : undefined}>
                           {col.label}{hasFilter && ` (${filters[col.key].length})`}{col.filterable && ' ▼'}
                         </th>
@@ -415,6 +417,13 @@ export default function VoltageSpcPage() {
                       </td>
                       <td style={tdStyle}>{formatDateTime(row.CP8_DATE)}</td>
                       <td style={tdStyle}>{formatDateTime(row.MEASURE_DATE)}</td>
+                      <td style={tdStyle}>{formatDateTime(row.LAST_OK_DATE)}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600, color: '#059669' }}>
+                        {row.LAST_OK_VOLTAGE || '—'}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: 16, color: row.TEN_MIN_NG === '+' ? '#059669' : '#DC2626' }}>
+                        {row.TEN_MIN_NG}
+                      </td>
                       <td style={tdStyle}>{row.MODEL || '—'}</td>
                     </tr>
                   )) : (
@@ -439,7 +448,7 @@ export default function VoltageSpcPage() {
           </>
         )}
 
-        {/* Dropdown фильтра из шапки */}
+        {/* Dropdown фильтра */}
         {activeFilterColumn && (
           <div className="filter-dropdown" style={{ ...filterDropdownStyle, top: filterDropdownPos.top, left: filterDropdownPos.left }}>
             <div style={{ ...filterOptionStyle, fontWeight: 700, borderBottom: '1px solid #E5E7EB', marginBottom: 4 }}
@@ -489,20 +498,32 @@ export default function VoltageSpcPage() {
                       <th style={{ padding: '10px 14px', textAlign: 'left', borderBottom: '2px solid #E5E7EB' }}>Время замера</th>
                       <th style={{ padding: '10px 14px', textAlign: 'left', borderBottom: '2px solid #E5E7EB' }}>Вольтаж</th>
                       <th style={{ padding: '10px 14px', textAlign: 'left', borderBottom: '2px solid #E5E7EB' }}>Тип проверки</th>
-                      <th style={{ padding: '10px 14px', textAlign: 'left', borderBottom: '2px solid #E5E7EB' }}>Результат</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'left', borderBottom: '2px solid #E5E7EB' }}>Результат (расчет)</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {modalData.map((m, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid #F0F0F5', backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                        <td style={{ padding: '10px 14px' }}>{formatDateTime(m.CREATION_TIME)}</td>
-                        <td style={{ padding: '10px 14px', fontWeight: 'bold', color: m.VOLTAGE > 13.4 ? '#DC2626' : '#1F2937' }}>
-                          {m.VOLTAGE} V
-                        </td>
-                        <td style={{ padding: '10px 14px' }}>{m.TYPE || '—'}</td>
-                        <td style={{ padding: '10px 14px' }}>{m.RESULT || '—'}</td>
-                      </tr>
-                    ))}
+                    {modalData.map((m, i) => {
+                      // Расчет результата: OK если > 12.6 и < 13
+                      const isOk = m.VOLTAGE > 12.6 && m.VOLTAGE < 13;
+                      return (
+                        <tr key={i} style={{ borderBottom: '1px solid #F0F0F5', backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                          <td style={{ padding: '10px 14px' }}>{formatDateTime(m.CREATION_TIME)}</td>
+                          <td style={{ padding: '10px 14px', fontWeight: 'bold', color: isOk ? '#059669' : '#DC2626' }}>
+                            {m.VOLTAGE} V
+                          </td>
+                          <td style={{ padding: '10px 14px' }}>{m.TYPE || '—'}</td>
+                          <td style={{ padding: '10px 14px' }}>
+                            <span style={{
+                              padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700,
+                              background: isOk ? '#DCFCE7' : '#FEE2E2',
+                              color: isOk ? '#166534' : '#991B1B'
+                            }}>
+                              {isOk ? 'OK' : 'NOK'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

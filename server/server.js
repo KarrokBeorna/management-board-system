@@ -16238,7 +16238,7 @@ app.get('/api/drr-weekly-photos', async (req, res) => {
 
 
 /* ====================================================================== */
-/* VOLTAGE SPC REPORT                                                      */
+/* VOLTAGE SPC REPORT (ОБНОВЛЕННЫЙ)                                        */
 /* ====================================================================== */
 
 // 1. Основная таблица
@@ -16248,7 +16248,7 @@ app.get('/api/voltage-spc', async (req, res) => {
 
     const conditions = [
       `d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'`,
-      `CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) > 13.4`
+      `CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) >= 13`
     ];
     const params = [];
 
@@ -16268,7 +16268,7 @@ app.get('/api/voltage-spc', async (req, res) => {
     const where = conditions.join(' AND ');
     const lim = Math.min(parseInt(limit, 10) || 5000, 20000);
 
-    // Шаг 1: Берем данные из IoT (pool)
+    // Шаг 1: Берем строки, где вольтаж >= 13
     const [rows] = await pool.query(`
       SELECT 
         i.VIN,
@@ -16283,31 +16283,75 @@ app.get('/api/voltage-spc', async (req, res) => {
       LIMIT ?
     `, [...params, lim]);
 
-    if (rows.length === 0) {
-      return res.json([]);
-    }
+    if (rows.length === 0) return res.json([]);
 
-    // Шаг 2: Берем время CP8 из MES (mesPool)
-    const vins = [...new Set(rows.map(r => r.VIN))];
-    const placeholders = vins.map(() => '?').join(',');
-    
+    const uniqueVins = [...new Set(rows.map(r => r.VIN))];
+    const placeholders = uniqueVins.map(() => '?').join(',');
+
+    // Шаг 2: Получаем CP8 из MES
     const [cp8Rows] = await mesPool.query(`
       SELECT vin, MAX(scan_time) AS CP8_DATE
       FROM ti_mes_movement
-      WHERE uloc_no = 'AGMAS01004'
-        AND is_deleted = 0
-        AND vin IN (${placeholders})
+      WHERE uloc_no = 'AGMAS01004' AND is_deleted = 0 AND vin IN (${placeholders})
       GROUP BY vin
-    `, vins);
+    `, uniqueVins);
 
-    // Шаг 3: Склеиваем данные
-    const cp8Map = new Map();
-    cp8Rows.forEach(r => cp8Map.set(r.vin, r.CP8_DATE));
+    // Шаг 3: Получаем последний OK замер (12.6 < V < 13) для каждого VIN
+    const [lastOkRows] = await pool.query(`
+      SELECT t.VIN, t.CREATION_TIME AS LAST_OK_DATE, t.VOLTAGE AS LAST_OK_VOLTAGE
+      FROM (
+        SELECT i.VIN, d.CREATION_TIME, CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) AS VOLTAGE,
+               ROW_NUMBER() OVER(PARTITION BY i.VIN ORDER BY d.CREATION_TIME DESC) as rn
+        FROM at_im_electrical_check_dtl d
+        JOIN at_im_electrical_check_info i ON i.ID = d.MAIN_ID
+        WHERE d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'
+          AND i.VIN IN (${placeholders})
+          AND CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) > 12.6
+          AND CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) < 13
+      ) t WHERE t.rn = 1
+    `, uniqueVins);
 
-    const result = rows.map(r => ({
-      ...r,
-      CP8_DATE: cp8Map.get(r.VIN) || null
-    }));
+    // Шаг 4: Получаем самый последний замер (любой) для каждого VIN
+    const [lastMeasRows] = await pool.query(`
+      SELECT t.VIN, t.CREATION_TIME AS LAST_MEASURE_DATE, t.VOLTAGE AS LAST_VOLTAGE
+      FROM (
+        SELECT i.VIN, d.CREATION_TIME, CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) AS VOLTAGE,
+               ROW_NUMBER() OVER(PARTITION BY i.VIN ORDER BY d.CREATION_TIME DESC) as rn
+        FROM at_im_electrical_check_dtl d
+        JOIN at_im_electrical_check_info i ON i.ID = d.MAIN_ID
+        WHERE d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'
+          AND i.VIN IN (${placeholders})
+      ) t WHERE t.rn = 1
+    `, uniqueVins);
+
+    // Шаг 5: Склеиваем в Map для быстрого доступа
+    const cp8Map = new Map(cp8Rows.map(r => [r.vin, r.CP8_DATE]));
+    const lastOkMap = new Map(lastOkRows.map(r => [r.VIN, r]));
+    const lastMeasMap = new Map(lastMeasRows.map(r => [r.VIN, r]));
+
+    // Шаг 6: Формируем ответ с расчетом "10 min NG"
+    const result = rows.map(r => {
+      const cp8Date = cp8Map.get(r.VIN) || null;
+      const lastOk = lastOkMap.get(r.VIN);
+      const lastMeas = lastMeasMap.get(r.VIN);
+
+      let tenMinNg = '+';
+      if (lastMeas && cp8Date) {
+        const isAfterCp8 = new Date(lastMeas.LAST_MEASURE_DATE) > new Date(cp8Date);
+        const isLastNok = (lastMeas.LAST_VOLTAGE <= 12.6 || lastMeas.LAST_VOLTAGE >= 13);
+        if (isAfterCp8 && isLastNok) {
+          tenMinNg = '-';
+        }
+      }
+
+      return {
+        ...r,
+        CP8_DATE: cp8Date,
+        LAST_OK_DATE: lastOk ? lastOk.LAST_OK_DATE : null,
+        LAST_OK_VOLTAGE: lastOk ? lastOk.LAST_OK_VOLTAGE : null,
+        TEN_MIN_NG: tenMinNg
+      };
+    });
 
     res.json(result);
   } catch (err) {
@@ -16316,7 +16360,7 @@ app.get('/api/voltage-spc', async (req, res) => {
   }
 });
 
-// 2. История замеров по конкретному VIN (все замеры без фильтра > 13.4)
+// 2. История замеров по конкретному VIN (без фильтра > 13)
 app.get('/api/voltage-spc-vin-history', async (req, res) => {
   try {
     const { vin } = req.query;
