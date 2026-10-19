@@ -318,45 +318,61 @@ export default function VoltageSpcPage() {
           </div>
         </div>
 
-        {/* БЛОК ФИЛЬТРОВ */}
+        {/* БЛОК ФИЛЬТРОВ (ВЫРОВНЕН) */}
         <div style={{ marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
           
           {/* Ряд 1: Дата замера (ходит в бэк) + VIN */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            
+            {/* Блок Даты замера */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#F0FDF4', padding: '6px 12px', borderRadius: 8, border: '1px solid #DCFCE7' }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>📅 Дата замера:</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#166534', width: 115, display: 'inline-block' }}>
+                📅 Дата замера:
+              </span>
               <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
-                С <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
+                <span>С</span>
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...inputStyle, width: 125, padding: '6px 8px' }} />
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
-                По <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
+                <span>По</span>
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...inputStyle, width: 125, padding: '6px 8px' }} />
               </label>
             </div>
             
+            {/* VIN и Применить */}
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
-              🔍 VIN: <input type="text" value={vinSearch} onChange={(e) => setVinSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && loadData()} placeholder="Введите VIN..." style={{ ...inputStyle, width: 200 }} />
+              🔍 VIN: <input type="text" value={vinSearch} onChange={(e) => setVinSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && loadData()} placeholder="Введите VIN..." style={{ ...inputStyle, width: 200, padding: '6px 12px' }} />
             </label>
             
             <button style={buttonStyle} onClick={loadData}>Применить</button>
           </div>
 
           {/* Ряд 2: Дата CP8 (фильтруется на клиенте) */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#EFF6FF', padding: '6px 12px', borderRadius: 8, border: '1px solid #DBEAFE', alignSelf: 'flex-start' }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#1E40AF' }}>🏁 Дата CP8:</span>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
-              С <input type="date" value={cp8DateFrom} onChange={(e) => setCp8DateFrom(e.target.value)} style={inputStyle} />
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
-              По <input type="date" value={cp8DateTo} onChange={(e) => setCp8DateTo(e.target.value)} style={inputStyle} />
-            </label>
-            {(cp8DateFrom || cp8DateTo) && (
-              <button 
-                onClick={() => { setCp8DateFrom(''); setCp8DateTo(''); }} 
-                style={{ background: 'transparent', border: 'none', color: '#3B82F6', fontSize: 12, cursor: 'pointer', marginLeft: 8 }}>
-                Сбросить
-              </button>
-            )}
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            
+            {/* Блок Даты CP8 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#EFF6FF', padding: '6px 12px', borderRadius: 8, border: '1px solid #DBEAFE' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#1E40AF', width: 115, display: 'inline-block' }}>
+                🏁 Дата CP8:
+              </span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
+                <span>С</span>
+                <input type="date" value={cp8DateFrom} onChange={(e) => setCp8DateFrom(e.target.value)} style={{ ...inputStyle, width: 125, padding: '6px 8px' }} />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
+                <span>По</span>
+                <input type="date" value={cp8DateTo} onChange={(e) => setCp8DateTo(e.target.value)} style={{ ...inputStyle, width: 125, padding: '6px 8px' }} />
+              </label>
+              {(cp8DateFrom || cp8DateTo) && (
+                <button
+                  onClick={() => { setCp8DateFrom(''); setCp8DateTo(''); }}
+                  style={{ background: 'transparent', border: 'none', color: '#3B82F6', fontSize: 12, fontWeight: 600, cursor: 'pointer', marginLeft: 8 }}>
+                  Сбросить
+                </button>
+              )}
+            </div>
           </div>
+          
         </div>
 
         {loading ? (
