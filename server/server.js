@@ -11723,6 +11723,7 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
       SELECT
         d.VIN, wo.MODEL,
         d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE,
+        d.PROBLEM_DESCRIPTION,
         d.STATUS,
         d.REPAIR_TIME, d.REPAIR_TIME1
       FROM at_qm_defect_info d
@@ -11741,21 +11742,29 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
       const model = d.MODEL || '—';
       const part = (d.PART_NAME || '').trim();
       const problem = (d.PROBLEM_TYPE || '').trim();
+      const desc = (d.PROBLEM_DESCRIPTION || '').trim();
 
-      const mpp = (!part && !problem)
-        ? `${model} TS02 WA EC Tool - NG`
-        : `${model} ${part} ${problem}`.replace(/\s+/g, ' ').trim();
+      let mpp;
+      if (!part && !problem) {
+        mpp = desc ? `${model} ${desc}`.replace(/\s+/g, ' ').trim() : `${model} (Без описания)`;
+      } else {
+        mpp = `${model} ${part} ${problem}`.replace(/\s+/g, ' ').trim();
+      }
 
-      if (!map.has(mpp)) {
-        map.set(mpp, {
+      // Ключ для группировки, чтобы разные описания не склеивались
+      const mppKey = `${model}|${part}|${problem}|${desc}`;
+
+      if (!map.has(mppKey)) {
+        map.set(mppKey, {
           mpp,
           model: model,
           part_name: part,
           problem_type: problem,
+          problem_description: desc, // <-- Добавили в ответ
           defectCount: 0,
         });
       }
-      map.get(mpp).defectCount += 1;
+      map.get(mppKey).defectCount += 1;
     });
 
     const result = [...map.values()]
@@ -11774,7 +11783,7 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
 /* ====================================================================== */
 app.get('/api/drr-cpfinal-mpp-vins', async (req, res) => {
   try {
-    const { startTime, endTime, model, part_name = '', problem_type = '' } = req.query;
+    const { startTime, endTime, model, part_name = '', problem_type = '', problem_description = '' } = req.query;
 
     if (!startTime || !endTime || !model) {
       return res.status(400).json({ error: 'startTime, endTime и model обязательны' });
@@ -11797,6 +11806,12 @@ app.get('/api/drr-cpfinal-mpp-vins', async (req, res) => {
 
     if (part_name === '' && problem_type === '') {
       whereClause += ` AND (d.PART_NAME IS NULL OR TRIM(d.PART_NAME) = '') AND (d.PROBLEM_TYPE IS NULL OR TRIM(d.PROBLEM_TYPE) = '')`;
+      if (problem_description !== '') {
+        whereClause += ` AND d.PROBLEM_DESCRIPTION = ?`;
+        params.push(problem_description);
+      } else {
+        whereClause += ` AND (d.PROBLEM_DESCRIPTION IS NULL OR TRIM(d.PROBLEM_DESCRIPTION) = '')`;
+      }
     } else {
       whereClause += ` AND d.PART_NAME = ? AND d.PROBLEM_TYPE = ?`;
       params.push(part_name, problem_type);
@@ -11806,6 +11821,7 @@ app.get('/api/drr-cpfinal-mpp-vins', async (req, res) => {
       SELECT
         d.VIN, wo.MODEL,
         d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE,
+        d.PROBLEM_DESCRIPTION,
         d.STATUS, d.CREATION_TIME,
         d.REPAIR_TIME, d.REPAIR_TIME1
       FROM at_qm_defect_info d
@@ -11820,7 +11836,6 @@ app.get('/api/drr-cpfinal-mpp-vins', async (req, res) => {
       const tlttMs = new Date(tlttFirst).getTime();
       if (!isDefectNokCpFinal(d, tlttMs)) return;
 
-      // Самое раннее время доработки
       const repairTimes = [d.REPAIR_TIME, d.REPAIR_TIME1]
         .filter(t => t != null && t !== '')
         .map(t => new Date(t).getTime())
@@ -11911,10 +11926,13 @@ async function saveDrrCpFinalSnapshot(shiftDate, shift) {
 
       if (nokVinsList.length > 0) {
         const ph = nokVinsList.map(() => '?').join(',');
+        
+        // 1. ДОБАВЛЕНО: d.PROBLEM_DESCRIPTION в SELECT
         const [defectRows] = await pool.query(`
           SELECT
             d.VIN, wo.MODEL,
             d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE,
+            d.PROBLEM_DESCRIPTION,
             d.STATUS, d.REPAIR_TIME, d.REPAIR_TIME1
           FROM at_qm_defect_info d
           LEFT JOIN work_order wo ON wo.VIN = d.VIN
@@ -11932,14 +11950,30 @@ async function saveDrrCpFinalSnapshot(shiftDate, shift) {
           const model = d.MODEL || '—';
           const part = (d.PART_NAME || '').trim();
           const problem = (d.PROBLEM_TYPE || '').trim();
-          const mpp = (!part && !problem)
-            ? `${model} TS02 WA EC Tool - NG`
-            : `${model} ${part} ${problem}`.replace(/\s+/g, ' ').trim();
+          const desc = (d.PROBLEM_DESCRIPTION || '').trim(); // 2. ДОБАВЛЕНО: читаем описание
 
-          if (!map.has(mpp)) {
-            map.set(mpp, { mpp, model, part_name: part, problem_type: problem, defectCount: 0 });
+          // 3. ИЗМЕНЕНО: убрали костыль TS02 WA EC Tool
+          let mpp;
+          if (!part && !problem) {
+            mpp = desc ? `${model} ${desc}`.replace(/\s+/g, ' ').trim() : `${model} (Без описания)`;
+          } else {
+            mpp = `${model} ${part} ${problem}`.replace(/\s+/g, ' ').trim();
           }
-          map.get(mpp).defectCount += 1;
+
+          // Ключ для Map, чтобы разные описания не склеивались в одну строку
+          const mppKey = `${model}|${part}|${problem}|${desc}`;
+
+          if (!map.has(mppKey)) {
+            map.set(mppKey, { 
+              mpp, 
+              model, 
+              part_name: part, 
+              problem_type: problem, 
+              problem_description: desc, // 4. ДОБАВЛЕНО: сохраняем в JSON
+              defectCount: 0 
+            });
+          }
+          map.get(mppKey).defectCount += 1;
         });
 
         topDefects = [...map.values()]

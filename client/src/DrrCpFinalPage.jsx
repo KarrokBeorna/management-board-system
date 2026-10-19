@@ -428,6 +428,7 @@ export default function DrrCpFinalPage() {
         model: defect.model,
         part_name: defect.part_name || '',
         problem_type: defect.problem_type || '',
+        problem_description: defect.problem_description || '' // <-- ДОБАВЛЕНО ДЛЯ ПЕРЕДАЧИ ОПИСАНИЯ
       });
       const res = await fetch(`${API_BASE}/api/drr-cpfinal-mpp-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки VIN');
