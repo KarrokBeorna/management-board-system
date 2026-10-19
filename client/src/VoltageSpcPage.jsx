@@ -104,8 +104,8 @@ export default function VoltageSpcPage() {
   
   const [dateFrom, setDateFrom] = useState(getTodayStr());
   const [dateTo, setDateTo]     = useState(getTodayStr());
-  const [cp8DateFrom, setCp8DateFrom] = useState('');
-  const [cp8DateTo, setCp8DateTo]     = useState('');
+  const [cp8DateFrom, setCp8DateFrom] = useState(getTodayStr());
+  const [cp8DateTo, setCp8DateTo]     = useState(getTodayStr());
 
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
@@ -118,12 +118,12 @@ export default function VoltageSpcPage() {
   // Сгруппированные колонки
   const columns = [
     // Группа 1: Автомобиль
-    { key: 'VIN',             label: 'VIN c NG',               filterable: true,  width: 180, mono: true },
+    { key: 'VIN',             label: 'VIN',               filterable: true,  width: 180, mono: true },
     { key: 'MODEL',           label: 'Модель',            filterable: true,  width: 110 },
     
     // Группа 2: Текущий NOK (подсветка красным)
     { key: 'VOLTAGE',         label: 'Voltage (>= 13)',   filterable: false, width: 110, groupColor: '#FEF2F2' },
-    { key: 'MEASURE_DATE',    label: 'Дата замера',       filterable: false, isTime: true, width: 140, groupColor: '#FEF2F2' },
+    { key: 'MEASURE_DATE',    label: 'Дата NOK замера',   filterable: false, isTime: true, width: 140, groupColor: '#FEF2F2' },
     
     // Группа 3: Последний OK (подсветка зеленым)
     { key: 'LAST_OK_VOLTAGE', label: 'Volt посл. OK',     filterable: false, width: 110, groupColor: '#F0FDF4' },
@@ -170,6 +170,8 @@ export default function VoltageSpcPage() {
       if (vinSearch.trim()) params.append('vin', vinSearch.trim());
       if (dateFrom) params.append('dateFrom', dateFrom);
       if (dateTo)   params.append('dateTo',   dateTo);
+      if (cp8DateFrom) params.append('cp8DateFrom', cp8DateFrom);
+      if (cp8DateTo)   params.append('cp8DateTo',   cp8DateTo);
 
       const res = await fetch(`${API_BASE}/api/voltage-spc?${params.toString()}`);
       if (!res.ok) throw new Error(`Ошибка загрузки (${res.status})`);
@@ -185,7 +187,8 @@ export default function VoltageSpcPage() {
     }
   };
 
-  useEffect(() => { loadData(); }, [dateFrom, dateTo]);
+  // Автозагрузка при смене любых дат
+  useEffect(() => { loadData(); }, [dateFrom, dateTo, cp8DateFrom, cp8DateTo]);
 
   const openVinHistory = async (vin) => {
     setModalVin(vin);
@@ -247,8 +250,8 @@ export default function VoltageSpcPage() {
     setVinSearch('');
     setDateFrom(getTodayStr());
     setDateTo(getTodayStr());
-    setCp8DateFrom('');
-    setCp8DateTo('');
+    setCp8DateFrom(getTodayStr());
+    setCp8DateTo(getTodayStr());
     setActiveFilterColumn(null);
     setTimeout(loadData, 0);
   };
@@ -261,15 +264,6 @@ export default function VoltageSpcPage() {
       result = result.filter(d => d.VIN && String(d.VIN).toLowerCase().includes(q));
     }
 
-    if (cp8DateFrom) {
-      const from = new Date(`${cp8DateFrom}T00:00:00`);
-      result = result.filter(d => d.CP8_DATE && new Date(d.CP8_DATE) >= from);
-    }
-    if (cp8DateTo) {
-      const to = new Date(`${cp8DateTo}T23:59:59`);
-      result = result.filter(d => d.CP8_DATE && new Date(d.CP8_DATE) <= to);
-    }
-
     if (Object.keys(filters).length > 0) {
       result = result.filter(row => {
         for (const [col, values] of Object.entries(filters)) {
@@ -280,19 +274,19 @@ export default function VoltageSpcPage() {
     }
     
     return result;
-  }, [data, filters, vinSearch, cp8DateFrom, cp8DateTo]);
+  }, [data, filters, vinSearch]);
 
-  useEffect(() => { setPage(0); }, [filters, vinSearch, cp8DateFrom, cp8DateTo]);
+  useEffect(() => { setPage(0); }, [filters, vinSearch]);
 
   const exportExcel = () => {
     if (!filtered.length) return;
     const rows = filtered.map(d => ({
       'VIN': d.VIN,
       'Модель': d.MODEL || '—',
-      'Voltage': d.VOLTAGE,
-      'Дата замера': formatDateTime(d.MEASURE_DATE),
+      'Voltage (NOK)': d.VOLTAGE || '—',
+      'Дата NOK замера': d.MEASURE_DATE ? formatDateTime(d.MEASURE_DATE) : '—',
       'Volt посл. OK': d.LAST_OK_VOLTAGE || '—',
-      'Дата посл. OK': formatDateTime(d.LAST_OK_DATE),
+      'Дата посл. OK': d.LAST_OK_DATE ? formatDateTime(d.LAST_OK_DATE) : '—',
       '10 min NG': d.TEN_MIN_NG,
       'Дата CP8': formatDateTime(d.CP8_DATE),
     }));
@@ -330,7 +324,7 @@ export default function VoltageSpcPage() {
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
           <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1F2937', margin: 0 }}>
-            Замеры напряжения (&ge; 13 V)
+            Замеры напряжения и прошедшие CP8
           </h2>
           <div style={{ display: 'flex', gap: 8 }}>
             <button style={{ ...buttonStyle, background: '#059669' }} onClick={exportExcel}>📊 Excel</button>
@@ -341,6 +335,7 @@ export default function VoltageSpcPage() {
         {/* БЛОК ФИЛЬТРОВ */}
         <div style={{ marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
           
+          {/* Ряд 1: Дата замера + VIN */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#F0FDF4', padding: '6px 12px', borderRadius: 8, border: '1px solid #DCFCE7' }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: '#166534', width: 115, display: 'inline-block' }}>
@@ -363,6 +358,7 @@ export default function VoltageSpcPage() {
             <button style={buttonStyle} onClick={loadData}>Применить</button>
           </div>
 
+          {/* Ряд 2: Дата CP8 */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#EFF6FF', padding: '6px 12px', borderRadius: 8, border: '1px solid #DBEAFE' }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: '#1E40AF', width: 115, display: 'inline-block' }}>
@@ -437,7 +433,7 @@ export default function VoltageSpcPage() {
 
                       {/* Блок 2: Текущий NOK замер */}
                       <td style={{ ...tdStyle, fontWeight: 700, color: '#DC2626', background: 'rgba(254, 242, 242, 0.4)' }}>
-                        {row.VOLTAGE}
+                        {row.VOLTAGE || '—'}
                       </td>
                       <td style={{ ...tdStyle, background: 'rgba(254, 242, 242, 0.4)', borderRight: '3px solid #E5E7EB' }}>
                         {formatDateTime(row.MEASURE_DATE)}

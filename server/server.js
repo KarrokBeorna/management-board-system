@@ -16237,66 +16237,78 @@ app.get('/api/drr-weekly-photos', async (req, res) => {
 
 
 
-/* ====================================================================== */
-/* VOLTAGE SPC REPORT (ОБНОВЛЕННЫЙ)                                        */
-/* ====================================================================== */
-
-// 1. Основная таблица
 app.get('/api/voltage-spc', async (req, res) => {
   try {
-    const { vin, dateFrom, dateTo, limit = 5000 } = req.query;
+    const { vin, dateFrom, dateTo, cp8DateFrom, cp8DateTo } = req.query;
 
-    const conditions = [
-      `d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'`,
-      `CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) >= 13`
-    ];
-    const params = [];
+    // 1. Получаем VINs из CP8 (если задан CP8 фильтр)
+    let cp8Vins = new Set();
+    let cp8DateMap = new Map();
 
+    if (cp8DateFrom && cp8DateTo) {
+      const [cp8Rows] = await mesPool.query(`
+        SELECT vin, MAX(scan_time) AS CP8_DATE
+        FROM ti_mes_movement
+        WHERE uloc_no = 'AGMAS01004'
+          AND is_deleted = 0
+          AND scan_time >= ? AND scan_time <= ?
+        GROUP BY vin
+      `, [`${cp8DateFrom} 00:00:00`, `${cp8DateTo} 23:59:59`]);
+
+      cp8Rows.forEach(r => {
+        cp8Vins.add(r.vin);
+        cp8DateMap.set(r.vin, r.CP8_DATE);
+      });
+    }
+
+    // 2. Получаем VINs с NOK тестами (если задан фильтр даты замера)
+    let nokVins = new Set();
+
+    if (dateFrom && dateTo) {
+      const [nokRows] = await pool.query(`
+        SELECT DISTINCT i.VIN
+        FROM at_im_electrical_check_dtl d
+        JOIN at_im_electrical_check_info i ON i.ID = d.MAIN_ID
+        WHERE d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'
+          AND CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) >= 13
+          AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
+      `, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
+      nokRows.forEach(r => nokVins.add(r.VIN));
+    }
+
+    // 3. Объединяем списки VIN
+    let allVins = new Set([...cp8Vins, ...nokVins]);
+
+    // Фильтр по VIN поиску
     if (vin && String(vin).trim()) {
-      conditions.push(`i.VIN LIKE ?`);
-      params.push(`%${String(vin).trim()}%`);
-    }
-    if (dateFrom) {
-      conditions.push(`d.CREATION_TIME >= ?`);
-      params.push(`${dateFrom} 00:00:00`);
-    }
-    if (dateTo) {
-      conditions.push(`d.CREATION_TIME <= ?`);
-      params.push(`${dateTo} 23:59:59`);
+      const search = String(vin).trim();
+      allVins = new Set([...allVins].filter(v => v.includes(search)));
     }
 
-    const where = conditions.join(' AND ');
-    const lim = Math.min(parseInt(limit, 10) || 5000, 20000);
+    if (allVins.size === 0) return res.json([]);
+    const vins = [...allVins];
+    const placeholders = vins.map(() => '?').join(',');
 
-    // Шаг 1: Берем строки, где вольтаж >= 13
-    const [rows] = await pool.query(`
-      SELECT 
-        i.VIN,
-        wo.MODEL,
-        CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) AS VOLTAGE,
-        d.CREATION_TIME AS MEASURE_DATE
-      FROM at_im_electrical_check_dtl d
-      JOIN at_im_electrical_check_info i ON i.ID = d.MAIN_ID
-      LEFT JOIN work_order wo ON wo.VIN = i.VIN
-      WHERE ${where}
-      ORDER BY d.CREATION_TIME DESC
-      LIMIT ?
-    `, [...params, lim]);
+    // 4. Модели
+    const [modelRows] = await pool.query(`SELECT VIN, MODEL FROM work_order WHERE VIN IN (${placeholders})`, vins);
+    const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
 
-    if (rows.length === 0) return res.json([]);
+    // 5. Последний NOK замер (глобально за всё время, чтобы показать текущий статус)
+    const [lastNokRows] = await pool.query(`
+      SELECT t.VIN, t.CREATION_TIME AS MEASURE_DATE, t.VOLTAGE
+      FROM (
+        SELECT i.VIN, d.CREATION_TIME, CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) AS VOLTAGE,
+               ROW_NUMBER() OVER(PARTITION BY i.VIN ORDER BY d.CREATION_TIME DESC) as rn
+        FROM at_im_electrical_check_dtl d
+        JOIN at_im_electrical_check_info i ON i.ID = d.MAIN_ID
+        WHERE d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'
+          AND i.VIN IN (${placeholders})
+          AND CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) >= 13
+      ) t WHERE t.rn = 1
+    `, vins);
+    const lastNokMap = new Map(lastNokRows.map(r => [r.VIN, r]));
 
-    const uniqueVins = [...new Set(rows.map(r => r.VIN))];
-    const placeholders = uniqueVins.map(() => '?').join(',');
-
-    // Шаг 2: Получаем CP8 из MES
-    const [cp8Rows] = await mesPool.query(`
-      SELECT vin, MAX(scan_time) AS CP8_DATE
-      FROM ti_mes_movement
-      WHERE uloc_no = 'AGMAS01004' AND is_deleted = 0 AND vin IN (${placeholders})
-      GROUP BY vin
-    `, uniqueVins);
-
-    // Шаг 3: Получаем последний OK замер (12.6 < V < 13) для каждого VIN
+    // 6. Последний OK замер (глобально)
     const [lastOkRows] = await pool.query(`
       SELECT t.VIN, t.CREATION_TIME AS LAST_OK_DATE, t.VOLTAGE AS LAST_OK_VOLTAGE
       FROM (
@@ -16309,9 +16321,10 @@ app.get('/api/voltage-spc', async (req, res) => {
           AND CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) > 12.6
           AND CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) < 13
       ) t WHERE t.rn = 1
-    `, uniqueVins);
+    `, vins);
+    const lastOkMap = new Map(lastOkRows.map(r => [r.VIN, r]));
 
-    // Шаг 4: Получаем самый последний замер (любой) для каждого VIN
+    // 7. Самый последний замер (любой, для 10 min NG)
     const [lastMeasRows] = await pool.query(`
       SELECT t.VIN, t.CREATION_TIME AS LAST_MEASURE_DATE, t.VOLTAGE AS LAST_VOLTAGE
       FROM (
@@ -16322,18 +16335,15 @@ app.get('/api/voltage-spc', async (req, res) => {
         WHERE d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'
           AND i.VIN IN (${placeholders})
       ) t WHERE t.rn = 1
-    `, uniqueVins);
-
-    // Шаг 5: Склеиваем в Map для быстрого доступа
-    const cp8Map = new Map(cp8Rows.map(r => [r.vin, r.CP8_DATE]));
-    const lastOkMap = new Map(lastOkRows.map(r => [r.VIN, r]));
+    `, vins);
     const lastMeasMap = new Map(lastMeasRows.map(r => [r.VIN, r]));
 
-    // Шаг 6: Формируем ответ с расчетом "10 min NG"
-    const result = rows.map(r => {
-      const cp8Date = cp8Map.get(r.VIN) || null;
-      const lastOk = lastOkMap.get(r.VIN);
-      const lastMeas = lastMeasMap.get(r.VIN);
+    // 8. Формируем результат
+    const result = vins.map(v => {
+      const cp8Date = cp8DateMap.get(v) || null;
+      const lastNok = lastNokMap.get(v);
+      const lastOk = lastOkMap.get(v);
+      const lastMeas = lastMeasMap.get(v);
 
       let tenMinNg = '+';
       if (lastMeas && cp8Date) {
@@ -16345,12 +16355,25 @@ app.get('/api/voltage-spc', async (req, res) => {
       }
 
       return {
-        ...r,
+        VIN: v,
+        MODEL: modelMap.get(v) || '—',
+        VOLTAGE: lastNok ? lastNok.VOLTAGE : null,
+        MEASURE_DATE: lastNok ? lastNok.MEASURE_DATE : null,
         CP8_DATE: cp8Date,
         LAST_OK_DATE: lastOk ? lastOk.LAST_OK_DATE : null,
         LAST_OK_VOLTAGE: lastOk ? lastOk.LAST_OK_VOLTAGE : null,
         TEN_MIN_NG: tenMinNg
       };
+    });
+
+    // Сортировка: сначала машины с NOK (свежие сверху), потом остальные по дате CP8
+    result.sort((a, b) => {
+      if (a.VOLTAGE && !b.VOLTAGE) return -1;
+      if (!a.VOLTAGE && b.VOLTAGE) return 1;
+      if (a.CP8_DATE && b.CP8_DATE) return new Date(b.CP8_DATE) - new Date(a.CP8_DATE);
+      if (a.CP8_DATE) return -1;
+      if (b.CP8_DATE) return 1;
+      return 0;
     });
 
     res.json(result);
@@ -16360,11 +16383,17 @@ app.get('/api/voltage-spc', async (req, res) => {
   }
 });
 
-// 2. История замеров по конкретному VIN (без фильтра > 13)
+// 2. История замеров по конкретному VIN (все замеры без фильтра > 13.4)
+/* ====================================================================== */
+/* VOLTAGE SPC: История замеров по конкретному VIN (для модалки)           */
+/* ====================================================================== */
+
 app.get('/api/voltage-spc-vin-history', async (req, res) => {
   try {
     const { vin } = req.query;
-    if (!vin) return res.status(400).json({ error: 'vin обязателен' });
+    if (!vin) {
+      return res.status(400).json({ error: 'Параметр vin обязателен' });
+    }
 
     const [rows] = await pool.query(`
       SELECT 
