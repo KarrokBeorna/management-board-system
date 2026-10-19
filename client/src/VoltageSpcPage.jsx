@@ -118,7 +118,7 @@ export default function VoltageSpcPage() {
   // Сгруппированные колонки
   const columns = [
     // Группа 1: Автомобиль
-    { key: 'VIN',             label: 'VIN',               filterable: true,  width: 180, mono: true },
+    { key: 'VIN',             label: 'VIN c NG',               filterable: true,  width: 180, mono: true },
     { key: 'MODEL',           label: 'Модель',            filterable: true,  width: 110 },
     
     // Группа 2: Текущий NOK (подсветка красным)
