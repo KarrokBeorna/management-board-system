@@ -345,8 +345,9 @@ export default function DrrReportPage() {
   };
 
   const handleMappingImport = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = ''; // чтобы можно было загрузить тот же файл повторно
 
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -356,33 +357,112 @@ export default function DrrReportPage() {
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
-        const json = XLSX.utils.sheet_to_json(sheet);
+        const json = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
 
-        const shopMap = {
-          'BODY': 'BS',
-          'ASSEMBLY': 'AS',
-          'PAINT': 'PS',
-          'BS': 'BS',
-          'AS': 'AS',
-          'PS': 'PS',
-          'СБОРКА': 'AS',
-          'СВАРКА': 'BS',
-          'ОКРАСКА': 'PS',
+        if (!json.length) {
+          alert('Файл пуст или не содержит строк');
+          return;
+        }
+
+        // Диагностика — открой консоль браузера, увидишь реальные колонки
+        const headers = Object.keys(json[0] || {});
+        console.log('📋 Колонки файла:', headers);
+        console.log('📋 Первая строка:', json[0]);
+
+        // Нормализация: убираем BOM, пробелы, регистр, разделители
+        const norm = (s) =>
+          String(s ?? '')
+            .replace(/^\uFEFF/, '')
+            .trim()
+            .toLowerCase()
+            .replace(/[\s_\-]+/g, '');
+
+        const findHeader = (aliases) => {
+          for (const h of headers) {
+            if (aliases.includes(norm(h))) return h;
+          }
+          return null;
         };
 
-        const mappings = json.map(row => {
-          const rawShop = String(row.shop || row['Цех'] || '').trim().toUpperCase();
-          const mappedShop = shopMap[rawShop] || null;
+        const partKey = findHeader([
+          'partdefect', 'partname', 'part', 'part_name', 'partn',
+          'деталь', 'наименованиедетали', 'названиедетали', 'наименование',
+        ]);
+        const defectKey = findHeader([
+          'defecttype', 'defect_type', 'type', 'defect',
+          'problemtype', 'problem_type', 'defectname',
+          'тип', 'типдефекта', 'названиедефекта', 'дефект',
+        ]);
+        const shopKey = findHeader([
+          'shop', 'workshop', 'цех', 'workshopname', 'подразделение',
+        ]);
 
-          return {
-            part_name: String(row.part_name || row['PartDefect'] || '').trim(),
-            defect_type: String(row.defect_type || row['Тип'] || '').trim(),
+        if (!partKey || !defectKey || !shopKey) {
+          alert(
+            'Не найдены нужные колонки.\n\n' +
+            'В файле есть: ' + headers.join(', ') + '\n\n' +
+            'Ожидаются:\n' +
+            '• Деталь: PartDefect / part_name / Деталь\n' +
+            '• Дефект: defect_type / Тип / PROBLEM_TYPE\n' +
+            '• Цех: shop / Цех / Workshop'
+          );
+          return;
+        }
+
+        // Поддержка распространённых вариаций цехов
+        const shopMap = {
+          // EN
+          'body': 'BS', 'bodyshop': 'BS',
+          'assembly': 'AS', 'assemblyshop': 'AS',
+          'paint': 'PS', 'paintshop': 'PS',
+          'bs': 'BS', 'as': 'AS', 'ps': 'PS',
+          // RU
+          'сборка': 'AS', 'сборочный': 'AS', 'цехсборки': 'AS',
+          'сварка': 'BS', 'сварочный': 'BS', 'цехсварки': 'BS',
+          'окраска': 'PS', 'окрасочный': 'PS', 'цехокраски': 'PS',
+        };
+
+        const skipped = [];
+        const mappings = [];
+
+        json.forEach((row, i) => {
+          const rawPart = String(row[partKey] ?? '').trim();
+          const rawDefect = String(row[defectKey] ?? '').trim();
+          const rawShop = String(row[shopKey] ?? '').trim();
+          const mappedShop = shopMap[norm(rawShop)] || null;
+
+          if (!rawPart || !rawDefect || !mappedShop) {
+            // пустые строки не считаем «пропущенными»
+            if (rawPart || rawDefect || rawShop) {
+              skipped.push({
+                row: i + 2, // +2 = номер строки в Excel (1-заголовки)
+                part: rawPart,
+                defect: rawDefect,
+                shop: rawShop,
+                reason: !mappedShop ? `цех "${rawShop}" не распознан` : 'пустое поле',
+              });
+            }
+            return;
+          }
+
+          mappings.push({
+            part_name: rawPart,
+            defect_type: rawDefect,
             shop: mappedShop,
-          };
-        }).filter(m => m.part_name && m.defect_type && m.shop);
+          });
+        });
+
+        console.log('✅ К отправке:', mappings.length);
+        console.log('⚠️ Пропущено:', skipped.length);
+        if (skipped.length) console.table(skipped.slice(0, 20));
 
         if (!mappings.length) {
-          alert('Не найдены данные. Проверьте колонки и значения цехов (BODY, ASSEMBLY, PAINT)');
+          alert(
+            'Ни одна строка не распознана.\n\n' +
+            'Первая строка файла:\n' + JSON.stringify(json[0], null, 2) + '\n\n' +
+            'Цех должен быть: AS / BODY / ASSEMBLY / СБОРКА, BS / СВАРКА, PS / PAINT / ОКРАСКА.\n' +
+            'Точные причины — в консоли (F12).'
+          );
           return;
         }
 
@@ -392,14 +472,23 @@ export default function DrrReportPage() {
           body: JSON.stringify({ mappings }),
         });
 
-        if (res.ok) {
-          alert(`Загружено ${mappings.length} записей`);
-          loadDrrByShop();
-        } else {
-          alert('Ошибка загрузки');
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status}: ${text}`);
         }
+
+        const result = await res.json();
+        let msg = `✅ Загружено ${mappings.length} записей`;
+        if (skipped.length) {
+          msg += `\n⚠️ Пропущено ${skipped.length}:\n` +
+            skipped.slice(0, 5).map(s => `• стр.${s.row}: ${s.reason}`).join('\n');
+          if (skipped.length > 5) msg += `\n… и ещё ${skipped.length - 5}`;
+        }
+        alert(msg);
+        loadDrrByShop();
       } catch (err) {
-        alert('Ошибка: ' + err.message);
+        console.error(err);
+        alert('Ошибка импорта: ' + err.message);
       } finally {
         setImportingMapping(false);
       }
