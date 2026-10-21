@@ -222,12 +222,6 @@ const getPlannedDate = () => {
   return now;
 };
 
-/**
- * Агрегация причины холда:
- *   "…- по запросу X"  -> "…"
- *   "…-по запросу X"   -> "…"
- *   "… по запросу X"   -> "…"
- */
 const aggregateReason = (desc) => {
   if (!desc) return '';
   const match = desc.match(/\s*-?\s*по\s+запросу/i);
@@ -235,6 +229,33 @@ const aggregateReason = (desc) => {
     return desc.substring(0, match.index).trim();
   }
   return desc.trim();
+};
+
+// Функция склонения
+const pluralize = (n, one, few, many) => {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+  return many;
+};
+
+// Группировка VIN'ов для текстового отчета
+const formatVinsGroup = (vins, viewType) => {
+  if (!vins || !vins.length) return 'нет';
+  const groups = {};
+  vins.forEach(v => {
+    const reason = viewType === 'aggregated' ? aggregateReason(v.issue_desc) : v.issue_desc;
+    const key = `${v.model}_|_${reason}`;
+    if (!groups[key]) {
+      groups[key] = { model: v.model, reason, count: 0, vins: new Set() };
+    }
+    groups[key].vins.add(v.vin);
+  });
+
+  return Object.values(groups)
+    .map(g => `${g.vins.size} ${g.model} (${g.reason})`)
+    .join(', ');
 };
 
 // ====== КАСКАДНАЯ ДИАГРАММА ИЗМЕНЕНИЯ КОЛ-ВА ЗАХОЛДИРОВАННЫХ МАШИН ======
@@ -435,6 +456,10 @@ export default function HoldsSgpPage() {
   const [retroDates, setRetroDates] = useState([]);
   const [analyticsView, setAnalyticsView] = useState('batch'); // 'batch' | 'aggregated'
 
+  // Сводка (текстовый отчет)
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryData, setSummaryData] = useState(null);
+
   // Модалка VIN
   const [showVinModal, setShowVinModal] = useState(false);
   const [vinModalTitle, setVinModalTitle] = useState('');
@@ -486,6 +511,9 @@ export default function HoldsSgpPage() {
 
   const loadRetrospective = async () => {
     setRetroLoading(true);
+    setSummaryLoading(true);
+    setSummaryData(null);
+
     try {
       const dates = generateDates();
       setRetroDates(dates);
@@ -511,12 +539,54 @@ export default function HoldsSgpPage() {
         setRetroData(json.rows || []);
         setUniqueVinsByDate(json.uniqueVinsByDate || {});
       }
+
+      // ====== Загрузка данных для текстовой сводки ======
+      const lastDate = dates[dates.length - 1];
+      const prevDate = dates[dates.length - 2];
+      
+      const [todayRes, yesterdayRes] = await Promise.all([
+        fetch(`${API_BASE}/api/holds-sgp-retrospective-all-vins?date=${lastDate}&${params.toString()}`),
+        fetch(`${API_BASE}/api/holds-sgp-retrospective-all-vins?date=${prevDate}&${params.toString()}`)
+      ]);
+
+      if (todayRes.ok && yesterdayRes.ok) {
+        const todayVins = await todayRes.json();
+        const yesterdayVins = await yesterdayRes.json();
+
+        // Уникальные VIN'ы (одна машина может быть в нескольких холдах)
+        const todayMap = new Map();
+        todayVins.forEach(v => todayMap.set(v.vin, v));
+
+        const yesterdayMap = new Map();
+        yesterdayVins.forEach(v => yesterdayMap.set(v.vin, v));
+
+        // Вычисляем добавленные и снятые
+        const addedVins = [];
+        const removedVins = [];
+
+        todayMap.forEach((v, vin) => {
+          if (!yesterdayMap.has(vin)) addedVins.push(v);
+        });
+
+        yesterdayMap.forEach((v, vin) => {
+          if (!todayMap.has(vin)) removedVins.push(v);
+        });
+
+        setSummaryData({
+          addedVins,
+          removedVins,
+          currentCount: todayMap.size,
+          change: todayMap.size - yesterdayMap.size,
+          prevDate,
+        });
+      }
     } catch (err) {
       console.error('Ошибка ретроспективы:', err);
       setRetroData([]);
       setUniqueVinsByDate({});
     } finally {
       setRetroLoading(false);
+      setSummaryLoading(false);
     }
   };
 
@@ -532,7 +602,6 @@ export default function HoldsSgpPage() {
   }, [activeTab]);
 
   // ====== Загрузка VIN в модалку ======
-  // opts.reason — если передан, значит запрос идёт по агрегированной причине
   const handleVinClick = async (model, label, date, opts = {}) => {
     const { reason } = opts;
     setVinLoading(true);
@@ -695,7 +764,6 @@ export default function HoldsSgpPage() {
   const handleExport = async () => {
     const data = reportView === 'batch' ? filteredData : filteredDataAggregated;
 
-    // ====== Лист 1: основная таблица (10 колонок, как в эталоне) ======
     const exportData = data.map(d => ({
       'Модель': d.model,
       'Описание': d.issue_desc,
@@ -729,19 +797,11 @@ export default function HoldsSgpPage() {
       reportView === 'batch' ? 'Холды по батчам' : 'Агрегированные холды';
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
     ws['!cols'] = [
-      { wch: 20 }, // Модель
-      { wch: 70 }, // Описание
-      { wch: 12 }, // Количество
-      { wch: 22 }, // Дата постановки на Холд
-      { wch: 14 }, // Дней ожидания
-      { wch: 16 }, // Ответственный
-      { wch: 12 }, // Действия
-      { wch: 14 }, // Плановая дата
-      { wch: 14 }, // Статус
-      { wch: 22 }, // Комментарий
+      { wch: 20 }, { wch: 70 }, { wch: 12 }, { wch: 22 },
+      { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 14 },
+      { wch: 14 }, { wch: 22 },
     ];
 
-    // ====== Лист 2: VIN список ======
     try {
       const params = new URLSearchParams();
       if (selectedModels.length > 0 && selectedModels.length < allModels.length) {
@@ -754,8 +814,6 @@ export default function HoldsSgpPage() {
 
       if (res.ok) {
         const allVins = await res.json();
-
-        // Причина холда — ВСЕГДА исходная, как в БД
         const vinsSheetData = allVins.map(r => ({
           'VIN': r.vin,
           'Модель': r.model,
@@ -767,22 +825,15 @@ export default function HoldsSgpPage() {
 
         const ws2 = XLSX.utils.json_to_sheet(vinsSheetData);
         ws2['!cols'] = [
-          { wch: 22 }, // VIN
-          { wch: 14 }, // Модель
-          { wch: 70 }, // Причина холда
-          { wch: 14 }, // Статус
-          { wch: 18 }, // Дата постановки
-          { wch: 16 }, // Ответственный
+          { wch: 22 }, { wch: 14 }, { wch: 70 },
+          { wch: 14 }, { wch: 18 }, { wch: 16 },
         ];
         XLSX.utils.book_append_sheet(wb, ws2, 'VIN список');
-      } else {
-        console.warn('Не удалось загрузить VIN для второго листа');
       }
     } catch (err) {
       console.error('Ошибка выгрузки VIN списка:', err);
     }
 
-    // ====== Имя файла ======
     const now = new Date();
     const months = [
       'January', 'February', 'March', 'April', 'May', 'June',
@@ -801,7 +852,6 @@ export default function HoldsSgpPage() {
     const data = analyticsView === 'batch' ? retroData : retroDataAggregated;
     if (!data.length || !retroDates.length) return;
 
-    // ====== Лист 1: матрица ретроспективы ======
     const exportData = [];
 
     const reasonsRow = { 'Модель': 'К-во причин холдов', 'Описание': '' };
@@ -847,7 +897,6 @@ export default function HoldsSgpPage() {
       ...retroDates.map(() => ({ wch: 8 })),
     ];
 
-    // ====== Лист 2: все VIN на последний день с причинами и расположением ======
     try {
       const lastDate = retroDates[retroDates.length - 1];
       const params = new URLSearchParams({ date: lastDate });
@@ -876,8 +925,6 @@ export default function HoldsSgpPage() {
           'Текущее расположение': r.location || '',
         }));
 
-        // В агрегированном режиме один VIN мог дать несколько строк
-        // с одинаковой агрегированной причиной — схлопнём дубли
         const finalVinsData =
           analyticsView === 'aggregated'
             ? Object.values(
@@ -898,8 +945,6 @@ export default function HoldsSgpPage() {
           { wch: 24 },
         ];
         XLSX.utils.book_append_sheet(wb, ws2, 'VIN и причины холдов');
-      } else {
-        console.warn('Не удалось загрузить VIN для второго листа');
       }
     } catch (err) {
       console.error('Ошибка выгрузки VIN во второй лист:', err);
@@ -929,7 +974,6 @@ export default function HoldsSgpPage() {
     );
   }
 
-  // Стиль ячейки футера ретроспективы
   const footerCellStyle = {
     ...tdStyle,
     fontWeight: 800,
@@ -1588,8 +1632,6 @@ export default function HoldsSgpPage() {
                                         date,
                                       );
                                     } else {
-                                      // В агрегированном режиме row.issue_desc —
-                                      // это уже агрегированная причина
                                       handleVinClick(
                                         row.model,
                                         row.issue_desc,
@@ -1620,7 +1662,6 @@ export default function HoldsSgpPage() {
                         boxShadow: '0 -4px 6px -2px rgba(0,0,0,0.05)',
                       }}
                     >
-                      {/* К-во причин холдов */}
                       <tr>
                         <td
                           style={{
@@ -1662,7 +1703,6 @@ export default function HoldsSgpPage() {
                         })}
                       </tr>
 
-                      {/* К-во захолдированных машин */}
                       <tr>
                         <td
                           style={{
@@ -1696,7 +1736,6 @@ export default function HoldsSgpPage() {
                         ))}
                       </tr>
 
-                      {/* Изменение к прошлому дню, шт. */}
                       <tr>
                         <td
                           style={{
@@ -1716,7 +1755,6 @@ export default function HoldsSgpPage() {
                         />
                         {retroDates.map(date => {
                           const v = dailyChange[date] || 0;
-                          // Рост = красный, снижение = зелёный
                           const color =
                             v > 0
                               ? '#EF4444'
@@ -1776,6 +1814,85 @@ export default function HoldsSgpPage() {
                     values={retroDates.map(d => dailyChange[d] || 0)}
                     baseline={baselineUniqueVins}
                   />
+                </div>
+
+                {/* Текстовый отчет под графиком */}
+                <div
+                  style={{
+                    marginTop: 24,
+                    padding: 20,
+                    backgroundColor: '#F9FAFB',
+                    borderRadius: 12,
+                    border: '1px solid #E5E7EB',
+                    fontSize: 14,
+                    lineHeight: 1.6,
+                    color: '#1F2937',
+                  }}
+                >
+                  {summaryLoading ? (
+                    <div style={{ color: '#6B7280', fontStyle: 'italic' }}>
+                      Формирование отчета...
+                    </div>
+                  ) : summaryData ? (
+                    <>
+                      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>
+                        Отчет по заблокированным автомобилям на СГП, состояние на{' '}
+                        {new Date().toLocaleTimeString('ru-RU')}.
+                      </div>
+                      <ul style={{ paddingLeft: 20, margin: 0 }}>
+                        <li>
+                          Количество авто на hold –{' '}
+                          <span style={{ fontWeight: 700 }}>{summaryData.currentCount}</span>{' '}
+                          {pluralize(summaryData.currentCount, 'шт', 'шт', 'шт')}.
+                        </li>
+                        <li>
+                          Изменения по сравнению с{' '}
+                          <span style={{ fontWeight: 600 }}>
+                            {formatDate(summaryData.prevDate)}
+                          </span>
+                          :
+                          <ul style={{ paddingLeft: 20, marginTop: 6, marginBottom: 6 }}>
+                            <li>
+                              Количество заблокированных автомобилей{' '}
+                              {summaryData.change > 0 ? (
+                                <span style={{ color: '#EF4444', fontWeight: 700 }}>
+                                  увеличилось
+                                </span>
+                              ) : summaryData.change < 0 ? (
+                                <span style={{ color: '#10B981', fontWeight: 700 }}>
+                                  уменьшилось
+                                </span>
+                              ) : (
+                                'не изменилось'
+                              )}{' '}
+                              {summaryData.change !== 0 && (
+                                <>
+                                  на <span style={{ fontWeight: 700 }}>{Math.abs(summaryData.change)}</span>{' '}
+                                  {pluralize(Math.abs(summaryData.change), 'шт', 'шт', 'шт')}
+                                </>
+                              )}
+                            </li>
+                            <li>
+                              Добавлено на холд{' '}
+                              <span style={{ fontWeight: 700 }}>{summaryData.addedVins.length}</span>{' '}
+                              авто:{' '}
+                              {formatVinsGroup(summaryData.addedVins, analyticsView)}
+                            </li>
+                            <li>
+                              Снято с холда{' '}
+                              <span style={{ fontWeight: 700 }}>{summaryData.removedVins.length}</span>{' '}
+                              авто:{' '}
+                              {formatVinsGroup(summaryData.removedVins, analyticsView)}
+                            </li>
+                          </ul>
+                        </li>
+                      </ul>
+                    </>
+                  ) : (
+                    <div style={{ color: '#6B7280', fontStyle: 'italic' }}>
+                      Нет данных для формирования отчета.
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
