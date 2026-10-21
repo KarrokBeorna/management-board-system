@@ -8,6 +8,9 @@ const getTodayStr = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+const getTodayStart = () => `${getTodayStr()}T00:00`;
+const getTodayEnd = () => `${getTodayStr()}T23:59`;
+
 /* ===================== СТИЛИ ===================== */
 const cardStyle = {
   backgroundColor: '#FFFFFF',
@@ -102,10 +105,13 @@ export default function VoltageSpcPage() {
   const [filters, setFilters] = useState({});
   const [vinSearch, setVinSearch] = useState('');
   
+  // Фильтры по датам
+  const [useMeasureDate, setUseMeasureDate] = useState(false); // По умолчанию выключен
   const [dateFrom, setDateFrom] = useState(getTodayStr());
   const [dateTo, setDateTo]     = useState(getTodayStr());
-  const [cp8DateFrom, setCp8DateFrom] = useState(getTodayStr());
-  const [cp8DateTo, setCp8DateTo]     = useState(getTodayStr());
+  
+  const [cp8Start, setCp8Start] = useState(getTodayStart());
+  const [cp8End, setCp8End]     = useState(getTodayEnd());
 
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, left: 0 });
@@ -115,26 +121,17 @@ export default function VoltageSpcPage() {
   const [modalData, setModalData] = useState([]);
   const [modalLoading, setModalLoading] = useState(false);
 
-  // Сгруппированные колонки
   const columns = [
-    // Группа 1: Автомобиль
     { key: 'VIN',             label: 'VIN',               filterable: true,  width: 180, mono: true },
     { key: 'MODEL',           label: 'Модель',            filterable: true,  width: 110 },
-    
-    // Группа 2: Текущий NOK (подсветка красным)
-    { key: 'VOLTAGE',         label: 'Voltage (>= 13)',   filterable: false, width: 110, groupColor: '#FEF2F2' },
+    { key: 'VOLTAGE',         label: 'Voltage (NG)',      filterable: false, width: 110, groupColor: '#FEF2F2' },
     { key: 'MEASURE_DATE',    label: 'Дата NOK замера',   filterable: false, isTime: true, width: 140, groupColor: '#FEF2F2' },
-    
-    // Группа 3: Последний OK (подсветка зеленым)
     { key: 'LAST_OK_VOLTAGE', label: 'Volt посл. OK',     filterable: false, width: 110, groupColor: '#F0FDF4' },
     { key: 'LAST_OK_DATE',    label: 'Дата посл. OK',     filterable: false, isTime: true, width: 140, groupColor: '#F0FDF4' },
-    
-    // Группа 4: События
     { key: 'TEN_MIN_NG',      label: '10 min NG',         filterable: true,  width: 90, align: 'center' },
     { key: 'CP8_DATE',        label: 'Дата CP8',          filterable: false, isTime: true, width: 140 },
   ];
 
-  // Блокировка фона при открытой модалке
   useEffect(() => {
     if (modalOpen) {
       const prev = document.body.style.overflow;
@@ -168,10 +165,16 @@ export default function VoltageSpcPage() {
     try {
       const params = new URLSearchParams();
       if (vinSearch.trim()) params.append('vin', vinSearch.trim());
-      if (dateFrom) params.append('dateFrom', dateFrom);
-      if (dateTo)   params.append('dateTo',   dateTo);
-      if (cp8DateFrom) params.append('cp8DateFrom', cp8DateFrom);
-      if (cp8DateTo)   params.append('cp8DateTo',   cp8DateTo);
+      
+      // Передаем даты замера, только если включен чекбокс
+      if (useMeasureDate) {
+        if (dateFrom) params.append('dateFrom', dateFrom);
+        if (dateTo)   params.append('dateTo',   dateTo);
+      }
+      
+      // Даты CP8 передаем всегда
+      if (cp8Start) params.append('cp8Start', cp8Start);
+      if (cp8End)   params.append('cp8End',   cp8End);
 
       const res = await fetch(`${API_BASE}/api/voltage-spc?${params.toString()}`);
       if (!res.ok) throw new Error(`Ошибка загрузки (${res.status})`);
@@ -187,8 +190,8 @@ export default function VoltageSpcPage() {
     }
   };
 
-  // Автозагрузка при смене любых дат
-  useEffect(() => { loadData(); }, [dateFrom, dateTo, cp8DateFrom, cp8DateTo]);
+  // Автозагрузка при смене дат или чекбокса
+  useEffect(() => { loadData(); }, [useMeasureDate, dateFrom, dateTo, cp8Start, cp8End]);
 
   const openVinHistory = async (vin) => {
     setModalVin(vin);
@@ -248,10 +251,11 @@ export default function VoltageSpcPage() {
   const clearAll = () => {
     setFilters({});
     setVinSearch('');
+    setUseMeasureDate(false);
     setDateFrom(getTodayStr());
     setDateTo(getTodayStr());
-    setCp8DateFrom(getTodayStr());
-    setCp8DateTo(getTodayStr());
+    setCp8Start(getTodayStart());
+    setCp8End(getTodayEnd());
     setActiveFilterColumn(null);
     setTimeout(loadData, 0);
   };
@@ -278,12 +282,22 @@ export default function VoltageSpcPage() {
 
   useEffect(() => { setPage(0); }, [filters, vinSearch]);
 
+  /* ===================== KPI (Метрики) ===================== */
+  const kpi = useMemo(() => {
+    const uniqueVins = new Set(filtered.map(d => d.VIN)).size;
+    const cp8Vins = filtered.filter(d => d.CP8_DATE).length;
+    const nokVoltage = filtered.filter(d => d.VOLTAGE !== null).length;
+    const tenMinNg = filtered.filter(d => d.TEN_MIN_NG === '-').length;
+
+    return { uniqueVins, cp8Vins, nokVoltage, tenMinNg };
+  }, [filtered]);
+
   const exportExcel = () => {
     if (!filtered.length) return;
     const rows = filtered.map(d => ({
       'VIN': d.VIN,
       'Модель': d.MODEL || '—',
-      'Voltage (NOK)': d.VOLTAGE || '—',
+      'Voltage (NG)': d.VOLTAGE || '—',
       'Дата NOK замера': d.MEASURE_DATE ? formatDateTime(d.MEASURE_DATE) : '—',
       'Volt посл. OK': d.LAST_OK_VOLTAGE || '—',
       'Дата посл. OK': d.LAST_OK_DATE ? formatDateTime(d.LAST_OK_DATE) : '—',
@@ -312,7 +326,6 @@ export default function VoltageSpcPage() {
     fontSize: 13, verticalAlign: 'top',
   };
 
-  // Ключи, после которых нужно нарисовать толстую границу (конец группы)
   const groupEndKeys = ['MODEL', 'MEASURE_DATE', 'LAST_OK_DATE'];
 
   return (
@@ -321,10 +334,30 @@ export default function VoltageSpcPage() {
         ⚡ Voltage SPC Report
       </h1>
 
+      {/* KPI Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+        <div style={{ ...cardStyle, padding: 20, marginBottom: 0, borderTop: '4px solid #3B82F6' }}>
+          <div style={{ fontSize: 13, color: '#6B7280', fontWeight: 600, textTransform: 'uppercase' }}>Всего VIN</div>
+          <div style={{ fontSize: 32, fontWeight: 800, color: '#111827', marginTop: 8 }}>{kpi.uniqueVins}</div>
+        </div>
+        <div style={{ ...cardStyle, padding: 20, marginBottom: 0, borderTop: '4px solid #8B5CF6' }}>
+          <div style={{ fontSize: 13, color: '#6B7280', fontWeight: 600, textTransform: 'uppercase' }}>Прошли CP8</div>
+          <div style={{ fontSize: 32, fontWeight: 800, color: '#111827', marginTop: 8 }}>{kpi.cp8Vins}</div>
+        </div>
+        <div style={{ ...cardStyle, padding: 20, marginBottom: 0, borderTop: '4px solid #EF4444' }}>
+          <div style={{ fontSize: 13, color: '#6B7280', fontWeight: 600, textTransform: 'uppercase' }}>NG по вольтажу</div>
+          <div style={{ fontSize: 32, fontWeight: 800, color: '#111827', marginTop: 8 }}>{kpi.nokVoltage}</div>
+        </div>
+        <div style={{ ...cardStyle, padding: 20, marginBottom: 0, borderTop: '4px solid #F59E0B' }}>
+          <div style={{ fontSize: 13, color: '#6B7280', fontWeight: 600, textTransform: 'uppercase' }}>10 min NG</div>
+          <div style={{ fontSize: 32, fontWeight: 800, color: '#111827', marginTop: 8 }}>{kpi.tenMinNg}</div>
+        </div>
+      </div>
+
       <div style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
           <h2 style={{ fontSize: 20, fontWeight: 700, color: '#1F2937', margin: 0 }}>
-            Замеры напряжения и прошедшие CP8
+            Детализация
           </h2>
           <div style={{ display: 'flex', gap: 8 }}>
             <button style={{ ...buttonStyle, background: '#059669' }} onClick={exportExcel}>📊 Excel</button>
@@ -332,54 +365,51 @@ export default function VoltageSpcPage() {
           </div>
         </div>
 
-        {/* БЛОК ФИЛЬТРОВ */}
-        <div style={{ marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* ================= БЛОК ФИЛЬТРОВ ================= */}
+        <div style={{ marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 12, background: '#F9FAFB', padding: 16, borderRadius: 12, border: '1px solid #E5E7EB' }}>
           
-          {/* Ряд 1: Дата замера + VIN */}
+          {/* Ряд 1: Фильтры по датам */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#F0FDF4', padding: '6px 12px', borderRadius: 8, border: '1px solid #DCFCE7' }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#166534', width: 115, display: 'inline-block' }}>
+            
+            {/* Фильтр Дата замера (по умолчанию выключен) */}
+            <div style={{ 
+              display: 'flex', alignItems: 'center', gap: 8, 
+              opacity: useMeasureDate ? 1 : 0.5, 
+              transition: 'opacity 0.2s',
+              background: useMeasureDate ? '#F0FDF4' : 'transparent',
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: `1px solid ${useMeasureDate ? '#DCFCE7' : 'transparent'}`
+            }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#166534', width: 135 }}>
+                <input 
+                  type="checkbox" 
+                  checked={useMeasureDate} 
+                  onChange={(e) => setUseMeasureDate(e.target.checked)}
+                  style={{ width: 16, height: 16, cursor: 'pointer' }}
+                />
                 📅 Дата замера:
-              </span>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
-                <span>С</span>
-                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...inputStyle, width: 125, padding: '6px 8px' }} />
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
-                <span>По</span>
-                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...inputStyle, width: 125, padding: '6px 8px' }} />
-              </label>
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} disabled={!useMeasureDate} style={{ ...inputStyle, width: 125, padding: '6px 8px' }} />
+              <span style={{ fontSize: 13, color: '#6B7280' }}>—</span>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} disabled={!useMeasureDate} style={{ ...inputStyle, width: 125, padding: '6px 8px' }} />
             </div>
-            
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
-              🔍 VIN: <input type="text" value={vinSearch} onChange={(e) => setVinSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && loadData()} placeholder="Введите VIN..." style={{ ...inputStyle, width: 200, padding: '6px 12px' }} />
-            </label>
-            
-            <button style={buttonStyle} onClick={loadData}>Применить</button>
+
+            {/* Фильтр Дата CP8 (всегда активен, с часами и минутами) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#EFF6FF', padding: '6px 12px', borderRadius: 8, border: '1px solid #DBEAFE' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#1E40AF', width: 90 }}>🏁 Дата CP8:</span>
+              <input type="datetime-local" value={cp8Start} onChange={(e) => setCp8Start(e.target.value)} style={{ ...inputStyle, width: 165, padding: '6px 8px' }} />
+              <span style={{ fontSize: 13, color: '#6B7280' }}>—</span>
+              <input type="datetime-local" value={cp8End} onChange={(e) => setCp8End(e.target.value)} style={{ ...inputStyle, width: 165, padding: '6px 8px' }} />
+            </div>
           </div>
 
-          {/* Ряд 2: Дата CP8 */}
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#EFF6FF', padding: '6px 12px', borderRadius: 8, border: '1px solid #DBEAFE' }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#1E40AF', width: 115, display: 'inline-block' }}>
-                🏁 Дата CP8:
-              </span>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
-                <span>С</span>
-                <input type="date" value={cp8DateFrom} onChange={(e) => setCp8DateFrom(e.target.value)} style={{ ...inputStyle, width: 125, padding: '6px 8px' }} />
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: '#4B5563' }}>
-                <span>По</span>
-                <input type="date" value={cp8DateTo} onChange={(e) => setCp8DateTo(e.target.value)} style={{ ...inputStyle, width: 125, padding: '6px 8px' }} />
-              </label>
-              {(cp8DateFrom || cp8DateTo) && (
-                <button
-                  onClick={() => { setCp8DateFrom(''); setCp8DateTo(''); }}
-                  style={{ background: 'transparent', border: 'none', color: '#3B82F6', fontSize: 12, fontWeight: 600, cursor: 'pointer', marginLeft: 8 }}>
-                  Сбросить
-                </button>
-              )}
-            </div>
+          {/* Ряд 2: Поиск по VIN */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500, flex: 1, maxWidth: 400 }}>
+              🔍 VIN: <input type="text" value={vinSearch} onChange={(e) => setVinSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && loadData()} placeholder="Введите VIN..." style={{ ...inputStyle, width: '100%', padding: '8px 12px' }} />
+            </label>
+            <button style={buttonStyle} onClick={loadData}>Применить</button>
           </div>
         </div>
 
@@ -392,7 +422,7 @@ export default function VoltageSpcPage() {
           <div style={{ textAlign: 'center', padding: 40, color: '#DC2626' }}>❌ {error}</div>
         ) : (
           <>
-            <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 400px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
+            <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 450px)', borderRadius: 8, border: '1px solid #E5E7EB' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 1100 }}>
                 <thead>
                   <tr>
@@ -422,7 +452,6 @@ export default function VoltageSpcPage() {
                         onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
                         onMouseLeave={e => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'}>
                       
-                      {/* Блок 1: Идентификация */}
                       <td style={{...tdStyle, fontFamily: 'monospace', fontWeight: 600}}>
                         <span style={{ color: '#2563EB', cursor: 'pointer', textDecoration: 'underline' }}
                               onClick={() => openVinHistory(row.VIN)}>
@@ -431,7 +460,6 @@ export default function VoltageSpcPage() {
                       </td>
                       <td style={{ ...tdStyle, borderRight: '3px solid #E5E7EB' }}>{row.MODEL || '—'}</td>
 
-                      {/* Блок 2: Текущий NOK замер */}
                       <td style={{ ...tdStyle, fontWeight: 700, color: '#DC2626', background: 'rgba(254, 242, 242, 0.4)' }}>
                         {row.VOLTAGE || '—'}
                       </td>
@@ -439,7 +467,6 @@ export default function VoltageSpcPage() {
                         {formatDateTime(row.MEASURE_DATE)}
                       </td>
 
-                      {/* Блок 3: Последний OK замер */}
                       <td style={{ ...tdStyle, fontWeight: 600, color: '#059669', background: 'rgba(240, 253, 244, 0.4)' }}>
                         {row.LAST_OK_VOLTAGE || '—'}
                       </td>
@@ -447,7 +474,6 @@ export default function VoltageSpcPage() {
                         {formatDateTime(row.LAST_OK_DATE)}
                       </td>
 
-                      {/* Блок 4: События */}
                       <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: 16, color: row.TEN_MIN_NG === '+' ? '#059669' : '#DC2626' }}>
                         {row.TEN_MIN_NG}
                       </td>
@@ -462,7 +488,7 @@ export default function VoltageSpcPage() {
 
             {filtered.length > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
-                <span style={{ fontSize: 14, color: '#6B7280' }}>Всего: {filtered.length}</span>
+                <span style={{ fontSize: 14, color: '#6B7280' }}>Всего строк: {filtered.length}</span>
                 {Math.ceil(filtered.length / pageSize) > 1 && (
                   <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
                     <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} style={{ ...buttonStyle, background: page === 0 ? '#CBD5E1' : '#9CA3AF' }}>← Назад</button>
@@ -530,7 +556,6 @@ export default function VoltageSpcPage() {
                   </thead>
                   <tbody>
                     {modalData.map((m, i) => {
-                      // Расчет результата: OK если > 12.6 и < 13
                       const isOk = m.VOLTAGE > 12.6 && m.VOLTAGE < 13;
                       return (
                         <tr key={i} style={{ borderBottom: '1px solid #F0F0F5', backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>

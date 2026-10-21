@@ -47,6 +47,18 @@ const inputStyle = {
   background: '#F9FAFB',
 };
 
+const textareaStyle = {
+  padding: '8px 12px',
+  borderRadius: 8,
+  border: '1px solid #D1D5DB',
+  fontSize: 14,
+  background: '#F9FAFB',
+  minHeight: '44px',
+  resize: 'vertical',
+  fontFamily: 'inherit',
+  lineHeight: '1.4',
+};
+
 const buttonStyle = {
   padding: '8px 20px',
   borderRadius: 8,
@@ -150,6 +162,15 @@ const loadingAnimation = `
   .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
   .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
 `;
+
+// Парсер списка VIN (разделяет по запятым, пробелам, переносам строк)
+const parseVinList = (input) => {
+  if (!input) return [];
+  return input
+    .split(/[\s,;\n\r]+/)
+    .map(v => v.trim())
+    .filter(v => v.length > 0);
+};
 
 export default function SgpAuditPage() {
   const navigate = useNavigate();
@@ -285,15 +306,12 @@ export default function SgpAuditPage() {
     return `${dd}.${mm} ${hh}:${min}`;
   };
 
-  const loadTimePoints = async (vin = '') => {
+  const loadTimePoints = async () => {
     setTimePointsLoading(true);
     setTimePointsError(null);
     try {
-      const params = new URLSearchParams();
-      if (vin && vin.trim()) {
-        params.append('vin', vin.trim());
-      }
-      const res = await fetch(`${API_BASE}/api/time-points?${params.toString()}`);
+      // Всегда грузим все данные для вкладки, фильтрация списков/неполных VIN идет локально
+      const res = await fetch(`${API_BASE}/api/time-points`);
       if (!res.ok) {
         const errorText = await res.text();
         console.error('Server error:', errorText);
@@ -366,9 +384,24 @@ export default function SgpAuditPage() {
   const filteredTimePointsData = useMemo(() => {
     let result = allTimePointsData;
 
+    // Фильтрация по списку VIN или неполному VIN (6 цифр)
     if (tpVinSearch.trim()) {
-      const vinFilter = tpVinSearch.trim().toLowerCase();
-      result = result.filter(d => d.vin && d.vin.toLowerCase().includes(vinFilter));
+      const searchTokens = parseVinList(tpVinSearch);
+      if (searchTokens.length > 0) {
+        result = result.filter(d => {
+          if (!d.vin) return false;
+          const upperVin = d.vin.toUpperCase();
+          return searchTokens.some(token => {
+            const upperToken = token.toUpperCase();
+            // Если ввели ровно 6 символов, ищем по окончанию
+            if (upperToken.length === 6) {
+              return upperVin.endsWith(upperToken);
+            }
+            // Иначе ищем вхождение (или полное совпадение)
+            return upperVin.includes(upperToken);
+          });
+        });
+      }
     }
 
     if (Array.isArray(tpFilters.vin) && tpFilters.vin.length > 0) {
@@ -875,14 +908,15 @@ export default function SgpAuditPage() {
   );
 
   const handleVinSearch = () => {
-    if (!vinSearch.trim()) {
+    const tokens = parseVinList(vinSearch);
+    if (tokens.length === 0) {
       setIsVinMode(false);
       return;
     }
     setIsVinMode(true);
     setStartDate(''); setEndDate('');
     setCpModel('ALL');
-    loadStorageByVin();
+    loadStorageByVin(tokens);
   };
 
   const handleVinReset = () => {
@@ -894,37 +928,49 @@ export default function SgpAuditPage() {
 
   const isFilterDisabled = isVinMode;
 
-  const loadStorageByVin = async () => {
+  const loadStorageByVin = async (tokens) => {
     setCpLoading(true);
     setCpError(null);
     try {
-      const vin = vinSearch.trim();
+      // Передаем весь список токенов (включая 6-значные) в бат-запросы
+      const storageMap = await fetchStorageLocations(tokens);
+      const modelsMap = await fetchModels(tokens);
+      const locMap = await fetchCurrentLocations(tokens);
 
-      const locRes = await fetch(`${API_BASE}/api/vehicles-current-location?vins=${encodeURIComponent(vin)}`);
-      const locArray = await locRes.json();
-      const loc = locArray.length > 0 ? locArray[0] : null;
+      const rowData = tokens.map(vin => {
+        const s = storageMap[vin] || {};
+        const modelFromMap = modelsMap[vin];
+        const modelFromStorage = s.Модель && s.Модель !== '-' ? s.Модель : '-';
+        
+        let displayLocation = '-';
+        const loc = locMap[vin];
+        if (loc) {
+          if (loc.isInStorage) displayLocation = 'На складе';
+          else if (loc.isSold) displayLocation = 'Продан';
+          else displayLocation = loc.checkpoint || '-';
+        }
 
-      const modelRes = await fetch(`${API_BASE}/api/vehicles-models?vins=${encodeURIComponent(vin)}`);
-      const modelMap = await modelRes.json();
-      const model = modelMap[vin] || '-';
+        return {
+          VIN: vin,
+          Модель: modelFromMap || modelFromStorage,
+          Склад: s.Склад || '-',
+          Локация: s.Локация || '-',
+          Ячейка: s.Ячейка || '-',
+          'Результат проверки': '',
+          'Текущее расположение': displayLocation // добавим сразу в объект
+        };
+      });
 
-      const storageRes = await fetch(`${API_BASE}/api/sgp-audit-storage?vin=${encodeURIComponent(vin)}`);
-      const storageData = await storageRes.json();
-      const storageRow = storageData && storageData.length > 0 ? storageData[0] : null;
+      const cleanedData = rowData.map(row => {
+        const newRow = { ...row };
+        Object.keys(newRow).forEach(key => {
+          if (newRow[key] === 'N/A') newRow[key] = '-';
+        });
+        return newRow;
+      });
 
-      const rowData = {
-        VIN: vin,
-        Модель: model,
-        Склад: storageRow?.Склад || '-',
-        Локация: storageRow?.Локация || '-',
-        Ячейка: storageRow?.Ячейка || '-',
-        'Результат проверки': '',
-      };
-
-      Object.keys(rowData).forEach(k => { if (rowData[k] === 'N/A') rowData[k] = '-'; });
-
-      setCpData([rowData]);
-      setCpLocations({ [vin]: loc });
+      setCpData(cleanedData);
+      setCpLocations(locMap);
     } catch (err) {
       setCpError(err.message);
     } finally {
@@ -1003,13 +1049,9 @@ export default function SgpAuditPage() {
     saveAs(new Blob([buf], { type: 'application/octet-stream' }), `${filename}.xlsx`);
   };
 
-  // ====== ИСПРАВЛЕННАЯ выгрузка в Excel ======
-  // Даты пишем как настоящие Date с форматом dd.mm.yyyy — Excel фильтрует по дате.
-  // Время — как Date с форматом hh:mm — фильтруется/сортируется как время.
   const exportTimePointsToExcel = () => {
     if (!filteredTimePointsData.length) return;
 
-    // Заголовки: для time-колонок — Дата + Время
     const headers = timePointColumns.flatMap(col =>
       col.isTime ? [`${col.label} Дата`, `${col.label} Время`] : [col.label]
     );
@@ -1024,12 +1066,10 @@ export default function SgpAuditPage() {
           const dt = raw ? new Date(raw) : null;
           const valid = dt && !isNaN(dt.getTime());
 
-          // Дата — тип 'd' + формат dd.mm.yyyy (в Excel — фильтруется как дата)
           line.push(valid
             ? { v: dt, t: 'd', z: 'dd.mm.yyyy' }
             : { v: '', t: 's' });
 
-          // Время — тип 'd' + формат hh:mm (в Excel — фильтруется как время/число)
           line.push(valid
             ? { v: dt, t: 'd', z: 'hh:mm' }
             : { v: '', t: 's' });
@@ -1041,10 +1081,7 @@ export default function SgpAuditPage() {
     });
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-    // Автоширина колонок
     ws['!cols'] = headers.map(h => ({ wch: Math.max(12, String(h).length + 2) }));
-
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Time Points');
 
@@ -1183,19 +1220,18 @@ export default function SgpAuditPage() {
             </div>
           </div>
 
-          <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+          <div style={{ marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
+            <label style={{ ...labelStyle, alignItems: 'flex-start', paddingTop: 10 }}>
               🔍 VIN:
-              <input
-                type="text"
+              <textarea
                 value={tpVinSearch}
                 onChange={(e) => setTpVinSearch(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') loadTimePoints(tpVinSearch); }}
-                placeholder="Введите VIN..."
-                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14, background: '#F9FAFB', width: 200 }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); loadTimePoints(); } }}
+                placeholder="Вставьте VIN (через запятую, пробел или с новой строки)..."
+                style={{ ...textareaStyle, width: 350 }}
               />
             </label>
-            <button style={buttonStyle} onClick={() => loadTimePoints(tpVinSearch)}>
+            <button style={{ ...buttonStyle, marginTop: 10 }} onClick={loadTimePoints}>
               Найти
             </button>
           </div>
@@ -1554,15 +1590,15 @@ export default function SgpAuditPage() {
       {activeTab === 'checkpoints' && (
         <>
           <div style={{ marginBottom: 24, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', border: '1px solid #F0F0F5' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563', fontWeight: 500 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <label style={{ ...labelStyle, alignItems: 'flex-start', paddingTop: 10 }}>
                 🔍 VIN:
-                <input
-                  type="text"
+                <textarea
                   value={vinSearch}
                   onChange={(e) => setVinSearch(e.target.value)}
-                  placeholder="Введите VIN..."
-                  style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: 14, background: '#F9FAFB', width: 200 }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleVinSearch(); } }}
+                  placeholder="Вставьте VIN (через запятую, пробел или с новой строки)..."
+                  style={{ ...textareaStyle, width: 350 }}
                   disabled={isVinMode && !vinSearch}
                 />
               </label>
@@ -1571,6 +1607,7 @@ export default function SgpAuditPage() {
                 disabled={!vinSearch.trim()}
                 style={{
                   ...buttonStyle,
+                  marginTop: 10,
                   opacity: vinSearch.trim() ? 1 : 0.6,
                   pointerEvents: vinSearch.trim() ? 'auto' : 'none',
                 }}
@@ -1580,7 +1617,7 @@ export default function SgpAuditPage() {
               {isVinMode && (
                 <button
                   onClick={handleVinReset}
-                  style={{ ...buttonStyle, background: '#9CA3AF' }}
+                  style={{ ...buttonStyle, background: '#9CA3AF', marginTop: 10 }}
                 >
                   ✕ Сбросить
                 </button>
@@ -1641,7 +1678,7 @@ export default function SgpAuditPage() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead>
                       <tr style={{ backgroundColor: '#F9FAFB' }}>
-                        {Object.keys(cpData[0]).map(h => <th key={h} style={thStyle}>{h}</th>)}
+                        {Object.keys(cpData[0]).filter(k => k !== 'Текущее расположение').map(h => <th key={h} style={thStyle}>{h}</th>)}
                         <th style={thStyle}>Текущее расположение</th>
                       </tr>
                     </thead>
@@ -1658,7 +1695,7 @@ export default function SgpAuditPage() {
                           <tr key={i} style={{ backgroundColor: i % 2 ? '#F9FAFB' : '#FFFFFF' }}
                             onMouseEnter={e => e.currentTarget.style.backgroundColor = '#EEF2FF'}
                             onMouseLeave={e => e.currentTarget.style.backgroundColor = i % 2 ? '#F9FAFB' : '#FFFFFF'}>
-                            {Object.keys(cpData[0]).map(key => (
+                            {Object.keys(cpData[0]).filter(k => k !== 'Текущее расположение').map(key => (
                               <td key={key} style={tdStyle}>
                                 {row[key] === 'N/A' ? '-' : (row[key] ?? '')}
                               </td>

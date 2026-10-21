@@ -3,6 +3,15 @@ import * as XLSX from 'xlsx';
 
 const API_BASE = '';
 
+// ====== ХЕЛПЕРЫ ======
+const parseVinList = (input) => {
+  if (!input) return [];
+  return input
+    .split(/[\s,;\n\r]+/)
+    .map(v => v.trim().toUpperCase())
+    .filter(v => v.length > 0);
+};
+
 // ====== СТИЛИ ======
 const containerStyle = {
   padding: 30,
@@ -306,7 +315,7 @@ export default function SgpManagementPage() {
     return rawData.filter(d => d.model === activeModel);
   }, [rawData, activeModel]);
 
-  // Применяем фильтры статусов и поиска по VIN
+  // Применяем фильтры статусов и поиска по VIN (обновлено для списков и 6 символов)
   const filteredByStatuses = useMemo(() => {
     let result = filteredByModel;
     if (blockStatusFilter.length > 0) {
@@ -319,8 +328,19 @@ export default function SgpManagementPage() {
       result = result.filter(d => storageStatusFilter.includes(d.storage_status));
     }
     if (searchVin.trim()) {
-      const vinSearch = searchVin.trim().toLowerCase();
-      result = result.filter(d => d.vin && d.vin.toLowerCase().includes(vinSearch));
+      const searchTokens = parseVinList(searchVin);
+      if (searchTokens.length > 0) {
+        result = result.filter(d => {
+          if (!d.vin) return false;
+          const upperVin = d.vin.toUpperCase();
+          return searchTokens.some(token => {
+            // Если ровно 6 символов - ищем совпадение с конца
+            if (token.length === 6) return upperVin.endsWith(token);
+            // Иначе ищем вхождение
+            return upperVin.includes(token);
+          });
+        });
+      }
     }
     return result;
   }, [filteredByModel, blockStatusFilter, resolutionStatusFilter, storageStatusFilter, searchVin]);
@@ -655,27 +675,33 @@ export default function SgpManagementPage() {
         </div>
 
         {/* Вторая строка: поиск VIN и комплектация */}
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'nowrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>VIN:</span>
-            <input
-                type="text"
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#374151', paddingTop: 10 }}>VIN:</span>
+            <textarea
                 value={searchVin}
                 onChange={(e) => setSearchVin(e.target.value)}
-                placeholder="Введите VIN..."
-                style={{ ...inputStyle, width: 180 }}
+                placeholder="Введите или вставьте VIN (через запятую или с новой строки)..."
+                style={{ 
+                  ...inputStyle, 
+                  width: 300, 
+                  minHeight: 40, 
+                  resize: 'vertical', 
+                  fontFamily: 'inherit', 
+                  lineHeight: '1.4' 
+                }}
             />
             {searchVin && (
                 <button
                 onClick={() => setSearchVin('')}
-                style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
+                style={{ ...buttonStyle, background: '#9CA3AF', padding: '6px 12px', marginTop: 4 }}
                 >
                 ✕
                 </button>
             )}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>Комплектация:</span>
             <select
                 value={complectFilter}
