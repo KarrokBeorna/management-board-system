@@ -354,6 +354,7 @@ export default function HomePage() {
     //{ to: "/drr-cp8-dashboard", imgSrc: DrrCp8DashboardPage, caption: "DRR CPFinal Dashboard", accentColor: "#8B5CF6" },
     { to: "/drr-tl-dashboard", imgSrc: drrTestlinePreview, caption: "DRR ADAS Dashboard", accentColor: "#0ea5e9" },
     { to: "/drr-pip-dashboard", imgSrc: DrrPIPDashboardPage, caption: "DRR PIP Dashboard", accentColor: "#0EA5E9" },
+    { to: "/drr-cp7-tup", imgSrc: DrrCp7DashboardPage, caption: "DRR CP7 (Touch Up)", accentColor: "#F59E0B" },
     { to: "/drr-wt-portal", imgSrc: drrWtPortalPreview, caption: "DRR CPFinal Dashboard", accentColor: "#0EA5E9" },//это новый спфинал
     { to: "/defect-electronics-top", imgSrc: electronicsPreview, caption: "Electronics Defects Top", accentColor: "#8B5CF6" },
     { to: "/remzone-work-status", imgSrc: RemPreview, caption: "Remzone Work Status", accentColor: "#8B5CF6" },
@@ -390,7 +391,8 @@ export default function HomePage() {
     '/drr-cp6',
     '/drr-cp5',
     '/all-drr-dashboard',
-    '/drr-shift-dashboard'
+    '/drr-shift-dashboard',
+    '/drr-cp7-tup'
   ];
 
   const allDrrCards = allReportCards.filter(card => DRR_ROUTES.includes(card.to));
