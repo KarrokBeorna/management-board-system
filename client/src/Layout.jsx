@@ -101,7 +101,8 @@ export default function Layout() {
     location.pathname === '/drr-shift-dashboard' ||
     location.pathname === '/brigade-report' ||
     location.pathname === '/defect-capture' ||
-
+    location.pathname === '/drr-cp7-tup' ||
+    
 
 
     location.pathname === '/inspection' ||
