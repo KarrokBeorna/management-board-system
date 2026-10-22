@@ -224,11 +224,37 @@ const getPlannedDate = () => {
 
 const aggregateReason = (desc) => {
   if (!desc) return '';
-  const match = desc.match(/\s*-?\s*по\s+запросу/i);
-  if (match && match.index !== undefined) {
-    return desc.substring(0, match.index).trim();
+  let text = desc.trim();
+
+  // 1. Ищем хвост, начинающийся с "по запросу", "по письму" и т.д.
+  const suffixMatch = text.match(
+    /\s*-?\s*(по\s+(?:запросу|письму|обращению|звонку|указанию|просьбе)).*$/i
+  );
+
+  if (suffixMatch && suffixMatch.index > 0) {
+    // Если фраза не в самом начале, просто отрезаем всё, что после неё
+    text = text.substring(0, suffixMatch.index).trim();
+  } else if (suffixMatch && suffixMatch.index === 0) {
+    // Если строка НАЧИНАЕТСЯ с этой фразы (например, "по письму Хлопкина С. 09.10.26 (09:18) Шум вакуумного насоса")
+    // Пытаемся вытащить причину, отбросив дату и время
+    const dateExtract = text.match(
+      /^по\s+(?:запросу|письму|обращению|звонку|указанию|просьбе)\s+.*?\d{2}\.\d{2}\.\d{2,4}(?:\s*\(\d{2}:\d{2}\))?\s+(.+)$/i
+    );
+    if (dateExtract) {
+      text = dateExtract[1].trim();
+    }
   }
-  return desc.trim();
+
+  // 2. Убираем висящие дефисы и лишние пробелы
+  text = text.replace(/[-\s]+$/, '').trim();
+  text = text.replace(/\s+/g, ' ');
+
+  // Страховка: если отрезали всё лишнее, возвращаем оригинал
+  if (!text) {
+    text = desc.trim();
+  }
+
+  return text;
 };
 
 // Функция склонения
