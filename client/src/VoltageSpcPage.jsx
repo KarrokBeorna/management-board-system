@@ -554,6 +554,9 @@ export default function VoltageSpcPage() {
                       <ClickableNum value={dashKpi.cp7.no} color="#6B7280" subtext="Нет замера" onClick={() => openDashDetail('CP7: Нет замера', dashKpi.cp7.listNo)} />
                     </div>
                   </div>
+                  <div style={{ marginTop: 16, paddingTop: 10, textAlign: 'center', fontSize: 11, color: '#1E40AF', borderTop: '1px dashed #BFDBFE' }}>
+                    NG: &lt; 11.60 В или &gt; 12.60 В
+                  </div>
                 </div>
 
                 <FlowArrow />
@@ -608,6 +611,10 @@ export default function VoltageSpcPage() {
                       </div>
                     </div>
                   </div>
+                  
+                  <div style={{ marginTop: 16, paddingTop: 10, textAlign: 'center', fontSize: 11, color: '#334155', borderTop: '1px dashed #E2E8F0' }}>
+                    NG: &lt; 12.60 В или &gt; 13.00 В
+                  </div>
                 </div>
 
                 <FlowArrow />
@@ -622,6 +629,9 @@ export default function VoltageSpcPage() {
                       <ClickableNum value={dashKpi.cp8.ng} color="#DC2626" subtext="Замер NG" onClick={() => openDashDetail('CP8: NG', dashKpi.cp8.listNg)} />
                       <ClickableNum value={dashKpi.cp8.no} color="#6B7280" subtext="Нет замера" onClick={() => openDashDetail('CP8: Нет замера', dashKpi.cp8.listNo)} />
                     </div>
+                  </div>
+                  <div style={{ marginTop: 16, paddingTop: 10, textAlign: 'center', fontSize: 11, color: '#166534', borderTop: '1px dashed #DCFCE7' }}>
+                    NG: &lt; 12.60 В или &gt; 13.00 В
                   </div>
                 </div>
 
@@ -690,7 +700,6 @@ export default function VoltageSpcPage() {
                           </td>
                           <td style={tdStyle}>{formatDateTime(row.TEN_MIN_DATE)}</td>
                           
-                          {/* ИЗМЕНЕНО: Вывод + или - с цветом */}
                           <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: 16, color: row.TEN_MIN_RESULT === '+' ? '#059669' : (row.TEN_MIN_RESULT === '-' ? '#DC2626' : '#6B7280') }}>
                             {row.TEN_MIN_RESULT}
                           </td>
