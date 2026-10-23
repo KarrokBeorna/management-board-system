@@ -751,7 +751,7 @@ export default function DrrCp7TupDashboardPage() {
                     <thead>
                       <tr>
                         <th style={thStyle}>Описание дефекта (MPP)</th>
-                        <th style={thStyle}>Класс</th>
+                        {/* Удален столбец Класс */}
                         <th style={thStyle}>Кол-во дефектов</th>
                       </tr>
                     </thead>
@@ -769,7 +769,7 @@ export default function DrrCp7TupDashboardPage() {
                           <td style={{ ...tdStyle, boxShadow: idx < 3 ? 'inset 10px 0 0 #EF4444' : 'none' }}>
                             {defect.mpp}
                           </td>
-                          <td style={{ ...tdStyle, fontWeight: 700, color: '#475569' }}>{defect.grade}</td>
+                          {/* Удалена ячейка Класс */}
                           <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 900, fontSize: '2rem', color: idx < 3 ? '#DC2626' : '#1E293B' }}>
                             {defect.defectCount}
                           </td>
@@ -880,12 +880,13 @@ export default function DrrCp7TupDashboardPage() {
                   Всего: <b>{mppVins.length}</b>
                 </div>
                 <div style={{ overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8 }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1300 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1200 }}>
                     <thead>
                       <tr>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>VIN</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Модель</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Класс</th>
+                        
+                        {/* Удален столбец Класс */}
                         
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Станция внесения</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Станция закрытия</th>
@@ -909,7 +910,8 @@ export default function DrrCp7TupDashboardPage() {
                           <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', whiteSpace: 'nowrap' }}>{item.vin}</td>
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
-                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.grade}</td>
+                            
+                            {/* Удалена ячейка Класс */}
                             
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.post_name || '—'}</td>
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.repair_post_name || '—'}</td>
