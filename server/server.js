@@ -5156,7 +5156,13 @@ app.get('/api/holds-sgp-retrospective-all-vins', async (req, res) => {
 
 
 
-
+// Хелпер для форматирования даты без сдвига UTC
+const formatLocalDate = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
 
 // Справочник дефектов по цехам
 app.get('/api/part-defect-shop-mapping', async (req, res) => {
@@ -5187,27 +5193,23 @@ app.post('/api/part-defect-shop-mapping', async (req, res) => {
 });
 
 // DRR по цехам
-// ================== DRR ПО ЦЕХАМ ==================
 app.get('/api/drr-by-shop', async (req, res) => {
   try {
     const { weeks = 10 } = req.query;
     
-    // Получаем справочник
     const [mappingRows] = await notesPool.query('SELECT * FROM part_defect_shop_mapping');
+    if (!mappingRows.length) return res.json({ weeks: [], AS: [], BS: [], PS: [], hasMapping: false });
     
-    if (!mappingRows.length) {
-      return res.json({ weeks: [], AS: [], BS: [], PS: [], hasMapping: false });
-    }
-    
-    // Группируем по цехам
     const shopMapping = { AS: [], BS: [], PS: [] };
     mappingRows.forEach(m => {
       if (shopMapping[m.shop]) {
-        shopMapping[m.shop].push({ part_name: m.part_name, defect_type: m.defect_type });
+        shopMapping[m.shop].push({ 
+          part_name: String(m.part_name).trim(), 
+          defect_type: String(m.defect_type).trim() 
+        });
       }
     });
     
-    // Генерируем последние N недель
     const today = new Date();
     const currentMonday = new Date(today);
     const dayOfWeek = today.getDay();
@@ -5221,8 +5223,8 @@ app.get('/api/drr-by-shop', async (req, res) => {
       const sunday = new Date(monday);
       sunday.setDate(monday.getDate() + 6);
       
-      const weekStart = monday.toISOString().split('T')[0];
-      const weekEnd = sunday.toISOString().split('T')[0];
+      const weekStart = formatLocalDate(monday);
+      const weekEnd = formatLocalDate(sunday);
       const weekNum = getISOWeek(monday);
       
       result.weeks.unshift(`CW${weekNum}`);
@@ -5235,7 +5237,6 @@ app.get('/api/drr-by-shop', async (req, res) => {
           continue;
         }
         
-        // Общее количество VIN за неделю
         const [carsRows] = await pool.query(`
           SELECT COUNT(DISTINCT VIN) AS TOTAL
           FROM at_om_wiptrackinghistory
@@ -5243,51 +5244,48 @@ app.get('/api/drr-by-shop', async (req, res) => {
         `, [weekStart, weekEnd]);
         const totalCars = carsRows[0]?.TOTAL || 0;
         
-        // Строим условия для каждого part+defect
         const conditions = [];
         const params = [];
-        
         parts.forEach(p => {
-          conditions.push('(PART_NAME = ? AND PROBLEM_TYPE = ?)');
+          conditions.push('(TRIM(PART_NAME) = ? AND TRIM(PROBLEM_TYPE) = ?)');
           params.push(p.part_name, p.defect_type);
         });
-        
         const whereClause = conditions.join(' OR ');
         
-        // VIN с оффлайн дефектами
+        // УМНЫЙ КОСТЫЛЬ: Берем оффлайн + (онлайн, но если это класс А/Б или есть комментарий о доработке)
         const [defectRows] = await pool.query(`
           SELECT COUNT(DISTINCT VIN) AS DEFECT_VINS
           FROM (
-            SELECT VIN, PART_NAME, PROBLEM_TYPE, DATE(CREATION_TIME) AS CREATION_DATE,
-                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+            SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
+                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
             FROM at_biw_qm_defect_info
             WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
             UNION ALL
-            SELECT VIN, PART_NAME, PROBLEM_TYPE, DATE(CREATION_TIME) AS CREATION_DATE,
-                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+            SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
+                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
             FROM at_paint_qm_defect_info
             WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
             UNION ALL
-            SELECT VIN, PART_NAME, PROBLEM_TYPE, DATE(CREATION_TIME) AS CREATION_DATE,
-                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+            SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
+                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
             FROM at_qm_defect_info
             WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
           ) QM_DEF
-          WHERE QM_DEF.S_OFFLINE = 1
-            AND (${whereClause})
+          WHERE (${whereClause})
+            AND (
+              IS_OFF = 1 
+              OR 
+              (IS_OFF = 0 AND (PROBLEM_GRADE IN ('A', 'B', 'A1', 'B1') OR (PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> '')))
+            )
         `, [weekStart, weekEnd, weekStart, weekEnd, weekStart, weekEnd, ...params]);
         
         const defectVins = defectRows[0]?.DEFECT_VINS || 0;
-        
         let drr = 0;
-        if (totalCars > 0) {
-          drr = (1 - (defectVins / totalCars)) * 100;
-        }
+        if (totalCars > 0) drr = (1 - (defectVins / totalCars)) * 100;
         
         result[shop].unshift(parseFloat(drr.toFixed(2)));
       }
     }
-    
     res.json(result);
   } catch (err) {
     console.error('Ошибка DRR по цехам:', err.message);
@@ -5301,17 +5299,13 @@ app.get('/api/shop-top-defects', async (req, res) => {
     const { shop, model } = req.query;
     if (!shop) return res.status(400).json({ error: 'shop обязателен' });
     
-    // Получаем справочник для цеха
     const [mappingRows] = await notesPool.query(
       'SELECT part_name, defect_type FROM part_defect_shop_mapping WHERE shop = ?',
       [shop]
     );
     
-    if (!mappingRows.length) {
-      return res.json({ weeks: [], data: [], hasMapping: false });
-    }
+    if (!mappingRows.length) return res.json({ weeks: [], data: [], hasMapping: false });
     
-    // Генерируем последние 5 недель
     const today = new Date();
     const currentMonday = new Date(today);
     const dayOfWeek = today.getDay();
@@ -5325,17 +5319,16 @@ app.get('/api/shop-top-defects', async (req, res) => {
       sunday.setDate(monday.getDate() + 6);
       weeks.push({
         weekNum: getISOWeek(monday),
-        start: monday.toISOString().split('T')[0],
-        end: sunday.toISOString().split('T')[0],
+        start: formatLocalDate(monday),
+        end: formatLocalDate(sunday),
       });
     }
     
-    // Строим условия
     const conditions = [];
     const mappingParams = [];
     mappingRows.forEach(m => {
-      conditions.push('(PART_NAME = ? AND PROBLEM_TYPE = ?)');
-      mappingParams.push(m.part_name, m.defect_type);
+      conditions.push('(TRIM(PART_NAME) = ? AND TRIM(PROBLEM_TYPE) = ?)');
+      mappingParams.push(String(m.part_name).trim(), String(m.defect_type).trim());
     });
     const whereClause = conditions.join(' OR ');
     
@@ -5349,35 +5342,42 @@ app.get('/api/shop-top-defects', async (req, res) => {
         ...mappingParams,
       ];
       
+      let joinClause = '';
       let modelCondition = '';
       if (model && model !== 'ALL') {
+        joinClause = 'JOIN work_order wo ON wo.VIN = QM_DEF.VIN';
         modelCondition = ' AND wo.MODEL = ?';
         params.push(model);
       }
       
+      // ТОТ ЖЕ УМНЫЙ КОСТЫЛЬ
       const sql = `
         SELECT 
           CONCAT(QM_DEF.PART_NAME, '_', QM_DEF.PROBLEM_TYPE) AS defect_name,
           COUNT(DISTINCT QM_DEF.VIN) AS defect_count
         FROM (
-          SELECT VIN, PART_NAME, PROBLEM_TYPE, DATE(CREATION_TIME) AS CREATION_DATE,
-                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
           FROM at_biw_qm_defect_info
           WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
           UNION ALL
-          SELECT VIN, PART_NAME, PROBLEM_TYPE, DATE(CREATION_TIME) AS CREATION_DATE,
-                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
           FROM at_paint_qm_defect_info
           WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
           UNION ALL
-          SELECT VIN, PART_NAME, PROBLEM_TYPE, DATE(CREATION_TIME) AS CREATION_DATE,
-                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE
+          SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
+                 (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
           FROM at_qm_defect_info
           WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
         ) QM_DEF
-        JOIN work_order wo ON wo.VIN = QM_DEF.VIN
-        WHERE QM_DEF.S_OFFLINE = 1
-          AND (${whereClause})
+        ${joinClause}
+        WHERE (${whereClause})
+          AND (
+            IS_OFF = 1 
+            OR 
+            (IS_OFF = 0 AND (PROBLEM_GRADE IN ('A', 'B', 'A1', 'B1') OR (PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> '')))
+          )
           ${modelCondition}
         GROUP BY defect_name
         ORDER BY defect_count DESC
@@ -5398,15 +5398,10 @@ app.get('/api/shop-top-defects', async (req, res) => {
       ...counts,
     }));
     
-    // Сортируем по последней неделе
     const lastWeekKey = `CW${weeks[weeks.length - 1].weekNum}`;
     data.sort((a, b) => (b[lastWeekKey] || 0) - (a[lastWeekKey] || 0));
     
-    res.json({ 
-      weeks: weeks.map(w => `CW${w.weekNum}`), 
-      data,
-      hasMapping: true,
-    });
+    res.json({ weeks: weeks.map(w => `CW${w.weekNum}`), data, hasMapping: true });
   } catch (err) {
     console.error('Ошибка shop-top-defects:', err.message);
     res.status(500).json({ error: err.message });
@@ -6483,7 +6478,9 @@ app.get('/api/drr-cp7-mpp-vins', async (req, res) => {
         d.VIN, wo.MODEL,
         d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE,
         d.STATUS, d.CREATION_TIME,
-        d.REPAIR_TIME, d.REPAIR_TIME1
+        d.REPAIR_TIME, d.REPAIR_TIME1,
+        d.POST_NAME AS post_name,
+        d.REPAIR_POST_NAME AS repair_post_name
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.POST_NAME IN (${postListStr})
@@ -6520,6 +6517,8 @@ app.get('/api/drr-cp7-mpp-vins', async (req, res) => {
           defect_time: row.CREATION_TIME,
           repair_time: repairMs ? new Date(repairMs).toISOString() : null,
           cp72_time: cp72TimeMap.get(row.VIN),
+          post_name: row.post_name || '—',
+          repair_post_name: row.repair_post_name || '—',
           _defectTimeMs: defectTime,
         });
       }
@@ -7483,13 +7482,20 @@ app.get('/api/drr-cp7-tup-mpp-vins', async (req, res) => {
     const vins = cp72Rows.map(r => r.VIN);
     const placeholders = vins.map(() => '?').join(',');
 
-    // ДОБАВЛЕН ФИЛЬТР d.CREATION_USER = 'QC-TUP'
+    // ИСПРАВЛЕНО: Убраны алиасы для системных полей, чтобы isDefectNokCp7 работала корректно
     const [defectRows] = await pool.query(`
       SELECT
-        d.VIN, wo.MODEL,
-        d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE,
-        d.STATUS, d.CREATION_TIME,
-        d.REPAIR_TIME, d.REPAIR_TIME1
+        d.VIN,
+        wo.MODEL,
+        d.PART_NAME,
+        d.PROBLEM_TYPE,
+        d.PROBLEM_GRADE,
+        d.STATUS,
+        d.CREATION_TIME,
+        d.REPAIR_TIME,
+        d.REPAIR_TIME1,
+        d.POST_NAME AS post_name,
+        d.REPAIR_POST_NAME AS repair_post_name
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.POST_NAME IN (${postListStr})
@@ -7506,8 +7512,8 @@ app.get('/api/drr-cp7-tup-mpp-vins', async (req, res) => {
       if (!cp72TimeStr) return;
       const cp72Ms = new Date(cp72TimeStr).getTime();
       const defectTimeMs = new Date(row.CREATION_TIME).getTime();
+      
       if (defectTimeMs > cp72Ms + CP7_GRACE_MS) return;
-
       if (!isDefectNokCp7(row, cp72Ms)) return;
 
       const repairTimes = [row.REPAIR_TIME, row.REPAIR_TIME1]
@@ -7518,6 +7524,7 @@ app.get('/api/drr-cp7-tup-mpp-vins', async (req, res) => {
 
       const existing = vinMap.get(row.VIN);
       const defectTime = new Date(row.CREATION_TIME).getTime();
+      
       if (!existing || defectTime > existing._defectTimeMs) {
         vinMap.set(row.VIN, {
           vin: row.VIN,
@@ -7527,6 +7534,8 @@ app.get('/api/drr-cp7-tup-mpp-vins', async (req, res) => {
           defect_time: row.CREATION_TIME,
           repair_time: repairMs ? new Date(repairMs).toISOString() : null,
           cp72_time: cp72TimeMap.get(row.VIN),
+          post_name: row.post_name || '—',
+          repair_post_name: row.repair_post_name || '—',
           _defectTimeMs: defectTime,
         });
       }
@@ -16552,7 +16561,7 @@ app.get('/api/voltage-spc', async (req, res) => {
       });
     }
 
-    // 2. Получаем VINs с NOK тестами (только если переданы dateFrom и dateTo)
+    // 2. Получаем VINs с NOK тестами (строго < 12.6 или строго > 13)
     let nokVins = new Set();
 
     if (dateFrom && dateTo) {
@@ -16562,9 +16571,9 @@ app.get('/api/voltage-spc', async (req, res) => {
         JOIN at_im_electrical_check_info i ON i.ID = d.MAIN_ID
         WHERE d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'
           AND (
-            CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) <= 12.6 
+            CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) < 12.6 
             OR 
-            CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) >= 13
+            CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) > 13
           )
           AND d.CREATION_TIME >= ? AND d.CREATION_TIME <= ?
       `, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
@@ -16588,7 +16597,7 @@ app.get('/api/voltage-spc', async (req, res) => {
     const [modelRows] = await pool.query(`SELECT VIN, MODEL FROM work_order WHERE VIN IN (${placeholders})`, vins);
     const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
 
-    // 5. Последний NOK замер
+    // 5. Последний NOK замер (строго < 12.6 или строго > 13)
     const [lastNokRows] = await pool.query(`
       SELECT t.VIN, t.CREATION_TIME AS MEASURE_DATE, t.VOLTAGE
       FROM (
@@ -16599,15 +16608,15 @@ app.get('/api/voltage-spc', async (req, res) => {
         WHERE d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'
           AND i.VIN IN (${placeholders})
           AND (
-            CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) <= 12.6 
+            CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) < 12.6 
             OR 
-            CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) >= 13
+            CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) > 13
           )
       ) t WHERE t.rn = 1
     `, vins);
     const lastNokMap = new Map(lastNokRows.map(r => [r.VIN, r]));
 
-    // 6. Последний OK замер
+    // 6. Последний OK замер (>= 12.6 и <= 13)
     const [lastOkRows] = await pool.query(`
       SELECT t.VIN, t.CREATION_TIME AS LAST_OK_DATE, t.VOLTAGE AS LAST_OK_VOLTAGE
       FROM (
@@ -16617,13 +16626,13 @@ app.get('/api/voltage-spc', async (req, res) => {
         JOIN at_im_electrical_check_info i ON i.ID = d.MAIN_ID
         WHERE d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage'
           AND i.VIN IN (${placeholders})
-          AND CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) > 12.6
-          AND CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) < 13
+          AND CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) >= 12.6
+          AND CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) <= 13
       ) t WHERE t.rn = 1
     `, vins);
     const lastOkMap = new Map(lastOkRows.map(r => [r.VIN, r]));
 
-    // 7. Формируем результат с логикой 10 min NG
+    // 7. Формируем результат
     const result = vins.map(v => {
       const cp8Date = cp8DateMap.get(v) || null;
       const lastNok = lastNokMap.get(v);
@@ -16634,10 +16643,7 @@ app.get('/api/voltage-spc', async (req, res) => {
         const cp8Time = new Date(cp8Date).getTime();
         const tenMinBeforeCp8 = cp8Time - (10 * 60 * 1000);
 
-        // Условие 1: нет последнего OK, или он был раньше, чем за 10 минут до CP8
         const cond1 = !lastOk || (new Date(lastOk.LAST_OK_DATE).getTime() < tenMinBeforeCp8);
-        
-        // Условие 2: последний NOK был после CP8
         const cond2 = lastNok && (new Date(lastNok.MEASURE_DATE).getTime() > cp8Time);
 
         if (cond1 || cond2) {

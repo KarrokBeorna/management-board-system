@@ -556,7 +556,7 @@ export default function VoltageSpcPage() {
                   </thead>
                   <tbody>
                     {modalData.map((m, i) => {
-                      const isOk = m.VOLTAGE > 12.6 && m.VOLTAGE < 13;
+                      const isOk = m.VOLTAGE >= 12.6 && m.VOLTAGE <= 13;
                       return (
                         <tr key={i} style={{ borderBottom: '1px solid #F0F0F5', backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
                           <td style={{ padding: '10px 14px' }}>{formatDateTime(m.CREATION_TIME)}</td>

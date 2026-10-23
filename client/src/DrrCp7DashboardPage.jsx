@@ -229,7 +229,6 @@ const getCurrentShiftInfo = () => {
   return { weekNumber, shiftLetter, shiftType };
 };
 
-// Форматирование длительности (мс → «X ч Y мин» / «Y мин»)
 const formatDuration = (ms) => {
   if (ms == null || ms < 0) return '—';
   const totalMin = Math.floor(ms / 60000);
@@ -248,7 +247,6 @@ const getOpcValueColor = (value) => {
   return '#059669';
 };
 
-// ============== OPC UA виджет ==============
 function OpcUaWidget() {
   const [value, setValue] = useState(null);
   const [error, setError] = useState(null);
@@ -290,21 +288,10 @@ function OpcUaWidget() {
       border: '3px solid #fdfeff',
       minWidth: '110px',
     }}>
-      <span style={{
-        fontSize: '1.2rem',
-        color: '#64748B',
-        fontWeight: 800,
-        letterSpacing: '0.5px',
-        marginBottom: '4px',
-      }}>
+      <span style={{ fontSize: '1.2rem', color: '#64748B', fontWeight: 800, letterSpacing: '0.5px', marginBottom: '4px' }}>
         Bufer
       </span>
-      <span style={{
-        fontSize: '6.2rem',
-        fontWeight: 900,
-        color: error ? '#DC2626' : getOpcValueColor(value),
-        lineHeight: 1,
-      }}>
+      <span style={{ fontSize: '6.2rem', fontWeight: 900, color: error ? '#DC2626' : getOpcValueColor(value), lineHeight: 1 }}>
         {error ? '!' : (value !== null && value !== undefined ? value : '—')}
       </span>
     </div>
@@ -879,12 +866,17 @@ export default function DrrCp7DashboardPage() {
                   Всего: <b>{mppVins.length}</b>
                 </div>
                 <div style={{ overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8 }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1200 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1300 }}>
                     <thead>
                       <tr>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>VIN</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Модель</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Класс</th>
+                        
+                        {/* НОВЫЕ КОЛОНКИ */}
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Станция внесения</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Станция закрытия</th>
+                        
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Статус</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Дата прохода CP72</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Дата регистрации дефекта</th>
@@ -905,6 +897,11 @@ export default function DrrCp7DashboardPage() {
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', whiteSpace: 'nowrap' }}>{item.vin}</td>
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.grade}</td>
+                            
+                            {/* НОВЫЕ ЯЧЕЙКИ С ДАННЫМИ */}
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.post_name || '—'}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.repair_post_name || '—'}</td>
+                            
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', color: (item.status || '').toLowerCase() === 'closed' ? '#059669' : '#DC2626', fontWeight: 600, whiteSpace: 'nowrap' }}>
                               {item.status || '—'}
                             </td>

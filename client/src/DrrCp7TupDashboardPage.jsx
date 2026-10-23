@@ -335,7 +335,6 @@ export default function DrrCp7TupDashboardPage() {
     try {
       const { start, end } = getTimeRange(timeFilter);
 
-      // ИСПОЛЬЗУЕМ НОВЫЕ ЭНДПОИНТЫ -tup-
       const drrParams = new URLSearchParams({ filter, startTime: start, endTime: end });
       const drrRes = await fetch(`${API_BASE}/api/drr-cp7-tup-dashboard?${drrParams.toString()}`);
       if (!drrRes.ok) throw new Error('Ошибка загрузки DRR');
@@ -366,7 +365,6 @@ export default function DrrCp7TupDashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      // ИСПОЛЬЗУЕМ НОВЫЙ ЭНДПОИНТ СНИМКА
       const res = await fetch(`${API_BASE}/api/drr-cp7-tup-snapshot/${id}`);
       if (!res.ok) throw new Error('Ошибка загрузки снимка');
       const json = await res.json();
@@ -392,7 +390,6 @@ export default function DrrCp7TupDashboardPage() {
   };
 
   useEffect(() => {
-    // ИСПОЛЬЗУЕМ НОВЫЙ ЭНДПОИНТ СПИСКА СНИМКОВ
     fetch(`${API_BASE}/api/drr-cp7-tup-snapshots?days=14&filter=${filter}`)
       .then(res => res.json())
       .then(json => {
@@ -446,7 +443,6 @@ export default function DrrCp7TupDashboardPage() {
     setVinModalLoading(true);
     try {
       const { start, end } = getTimeRange(timeFilter);
-      // ИСПОЛЬЗУЕМ НОВЫЙ ЭНДПОИНТ VIN
       const params = new URLSearchParams({ filter, startTime: start, endTime: end, status });
       const res = await fetch(`${API_BASE}/api/drr-cp7-tup-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки списка VIN');
@@ -480,7 +476,6 @@ export default function DrrCp7TupDashboardPage() {
     setMppModalLoading(true);
 
     try {
-      // ИСПОЛЬЗУЕМ НОВЫЙ ЭНДПОИНТ MPP
       const params = new URLSearchParams({
         filter,
         startTime: range.start,
@@ -885,12 +880,16 @@ export default function DrrCp7TupDashboardPage() {
                   Всего: <b>{mppVins.length}</b>
                 </div>
                 <div style={{ overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8 }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1200 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1300 }}>
                     <thead>
                       <tr>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>VIN</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Модель</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Класс</th>
+                        
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Станция внесения</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Станция закрытия</th>
+                        
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Статус</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Дата прохода CP72</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Дата регистрации дефекта</th>
@@ -911,6 +910,10 @@ export default function DrrCp7TupDashboardPage() {
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', whiteSpace: 'nowrap' }}>{item.vin}</td>
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.model}</td>
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.grade}</td>
+                            
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.post_name || '—'}</td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5' }}>{item.repair_post_name || '—'}</td>
+                            
                             <td style={{ padding: '8px', borderBottom: '1px solid #F0F0F5', color: (item.status || '').toLowerCase() === 'closed' ? '#059669' : '#DC2626', fontWeight: 600, whiteSpace: 'nowrap' }}>
                               {item.status || '—'}
                             </td>
