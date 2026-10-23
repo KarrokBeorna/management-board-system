@@ -5252,7 +5252,19 @@ app.get('/api/drr-by-shop', async (req, res) => {
         });
         const whereClause = conditions.join(' OR ');
         
-        // УМНЫЙ КОСТЫЛЬ: Берем оффлайн + (онлайн, но если это класс А/Б или есть комментарий о доработке)
+        // УМНЫЙ КОСТЫЛЬ ПО ЦЕХАМ
+        let offlineCondition = '';
+        if (shop === 'AS' || shop === 'PS') {
+            // Для Сборки и Окраски берем ВСЕ, так как операторы путают онлайн/оффлайн
+            offlineCondition = '1 = 1';
+        } else {
+            // Для Сварки берем оффлайн + только серьезные онлайн, чтобы не было шума
+            offlineCondition = `
+              IS_OFF = 1 
+              OR (IS_OFF = 0 AND (PROBLEM_GRADE IN ('A', 'B', 'A1', 'B1') OR (PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> '')))
+            `;
+        }
+        
         const [defectRows] = await pool.query(`
           SELECT COUNT(DISTINCT VIN) AS DEFECT_VINS
           FROM (
@@ -5272,11 +5284,7 @@ app.get('/api/drr-by-shop', async (req, res) => {
             WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
           ) QM_DEF
           WHERE (${whereClause})
-            AND (
-              IS_OFF = 1 
-              OR 
-              (IS_OFF = 0 AND (PROBLEM_GRADE IN ('A', 'B', 'A1', 'B1') OR (PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> '')))
-            )
+            AND (${offlineCondition})
         `, [weekStart, weekEnd, weekStart, weekEnd, weekStart, weekEnd, ...params]);
         
         const defectVins = defectRows[0]?.DEFECT_VINS || 0;
