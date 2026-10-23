@@ -16701,9 +16701,295 @@ app.get('/api/voltage-spc-vin-history', async (req, res) => {
   }
 });
 
+app.get('/api/voltage-spc-after-cp7', async (req, res) => {
+  try {
+    const { vin, dateFrom, dateTo } = req.query;
 
+    let cp7Query = `
+      SELECT vin, MIN(scan_time) AS cp7_time
+      FROM ti_mes_movement
+      WHERE uloc_no = 'CP72' AND is_deleted = 0
+    `;
+    const cp7Params = [];
+    if (dateFrom && dateTo) {
+      cp7Query += ` AND scan_time >= ? AND scan_time <= ?`;
+      cp7Params.push(`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`);
+    }
+    cp7Query += ` GROUP BY vin`;
 
+    const [cp7Rows] = await mesPool.query(cp7Query, cp7Params);
+    if (cp7Rows.length === 0) return res.json([]);
 
+    let vins = cp7Rows.map(r => r.vin);
+    if (vin && String(vin).trim()) {
+      const search = String(vin).trim().toUpperCase();
+      vins = vins.filter(v => v.toUpperCase().includes(search));
+    }
+    if (vins.length === 0) return res.json([]);
+
+    const cp7TimeMap = new Map(cp7Rows.map(r => [r.vin, r.cp7_time]));
+    const placeholders = vins.map(() => '?').join(',');
+
+    const [voltageRows] = await pool.query(`
+      SELECT i.VIN, d.CREATION_TIME, CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) AS VOLTAGE
+      FROM at_im_electrical_check_dtl d
+      JOIN at_im_electrical_check_info i ON i.ID = d.MAIN_ID
+      WHERE d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage' AND i.VIN IN (${placeholders})
+      ORDER BY i.VIN, d.CREATION_TIME ASC
+    `, vins);
+
+    const [woRows] = await mesPool.query(`
+      SELECT too.vin, too.product AS model, tbmr.material_desc AS complectation
+      FROM tm_ofm_order too
+      LEFT JOIN tm_bas_material_relation tbmr ON tbmr.material_no = too.material_no AND tbmr.is_deleted = 0
+      WHERE too.vin IN (${placeholders})
+    `, vins);
+    const infoMap = new Map(woRows.map(r => [r.vin, r]));
+
+    const voltageByVin = new Map();
+    voltageRows.forEach(r => {
+      if (!voltageByVin.has(r.VIN)) voltageByVin.set(r.VIN, []);
+      voltageByVin.get(r.VIN).push({
+        time: new Date(r.CREATION_TIME).getTime(),
+        voltage: parseFloat(r.VOLTAGE),
+        dateStr: r.CREATION_TIME
+      });
+    });
+
+    const result = [];
+
+    vins.forEach(v => {
+      const cp7DateStr = cp7TimeMap.get(v);
+      const cp7Ms = new Date(cp7DateStr).getTime();
+      const checks = voltageByVin.get(v) || [];
+      const info = infoMap.get(v) || {};
+
+      if (checks.length === 0) {
+        result.push({
+          VIN: v, MODEL: info.model || '—', COMPLECTATION: info.complectation || '—',
+          CP7_DATE: cp7DateStr, CP7_VOLTAGE: null,
+          FIRST_NOK_DATE: null, FIRST_NOK_VOLTAGE: null,
+          FIRST_OK_DATE: null, FIRST_OK_VOLTAGE: null,
+          TEN_MIN_DATE: null, TEN_MIN_RESULT: '—',
+          DIFF_NOK_CP7_MINUTES: null
+        });
+        return;
+      }
+
+      const windowMs = 10 * 60 * 1000;
+      const inWindow = checks.filter(c => Math.abs(c.time - cp7Ms) <= windowMs);
+      
+      let closestCheck = null;
+      if (inWindow.length > 0) {
+        closestCheck = inWindow.reduce((prev, curr) => (Math.abs(curr.time - cp7Ms) < Math.abs(prev.time - cp7Ms) ? curr : prev), inWindow[0]);
+      } else {
+        closestCheck = checks[0];
+      }
+
+      const firstNok = checks.find(c => c.voltage < 11.6 || c.voltage > 12.6) || null;
+      const firstOk = checks.find(c => c.voltage >= 11.6 && c.voltage <= 12.6) || null;
+
+      const tenMinTargetMs = cp7Ms + (10 * 60 * 1000);
+      const tenMinCheck = checks.reduce((prev, curr) => (Math.abs(curr.time - tenMinTargetMs) < Math.abs(prev.time - tenMinTargetMs) ? curr : prev), checks[0]);
+      
+      // ВОЗВРАЩАЕМ + и - ВМЕСТО ОК/НГ
+      let tenMinResult = '—';
+      if (tenMinCheck) {
+        tenMinResult = (tenMinCheck.voltage >= 11.6 && tenMinCheck.voltage <= 12.6) ? '+' : '-';
+      }
+
+      // РАЗНИЦА = ДАТА CP7 - ДАТА 1-ГО NOK (по модулю)
+      let diffMinutes = null;
+      if (firstNok && closestCheck) {
+        diffMinutes = Math.abs(Math.floor((cp7Ms - firstNok.time) / 60000));
+      }
+
+      result.push({
+        VIN: v,
+        MODEL: info.model || '—',
+        COMPLECTATION: info.complectation || '—',
+        CP7_DATE: cp7DateStr,
+        CP7_VOLTAGE: closestCheck ? closestCheck.voltage : null,
+        FIRST_NOK_DATE: firstNok ? firstNok.dateStr : null,
+        FIRST_NOK_VOLTAGE: firstNok ? firstNok.voltage : null,
+        FIRST_OK_DATE: firstOk ? firstOk.dateStr : null,
+        FIRST_OK_VOLTAGE: firstOk ? firstOk.voltage : null,
+        TEN_MIN_DATE: tenMinCheck ? tenMinCheck.dateStr : null,
+        TEN_MIN_RESULT: tenMinResult,
+        DIFF_NOK_CP7_MINUTES: diffMinutes
+      });
+    });
+
+    result.sort((a, b) => new Date(b.CP7_DATE) - new Date(a.CP7_DATE));
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка /api/voltage-spc-after-cp7:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/voltage-spc-checkpoints-dashboard', async (req, res) => {
+  try {
+    const { dateFrom, dateTo } = req.query;
+    const dateStart = `${dateFrom} 00:00:00`;
+    const dateEnd = `${dateTo} 23:59:59`;
+
+    // 1. Собираем VIN и время по CP7 (CP72)
+    const [cp7Rows] = await mesPool.query(`
+      SELECT UPPER(vin) AS vin, MIN(scan_time) AS time_val
+      FROM ti_mes_movement
+      WHERE uloc_no = 'CP72' AND is_deleted = 0
+        AND scan_time >= ? AND scan_time <= ?
+      GROUP BY vin
+    `, [dateStart, dateEnd]);
+    const cp7Map = new Map(cp7Rows.map(r => [r.vin, new Date(r.time_val).getTime()]));
+
+    // 2. Собираем VIN и время по TLADAS
+    const [tladasRows] = await mesPool.query(`
+      SELECT UPPER(vin) AS vin, MIN(gmt_create) AS time_val
+      FROM tm_vhc_test_line_movement
+      WHERE node_nature = 'TLADAS' AND is_deleted = 0
+        AND gmt_create >= ? AND gmt_create <= ?
+      GROUP BY vin
+    `, [dateStart, dateEnd]);
+    const tladasMap = new Map(tladasRows.map(r => [r.vin, new Date(r.time_val).getTime()]));
+
+    // 3. Собираем VIN и время по CP8
+    const [cp8Rows] = await mesPool.query(`
+      SELECT UPPER(vin) AS vin, MAX(scan_time) AS time_val
+      FROM ti_mes_movement
+      WHERE uloc_no = 'AGMAS01004' AND is_deleted = 0
+        AND scan_time >= ? AND scan_time <= ?
+      GROUP BY vin
+    `, [dateStart, dateEnd]);
+    const cp8Map = new Map(cp8Rows.map(r => [r.vin, new Date(r.time_val).getTime()]));
+
+    // Объединяем все VIN
+    const allVinsSet = new Set([
+      ...cp7Rows.map(r => r.vin),
+      ...tladasRows.map(r => r.vin),
+      ...cp8Rows.map(r => r.vin)
+    ]);
+    const vins = Array.from(allVinsSet);
+    if (vins.length === 0) return res.json([]);
+
+    const placeholders = vins.map(() => '?').join(',');
+
+    // 4. Получаем ВСЕ замеры
+    const [voltageRows] = await pool.query(`
+      SELECT UPPER(i.VIN) AS VIN, d.CREATION_TIME, CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) AS VOLTAGE
+      FROM at_im_electrical_check_dtl d
+      JOIN at_im_electrical_check_info i ON i.ID = d.MAIN_ID
+      WHERE d.ITEMNAME = 'VehicleDataDetail-EMS-Battery_Voltage' AND i.VIN IN (${placeholders})
+      ORDER BY i.VIN, d.CREATION_TIME ASC
+    `, vins);
+
+    // 5. Инфо о модели и комплектации
+    const [woRows] = await mesPool.query(`
+      SELECT UPPER(too.vin) AS vin, too.product AS model, tbmr.material_desc AS complectation
+      FROM tm_ofm_order too
+      LEFT JOIN tm_bas_material_relation tbmr ON tbmr.material_no = too.material_no AND tbmr.is_deleted = 0
+      WHERE too.vin IN (${placeholders})
+    `, vins);
+    const infoMap = new Map(woRows.map(r => [r.vin, r]));
+
+    const voltageByVin = new Map();
+    voltageRows.forEach(r => {
+      if (!voltageByVin.has(r.VIN)) voltageByVin.set(r.VIN, []);
+      voltageByVin.get(r.VIN).push({
+        time: new Date(r.CREATION_TIME).getTime(),
+        voltage: parseFloat(r.VOLTAGE),
+      });
+    });
+
+    const result = [];
+
+    vins.forEach(v => {
+      const cp7Ms = cp7Map.get(v) || null;
+      const tladasMs = tladasMap.get(v) || null;
+      const cp8Ms = cp8Map.get(v) || null;
+      const checks = voltageByVin.get(v) || [];
+      const info = infoMap.get(v) || {};
+
+      // --- 1. CP7 ---
+      let cp7Val = null, cp7Ok = null;
+      if (cp7Ms) {
+        // Ищем в окне +-10 минут
+        const inWindow = checks.filter(c => Math.abs(c.time - cp7Ms) <= 10 * 60 * 1000);
+        // Если нет в окне — берем самый ранний (как просили)
+        const check = inWindow.length ? inWindow[0] : (checks.length ? checks[0] : null);
+        if (check) {
+          cp7Val = check.voltage;
+          cp7Ok = cp7Val >= 11.6 && cp7Val <= 12.6;
+        }
+      }
+
+      // --- 2. TLADAS ---
+      let tladasVal = null, tladasOk = null, tladasStatus = null;
+      if (tladasMs) {
+        // Статус "в течение часа"
+        if (cp7Ms) {
+          tladasStatus = (tladasMs - cp7Ms) <= 60 * 60 * 1000 ? 'under1h' : 'over1h';
+        } else {
+          tladasStatus = 'over1h'; // Если нет CP7, не можем посчитать <1ч
+        }
+
+        // Ищем в окне +-10 минут
+        const inWindow = checks.filter(c => Math.abs(c.time - tladasMs) <= 10 * 60 * 1000);
+        // Если нет в окне — берем самый последний (как просили)
+        const check = inWindow.length ? inWindow[0] : (checks.length ? checks[checks.length - 1] : null);
+        if (check) {
+          tladasVal = check.voltage;
+          tladasOk = tladasVal >= 11.6 && tladasVal <= 12.6;
+        }
+      }
+
+      // --- 3. CP8 (ПОЛНОСТЬЮ ПОВТОРЯЕМ ЛОГИКУ МИНУСОВ ИЗ SPC) ---
+      let cp8Val = null, cp8Ok = null;
+      if (cp8Ms) {
+        // Для CP8 OK - это от 12.6 до 13. NOK - это < 12.6 или > 13.
+        const validOk = checks.filter(c => c.voltage >= 12.6 && c.voltage <= 13);
+        const validNok = checks.filter(c => c.voltage < 12.6 || c.voltage > 13);
+        
+        const lastOk = validOk.length ? validOk[validOk.length - 1] : null;
+        const lastNok = validNok.length ? validNok[validNok.length - 1] : null;
+
+        const tenMinBeforeCp8 = cp8Ms - 10 * 60 * 1000;
+        const cond1 = !lastOk || lastOk.time < tenMinBeforeCp8;
+        const cond2 = lastNok && lastNok.time > cp8Ms;
+
+        // Если сработало условие, значит ставим МИНУС (NG), иначе OK
+        cp8Ok = (cond1 || cond2) ? false : true;
+
+        // Сам замер для отображения
+        const inWindow = checks.filter(c => Math.abs(c.time - cp8Ms) <= 10 * 60 * 1000);
+        const closestCheck = inWindow.length ? inWindow[0] : (checks.length ? checks[checks.length - 1] : null);
+        cp8Val = closestCheck ? closestCheck.voltage : null;
+      }
+
+      result.push({
+        VIN: v,
+        MODEL: info.model || '—',
+        COMPLECTATION: info.complectation || '—',
+        CP7_DATE: cp7Ms ? new Date(cp7Ms).toISOString() : null,
+        CP7_VOLTAGE: cp7Val,
+        CP7_OK: cp7Ok,
+        TLADAS_DATE: tladasMs ? new Date(tladasMs).toISOString() : null,
+        TLADAS_VOLTAGE: tladasVal,
+        TLADAS_OK: tladasOk,
+        TLADAS_STATUS: tladasStatus,
+        CP8_DATE: cp8Ms ? new Date(cp8Ms).toISOString() : null,
+        CP8_VOLTAGE: cp8Val,
+        CP8_OK: cp8Ok,
+      });
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка voltage-spc-checkpoints-dashboard:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 
