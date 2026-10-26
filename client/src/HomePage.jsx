@@ -34,6 +34,7 @@ import defectCapturePreview from './assets/defph.png';
 import lineDefectsArchivePreview from './assets/archph.png';
 import reppsPreview from './assets/repps.png';
 import voltageSpcPreview from './assets/volt.png';
+import repelecPreview from './assets/repelec.png'; 
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -365,6 +366,7 @@ export default function HomePage() {
     { to: "/drr-shift-dashboard", imgSrc: drrShiftPreview, caption: "DRR Shift Dashboard", accentColor: "#7C3AED" },
     { to: "/repps-report", imgSrc: reppsPreview, caption: "REPPS Report", accentColor: "#EC4899" },
     { to: "/voltage-spc", imgSrc: voltageSpcPreview, caption: "Voltage SPC Report", accentColor: "#F59E0B" },
+    { to: "/repelec-report", imgSrc: repelecPreview, caption: "REPELEC Report", accentColor: "#F59E0B" },
   ];
 
   const allServiceCards = [

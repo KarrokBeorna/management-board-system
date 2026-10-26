@@ -37,6 +37,7 @@ import LineDefectsArchivePage from './LineDefectsArchivePage';
 import ReppsReportPage from './ReppsReportPage';
 import VoltageSpcPage from './VoltageSpcPage';
 import DrrCp7TupDashboardPage from './DrrCp7TupDashboardPage';
+import RepelecReportPage from './RepelecReportPage';
 
 
 import InspectionPage from './InspectionPage';
@@ -81,6 +82,7 @@ export default function App() {
         <Route path="/repps-report" element={<ReppsReportPage />} />
         <Route path="/voltage-spc" element={<VoltageSpcPage />} />
         <Route path="/drr-cp7-tup" element={<DrrCp7TupDashboardPage />} />
+        <Route path="/repelec-report" element={<RepelecReportPage />} />
 
 
 

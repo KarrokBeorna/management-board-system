@@ -554,8 +554,9 @@ export default function VoltageSpcPage() {
                       <ClickableNum value={dashKpi.cp7.no} color="#6B7280" subtext="Нет замера" onClick={() => openDashDetail('CP7: Нет замера', dashKpi.cp7.listNo)} />
                     </div>
                   </div>
+                  {/* ИЗМЕНЕНА ПОДПИСЬ CP7 (верхней границы нет) */}
                   <div style={{ marginTop: 16, paddingTop: 10, textAlign: 'center', fontSize: 11, color: '#1E40AF', borderTop: '1px dashed #BFDBFE' }}>
-                    NG: &lt; 11.60 В или &gt; 12.60 В
+                    NG: &lt; 12.60 В
                   </div>
                 </div>
 
@@ -612,8 +613,9 @@ export default function VoltageSpcPage() {
                     </div>
                   </div>
                   
+                  {/* ИЗМЕНЕНА ПОДПИСЬ TLADAS (верхней границы нет) */}
                   <div style={{ marginTop: 16, paddingTop: 10, textAlign: 'center', fontSize: 11, color: '#334155', borderTop: '1px dashed #E2E8F0' }}>
-                    NG: &lt; 12.60 В или &gt; 13.00 В
+                    NG: &lt; 12.60 В
                   </div>
                 </div>
 
@@ -630,6 +632,7 @@ export default function VoltageSpcPage() {
                       <ClickableNum value={dashKpi.cp8.no} color="#6B7280" subtext="Нет замера" onClick={() => openDashDetail('CP8: Нет замера', dashKpi.cp8.listNo)} />
                     </div>
                   </div>
+                  {/* ПОДПИСЬ CP8 ОСТАЕТСЯ С ДВУМЯ ГРАНИЦАМИ */}
                   <div style={{ marginTop: 16, paddingTop: 10, textAlign: 'center', fontSize: 11, color: '#166534', borderTop: '1px dashed #DCFCE7' }}>
                     NG: &lt; 12.60 В или &gt; 13.00 В
                   </div>
@@ -687,7 +690,7 @@ export default function VoltageSpcPage() {
                           <td style={tdStyle}>{row.MODEL || '—'}</td>
                           <td style={{ ...tdStyle, borderRight: '3px solid #E5E7EB' }}>{row.COMPLECTATION || '—'}</td>
                           <td style={{ ...tdStyle, background: 'rgba(239, 246, 255, 0.4)' }}>{formatDateTime(row.CP7_DATE)}</td>
-                          <td style={{ ...tdStyle, fontWeight: 700, background: 'rgba(239, 246, 255, 0.4)', borderRight: '3px solid #E5E7EB', color: (row.CP7_VOLTAGE >= 11.6 && row.CP7_VOLTAGE <= 12.6) ? '#059669' : '#DC2626' }}>
+                          <td style={{ ...tdStyle, fontWeight: 700, background: 'rgba(239, 246, 255, 0.4)', borderRight: '3px solid #E5E7EB', color: (row.CP7_VOLTAGE >= 12.6) ? '#059669' : '#DC2626' }}>
                             {row.CP7_VOLTAGE !== null ? `${row.CP7_VOLTAGE} V` : '—'}
                           </td>
                           <td style={{ ...tdStyle, background: 'rgba(254, 242, 242, 0.4)' }}>{formatDateTime(row.FIRST_NOK_DATE)}</td>
@@ -888,7 +891,7 @@ export default function VoltageSpcPage() {
                     </thead>
                     <tbody>
                       {modalData.map((m, i) => {
-                        const isOk = m.VOLTAGE >= 11.6 && m.VOLTAGE <= 12.6;
+                        const isOk = m.VOLTAGE >= 12.6; // ОБНОВЛЕНО: верхней границы нет
                         return (
                           <tr key={i} style={{ borderBottom: '1px solid #F0F0F5', backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
                             <td style={{ padding: '10px 14px' }}>{formatDateTime(m.CREATION_TIME)}</td>

@@ -385,10 +385,13 @@ export default function RemzoneWorkStatusPage() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
 
+  // Фильтр «Только с партномером» (MISS_PART). По умолчанию выключен.
+  const [withPartNumber, setWithPartNumber] = useState(false);
+
   // Модалка с деталями
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
-  const [detailsContext, setDetailsContext] = useState(null); // { person, name, date, hour }
+  const [detailsContext, setDetailsContext] = useState(null);
   const [detailsList, setDetailsList] = useState([]);
 
   const daysList = useMemo(() => {
@@ -408,9 +411,10 @@ export default function RemzoneWorkStatusPage() {
     const run = async () => {
       setLoading(true);
       try {
+        const pnParam = withPartNumber ? '&withPartNumber=true' : '';
         const url = mode === 'daily'
-          ? `${API_BASE}/api/remzone-work-status/daily?dateFrom=${dateFrom}&dateTo=${dateTo}`
-          : `${API_BASE}/api/remzone-work-status/hourly?date=${hourlyDate}`;
+          ? `${API_BASE}/api/remzone-work-status/daily?dateFrom=${dateFrom}&dateTo=${dateTo}${pnParam}`
+          : `${API_BASE}/api/remzone-work-status/hourly?date=${hourlyDate}${pnParam}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error('Ошибка загрузки');
         const json = await res.json();
@@ -426,7 +430,7 @@ export default function RemzoneWorkStatusPage() {
     };
     run();
     return () => { cancelled = true; };
-  }, [mode, dateFrom, dateTo, hourlyDate]);
+  }, [mode, dateFrom, dateTo, hourlyDate, withPartNumber]);
 
   /* ================ ФИЛЬТР + СОРТИРОВКА ================ */
   const filteredRows = useMemo(() => {
@@ -502,12 +506,12 @@ export default function RemzoneWorkStatusPage() {
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Remzone');
-    XLSX.writeFile(wb, `Remzone_${mode}_${toLocalDateStr(new Date())}.xlsx`);
+    XLSX.writeFile(wb, `Remzone_${mode}${withPartNumber ? '_PN' : ''}_${toLocalDateStr(new Date())}.xlsx`);
   };
 
   /* ================ ОТКРЫТИЕ ДЕТАЛЕЙ ================ */
   const openDetails = async (row, date, hour) => {
-    const person = row.repair_person; // полный ключ "REPXX|ФИО"
+    const person = row.repair_person;
     if (!person) return;
 
     setDetailsContext({
@@ -524,6 +528,7 @@ export default function RemzoneWorkStatusPage() {
     try {
       const params = new URLSearchParams({ repair_person: person, date });
       if (hour !== undefined && hour !== null) params.append('hour', hour);
+      if (withPartNumber) params.append('withPartNumber', 'true');
       const res = await fetch(`${API_BASE}/api/remzone-work-status/details?${params}`);
       if (!res.ok) throw new Error('Ошибка загрузки деталей');
       const json = await res.json();
@@ -618,6 +623,33 @@ export default function RemzoneWorkStatusPage() {
               ))}
             </>
           )}
+
+          {/* ФИЛЬТР: только с партномером (MISS_PART) */}
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'pointer',
+              padding: '4px 10px',
+              borderRadius: 8,
+              background: withPartNumber ? '#EFF6FF' : '#FFFFFF',
+              border: `1px solid ${withPartNumber ? '#93C5FD' : '#CBD5E1'}`,
+              fontSize: 13,
+              fontWeight: 600,
+              color: withPartNumber ? '#1D4ED8' : '#475569',
+              userSelect: 'none',
+            }}
+            title="Считать только дефекты, у которых заполнен партномер (MISS_PART)"
+          >
+            <input
+              type="checkbox"
+              checked={withPartNumber}
+              onChange={e => setWithPartNumber(e.target.checked)}
+              style={{ width: 15, height: 15, cursor: 'pointer', accentColor: '#2563EB' }}
+            />
+            Только с партномером
+          </label>
 
           <label style={{ ...filterLabelStyle, marginLeft: 'auto' }}>
             Поиск:
@@ -902,6 +934,7 @@ export default function RemzoneWorkStatusPage() {
                       <th style={detailThStyle}>Модель</th>
                       <th style={detailThStyle}>Деталь</th>
                       <th style={detailThStyle}>Дефект</th>
+                      {withPartNumber && <th style={detailThStyle}>Партномер</th>}
                       <th style={detailThStyle}>VIN</th>
                       <th style={detailThStyle}>Пост</th>
                     </tr>
@@ -914,6 +947,11 @@ export default function RemzoneWorkStatusPage() {
                         <td style={detailTdStyle}>{d.model}</td>
                         <td style={detailTdStyle}>{d.part_name}</td>
                         <td style={detailTdStyle}>{d.problem_type}</td>
+                        {withPartNumber && (
+                          <td style={{ ...detailTdStyle, fontFamily: 'monospace', color: '#1D4ED8', fontWeight: 600 }}>
+                            {d.miss_part || '—'}
+                          </td>
+                        )}
                         <td style={{ ...detailTdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{d.vin}</td>
                         <td style={detailTdStyle}>{d.post_name}</td>
                       </tr>

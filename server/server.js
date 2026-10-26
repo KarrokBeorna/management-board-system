@@ -11211,10 +11211,14 @@ const REMZONE_FILTER = `
 // ---------- 1. Ежедневный режим: по дням за период ----------
 app.get('/api/remzone-work-status/daily', async (req, res) => {
   try {
-    const { dateFrom, dateTo } = req.query;
+    const { dateFrom, dateTo, withPartNumber } = req.query;
     if (!dateFrom || !dateTo) {
       return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
     }
+
+    const partNumberCondition = withPartNumber === 'true'
+      ? ` AND MISS_PART IS NOT NULL AND TRIM(MISS_PART) <> ''`
+      : '';
 
     const [rows] = await pool.query(`
       SELECT
@@ -11227,6 +11231,7 @@ app.get('/api/remzone-work-status/daily', async (req, res) => {
         AND REPAIR_TIME >= ? AND REPAIR_TIME <= ?
         AND REPAIR_PERSON IS NOT NULL AND TRIM(REPAIR_PERSON) <> ''
         ${REMZONE_FILTER}
+        ${partNumberCondition}
       GROUP BY repair_date, REPAIR_PERSON, REPAIR_ACCOUNT
       ORDER BY repair_date
     `, [`${dateFrom} 00:00:00`, `${dateTo} 23:59:59`]);
@@ -11246,7 +11251,6 @@ app.get('/api/remzone-work-status/daily', async (req, res) => {
           repair_person: raw,
           repair_account: row.REPAIR_ACCOUNT || acc || '',
           person_account: acc || row.REPAIR_ACCOUNT || '',
-          // Если ФИО пустое (например, "REP00|") — показываем аккаунт
           person_name: name || acc || raw || '—',
           days: {},
           total: 0,
@@ -11274,10 +11278,14 @@ app.get('/api/remzone-work-status/daily', async (req, res) => {
 // ---------- 2. Часовой режим: по часам за конкретный день ----------
 app.get('/api/remzone-work-status/hourly', async (req, res) => {
   try {
-    const { date } = req.query;
+    const { date, withPartNumber } = req.query;
     if (!date) {
       return res.status(400).json({ error: 'date обязателен' });
     }
+
+    const partNumberCondition = withPartNumber === 'true'
+      ? ` AND MISS_PART IS NOT NULL AND TRIM(MISS_PART) <> ''`
+      : '';
 
     const [rows] = await pool.query(`
       SELECT
@@ -11290,6 +11298,7 @@ app.get('/api/remzone-work-status/hourly', async (req, res) => {
         AND DATE(REPAIR_TIME) = ?
         AND REPAIR_PERSON IS NOT NULL AND TRIM(REPAIR_PERSON) <> ''
         ${REMZONE_FILTER}
+        ${partNumberCondition}
       GROUP BY hour, REPAIR_PERSON, REPAIR_ACCOUNT
     `, [date]);
 
@@ -11337,10 +11346,14 @@ app.get('/api/remzone-work-status/hourly', async (req, res) => {
 // ---------- 3. Детали: список дефектов сотрудника за день (или за час) ----------
 app.get('/api/remzone-work-status/details', async (req, res) => {
   try {
-    const { repair_person, date, hour } = req.query;
+    const { repair_person, date, hour, withPartNumber } = req.query;
     if (!repair_person || !date) {
       return res.status(400).json({ error: 'repair_person и date обязательны' });
     }
+
+    const partNumberCondition = withPartNumber === 'true'
+      ? ` AND d.MISS_PART IS NOT NULL AND TRIM(d.MISS_PART) <> ''`
+      : '';
 
     const params = [repair_person, date];
     let hourFilter = '';
@@ -11357,13 +11370,15 @@ app.get('/api/remzone-work-status/details', async (req, res) => {
         d.PROBLEM_TYPE,
         d.POST_NAME,
         d.CHECK_POINT,
-        d.REPAIR_TIME
+        d.REPAIR_TIME,
+        d.MISS_PART
       FROM at_qm_defect_info d
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.REPAIR_PERSON = ?
         AND d.REPAIR_TIME IS NOT NULL
         AND DATE(d.REPAIR_TIME) = ?
         ${hourFilter}
+        ${partNumberCondition}
       ORDER BY d.REPAIR_TIME ASC
     `, params);
 
@@ -11376,6 +11391,7 @@ app.get('/api/remzone-work-status/details', async (req, res) => {
         post_name: r.POST_NAME || '—',
         checkpoint: r.CHECK_POINT || '—',
         repair_time: r.REPAIR_TIME,
+        miss_part: r.MISS_PART || '',
       })),
     });
   } catch (err) {
@@ -16756,16 +16772,17 @@ app.get('/api/voltage-spc-after-cp7', async (req, res) => {
         closestCheck = checks[0];
       }
 
-      // Для CP7 OK/NG (11.6 - 12.6)
-      const firstNok = checks.find(c => c.voltage < 11.6 || c.voltage > 12.6) || null;
-      const firstOk = checks.find(c => c.voltage >= 11.6 && c.voltage <= 12.6) || null;
+      // ИЗМЕНЕНО: NG только если < 12.6
+      const firstNok = checks.find(c => c.voltage < 12.6) || null;
+      const firstOk = checks.find(c => c.voltage >= 12.6) || null;
 
       const tenMinTargetMs = cp7Ms + (10 * 60 * 1000);
       const tenMinCheck = checks.reduce((prev, curr) => (Math.abs(curr.time - tenMinTargetMs) < Math.abs(prev.time - tenMinTargetMs) ? curr : prev), checks[0]);
       
       let tenMinResult = '—';
       if (tenMinCheck) {
-        tenMinResult = (tenMinCheck.voltage >= 11.6 && tenMinCheck.voltage <= 12.6) ? '+' : '-';
+        // ИЗМЕНЕНО: + если >= 12.6
+        tenMinResult = (tenMinCheck.voltage >= 12.6) ? '+' : '-';
       }
 
       let diffMinutes = null;
@@ -16806,7 +16823,6 @@ app.get('/api/voltage-spc-checkpoints-dashboard', async (req, res) => {
     const dateStart = `${dateFrom} 00:00:00`;
     const dateEnd = `${dateTo} 23:59:59`;
 
-    // 1. CP7 (CP72)
     const [cp7Rows] = await mesPool.query(`
       SELECT UPPER(vin) AS vin, MIN(scan_time) AS time_val
       FROM ti_mes_movement
@@ -16816,7 +16832,6 @@ app.get('/api/voltage-spc-checkpoints-dashboard', async (req, res) => {
     `, [dateStart, dateEnd]);
     const cp7Map = new Map(cp7Rows.map(r => [r.vin, new Date(r.time_val).getTime()]));
 
-    // 2. TLADAS
     const [tladasRows] = await mesPool.query(`
       SELECT UPPER(vin) AS vin, MIN(gmt_create) AS time_val
       FROM tm_vhc_test_line_movement
@@ -16826,7 +16841,6 @@ app.get('/api/voltage-spc-checkpoints-dashboard', async (req, res) => {
     `, [dateStart, dateEnd]);
     const tladasMap = new Map(tladasRows.map(r => [r.vin, new Date(r.time_val).getTime()]));
 
-    // 3. CP8
     const [cp8Rows] = await mesPool.query(`
       SELECT UPPER(vin) AS vin, MAX(scan_time) AS time_val
       FROM ti_mes_movement
@@ -16836,7 +16850,6 @@ app.get('/api/voltage-spc-checkpoints-dashboard', async (req, res) => {
     `, [dateStart, dateEnd]);
     const cp8Map = new Map(cp8Rows.map(r => [r.vin, new Date(r.time_val).getTime()]));
 
-    // Объединяем VIN
     const allVinsSet = new Set([
       ...cp7Rows.map(r => r.vin),
       ...tladasRows.map(r => r.vin),
@@ -16847,7 +16860,6 @@ app.get('/api/voltage-spc-checkpoints-dashboard', async (req, res) => {
 
     const placeholders = vins.map(() => '?').join(',');
 
-    // 4. ВСЕ замеры вольтажа
     const [voltageRows] = await pool.query(`
       SELECT UPPER(i.VIN) AS VIN, d.CREATION_TIME, CAST(REPLACE(d.ITEMVALUE, ',', '.') AS DECIMAL(10,2)) AS VOLTAGE
       FROM at_im_electrical_check_dtl d
@@ -16856,7 +16868,6 @@ app.get('/api/voltage-spc-checkpoints-dashboard', async (req, res) => {
       ORDER BY i.VIN, d.CREATION_TIME ASC
     `, vins);
 
-    // 5. Инфо
     const [woRows] = await mesPool.query(`
       SELECT UPPER(too.vin) AS vin, too.product AS model, tbmr.material_desc AS complectation
       FROM tm_ofm_order too
@@ -16884,35 +16895,36 @@ app.get('/api/voltage-spc-checkpoints-dashboard', async (req, res) => {
       const checks = voltageByVin.get(v) || [];
       const info = infoMap.get(v) || {};
 
-      // --- 1. CP7 (NG < 11.6 или > 12.6) ---
+      // --- 1. CP7 (NG < 12.6, верхней границы нет) ---
       let cp7Val = null, cp7Ok = null;
       if (cp7Ms) {
         const inWindow = checks.filter(c => Math.abs(c.time - cp7Ms) <= 10 * 60 * 1000);
         const check = inWindow.length ? inWindow[0] : (checks.length ? checks[0] : null);
         if (check) {
           cp7Val = check.voltage;
-          cp7Ok = cp7Val >= 11.6 && cp7Val <= 12.6;
+          cp7Ok = cp7Val >= 12.6; // ИЗМЕНЕНО
         }
       }
 
-      // --- 2. TLADAS (NG < 12.6 или > 13.0) ---
+      // --- 2. TLADAS (NG < 12.6, верхней границы нет) ---
       let tladasVal = null, tladasOk = null, tladasStatus = null;
       if (tladasMs) {
         if (cp7Ms) {
-          tladasStatus = (tladasMs - cp7Ms) <= 60 * 60 * 1000 ? 'under1h' : 'over1h';
+          const diff = tladasMs - cp7Ms;
+          tladasStatus = (diff <= 60 * 60 * 1000) ? 'under1h' : 'over1h';
         } else {
           tladasStatus = 'over1h';
         }
 
         const inWindow = checks.filter(c => Math.abs(c.time - tladasMs) <= 10 * 60 * 1000);
-        const check = inWindow.length ? inWindow[0] : (checks.length ? checks[checks.length - 1] : null);
+        const check = inWindow.length ? inWindow[inWindow.length - 1] : (checks.length ? checks[checks.length - 1] : null);
         if (check) {
           tladasVal = check.voltage;
-          tladasOk = tladasVal >= 12.6 && tladasVal <= 13.0;
+          tladasOk = tladasVal >= 12.6; // ИЗМЕНЕНО
         }
       }
 
-      // --- 3. CP8 (Повторяем логику SPC из первого эндпоинта) ---
+      // --- 3. CP8 (ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ, с верхней границей 13.0) ---
       let cp8Val = null, cp8Ok = null;
       if (cp8Ms) {
         const validOk = checks.filter(c => c.voltage >= 12.6 && c.voltage <= 13);
@@ -16928,7 +16940,12 @@ app.get('/api/voltage-spc-checkpoints-dashboard', async (req, res) => {
         cp8Ok = (cond1 || cond2) ? false : true;
 
         const inWindow = checks.filter(c => Math.abs(c.time - cp8Ms) <= 10 * 60 * 1000);
-        const closestCheck = inWindow.length ? inWindow[0] : (checks.length ? checks[checks.length - 1] : null);
+        let closestCheck = null;
+        if (inWindow.length > 0) {
+          closestCheck = inWindow.reduce((prev, curr) => (Math.abs(curr.time - cp8Ms) < Math.abs(prev.time - cp8Ms) ? curr : prev), inWindow[0]);
+        } else {
+          closestCheck = checks.length ? checks[checks.length - 1] : null;
+        }
         cp8Val = closestCheck ? closestCheck.voltage : null;
       }
 
@@ -16983,6 +17000,327 @@ app.get('/api/voltage-spc-vin-history', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
+
+
+/* ====================================================================== */
+/* ===================== REP ELEC REPORT ================================ */
+/* ====================================================================== */
+
+const REP_ELEC_NODE = 'REPELEC';
+const CP72_ULOC = 'CP72';
+
+// Хелпер: безопасный расчет номера недели
+function getWeekNumberForDate(dateStr) {
+  const cleanDate = String(dateStr).split('T')[0];
+  const d = new Date(cleanDate + 'T12:00:00Z');
+  if (isNaN(d.getTime())) return 0;
+  
+  const tmp = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const dayNum = tmp.getUTCDay() || 7;
+  tmp.setUTCDate(tmp.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+  return Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
+}
+
+// Хелпер: определение смены по времени (с учетом ротации недель)
+function getShiftInfoByDate(dateStr) {
+  const d = new Date(dateStr);
+  const moscow = new Date(d.getTime() + 3 * 60 * 60 * 1000);
+  const mins = moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+
+  let shiftType;
+  let shiftDate = new Date(moscow);
+  if (mins >= 7 * 60 + 50 && mins <= 16 * 60 + 40) {
+    shiftType = 'day';
+  } else if (mins >= 16 * 60 + 41 || mins <= 1 * 60 + 30) {
+    shiftType = 'evening';
+    if (mins <= 1 * 60 + 30) shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
+  } else {
+    shiftType = 'night';
+  }
+
+  const tmp = new Date(Date.UTC(shiftDate.getUTCFullYear(), shiftDate.getUTCMonth(), shiftDate.getUTCDate()));
+  const dayNum = tmp.getUTCDay() || 7;
+  tmp.setUTCDate(tmp.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
+  const isEven = weekNumber % 2 === 0;
+
+  if (shiftType === 'night') return 'C';
+  if (shiftType === 'day') return isEven ? 'B' : 'A';
+  return isEven ? 'A' : 'B';
+}
+
+// Хелпер: генерация периодов для графика
+function buildReelecPeriods({ period, count, fromDate, toDate, baseDate }) {
+  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const now = baseDate ? new Date(baseDate) : new Date(); 
+
+  if (fromDate && toDate) {
+    const out = [];
+    const start = new Date(fromDate + 'T00:00:00');
+    const end = new Date(toDate + 'T00:00:00');
+    if (isNaN(start) || isNaN(end) || start > end) return [];
+    const cur = new Date(start);
+    while (cur <= end) {
+      const ds = fmt(cur);
+      out.push({ type: 'day', label: ds, startDate: `${ds} 00:00:00`, endDate: `${ds} 23:59:59` });
+      cur.setDate(cur.getDate() + 1);
+    }
+    return out;
+  }
+
+  if (period === 'all') {
+    const months = [], weeks = [], days = [];
+    const curM = new Date(now.getFullYear(), now.getMonth(), 1);
+    for (let i = 0; i < 3; i++) {
+      const s = new Date(curM.getFullYear(), curM.getMonth() - i, 1);
+      const e = new Date(curM.getFullYear(), curM.getMonth() - i + 1, 0);
+      months.push({
+        type: 'month',
+        label: `${s.toLocaleString('en-US', { month: 'short' })} ${s.getFullYear()}`,
+        startDate: `${fmt(s)} 00:00:00`, endDate: `${fmt(e)} 23:59:59`,
+      });
+    }
+    months.reverse();
+
+    const curW = new Date(now);
+    curW.setDate(curW.getDate() - ((curW.getDay() + 6) % 7));
+    for (let i = 0; i < 4; i++) {
+      const s = new Date(curW); s.setDate(s.getDate() - i * 7);
+      const e = new Date(s); e.setDate(e.getDate() + 6);
+      weeks.push({
+        type: 'week',
+        label: `W${getWeekNumberForDate(fmt(s))} ${s.getFullYear()}`,
+        startDate: `${fmt(s)} 00:00:00`, endDate: `${fmt(e)} 23:59:59`,
+      });
+    }
+    weeks.reverse();
+
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(now); d.setDate(d.getDate() - i);
+      const ds = fmt(d);
+      days.push({ type: 'day', label: `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`, startDate: `${ds} 00:00:00`, endDate: `${ds} 23:59:59` });
+    }
+    days.reverse();
+
+    return [...months, ...weeks, ...days];
+  }
+
+  const n = Math.max(1, Math.min(parseInt(count, 10) || 3, 50));
+  const out = [];
+  const cur = new Date(now);
+
+  if (period === 'year') {
+    for (let i = 0; i < n; i++) {
+      const y = cur.getFullYear() - i;
+      out.push({ type: 'year', label: String(y), startDate: `${y}-01-01 00:00:00`, endDate: `${y}-12-31 23:59:59` });
+    }
+  } else if (period === 'month') {
+    for (let i = 0; i < n; i++) {
+      const s = new Date(cur.getFullYear(), cur.getMonth() - i, 1);
+      const e = new Date(cur.getFullYear(), cur.getMonth() - i + 1, 0);
+      out.push({
+        type: 'month',
+        label: `${s.toLocaleString('en-US', { month: 'short' })} ${String(s.getFullYear()).slice(-2)}`,
+        startDate: `${fmt(s)} 00:00:00`, endDate: `${fmt(e)} 23:59:59`,
+      });
+    }
+  } else if (period === 'week') {
+    const startW = new Date(cur);
+    startW.setDate(startW.getDate() - ((startW.getDay() + 6) % 7));
+    for (let i = 0; i < n; i++) {
+      const s = new Date(startW); s.setDate(s.getDate() - i * 7);
+      const e = new Date(s); e.setDate(e.getDate() + 6);
+      out.push({
+        type: 'week',
+        label: `W${getWeekNumberForDate(fmt(s))} ${s.getFullYear()}`,
+        startDate: `${fmt(s)} 00:00:00`, endDate: `${fmt(e)} 23:59:59`,
+      });
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      const d = new Date(cur); d.setDate(d.getDate() - i);
+      const ds = fmt(d);
+      out.push({ type: 'day', label: `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`, startDate: `${ds} 00:00:00`, endDate: `${ds} 23:59:59` });
+    }
+  }
+  return out.reverse();
+}
+
+// Эндпоинт 1: Данные для графика
+app.get('/api/repelec-report', async (req, res) => {
+  try {
+    const { period = 'all', count = 3, fromDate, toDate } = req.query;
+
+    const [maxDateRows] = await mesPool.query(`
+      SELECT MAX(gmt_create) AS max_time 
+      FROM tm_vhc_test_line_movement 
+      WHERE node_nature = 'REPELEC' AND (is_deleted = 0 OR is_deleted IS NULL)
+    `);
+    
+    let baseDate = maxDateRows[0]?.max_time ? new Date(maxDateRows[0].max_time) : new Date();
+    const periods = buildReelecPeriods({ period, count, fromDate, toDate, baseDate: baseDate.toISOString() });
+    
+    if (periods.length === 0) return res.json({ dataPoints: [] });
+
+    const ALL_MODELS = ['ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
+    const dataPoints = [];
+
+    for (const p of periods) {
+      // Берем из tm_vhc_test_line_movement
+      const [repelecRows] = await mesPool.query(`
+        SELECT UPPER(vin) AS VIN, MIN(gmt_create) AS REPELEC_TIME
+        FROM tm_vhc_test_line_movement
+        WHERE node_nature = 'REPELEC' 
+          AND (is_deleted = 0 OR is_deleted IS NULL)
+          AND gmt_create >= ? AND gmt_create <= ?
+        GROUP BY vin
+      `, [p.startDate, p.endDate]);
+
+      const vins = repelecRows.map(r => r.VIN);
+      const point = { type: p.type, label: p.label, startDate: p.startDate, endDate: p.endDate, shiftA: 0, shiftB: 0, total: 0 };
+      ALL_MODELS.forEach(m => { point[`${m}_A`] = 0; point[`${m}_B`] = 0; });
+
+      if (vins.length > 0) {
+        const ph = vins.map(() => '?').join(',');
+        
+        const [cp72Rows] = await mesPool.query(`
+          SELECT UPPER(vin) AS VIN, MIN(scan_time) AS CP72_TIME
+          FROM ti_mes_movement
+          WHERE uloc_no = ? AND (is_deleted = 0 OR is_deleted IS NULL) AND vin IN (${ph})
+          GROUP BY vin
+        `, [CP72_ULOC, ...vins]);
+        const cp72Map = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
+
+        const [modelRows] = await pool.query(`SELECT VIN, MODEL FROM work_order WHERE VIN IN (${ph})`, vins);
+        const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
+
+        vins.forEach(v => {
+          const repelecTime = repelecRows.find(r => r.VIN === v)?.REPELEC_TIME;
+          const timeToUse = cp72Map.get(v) || repelecTime; 
+          if (!timeToUse) return;
+
+          const shiftLetter = getShiftInfoByDate(timeToUse);
+          const model = modelMap.get(v) || 'UNKNOWN';
+
+          if (shiftLetter === 'A') {
+            point.shiftA++;
+            if (point[`${model}_A`] !== undefined) point[`${model}_A`]++;
+          } else if (shiftLetter === 'B') {
+            point.shiftB++;
+            if (point[`${model}_B`] !== undefined) point[`${model}_B`]++;
+          }
+        });
+      }
+      point.total = point.shiftA + point.shiftB;
+      dataPoints.push(point);
+    }
+    res.json({ dataPoints });
+  } catch (err) {
+    console.error('Ошибка /api/repelec-report:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Эндпоинт 2: Данные для модального окна
+// Эндпоинт 2: Данные для модального окна
+app.get('/api/repelec-vins', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, shift, model } = req.query;
+    if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom, dateTo обязательны' });
+
+    const [repelecRows] = await mesPool.query(`
+      SELECT UPPER(vin) AS VIN, MIN(gmt_create) AS REPELEC_TIME
+      FROM tm_vhc_test_line_movement
+      WHERE node_nature = 'REPELEC'
+        AND (is_deleted = 0 OR is_deleted IS NULL)
+        AND gmt_create >= ? AND gmt_create <= ?
+      GROUP BY vin
+    `, [dateFrom, dateTo]);
+
+    if (repelecRows.length === 0) return res.json([]);
+    let vins = repelecRows.map(r => r.VIN);
+    const repelecMap = new Map(repelecRows.map(r => [r.VIN, r.REPELEC_TIME]));
+
+    const ph = vins.map(() => '?').join(',');
+
+    const [cp72Rows] = await mesPool.query(`
+      SELECT UPPER(vin) AS VIN, MIN(scan_time) AS CP72_TIME
+      FROM ti_mes_movement
+      WHERE uloc_no = 'CP72' AND (is_deleted = 0 OR is_deleted IS NULL) AND vin IN (${ph})
+      GROUP BY vin
+    `, [...vins]);
+    const cp72Map = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
+
+    const [modelRows] = await pool.query(`SELECT VIN, MODEL FROM work_order WHERE VIN IN (${ph})`, vins);
+    const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL || '—']));
+
+    let filteredVins = [];
+    vins.forEach(v => {
+      const repelecTime = repelecMap.get(v);
+      const cp72Time = cp72Map.get(v);
+      const timeToUse = cp72Time || repelecTime;
+      
+      if (!timeToUse) return;
+      const shiftLetter = getShiftInfoByDate(timeToUse);
+      if (shiftLetter !== shift) return;
+      
+      const vModel = modelMap.get(v) || '—';
+      if (model && model !== 'ALL' && vModel !== model) return;
+      filteredVins.push(v);
+    });
+
+    if (filteredVins.length === 0) return res.json([]);
+
+    const vinsPh = filteredVins.map(() => '?').join(',');
+
+    // ОСТАВЛЯЕМ ТОЛЬКО ДЕФЕКТЫ ИЗ at_qm_defect_info
+    const [defectRows] = await pool.query(`
+      SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_DESCRIPTION, PROBLEM_REPLENISH, POST_NAME
+      FROM at_qm_defect_info 
+      WHERE VIN IN (${vinsPh})
+    `, filteredVins);
+
+    const defectsByVin = new Map();
+    
+    defectRows.forEach(r => {
+      const part = (r.PART_NAME || '').trim();
+      const problem = (r.PROBLEM_TYPE || '').trim();
+      const desc = (r.PROBLEM_DESCRIPTION || '').trim();
+      const comment = (r.PROBLEM_REPLENISH || '').trim();
+      
+      let finalDesc = desc || `${part} ${problem}`.trim();
+      if (!finalDesc) finalDesc = 'Без описания';
+      
+      if (!defectsByVin.has(r.VIN)) defectsByVin.set(r.VIN, []);
+      defectsByVin.get(r.VIN).push({
+        description: finalDesc,
+        comment: comment,
+        post: r.POST_NAME
+      });
+    });
+
+    const uniqueVins = [...new Set(filteredVins)];
+
+    const result = uniqueVins.map(v => ({
+      vin: v,
+      model: modelMap.get(v) || '—',
+      repelec_time: repelecMap.get(v),
+      defects: defectsByVin.get(v) || []
+    }));
+
+    result.sort((a, b) => new Date(a.repelec_time) - new Date(b.repelec_time));
+    res.json(result);
+
+  } catch (err) {
+    console.error('Ошибка /api/repelec-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 
