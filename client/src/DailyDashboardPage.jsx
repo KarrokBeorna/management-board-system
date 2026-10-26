@@ -182,23 +182,37 @@ export default function DailyDashboardPage() {
   const [activeMainTab, setActiveMainTab] = useState('mbs');
 
   return (
-    <div style={{ padding: 30, fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1400, margin: '0 auto', backgroundColor: '#F8FAFC', minHeight: '100vh' }}>
-      
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
-        <h1 style={{ color: '#1E293B', fontSize: 32, fontWeight: 900, margin: 0 }}>QUALITY DAILY REPORT</h1>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <button style={tabButtonStyle(activeMainTab === 'mbs')} onClick={() => setActiveMainTab('mbs')}>
-            DAILY REPORT MBS
-          </button>
-          <button style={tabButtonStyle(activeMainTab === 'iot')} onClick={() => setActiveMainTab('iot')}>
-            DAILY REPORT IOT
-          </button>
+    // Внешний контейнер: растягиваем на всю ширину и задаем серый фон
+    <div style={{ 
+      width: '100%', 
+      minHeight: '100vh', 
+      backgroundColor: '#F8FAFC', 
+      fontFamily: 'Inter, Segoe UI, Arial, sans-serif' 
+    }}>
+      {/* Внутренний контейнер: ограничиваем ширину и центрируем контент */}
+      <div style={{ 
+        padding: 30, 
+        maxWidth: 1400, 
+        margin: '0 auto' 
+      }}>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+          <h1 style={{ color: '#1E293B', fontSize: 32, fontWeight: 900, margin: 0 }}>QUALITY DAILY REPORT</h1>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button style={tabButtonStyle(activeMainTab === 'mbs')} onClick={() => setActiveMainTab('mbs')}>
+              DAILY REPORT MBS
+            </button>
+            <button style={tabButtonStyle(activeMainTab === 'iot')} onClick={() => setActiveMainTab('iot')}>
+              DAILY REPORT IOT
+            </button>
+          </div>
         </div>
-      </div>
 
-      <ErrorBoundary>
-        {activeMainTab === 'mbs' ? <DailyReportMBS /> : <DailyReportIOT />}
-      </ErrorBoundary>
+        <ErrorBoundary>
+          {activeMainTab === 'mbs' ? <DailyReportMBS /> : <DailyReportIOT />}
+        </ErrorBoundary>
+        
+      </div>
     </div>
   );
 }
