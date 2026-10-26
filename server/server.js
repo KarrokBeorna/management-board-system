@@ -15726,15 +15726,29 @@ app.delete('/api/defect-notes/:mpp', async (req, res) => {
 
 const REPPS_NODE = 'REPPS';
 
+// Эндпоинт 1: Данные для графиков
 app.get('/api/repps-retrospective', async (req, res) => {
   try {
-    const { period = 'all', count, fromDate, toDate } = req.query;
+    const { period = 'all', count, fromDate, toDate, hideAssembly } = req.query;
+
+    // 1. Загружаем справочник PS (один раз для всего запроса)
+    let psKeySet = new Set();
+    try {
+      const [psRows] = await notesPool.query(
+        "SELECT part_name, defect_type FROM part_defect_shop_mapping WHERE shop = 'PS'"
+      );
+      psKeySet = new Set(psRows.map(r =>
+        `${String(r.part_name || '').trim().toLowerCase()}|${String(r.defect_type || '').trim().toLowerCase()}`
+      ));
+    } catch (e) {
+      console.error('[repps-retrospective] Ошибка загрузки справочника PS:', e.message);
+    }
 
     /* ------------------------------------------------------------------ */
     /* Хелпер: посчитать данные за один период                            */
     /* ------------------------------------------------------------------ */
     const getReps = async (startDate, endDate, label, type) => {
-      // 1. Уникальные VIN + их РАННЕЕ время захода в REPPS.
+      // 2. Уникальные VIN + их РАННЕЕ время захода в REPPS.
       const [rows] = await mesPool.query(`
         SELECT t.vin, t.first_repps, too.product AS MODEL
         FROM (
@@ -15747,8 +15761,35 @@ app.get('/api/repps-retrospective', async (req, res) => {
         WHERE DATE(t.first_repps) BETWEEN ? AND ?
       `, [REPPS_NODE, startDate, endDate]);
 
+      let filteredRows = rows;
+
+      // 3. ФИЛЬТР "REPPS БЕЗ ДЕФЕКТОВ СБОРКИ" (оставляем только тех, у кого есть дефекты PS)
+      if (hideAssembly === 'true' && rows.length > 0) {
+        const vins = [...new Set(rows.map(r => r.vin))];
+        const ph = vins.map(() => '?').join(',');
+        
+        // Берем все дефекты из всех трех таблиц
+        const [paintDefects] = await pool.query(`SELECT VIN, PART_NAME, PROBLEM_TYPE FROM at_paint_qm_defect_info WHERE VIN IN (${ph})`, vins);
+        const [qmDefects] = await pool.query(`SELECT VIN, PART_NAME, PROBLEM_TYPE FROM at_qm_defect_info WHERE VIN IN (${ph})`, vins);
+        const [biwDefects] = await pool.query(`SELECT VIN, PART_NAME, PROBLEM_TYPE FROM at_biw_qm_defect_info WHERE VIN IN (${ph})`, vins);
+        
+        const vinsWithPsDefects = new Set();
+        const allDefects = [...paintDefects, ...qmDefects, ...biwDefects];
+        
+        // Проверяем каждый дефект по справочнику
+        allDefects.forEach(d => {
+          const key = `${String(d.PART_NAME || '').trim().toLowerCase()}|${String(d.PROBLEM_TYPE || '').trim().toLowerCase()}`;
+          if (psKeySet.has(key)) {
+            vinsWithPsDefects.add(d.VIN);
+          }
+        });
+        
+        // Оставляем только машины, у которых найден хотя бы один дефект из PS
+        filteredRows = rows.filter(r => vinsWithPsDefects.has(r.vin));
+      }
+
       const vinModel = new Map();
-      rows.forEach(r => {
+      filteredRows.forEach(r => {
         if (!vinModel.has(r.vin)) {
           vinModel.set(r.vin, r.MODEL || 'UNKNOWN');
         }
@@ -15756,11 +15797,6 @@ app.get('/api/repps-retrospective', async (req, res) => {
 
       const total = vinModel.size;
 
-      // Категории PS:
-      //   paint_all          — есть любой дефект окраски
-      //   paint_open         — есть ≥1 незакрытый дефект окраски
-      //   paint_closed_only  — есть дефекты, но все закрыты
-      //   no_paint           — дефектов окраски нет вообще
       let paintAll = 0;
       let paintOpen = 0;
       let paintClosedOnly = 0;
@@ -15802,11 +15838,7 @@ app.get('/api/repps-retrospective', async (req, res) => {
       }
 
       const result = {
-        label,
-        type,
-        startDate,
-        endDate,
-        total,
+        label, type, startDate, endDate, total,
         paint_all: paintAll,
         paint_open: paintOpen,
         paint_closed_only: paintClosedOnly,
@@ -15849,7 +15881,6 @@ app.get('/api/repps-retrospective', async (req, res) => {
     const typeOrder = { year: 0, month: 1, week: 2, day: 3 };
 
     if (period === 'all') {
-      // 3 месяца назад
       for (let i = 2; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const y = d.getFullYear();
@@ -15863,7 +15894,6 @@ app.get('/api/repps-retrospective', async (req, res) => {
           type: 'month',
         });
       }
-      // 4 недели
       const dayOfWeek = now.getDay();
       const monday = new Date(now);
       monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
@@ -15879,7 +15909,6 @@ app.get('/api/repps-retrospective', async (req, res) => {
           type: 'week',
         });
       }
-      // 14 дней
       for (let i = 13; i >= 0; i--) {
         const d = new Date(now);
         d.setDate(now.getDate() - i);
@@ -16016,16 +16045,28 @@ app.get('/api/repps-retrospective', async (req, res) => {
 });
 
 
-
-
+// Эндпоинт 2: Данные для модального окна (список VIN и их дефекты)
 app.get('/api/repps-vins-details', async (req, res) => {
   try {
-    const { dateFrom, dateTo, category = 'total', model } = req.query;
+    const { dateFrom, dateTo, category = 'total', model, hideAssembly } = req.query;
     if (!dateFrom || !dateTo) {
       return res.status(400).json({ error: 'dateFrom и dateTo обязательны' });
     }
 
-    // 1. VIN + первое время REPPS
+    // 1. Загружаем справочник PS
+    let psKeySet = new Set();
+    try {
+      const [psRows] = await notesPool.query(
+        "SELECT part_name, defect_type FROM part_defect_shop_mapping WHERE shop = 'PS'"
+      );
+      psKeySet = new Set(psRows.map(r =>
+        `${String(r.part_name || '').trim().toLowerCase()}|${String(r.defect_type || '').trim().toLowerCase()}`
+      ));
+    } catch (e) {
+      console.error('[repps-vins-details] Ошибка загрузки справочника PS:', e.message);
+    }
+
+    // 2. VIN + первое время REPPS
     let sql = `
       SELECT t.vin, t.first_repps, too.product AS MODEL
       FROM (
@@ -16046,20 +16087,42 @@ app.get('/api/repps-vins-details', async (req, res) => {
     const [rows] = await mesPool.query(sql, params);
     if (rows.length === 0) return res.json([]);
 
-    const vins = rows.map(r => r.vin);
+    let filteredRows = rows;
+
+    // 3. ФИЛЬТР "REPPS БЕЗ ДЕФЕКТОВ СБОРКИ" ДЛЯ МОДАЛКИ
+    if (hideAssembly === 'true') {
+      const vins = rows.map(r => r.vin);
+      const ph = vins.map(() => '?').join(',');
+      
+      const [paintDefects] = await pool.query(`SELECT VIN, PART_NAME, PROBLEM_TYPE FROM at_paint_qm_defect_info WHERE VIN IN (${ph})`, vins);
+      const [qmDefects] = await pool.query(`SELECT VIN, PART_NAME, PROBLEM_TYPE FROM at_qm_defect_info WHERE VIN IN (${ph})`, vins);
+      const [biwDefects] = await pool.query(`SELECT VIN, PART_NAME, PROBLEM_TYPE FROM at_biw_qm_defect_info WHERE VIN IN (${ph})`, vins);
+      
+      const vinsWithPsDefects = new Set();
+      [...paintDefects, ...qmDefects, ...biwDefects].forEach(d => {
+        const key = `${String(d.PART_NAME || '').trim().toLowerCase()}|${String(d.PROBLEM_TYPE || '').trim().toLowerCase()}`;
+        if (psKeySet.has(key)) vinsWithPsDefects.add(d.VIN);
+      });
+      
+      // Оставляем только машины, у которых есть совпадение
+      filteredRows = rows.filter(r => vinsWithPsDefects.has(r.vin));
+    }
+
+    if (filteredRows.length === 0) return res.json([]);
+
+    const vins = filteredRows.map(r => r.vin);
     const ph = vins.map(() => '?').join(',');
 
-    // 2. Время PSOUT (AGMPS01002)
+    // 4. Время PSOUT (AGMPS01002)
     const [psoutRows] = await mesPool.query(`
       SELECT vin, MAX(scan_time) AS psout_time
       FROM ti_mes_movement
       WHERE uloc_no = 'AGMPS01002' AND is_deleted = 0 AND vin IN (${ph})
       GROUP BY vin
     `, vins);
-
     const psoutByVin = new Map(psoutRows.map(r => [r.vin, r.psout_time]));
 
-    // 3. Дефекты из Paint (для колонки "Дефекты окраски" и классификации)
+    // 5. Дефекты из Paint (для колонки "Дефекты окраски" и классификации)
     const [paintDefects] = await pool.query(`
       SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, STATUS, CREATION_TIME
       FROM at_paint_qm_defect_info
@@ -16067,7 +16130,7 @@ app.get('/api/repps-vins-details', async (req, res) => {
       ORDER BY VIN, CREATION_TIME DESC
     `, vins);
 
-    // 4. Дефекты из QM и BIW (для колонки "Дефекты окраски после PS")
+    // 6. Дефекты из QM и BIW (для колонки "Дефекты окраски после PS")
     const [qmDefects] = await pool.query(`
       SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, STATUS, CREATION_TIME
       FROM at_qm_defect_info
@@ -16080,22 +16143,7 @@ app.get('/api/repps-vins-details', async (req, res) => {
       WHERE VIN IN (${ph})
     `, vins);
 
-    // 5. Справочник PS (фильтр для поля "После PS")
-    let psKeySet = null;
-    try {
-      const [psRows] = await notesPool.query(
-        "SELECT part_name, defect_type FROM part_defect_shop_mapping WHERE shop = 'PS'"
-      );
-      if (psRows.length > 0) {
-        psKeySet = new Set(psRows.map(r =>
-          `${String(r.part_name || '').trim().toLowerCase()}|${String(r.defect_type || '').trim().toLowerCase()}`
-        ));
-      }
-    } catch (e) {
-      console.error('[repps-vins-details] Ошибка загрузки справочника PS:', e.message);
-    }
-
-    // 6. Обработка "Дефекты окраски" (только Paint)
+    // 7. Обработка "Дефекты окраски" (только Paint)
     const defectsByVin = new Map();
     const vinHasPaint = new Set();
     const vinHasOpenPaint = new Set();
@@ -16116,19 +16164,13 @@ app.get('/api/repps-vins-details', async (req, res) => {
       });
     });
 
-    // 7. Обработка "Дефекты окраски после PS" (Paint + QM + BIW с фильтром по справочнику)
+    // 8. Обработка "Дефекты окраски после PS"
     const postPsDefectsByVin = new Map();
     const allDefects = [...paintDefects, ...qmDefects, ...biwDefects];
 
     allDefects.forEach(d => {
-      let isPs = false;
-      if (psKeySet) {
-        const key = `${String(d.PART_NAME || '').trim().toLowerCase()}|${String(d.PROBLEM_TYPE || '').trim().toLowerCase()}`;
-        isPs = psKeySet.has(key);
-      } else {
-        // Fallback: если справочник пуст, используем старый статический список
-        isPs = POST_PS_DEFECT_TYPES.includes(d.PROBLEM_TYPE);
-      }
+      const key = `${String(d.PART_NAME || '').trim().toLowerCase()}|${String(d.PROBLEM_TYPE || '').trim().toLowerCase()}`;
+      const isPs = psKeySet.has(key);
 
       if (isPs) {
         if (!postPsDefectsByVin.has(d.VIN)) postPsDefectsByVin.set(d.VIN, []);
@@ -16143,25 +16185,23 @@ app.get('/api/repps-vins-details', async (req, res) => {
       }
     });
 
-    // 8. Фильтр по категории
-    let filtered = rows;
+    // 9. Фильтр по категории
+    let filteredCategory = filteredRows;
     if (category === 'no_paint') {
-      filtered = rows.filter(r => !vinHasPaint.has(r.vin));
+      filteredCategory = filteredRows.filter(r => !vinHasPaint.has(r.vin));
     } else if (category === 'paint_closed_only') {
-      filtered = rows.filter(r => vinHasPaint.has(r.vin) && !vinHasOpenPaint.has(r.vin));
+      filteredCategory = filteredRows.filter(r => vinHasPaint.has(r.vin) && !vinHasOpenPaint.has(r.vin));
     } else if (category === 'paint_open') {
-      filtered = rows.filter(r => vinHasOpenPaint.has(r.vin) && psoutByVin.has(r.vin));
+      filteredCategory = filteredRows.filter(r => vinHasOpenPaint.has(r.vin) && psoutByVin.has(r.vin));
     } else if (category === 'paint_all') {
-      filtered = rows.filter(r => vinHasPaint.has(r.vin));
+      filteredCategory = filteredRows.filter(r => vinHasPaint.has(r.vin));
     }
 
-    // 9. Формирование ответа
-    const result = filtered.map(r => {
-      // "Дефекты окраски" (без дублей)
+    // 10. Формирование ответа
+    const result = filteredCategory.map(r => {
       const defects = (defectsByVin.get(r.vin) || [])
         .sort((a, b) => (b.is_open ? 1 : 0) - (a.is_open ? 1 : 0));
 
-      // "Дефекты окраски после PS" (с дедупликацией по названию и времени, чтобы избежать повторов из разных таблиц)
       const rawPostPs = postPsDefectsByVin.get(r.vin) || [];
       const uniquePostPsMap = new Map();
       rawPostPs.forEach(d => {

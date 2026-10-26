@@ -173,8 +173,14 @@ export default function RepelecReportPage() {
                   {points.map((point, idx) => {
                     const val = point[row.key];
                     return (
-                      <td key={idx} style={{ ...tdStyle, cursor: 'pointer', backgroundColor: reppsTypeBgColors[point.type], fontWeight: 700, color: row.color }}
-                          onClick={() => val > 0 && openVinsModal(point.startDate, point.endDate, row.shiftCode, selectedModel, point.label)}>
+                      <td 
+                        key={idx} 
+                        style={{ ...tdStyle, cursor: 'pointer', backgroundColor: reppsTypeBgColors[point.type], fontWeight: 700, color: row.color }}
+                        onClick={() => val > 0 && openVinsModal(point.startDate, point.endDate, row.shiftCode, selectedModel, point.label)}
+                        onMouseEnter={(e) => { if (val > 0) e.currentTarget.style.backgroundColor = '#BFDBFE'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = reppsTypeBgColors[point.type]; }}
+                        title={val > 0 ? 'Клик — показать VIN' : ''}
+                      >
                         {val || 0}
                       </td>
                     );
@@ -226,8 +232,14 @@ export default function RepelecReportPage() {
                         const val = isTotal ? point.shiftA : point[`${modelKey}_A`];
                         const modelParam = isTotal ? 'ALL' : modelKey;
                         return (
-                          <td key={idx} style={{ ...tdStyle, cursor: 'pointer', color: SHIFT_A_COLOR, borderBottom: 'none', backgroundColor: reppsTypeBgColors[point.type] }}
-                              onClick={() => val > 0 && openVinsModal(point.startDate, point.endDate, 'A', modelParam, point.label)}>
+                          <td 
+                            key={idx} 
+                            style={{ ...tdStyle, cursor: 'pointer', color: SHIFT_A_COLOR, borderBottom: 'none', backgroundColor: reppsTypeBgColors[point.type] }}
+                            onClick={() => val > 0 && openVinsModal(point.startDate, point.endDate, 'A', modelParam, point.label)}
+                            onMouseEnter={(e) => { if (val > 0) e.currentTarget.style.backgroundColor = '#BFDBFE'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = reppsTypeBgColors[point.type]; }}
+                            title={val > 0 ? 'Клик — показать VIN' : ''}
+                          >
                             {val || 0}
                           </td>
                         );
@@ -239,8 +251,14 @@ export default function RepelecReportPage() {
                         const val = isTotal ? point.shiftB : point[`${modelKey}_B`];
                         const modelParam = isTotal ? 'ALL' : modelKey;
                         return (
-                          <td key={idx} style={{ ...tdStyle, cursor: 'pointer', color: SHIFT_B_COLOR, borderTop: '1px solid #E5E7EB', borderBottom: '1px solid #E5E7EB', backgroundColor: reppsTypeBgColors[point.type] }}
-                              onClick={() => val > 0 && openVinsModal(point.startDate, point.endDate, 'B', modelParam, point.label)}>
+                          <td 
+                            key={idx} 
+                            style={{ ...tdStyle, cursor: 'pointer', color: SHIFT_B_COLOR, borderTop: '1px solid #E5E7EB', borderBottom: '1px solid #E5E7EB', backgroundColor: reppsTypeBgColors[point.type] }}
+                            onClick={() => val > 0 && openVinsModal(point.startDate, point.endDate, 'B', modelParam, point.label)}
+                            onMouseEnter={(e) => { if (val > 0) e.currentTarget.style.backgroundColor = '#BFDBFE'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = reppsTypeBgColors[point.type]; }}
+                            title={val > 0 ? 'Клик — показать VIN' : ''}
+                          >
                             {val || 0}
                           </td>
                         );

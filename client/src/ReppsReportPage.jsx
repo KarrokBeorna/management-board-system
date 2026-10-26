@@ -712,6 +712,7 @@ export default function ReppsReportPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [selectedModel, setSelectedModel] = useState('ALL');
+  const [hideAssembly, setHideAssembly] = useState(true); // ВКЛЮЧЕН ПО УМОЛЧАНИЮ
   const [dataPoints, setDataPoints] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -750,6 +751,9 @@ export default function ReppsReportPage() {
       params.append('fromDate', fromDate);
       params.append('toDate', toDate);
     }
+    
+    if (hideAssembly) params.append('hideAssembly', 'true');
+
     fetch(`${API_BASE}/api/repps-retrospective?${params.toString()}`)
       .then(res => res.json())
       .then(json => {
@@ -760,7 +764,7 @@ export default function ReppsReportPage() {
         console.error('Ошибка загрузки REPPS:', err);
         setLoading(false);
       });
-  }, [period, count, fromDate, toDate, activeSubTab]);
+  }, [period, count, fromDate, toDate, activeSubTab, hideAssembly]);
 
   const chartData = useMemo(() => dataPoints.map(p => ({ ...p })), [dataPoints]);
 
@@ -787,6 +791,8 @@ export default function ReppsReportPage() {
 
     const params = new URLSearchParams({ dateFrom: startDate, dateTo: endDate, category });
     if (model && model !== 'ALL') params.append('model', model);
+    
+    if (hideAssembly) params.append('hideAssembly', 'true');
 
     fetch(`${API_BASE}/api/repps-vins-details?${params.toString()}`)
       .then(res => res.json())
@@ -1065,6 +1071,17 @@ export default function ReppsReportPage() {
                 <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={inputStyle}>
                   {availableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
                 </select>
+              </label>
+
+              {/* ИСПРАВЛЕННЫЙ ФИЛЬТР */}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, color: '#4B5563', cursor: 'pointer', marginLeft: 12 }}>
+                <input 
+                  type="checkbox" 
+                  checked={hideAssembly} 
+                  onChange={e => setHideAssembly(e.target.checked)} 
+                  style={{ width: 16, height: 16, cursor: 'pointer' }}
+                />
+                REPPS без дефектов сборки
               </label>
 
               <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#4B5563', marginLeft: 'auto', flexWrap: 'wrap' }}>
