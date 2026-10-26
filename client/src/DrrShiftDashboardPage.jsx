@@ -966,42 +966,92 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
 
 function WeeklyAnalyticsView() {
   const [weeksList, setWeeksList] = useState([]);
+  
+  // Данные для "Сутки" (ALL)
   const [cp7Data, setCp7Data] = useState([]);
   const [adasData, setAdasData] = useState([]);
   const [cpFinalData, setCpFinalData] = useState([]);
+
+  // Данные для "Смены" - Смена A
+  const [cp7DataA, setCp7DataA] = useState([]);
+  const [adasDataA, setAdasDataA] = useState([]);
+  const [cpFinalDataA, setCpFinalDataA] = useState([]);
+
+  // Данные для "Смены" - Смена B
+  const [cp7DataB, setCp7DataB] = useState([]);
+  const [adasDataB, setAdasDataB] = useState([]);
+  const [cpFinalDataB, setCpFinalDataB] = useState([]);
+
   const [loading, setLoading] = useState(false);
+  const [viewType, setViewType] = useState('all'); // 'all' | 'shifts'
 
   const [fromWeekStart, setFromWeekStart] = useState('');
   const [toWeekStart, setToWeekStart] = useState('');
-  const [shiftLetter, setShiftLetter] = useState('ALL');
 
   useEffect(() => {
     setLoading(true);
-    const q = `weeks=52&shiftLetter=${shiftLetter}`;
-    Promise.all([
-      fetch(`${API_BASE}/api/drr-weekly-analytics/cp7?${q}`).then(r => r.json()),
-      fetch(`${API_BASE}/api/drr-weekly-analytics/adas?${q}`).then(r => r.json()),
-      fetch(`${API_BASE}/api/drr-weekly-analytics/cpfinal?${q}`).then(r => r.json()),
-    ])
-      .then(([cp7, adas, cpfinal]) => {
-        const weeks = cp7.data || [];
-        setWeeksList(weeks);
-        setCp7Data(cp7.data || []);
-        setAdasData(adas.data || []);
-        setCpFinalData(cpfinal.data || []);
+    if (viewType === 'all') {
+      const q = `weeks=52&shiftLetter=ALL`;
+      Promise.all([
+        fetch(`${API_BASE}/api/drr-weekly-analytics/cp7?${q}`).then(r => r.json()),
+        fetch(`${API_BASE}/api/drr-weekly-analytics/adas?${q}`).then(r => r.json()),
+        fetch(`${API_BASE}/api/drr-weekly-analytics/cpfinal?${q}`).then(r => r.json()),
+      ])
+        .then(([cp7, adas, cpfinal]) => {
+          const weeks = cp7.data || [];
+          setWeeksList(weeks);
+          setCp7Data(cp7.data || []);
+          setAdasData(adas.data || []);
+          setCpFinalData(cpfinal.data || []);
 
-        if (weeks.length > 0) {
-          const lastStart = weeks[weeks.length - 1].weekStart;
-          setFromWeekStart(lastStart);
-          setToWeekStart(lastStart);
-        } else {
-          setFromWeekStart('');
-          setToWeekStart('');
-        }
-      })
-      .catch(err => console.error('Ошибка загрузки недель:', err))
-      .finally(() => setLoading(false));
-  }, [shiftLetter]);
+          if (weeks.length > 0) {
+            const lastStart = weeks[weeks.length - 1].weekStart;
+            setFromWeekStart(lastStart);
+            setToWeekStart(lastStart);
+          } else {
+            setFromWeekStart('');
+            setToWeekStart('');
+          }
+        })
+        .catch(err => console.error('Ошибка загрузки недель:', err))
+        .finally(() => setLoading(false));
+    } else {
+      // Запрашиваем данные параллельно для Смены A и Смены B
+      const qa = `weeks=52&shiftLetter=A`;
+      const qb = `weeks=52&shiftLetter=B`;
+      Promise.all([
+        fetch(`${API_BASE}/api/drr-weekly-analytics/cp7?${qa}`).then(r => r.json()),
+        fetch(`${API_BASE}/api/drr-weekly-analytics/adas?${qa}`).then(r => r.json()),
+        fetch(`${API_BASE}/api/drr-weekly-analytics/cpfinal?${qa}`).then(r => r.json()),
+        fetch(`${API_BASE}/api/drr-weekly-analytics/cp7?${qb}`).then(r => r.json()),
+        fetch(`${API_BASE}/api/drr-weekly-analytics/adas?${qb}`).then(r => r.json()),
+        fetch(`${API_BASE}/api/drr-weekly-analytics/cpfinal?${qb}`).then(r => r.json()),
+      ])
+        .then(([cp7A, adasA, cpFinalA, cp7B, adasB, cpFinalB]) => {
+          const weeks = cp7A.data || [];
+          setWeeksList(weeks);
+          
+          setCp7DataA(cp7A.data || []);
+          setAdasDataA(adasA.data || []);
+          setCpFinalDataA(cpFinalA.data || []);
+
+          setCp7DataB(cp7B.data || []);
+          setAdasDataB(adasB.data || []);
+          setCpFinalDataB(cpFinalB.data || []);
+
+          if (weeks.length > 0) {
+            const lastStart = weeks[weeks.length - 1].weekStart;
+            setFromWeekStart(lastStart);
+            setToWeekStart(lastStart);
+          } else {
+            setFromWeekStart('');
+            setToWeekStart('');
+          }
+        })
+        .catch(err => console.error('Ошибка загрузки недель:', err))
+        .finally(() => setLoading(false));
+    }
+  }, [viewType]);
 
   const fromIdx = weeksList.findIndex(w => w.weekStart === fromWeekStart);
   const toIdx = weeksList.findIndex(w => w.weekStart === toWeekStart);
@@ -1014,9 +1064,21 @@ function WeeklyAnalyticsView() {
 
   const selectedWeekStartsSet = new Set(selectedWeeks.map(w => w.weekStart));
   const filterByWeeks = (arr) => arr.filter(w => selectedWeekStartsSet.has(w.weekStart));
+
+  // Данные для Суток
   const cp7Filtered = filterByWeeks(cp7Data);
   const adasFiltered = filterByWeeks(adasData);
   const cpFinalFiltered = filterByWeeks(cpFinalData);
+
+  // Данные для Смены A
+  const cp7FilteredA = filterByWeeks(cp7DataA);
+  const adasFilteredA = filterByWeeks(adasDataA);
+  const cpFinalFilteredA = filterByWeeks(cpFinalDataA);
+
+  // Данные для Смены B
+  const cp7FilteredB = filterByWeeks(cp7DataB);
+  const adasFilteredB = filterByWeeks(adasDataB);
+  const cpFinalFilteredB = filterByWeeks(cpFinalDataB);
 
   const periodLabel = selectedWeeks.length === 0
     ? '—'
@@ -1027,15 +1089,22 @@ function WeeklyAnalyticsView() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ ...reportBlockStyle, display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
-        <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
-          Смена:
-          <select value={shiftLetter} onChange={(e) => setShiftLetter(e.target.value)} style={{ ...dateSelectStyle, padding: '8px 14px' }}>
-            <option value="ALL">Сутки</option>
-            <option value="A">Смена A</option>
-            <option value="B">Смена B</option>
-            <option value="C">Смена C</option>
-          </select>
-        </label>
+        
+        {/* Переключатель Сутки / Смены */}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button 
+            style={filterButtonStyle(viewType === 'all', '#2563EB')} 
+            onClick={() => setViewType('all')}
+          >
+            Сутки
+          </button>
+          <button 
+            style={filterButtonStyle(viewType === 'shifts', '#7C3AED')} 
+            onClick={() => setViewType('shifts')}
+          >
+            Смены
+          </button>
+        </div>
 
         <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
           С недели:
@@ -1067,11 +1136,28 @@ function WeeklyAnalyticsView() {
       ) : selectedWeeks.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 60, color: '#94A3B8', fontSize: '1.2rem' }}>Нет данных</div>
       ) : (
-        <>
-          <WeeklyCheckpointBlock type="cp7" title="DRR CP7" periodLabel={periodLabel} weeks={cp7Filtered} shiftLetter={shiftLetter} />
-          <WeeklyCheckpointBlock type="adas" title="DRR ADAS" periodLabel={periodLabel} weeks={adasFiltered} shiftLetter={shiftLetter} />
-          <WeeklyCheckpointBlock type="cpfinal" title="DRR CPFinal" periodLabel={periodLabel} weeks={cpFinalFiltered} shiftLetter={shiftLetter} />
-        </>
+        viewType === 'all' ? (
+          <>
+            <WeeklyCheckpointBlock type="cp7" title="DRR CP7" periodLabel={periodLabel} weeks={cp7Filtered} shiftLetter="ALL" />
+            <WeeklyCheckpointBlock type="adas" title="DRR ADAS" periodLabel={periodLabel} weeks={adasFiltered} shiftLetter="ALL" />
+            <WeeklyCheckpointBlock type="cpfinal" title="DRR CPFinal" periodLabel={periodLabel} weeks={cpFinalFiltered} shiftLetter="ALL" />
+          </>
+        ) : (
+          <div style={twoColStyle}>
+            <div style={columnStyle}>
+              <div style={columnHeaderStyle(false)}>СМЕНА A</div>
+              <WeeklyCheckpointBlock type="cp7" title="DRR CP7" periodLabel={periodLabel} weeks={cp7FilteredA} shiftLetter="A" />
+              <WeeklyCheckpointBlock type="adas" title="DRR ADAS" periodLabel={periodLabel} weeks={adasFilteredA} shiftLetter="A" />
+              <WeeklyCheckpointBlock type="cpfinal" title="DRR CPFinal" periodLabel={periodLabel} weeks={cpFinalFilteredA} shiftLetter="A" />
+            </div>
+            <div style={columnStyle}>
+              <div style={columnHeaderStyle(true)}>СМЕНА B</div>
+              <WeeklyCheckpointBlock type="cp7" title="DRR CP7" periodLabel={periodLabel} weeks={cp7FilteredB} shiftLetter="B" />
+              <WeeklyCheckpointBlock type="adas" title="DRR ADAS" periodLabel={periodLabel} weeks={adasFilteredB} shiftLetter="B" />
+              <WeeklyCheckpointBlock type="cpfinal" title="DRR CPFinal" periodLabel={periodLabel} weeks={cpFinalFilteredB} shiftLetter="B" />
+            </div>
+          </div>
+        )
       )}
     </div>
   );
