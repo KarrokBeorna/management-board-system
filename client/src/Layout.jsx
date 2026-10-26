@@ -102,8 +102,8 @@ export default function Layout() {
     location.pathname === '/brigade-report' ||
     location.pathname === '/defect-capture' ||
     location.pathname === '/drr-cp7-tup' ||
+    location.pathname === '/daily-dashboard' ||
     
-
 
     location.pathname === '/inspection' ||
 

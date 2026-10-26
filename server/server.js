@@ -6379,8 +6379,8 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
         grade: d.grade,
         defectCount: d.defectCount,
       }))
-      .sort((a, b) => b.defectCount - a.defectCount)
-      .slice(0, 20);
+      .sort((a, b) => b.defectCount - a.defectCount);
+      
 
     res.json(topDefects);
   } catch (err) {
@@ -6679,8 +6679,8 @@ async function saveDrrCp7Snapshot(shiftDate, shift, filterName) {
       drrPercent = totalVins > 0 ? Math.round((closedVins / totalVins) * 1000) / 10 : 0;
 
       topDefects = Array.from(defectGroupMap.values())
-        .sort((a, b) => b.defectCount - a.defectCount)
-        .slice(0, 20);
+        .sort((a, b) => b.defectCount - a.defectCount);
+
     }
 
     await notesPool.query(`
@@ -7384,8 +7384,8 @@ app.get('/api/drr-cp7-tup-top-defects', async (req, res) => {
         grade: d.grade,
         defectCount: d.defectCount,
       }))
-      .sort((a, b) => b.defectCount - a.defectCount)
-      .slice(0, 20);
+      .sort((a, b) => b.defectCount - a.defectCount);
+      
 
     res.json(topDefects);
   } catch (err) {
@@ -7777,8 +7777,8 @@ app.get('/api/drr-cp8-top-defects', async (req, res) => {
     });
 
     const topDefects = [...defectGroupMap.values()]
-      .sort((a, b) => b.defectCount - a.defectCount)
-      .slice(0, 20);
+      .sort((a, b) => b.defectCount - a.defectCount);
+      
 
     res.json(topDefects);
   } catch (err) {
@@ -8111,8 +8111,8 @@ app.get('/api/drr-tl-top-defects', async (req, res) => {
     });
 
     const result = [...map.values()]
-      .sort((a, b) => b.defectCount - a.defectCount)
-      .slice(0, 20);
+      .sort((a, b) => b.defectCount - a.defectCount);
+      
 
     res.json(result);
   } catch (err) {
@@ -8301,8 +8301,8 @@ async function saveDrrAdasSnapshot(shiftDate, shift) {
         });
 
         topDefects = [...map.values()]
-          .sort((a, b) => b.defectCount - a.defectCount)
-          .slice(0, 20);
+          .sort((a, b) => b.defectCount - a.defectCount);
+          
       }
     }
 
@@ -8579,8 +8579,8 @@ app.get('/api/drr-pip-top-defects', async (req, res) => {
         grade: d.grade,
         defectCount: d.defectCount,
       }))
-      .sort((a, b) => b.defectCount - a.defectCount)
-      .slice(0, 20);
+      .sort((a, b) => b.defectCount - a.defectCount);
+      
 
     res.json(topDefects);
   } catch (err) {
@@ -8846,8 +8846,8 @@ async function saveDrrPipSnapshot(shiftDate, shift) {
       drrPercent = totalVins > 0 ? Math.round((closedVins / totalVins) * 1000) / 10 : 0;
 
       topDefects = Array.from(defectGroupMap.values())
-        .sort((a, b) => b.defectCount - a.defectCount)
-        .slice(0, 20);
+        .sort((a, b) => b.defectCount - a.defectCount);
+        
     }
 
     await notesPool.query(`
@@ -11877,8 +11877,8 @@ app.get('/api/drr-wt-portal-defects', async (req, res) => {
     });
 
     const result = [...defectMap.values()]
-      .sort((a, b) => b.defectCount - a.defectCount)
-      .slice(0, 20);
+      .sort((a, b) => b.defectCount - a.defectCount);
+      
 
     res.json(result);
   } catch (err) {
@@ -12147,8 +12147,8 @@ app.get('/api/drr-cpfinal-top-defects', async (req, res) => {
     });
 
     const result = [...map.values()]
-      .sort((a, b) => b.defectCount - a.defectCount)
-      .slice(0, 20);
+      .sort((a, b) => b.defectCount - a.defectCount);
+      
 
     res.json(result);
   } catch (err) {
@@ -12356,8 +12356,8 @@ async function saveDrrCpFinalSnapshot(shiftDate, shift) {
         });
 
         topDefects = [...map.values()]
-          .sort((a, b) => b.defectCount - a.defectCount)
-          .slice(0, 20);
+          .sort((a, b) => b.defectCount - a.defectCount);
+          
       }
     }
 
@@ -12905,8 +12905,8 @@ app.get('/api/drr-cp6-top-defects', async (req, res) => {
     });
 
     const result = [...map.values()]
-      .sort((a, b) => b.defectCount - a.defectCount)
-      .slice(0, 20);
+      .sort((a, b) => b.defectCount - a.defectCount);
+      
 
     res.json(result);
   } catch (err) {
@@ -14156,8 +14156,8 @@ app.get('/api/drr-cp5-top-defects', async (req, res) => {
     });
 
     const result = [...map.values()]
-      .sort((a, b) => b.defectCount - a.defectCount)
-      .slice(0, 20);
+      .sort((a, b) => b.defectCount - a.defectCount);
+      
 
     res.json(result);
   } catch (err) {

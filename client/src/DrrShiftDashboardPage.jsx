@@ -201,6 +201,7 @@ const getShiftsForDate = (dateStr) => {
     weekNumber: weekNum,
     a: { letter: 'A', type: aType, ...getShiftRange(dateStr, aType) },
     b: { letter: 'B', type: bType, ...getShiftRange(dateStr, bType) },
+    c: { letter: 'C', type: 'night', ...getShiftRange(dateStr, 'night') } // Добавили ночную смену
   };
 };
 
@@ -222,7 +223,6 @@ const normalizeReport = (reportName, dash) => {
   };
 };
 
-/* ============ LIVE: тянем актуальные данные из API ============ */
 const loadAllReportsLive = async (start, end) => {
   const params = new URLSearchParams({ startTime: start, endTime: end });
   const [cp7, cp7top, adas, adasTop, cpfinal, cpfinalTop] = await Promise.all([
@@ -234,13 +234,12 @@ const loadAllReportsLive = async (start, end) => {
     fetch(`${API_BASE}/api/drr-cpfinal-top-defects?${params}`).then(r => r.json()),
   ]);
   return {
-    cp7: { dash: normalizeReport('cp7', cp7), top: Array.isArray(cp7top) ? cp7top.slice(0, 20) : [] },
-    adas: { dash: normalizeReport('adas', adas), top: Array.isArray(adasTop) ? adasTop.slice(0, 20) : [] },
-    cpfinal: { dash: normalizeReport('cpfinal', cpfinal), top: Array.isArray(cpfinalTop) ? cpfinalTop.slice(0, 20) : [] },
+    cp7: { dash: normalizeReport('cp7', cp7), top: Array.isArray(cp7top) ? cp7top : [] },
+    adas: { dash: normalizeReport('adas', adas), top: Array.isArray(adasTop) ? adasTop : [] },
+    cpfinal: { dash: normalizeReport('cpfinal', cpfinal), top: Array.isArray(cpfinalTop) ? cpfinalTop : [] },
   };
 };
 
-/* ============ ARCHIVE: читаем сохранённые снимки ============ */
 const fetchSnapshotFromList = async (listUrl, detailUrl, dateStr, shiftType) => {
   try {
     const res = await fetch(`${API_BASE}${listUrl}`);
@@ -282,15 +281,15 @@ const loadAllReportsArchive = async (dateStr, shiftType) => {
   return {
     cp7: {
       dash: normalizeReport('cp7', cp7),
-      top: Array.isArray(cp7?.topDefects) ? cp7.topDefects.slice(0, 20) : [],
+      top: Array.isArray(cp7?.topDefects) ? cp7.topDefects : [],
     },
     adas: {
       dash: normalizeReport('adas', adas),
-      top: Array.isArray(adas?.topDefects) ? adas.topDefects.slice(0, 20) : [],
+      top: Array.isArray(adas?.topDefects) ? adas.topDefects : [],
     },
     cpfinal: {
       dash: normalizeReport('cpfinal', cpfinal),
-      top: Array.isArray(cpfinal?.topDefects) ? cpfinal.topDefects.slice(0, 20) : [],
+      top: Array.isArray(cpfinal?.topDefects) ? cpfinal.topDefects : [],
     },
   };
 };
@@ -316,7 +315,6 @@ const parsePhotoKey = (key) => {
 
 const weekKeyOf = (w) => `CW${String(w.weekNumber).padStart(2, '0')} ${w.year}`;
 
-/* ===================== КОМПРЕССИЯ ФОТО ===================== */
 const compressImage = (file, maxWidth = 900) => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = (ev) => {
@@ -836,15 +834,37 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
     };
     const endpoint = endpointMap[type];
 
-    const requests = weeks.map(w => {
-      const params = new URLSearchParams({
-        startTime: `${w.weekStart} 00:00:00`,
-        endTime: `${w.weekEnd} 23:59:59`,
-      });
-      return fetch(`${API_BASE}${endpoint}?${params}`)
-        .then(r => r.json())
-        .then(arr => ({ week: w, list: Array.isArray(arr) ? arr.slice(0, 20) : [] }))
-        .catch(() => ({ week: w, list: [] }));
+    // ФОРМИРУЕМ ЗАПРОСЫ ПО ДНЯМ С УЧЕТОМ СМЕНЫ
+    const requests = [];
+    weeks.forEach(w => {
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(w.weekStart + 'T12:00:00Z');
+        d.setUTCDate(d.getUTCDate() + i);
+        const dayStr = d.toISOString().split('T')[0]; // YYYY-MM-DD
+
+        let startTime, endTime;
+        if (shiftLetter === 'ALL') {
+          startTime = `${dayStr} 00:00:00`;
+          endTime = `${dayStr} 23:59:59`;
+        } else {
+          const shifts = getShiftsForDate(dayStr);
+          const target = shiftLetter === 'A' ? shifts.a : shiftLetter === 'B' ? shifts.b : shifts.c;
+          if (target) {
+            startTime = target.start;
+            endTime = target.end;
+          } else {
+            continue; // Пропускаем, если вдруг смена не определилась
+          }
+        }
+
+        const params = new URLSearchParams({ startTime, endTime });
+        requests.push(
+          fetch(`${API_BASE}${endpoint}?${params}`)
+            .then(r => r.json())
+            .then(arr => ({ week: w, list: Array.isArray(arr) ? arr : [] })) // УБРАН .slice(0, 20)
+            .catch(() => ({ week: w, list: [] }))
+        );
+      }
     });
 
     Promise.all(requests)
@@ -854,7 +874,8 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
           const key = weekKeyOf(week);
           list.forEach(item => {
             if (!mppMap.has(item.mpp)) mppMap.set(item.mpp, { mpp: item.mpp, counts: {} });
-            mppMap.get(item.mpp).counts[key] = item.defectCount;
+            // Суммируем дефекты за все дни этой недели
+            mppMap.get(item.mpp).counts[key] = (mppMap.get(item.mpp).counts[key] || 0) + item.defectCount;
           });
         });
         const rows = Array.from(mppMap.values())
@@ -871,7 +892,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
       })
       .finally(() => setLoadingTop(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, weekKey]);
+  }, [type, weekKey, shiftLetter]);
 
   useEffect(() => {
     if (weeks.length === 0) {
@@ -967,17 +988,14 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
 function WeeklyAnalyticsView() {
   const [weeksList, setWeeksList] = useState([]);
   
-  // Данные для "Сутки" (ALL)
   const [cp7Data, setCp7Data] = useState([]);
   const [adasData, setAdasData] = useState([]);
   const [cpFinalData, setCpFinalData] = useState([]);
 
-  // Данные для "Смены" - Смена A
   const [cp7DataA, setCp7DataA] = useState([]);
   const [adasDataA, setAdasDataA] = useState([]);
   const [cpFinalDataA, setCpFinalDataA] = useState([]);
 
-  // Данные для "Смены" - Смена B
   const [cp7DataB, setCp7DataB] = useState([]);
   const [adasDataB, setAdasDataB] = useState([]);
   const [cpFinalDataB, setCpFinalDataB] = useState([]);
@@ -1016,7 +1034,6 @@ function WeeklyAnalyticsView() {
         .catch(err => console.error('Ошибка загрузки недель:', err))
         .finally(() => setLoading(false));
     } else {
-      // Запрашиваем данные параллельно для Смены A и Смены B
       const qa = `weeks=52&shiftLetter=A`;
       const qb = `weeks=52&shiftLetter=B`;
       Promise.all([
@@ -1065,17 +1082,14 @@ function WeeklyAnalyticsView() {
   const selectedWeekStartsSet = new Set(selectedWeeks.map(w => w.weekStart));
   const filterByWeeks = (arr) => arr.filter(w => selectedWeekStartsSet.has(w.weekStart));
 
-  // Данные для Суток
   const cp7Filtered = filterByWeeks(cp7Data);
   const adasFiltered = filterByWeeks(adasData);
   const cpFinalFiltered = filterByWeeks(cpFinalData);
 
-  // Данные для Смены A
   const cp7FilteredA = filterByWeeks(cp7DataA);
   const adasFilteredA = filterByWeeks(adasDataA);
   const cpFinalFilteredA = filterByWeeks(cpFinalDataA);
 
-  // Данные для Смены B
   const cp7FilteredB = filterByWeeks(cp7DataB);
   const adasFilteredB = filterByWeeks(adasDataB);
   const cpFinalFilteredB = filterByWeeks(cpFinalDataB);
@@ -1090,7 +1104,6 @@ function WeeklyAnalyticsView() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ ...reportBlockStyle, display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
         
-        {/* Переключатель Сутки / Смены */}
         <div style={{ display: 'flex', gap: 8 }}>
           <button 
             style={filterButtonStyle(viewType === 'all', '#2563EB')} 
@@ -1239,10 +1252,8 @@ export default function DrrShiftDashboardPage() {
       const baseDate = periodMode === 'live' ? todayMoscowStr() : selectedDate;
 
       if (viewType === 'all') {
-        // Режим «Сутки»
         let data;
         if (periodMode === 'archive') {
-          // Читаем снимок shift='all'
           data = await loadAllReportsArchive(baseDate, 'all');
         } else {
           const start = `${baseDate} 00:00:00`;
@@ -1251,13 +1262,11 @@ export default function DrrShiftDashboardPage() {
         }
         setAllData({ date: baseDate, ...data });
       } else {
-        // Режим «Смены A / B»
         const shifts = getShiftsForDate(baseDate);
         let aData = null;
         let bData = null;
 
         if (periodMode === 'archive') {
-          // Читаем снимки по типу смены (day / evening)
           const [a, b] = await Promise.all([
             shifts.a.type ? loadAllReportsArchive(baseDate, shifts.a.type) : Promise.resolve(null),
             shifts.b.type ? loadAllReportsArchive(baseDate, shifts.b.type) : Promise.resolve(null),
@@ -1265,7 +1274,6 @@ export default function DrrShiftDashboardPage() {
           aData = a;
           bData = b;
         } else {
-          // Live: проверяем, началась ли смена
           const now = nowMoscowStr();
           const aStarted = now >= shifts.a.start;
           const bStarted = now >= shifts.b.start;
