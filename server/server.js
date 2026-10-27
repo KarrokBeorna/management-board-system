@@ -76,6 +76,17 @@ const lesPool = mysql.createPool({
   dateStrings: true,
 });
 
+const bmsPool = mysql.createPool({
+  host: process.env.BMS_HOST,
+  port: parseInt(process.env.BMS_PORT) || 3306,
+  user: process.env.BMS_USER,
+  password: process.env.BMS_PASSWORD,
+  database: process.env.BMS_NAME,
+  waitForConnections: true,
+  connectTimeout: 10000,
+  dateStrings: true,
+});
+
 // ================== NOTES AVAILABILITY ==================
 let notesAvailable = false;
 
@@ -139,6 +150,18 @@ async function checkLesDatabaseConnection() {
     return true;
   } catch (err) {
     console.error('БД LES ОШИБКА:', err.message);
+    return false;
+  }
+}
+
+async function checkBmsDatabaseConnection() {
+  try {
+    const connection = await bmsPool.getConnection();
+    console.log('✅ БД BMS (launch_db): Подключение успешно!');
+    connection.release();
+    return true;
+  } catch (err) {
+    console.error('❌ БД BMS (launch_db) ОШИБКА:', err.message);
     return false;
   }
 }
@@ -17320,7 +17343,7 @@ app.get('/api/repelec-vins', async (req, res) => {
 
     const vinsPh = filteredVins.map(() => '?').join(',');
 
-    // 5. Дефекты ТОЛЬКО из at_qm_defect_info + добавлен MISS_PART
+    // 5. Дефекты IOT
     const [defectRows] = await pool.query(`
       SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_DESCRIPTION, PROBLEM_REPLENISH, POST_NAME, MISS_PART
       FROM at_qm_defect_info 
@@ -17328,7 +17351,6 @@ app.get('/api/repelec-vins', async (req, res) => {
     `, filteredVins);
 
     const defectsByVin = new Map();
-    
     defectRows.forEach(r => {
       const part = (r.PART_NAME || '').trim();
       const problem = (r.PROBLEM_TYPE || '').trim();
@@ -17349,13 +17371,39 @@ app.get('/api/repelec-vins', async (req, res) => {
       });
     });
 
+    // 6. Дефекты BMS
+    let bmsDefectsRows = [];
+    try {
+      const [bmsRows] = await bmsPool.query(`
+        SELECT UPPER(vin) AS VIN, test_station, module_name, result, fault_content 
+        FROM qr_test_details 
+        WHERE result != 'OK' AND UPPER(vin) IN (${vinsPh})
+      `, filteredVins);
+      bmsDefectsRows = bmsRows;
+    } catch (bmsErr) {
+      console.error('⚠️ Ошибка загрузки BMS для REPELEC:', bmsErr.message);
+    }
+
+    const bmsByVin = new Map();
+    bmsDefectsRows.forEach(r => {
+      if (!bmsByVin.has(r.VIN)) bmsByVin.set(r.VIN, []);
+      bmsByVin.get(r.VIN).push({
+        test_station: r.test_station || '—',
+        module_name: r.module_name || '—',
+        result: r.result || '—',
+        fault_content: r.fault_content || '—'
+      });
+    });
+
+    // 7. Объединение (IOT и BMS теперь отдельными массивами)
     const uniqueVins = [...new Set(filteredVins)];
 
     const result = uniqueVins.map(v => ({
       vin: v,
       model: modelMap.get(v) || '—',
       repelec_time: repelecMap.get(v),
-      defects: defectsByVin.get(v) || []
+      iot_defects: defectsByVin.get(v) || [],
+      bms_defects: bmsByVin.get(v) || []
     }));
 
     result.sort((a, b) => new Date(a.repelec_time) - new Date(b.repelec_time));
@@ -17443,18 +17491,27 @@ app.get('/api/inspection-defects', async (req, res) => {
 const PORT = process.env.PORT || 40000;
 
 async function startServer() {
+  console.log('--- Проверка подключений к БД ---');
+  
   const dbOk = await checkDatabaseConnection();
   const lesOk = await checkLesDatabaseConnection();
+  
+  // Проверка BMS (выведет лог "✅ БД BMS (launch_db): Подключение успешно!")
+  const bmsOk = await checkBmsDatabaseConnection(); 
+  const notesOk = await checkNotesDatabaseConnection();
 
+  // Если основная БД или LES недоступны — останавливаем сервер (как было)
   if (!dbOk || !lesOk) {
     console.log('Сервер НЕ запущен — основная БД или LES недоступны.');
     process.exit(1);
   }
 
-  // Просто выставляем флаг, сервер из-за notes не падает
-  await checkNotesDatabaseConnection();
+  // Если хотите, чтобы сервер не стартовал без BMS, добавьте || !bmsOk в условие выше.
+  if (!bmsOk) {
+    console.log('⚠️  Внимание: БД BMS недоступна. Функции, зависящие от BMS, будут выдавать ошибку.');
+  }
 
-  if (!notesAvailable) {
+  if (!notesOk) {
     console.log('⚠️  БД заметок недоступна. Сервер стартует в деградированном режиме.');
     console.log('    Snapshot DRR, метки/фото смен и справочники включатся автоматически при восстановлении связи.');
   }

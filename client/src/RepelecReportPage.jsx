@@ -8,16 +8,11 @@ import {
 const API_BASE = '';
 
 const reppsTypeBgColors = { year: '#F3E8FF', month: '#E0F2FE', week: '#CCFBF1', day: '#FEF3C7' };
-const SHIFT_A_COLOR = '#F59E0B'; // Желтый
-const SHIFT_B_COLOR = '#10B981'; // Зеленый
+const SHIFT_A_COLOR = '#F59E0B';
+const SHIFT_B_COLOR = '#10B981';
 
 const modelShortNames = { 
-  'ESTEO MX': 'MX', 
-  'JELAND J6': 'J6', 
-  'JELAND J7': 'J7', 
-  'TENET A8': 'A8', 
-  'JELAND J8': 'J8', 
-  'total': 'Total' 
+  'ESTEO MX': 'MX', 'JELAND J6': 'J6', 'JELAND J7': 'J7', 'TENET A8': 'A8', 'JELAND J8': 'J8', 'total': 'Total' 
 };
 const H_CHART_2 = 260;
 
@@ -33,7 +28,7 @@ const tableHeaderStyle = { fontSize: 12, fontWeight: 700, color: '#374151', marg
 const tableWrapStyle = { marginTop: 4, border: '1px solid #E5E7EB', borderRadius: 6, overflow: 'hidden' };
 const dashDividerStyle = { borderTop: '2px dashed #CBD5E1', marginTop: 12, marginBottom: 8 };
 const modalThStyle = { padding: '10px 12px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 2, whiteSpace: 'nowrap' };
-const modalTdStyle = { padding: '8px 12px', borderBottom: '1px solid #F0F0F5', verticalAlign: 'top' };
+const modalTdStyle = { padding: '8px 12px', borderBottom: '1px solid #F0F0F5', verticalAlign: 'top', whiteSpace: 'normal', wordBreak: 'break-word' };
 
 const shortenLabel = (label, type) => {
   if (type === 'month') { const [m, y] = label.split(' '); return y ? `${m}'${y.slice(2)}` : m; }
@@ -117,23 +112,41 @@ export default function RepelecReportPage() {
   const exportErrorsToExcel = () => {
     const exportData = [];
     modalVins.forEach(item => {
-      if (item.defects && item.defects.length > 0) {
-        item.defects.forEach(d => {
+      const iotList = item.iot_defects || [];
+      const bmsList = item.bms_defects || [];
+      const bmsString = bmsList.map(b => `[${b.test_station}] ${b.module_name}: ${b.fault_content}`).join('\n');
+
+      if (iotList.length === 0 && bmsList.length === 0) return;
+
+      if (iotList.length > 0) {
+        iotList.forEach(d => {
           exportData.push({
             'VIN': item.vin,
             'Модель': item.model,
+            'Ошибки BMS': bmsString || '—',
             'Время REPELEC': formatDateTime(item.repelec_time),
-            'Дефект': d.description,
+            'Дефект IOT': d.description,
             'Комментарий': d.comment || '—',
             'Партномер': d.miss_part || '—',
             'Пост ввода': d.post || '—',
           });
         });
+      } else {
+        exportData.push({
+          'VIN': item.vin,
+          'Модель': item.model,
+          'Ошибки BMS': bmsString,
+          'Время REPELEC': formatDateTime(item.repelec_time),
+          'Дефект IOT': '—',
+          'Комментарий': '—',
+          'Партномер': '—',
+          'Пост ввода': '—',
+        });
       }
     });
 
     if (exportData.length === 0) {
-      alert('Нет дефектов для экспорта');
+      alert('Нет данных для экспорта');
       return;
     }
 
@@ -141,7 +154,8 @@ export default function RepelecReportPage() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ошибки REPELEC');
     ws['!cols'] = [
-      { wch: 22 }, { wch: 15 }, { wch: 20 }, { wch: 60 }, { wch: 30 }, { wch: 15 }, { wch: 15 }
+      { wch: 22 }, { wch: 15 }, { wch: 50 }, { wch: 20 }, 
+      { wch: 40 }, { wch: 25 }, { wch: 15 }, { wch: 15 }
     ];
     
     const now = new Date();
@@ -394,7 +408,7 @@ export default function RepelecReportPage() {
       {/* МОДАЛЬНОЕ ОКНО */}
       {modalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 20 }} onClick={closeModal}>
-          <div style={{ backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20, width: '100%', maxWidth: 1400, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20, width: '100%', maxWidth: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#111827' }}>
@@ -425,54 +439,65 @@ export default function RepelecReportPage() {
               <p style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>Нет данных</p>
             ) : (
               <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #E5E7EB', borderRadius: 8 }}>
-                {/* ДОБАВЛЕН tableLayout: 'fixed' ДЛЯ УПРАВЛЕНИЯ ШИРИНОЙ КОЛОНОК */}
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
                   <thead>
                     <tr>
-                      <th style={{ ...modalThStyle, width: 160 }}>VIN</th>
-                      <th style={{ ...modalThStyle, width: 90 }}>Модель</th>
-                      <th style={{ ...modalThStyle, width: 140 }}>Время REPELEC</th>
-                      {/* Дефект занимает все оставшееся место */}
-                      <th style={modalThStyle}>Дефект</th>
-                      <th style={{ ...modalThStyle, width: 200 }}>Комментарий</th>
-                      <th style={{ ...modalThStyle, width: 110 }}>Партномер</th>
-                      <th style={{ ...modalThStyle, width: 110 }}>Пост ввода</th>
+                      <th style={{ ...modalThStyle, width: 165 }}>VIN</th>
+                      <th style={{ ...modalThStyle, width: 110 }}>Модель</th>
+                      <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8', width: 280 }}>BMS (ошибки)</th>
+                      <th style={{ ...modalThStyle, width: 120 }}>Время REPELEC</th>
+                      
+                      <th style={{ ...modalThStyle, background: '#F0FDF4', color: '#166534' }}>Дефект IOT</th>
+                      <th style={{ ...modalThStyle, background: '#F0FDF4', color: '#166534', width: 150 }}>Комментарий</th>
+                      <th style={{ ...modalThStyle, background: '#F0FDF4', color: '#166534', width: 100 }}>Партномер</th>
+                      <th style={{ ...modalThStyle, background: '#F0FDF4', color: '#166534', width: 100 }}>Пост ввода</th>
                     </tr>
                   </thead>
                   <tbody>
                     {modalVins.map((item, idx) => {
-                      if (!item.defects || item.defects.length === 0) {
+                      const iotList = item.iot_defects || [];
+                      const bmsList = item.bms_defects || [];
+                      const rowCount = Math.max(iotList.length, 1);
+
+                      return Array.from({ length: rowCount }).map((_, i) => {
+                        const d = iotList[i];
                         return (
-                          <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                            <td style={{ ...modalTdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{item.vin}</td>
-                            <td style={modalTdStyle}>{item.model}</td>
-                            <td style={{ ...modalTdStyle, fontSize: 12 }}>{formatDateTime(item.repelec_time)}</td>
-                            <td style={modalTdStyle} colSpan={4}>Нет дефектов</td>
+                          <tr key={`${idx}-${i}`} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB', borderBottom: i === rowCount - 1 ? '2px solid #E5E7EB' : '1px solid #F0F0F5' }}>
+                            {i === 0 && (
+                              <>
+                                <td rowSpan={rowCount} style={{ ...modalTdStyle, fontFamily: 'monospace', fontWeight: 600, verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  {item.vin}
+                                </td>
+                                <td rowSpan={rowCount} style={{ ...modalTdStyle, verticalAlign: 'middle' }}>
+                                  {item.model}
+                                </td>
+                                <td rowSpan={rowCount} style={{ ...modalTdStyle, verticalAlign: 'middle', backgroundColor: '#FAF5FF' }}>
+                                  {bmsList.length > 0 ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                      {bmsList.map((b, bi) => (
+                                        <div key={bi} style={{ fontSize: 12 }}>
+                                          <span style={{ color: '#DC2626', fontWeight: 700 }}>{b.test_station}</span> / {b.module_name} 
+                                          <span style={{ color: '#DC2626', fontWeight: 700 }}> ({b.result})</span>
+                                          <br />
+                                          <span style={{ color: '#6B21A8' }}>{b.fault_content}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : '—'}
+                                </td>
+                                <td rowSpan={rowCount} style={{ ...modalTdStyle, fontSize: 12, verticalAlign: 'middle' }}>
+                                  {formatDateTime(item.repelec_time)}
+                                </td>
+                              </>
+                            )}
+
+                            <td style={modalTdStyle}>{d ? d.description : '—'}</td>
+                            <td style={{ ...modalTdStyle, color: '#6B7280' }}>{d ? (d.comment || '—') : '—'}</td>
+                            <td style={{ ...modalTdStyle, fontWeight: 600 }}>{d ? (d.miss_part || '—') : '—'}</td>
+                            <td style={modalTdStyle}>{d ? (d.post || '—') : '—'}</td>
                           </tr>
                         );
-                      }
-
-                      return item.defects.map((d, i) => (
-                        <tr key={`${idx}-${i}`} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB', borderBottom: i === item.defects.length - 1 ? '2px solid #E5E7EB' : '1px solid #F0F0F5' }}>
-                          {i === 0 && (
-                            <>
-                              <td rowSpan={item.defects.length} style={{ ...modalTdStyle, fontFamily: 'monospace', fontWeight: 600, verticalAlign: 'middle', whiteSpace: 'normal', wordBreak: 'break-all' }}>{item.vin}</td>
-                              <td rowSpan={item.defects.length} style={{ ...modalTdStyle, verticalAlign: 'middle' }}>{item.model}</td>
-                              <td rowSpan={item.defects.length} style={{ ...modalTdStyle, fontSize: 12, verticalAlign: 'middle' }}>{formatDateTime(item.repelec_time)}</td>
-                            </>
-                          )}
-                          
-                          {/* Дефект и комментарий с переносом текста (whiteSpace: 'normal') */}
-                          <td style={{ ...modalTdStyle, color: '#1F2937', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                            {d.description}
-                          </td>
-                          <td style={{ ...modalTdStyle, color: '#6B7280', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                            {d.comment || '—'}
-                          </td>
-                          <td style={{ ...modalTdStyle, fontWeight: 600, whiteSpace: 'normal', wordBreak: 'break-word' }}>{d.miss_part || '—'}</td>
-                          <td style={modalTdStyle}>{d.post || '—'}</td>
-                        </tr>
-                      ));
+                      });
                     })}
                   </tbody>
                 </table>
