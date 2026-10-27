@@ -112,35 +112,29 @@ export default function RepelecReportPage() {
   const exportErrorsToExcel = () => {
     const exportData = [];
     modalVins.forEach(item => {
-      const iotList = item.iot_defects || [];
       const bmsList = item.bms_defects || [];
-      const bmsString = bmsList.map(b => `[${b.test_station}] ${b.module_name}: ${b.fault_content}`).join('\n');
-
-      if (iotList.length === 0 && bmsList.length === 0) return;
-
-      if (iotList.length > 0) {
-        iotList.forEach(d => {
-          exportData.push({
-            'VIN': item.vin,
-            'Модель': item.model,
-            'Ошибки BMS': bmsString || '—',
-            'Время REPELEC': formatDateTime(item.repelec_time),
-            'Дефект IOT': d.description,
-            'Комментарий': d.comment || '—',
-            'Партномер': d.miss_part || '—',
-            'Пост ввода': d.post || '—',
-          });
-        });
-      } else {
+      
+      if (bmsList.length === 0) {
         exportData.push({
           'VIN': item.vin,
           'Модель': item.model,
-          'Ошибки BMS': bmsString,
           'Время REPELEC': formatDateTime(item.repelec_time),
-          'Дефект IOT': '—',
-          'Комментарий': '—',
-          'Партномер': '—',
-          'Пост ввода': '—',
+          'Станция BMS': '—',
+          'Модуль BMS': '—',
+          'Результат BMS': '—',
+          'Ошибка BMS': '—',
+        });
+      } else {
+        bmsList.forEach(b => {
+          exportData.push({
+            'VIN': item.vin,
+            'Модель': item.model,
+            'Время REPELEC': formatDateTime(item.repelec_time),
+            'Станция BMS': b.test_station,
+            'Модуль BMS': b.module_name,
+            'Результат BMS': b.result,
+            'Ошибка BMS': b.fault_content,
+          });
         });
       }
     });
@@ -154,13 +148,13 @@ export default function RepelecReportPage() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ошибки REPELEC');
     ws['!cols'] = [
-      { wch: 22 }, { wch: 15 }, { wch: 50 }, { wch: 20 }, 
-      { wch: 40 }, { wch: 25 }, { wch: 15 }, { wch: 15 }
+      { wch: 22 }, { wch: 15 }, { wch: 20 }, 
+      { wch: 20 }, { wch: 25 }, { wch: 15 }, { wch: 50 }
     ];
     
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    XLSX.writeFile(wb, `REPELEC_Ошибки_${dateStr}.xlsx`);
+    XLSX.writeFile(wb, `REPELEC_BMS_Ошибки_${dateStr}.xlsx`);
   };
 
   const renderStackChart = (points) => {
@@ -443,24 +437,22 @@ export default function RepelecReportPage() {
                   <thead>
                     <tr>
                       <th style={{ ...modalThStyle, width: 165 }}>VIN</th>
-                      <th style={{ ...modalThStyle, width: 110 }}>Модель</th>
-                      <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8', width: 280 }}>BMS (ошибки)</th>
-                      <th style={{ ...modalThStyle, width: 120 }}>Время REPELEC</th>
+                      <th style={{ ...modalThStyle, width: 120 }}>Модель</th>
+                      <th style={{ ...modalThStyle, width: 140 }}>Время REPELEC</th>
                       
-                      <th style={{ ...modalThStyle, background: '#F0FDF4', color: '#166534' }}>Дефект IOT</th>
-                      <th style={{ ...modalThStyle, background: '#F0FDF4', color: '#166534', width: 150 }}>Комментарий</th>
-                      <th style={{ ...modalThStyle, background: '#F0FDF4', color: '#166534', width: 100 }}>Партномер</th>
-                      <th style={{ ...modalThStyle, background: '#F0FDF4', color: '#166534', width: 100 }}>Пост ввода</th>
+                      <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8', width: 150 }}>Станция BMS</th>
+                      <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8', width: 150 }}>Модуль BMS</th>
+                      <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8', width: 100 }}>Результат BMS</th>
+                      <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8' }}>Описание ошибки BMS</th>
                     </tr>
                   </thead>
                   <tbody>
                     {modalVins.map((item, idx) => {
-                      const iotList = item.iot_defects || [];
                       const bmsList = item.bms_defects || [];
-                      const rowCount = Math.max(iotList.length, 1);
+                      const rowCount = Math.max(bmsList.length, 1);
 
                       return Array.from({ length: rowCount }).map((_, i) => {
-                        const d = iotList[i];
+                        const bms = bmsList[i];
                         return (
                           <tr key={`${idx}-${i}`} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB', borderBottom: i === rowCount - 1 ? '2px solid #E5E7EB' : '1px solid #F0F0F5' }}>
                             {i === 0 && (
@@ -471,30 +463,24 @@ export default function RepelecReportPage() {
                                 <td rowSpan={rowCount} style={{ ...modalTdStyle, verticalAlign: 'middle' }}>
                                   {item.model}
                                 </td>
-                                <td rowSpan={rowCount} style={{ ...modalTdStyle, verticalAlign: 'middle', backgroundColor: '#FAF5FF' }}>
-                                  {bmsList.length > 0 ? (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                      {bmsList.map((b, bi) => (
-                                        <div key={bi} style={{ fontSize: 12 }}>
-                                          <span style={{ color: '#DC2626', fontWeight: 700 }}>{b.test_station}</span> / {b.module_name} 
-                                          <span style={{ color: '#DC2626', fontWeight: 700 }}> ({b.result})</span>
-                                          <br />
-                                          <span style={{ color: '#6B21A8' }}>{b.fault_content}</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : '—'}
-                                </td>
                                 <td rowSpan={rowCount} style={{ ...modalTdStyle, fontSize: 12, verticalAlign: 'middle' }}>
                                   {formatDateTime(item.repelec_time)}
                                 </td>
                               </>
                             )}
 
-                            <td style={modalTdStyle}>{d ? d.description : '—'}</td>
-                            <td style={{ ...modalTdStyle, color: '#6B7280' }}>{d ? (d.comment || '—') : '—'}</td>
-                            <td style={{ ...modalTdStyle, fontWeight: 600 }}>{d ? (d.miss_part || '—') : '—'}</td>
-                            <td style={modalTdStyle}>{d ? (d.post || '—') : '—'}</td>
+                            {bms ? (
+                              <>
+                                <td style={{ ...modalTdStyle, color: '#6B21A8', fontWeight: 600, backgroundColor: '#FAF5FF' }}>{bms.test_station}</td>
+                                <td style={{ ...modalTdStyle, color: '#6B21A8', backgroundColor: '#FAF5FF' }}>{bms.module_name}</td>
+                                <td style={{ ...modalTdStyle, color: '#DC2626', fontWeight: 700, backgroundColor: '#FAF5FF' }}>{bms.result}</td>
+                                <td style={{ ...modalTdStyle, color: '#6B21A8', backgroundColor: '#FAF5FF' }}>{bms.fault_content}</td>
+                              </>
+                            ) : (
+                              <td colSpan={4} style={{ ...modalTdStyle, textAlign: 'center', color: '#94A3B8', fontStyle: 'italic' }}>
+                                Нет данных BMS
+                              </td>
+                            )}
                           </tr>
                         );
                       });
