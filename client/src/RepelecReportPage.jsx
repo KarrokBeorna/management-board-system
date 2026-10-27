@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import * as XLSX from 'xlsx'; 
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   ResponsiveContainer, LabelList,
@@ -112,6 +113,41 @@ export default function RepelecReportPage() {
   };
 
   const closeModal = () => { setModalOpen(false); setModalVins([]); };
+
+  const exportErrorsToExcel = () => {
+    const exportData = [];
+    modalVins.forEach(item => {
+      if (item.defects && item.defects.length > 0) {
+        item.defects.forEach(d => {
+          exportData.push({
+            'VIN': item.vin,
+            'Модель': item.model,
+            'Время REPELEC': formatDateTime(item.repelec_time),
+            'Дефект': d.description,
+            'Комментарий': d.comment || '—',
+            'Партномер': d.miss_part || '—',
+            'Пост ввода': d.post || '—',
+          });
+        });
+      }
+    });
+
+    if (exportData.length === 0) {
+      alert('Нет дефектов для экспорта');
+      return;
+    }
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Ошибки REPELEC');
+    ws['!cols'] = [
+      { wch: 22 }, { wch: 15 }, { wch: 20 }, { wch: 60 }, { wch: 30 }, { wch: 15 }, { wch: 15 }
+    ];
+    
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    XLSX.writeFile(wb, `REPELEC_Ошибки_${dateStr}.xlsx`);
+  };
 
   const renderStackChart = (points) => {
     if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
@@ -355,10 +391,10 @@ export default function RepelecReportPage() {
         </div>
       )}
 
-      {/* Модалка */}
+      {/* МОДАЛЬНОЕ ОКНО */}
       {modalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 20 }} onClick={closeModal}>
-          <div style={{ backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20, width: '100%', maxWidth: 1200, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20, width: '100%', maxWidth: 1400, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#111827' }}>
@@ -367,7 +403,20 @@ export default function RepelecReportPage() {
                 </h3>
                 <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>Всего VIN: {modalVins.length}</p>
               </div>
-              <button onClick={closeModal} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280', lineHeight: 1 }}>×</button>
+              
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button 
+                  onClick={exportErrorsToExcel} 
+                  style={{ 
+                    background: '#059669', color: '#FFF', border: 'none', borderRadius: 6, 
+                    padding: '8px 16px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 6
+                  }}
+                >
+                  📊 Экспорт в Excel
+                </button>
+                <button onClick={closeModal} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280', lineHeight: 1 }}>×</button>
+              </div>
             </div>
 
             {modalLoading ? (
@@ -376,52 +425,55 @@ export default function RepelecReportPage() {
               <p style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>Нет данных</p>
             ) : (
               <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #E5E7EB', borderRadius: 8 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                {/* ДОБАВЛЕН tableLayout: 'fixed' ДЛЯ УПРАВЛЕНИЯ ШИРИНОЙ КОЛОНОК */}
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
                   <thead>
                     <tr>
-                      <th style={modalThStyle}>VIN</th>
-                      <th style={modalThStyle}>Модель</th>
-                      <th style={modalThStyle}>Время REPELEC</th>
-                      <th style={modalThStyle}>Дефекты</th>
-                      <th style={modalThStyle}>Комментарий</th>
+                      <th style={{ ...modalThStyle, width: 160 }}>VIN</th>
+                      <th style={{ ...modalThStyle, width: 90 }}>Модель</th>
+                      <th style={{ ...modalThStyle, width: 140 }}>Время REPELEC</th>
+                      {/* Дефект занимает все оставшееся место */}
+                      <th style={modalThStyle}>Дефект</th>
+                      <th style={{ ...modalThStyle, width: 200 }}>Комментарий</th>
+                      <th style={{ ...modalThStyle, width: 110 }}>Партномер</th>
+                      <th style={{ ...modalThStyle, width: 110 }}>Пост ввода</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {modalVins.map((item, idx) => (
-                      <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                        <td style={{ ...modalTdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{item.vin}</td>
-                        <td style={modalTdStyle}>{item.model}</td>
-                        <td style={{ ...modalTdStyle, fontSize: 12 }}>{formatDateTime(item.repelec_time)}</td>
-                        
-                        <td style={{ ...modalTdStyle, fontSize: 12 }}>
-                          {item.defects && item.defects.length > 0 ? (
-                            <ul style={{ margin: 0, paddingLeft: 16 }}>
-                              {item.defects.map((d, i) => (
-                                <li key={i} style={{ color: '#1F2937', marginBottom: 4 }}>
-                                  {d.description}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <span style={{ color: '#9CA3AF' }}>Нет дефектов</span>
-                          )}
-                        </td>
+                    {modalVins.map((item, idx) => {
+                      if (!item.defects || item.defects.length === 0) {
+                        return (
+                          <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                            <td style={{ ...modalTdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{item.vin}</td>
+                            <td style={modalTdStyle}>{item.model}</td>
+                            <td style={{ ...modalTdStyle, fontSize: 12 }}>{formatDateTime(item.repelec_time)}</td>
+                            <td style={modalTdStyle} colSpan={4}>Нет дефектов</td>
+                          </tr>
+                        );
+                      }
 
-                        <td style={{ ...modalTdStyle, fontSize: 12 }}>
-                          {item.defects && item.defects.length > 0 ? (
-                            <ul style={{ margin: 0, paddingLeft: 16 }}>
-                              {item.defects.map((d, i) => (
-                                <li key={i} style={{ color: '#6B7280', marginBottom: 4 }}>
-                                  {d.comment || '—'}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <span style={{ color: '#9CA3AF' }}>—</span>
+                      return item.defects.map((d, i) => (
+                        <tr key={`${idx}-${i}`} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB', borderBottom: i === item.defects.length - 1 ? '2px solid #E5E7EB' : '1px solid #F0F0F5' }}>
+                          {i === 0 && (
+                            <>
+                              <td rowSpan={item.defects.length} style={{ ...modalTdStyle, fontFamily: 'monospace', fontWeight: 600, verticalAlign: 'middle', whiteSpace: 'normal', wordBreak: 'break-all' }}>{item.vin}</td>
+                              <td rowSpan={item.defects.length} style={{ ...modalTdStyle, verticalAlign: 'middle' }}>{item.model}</td>
+                              <td rowSpan={item.defects.length} style={{ ...modalTdStyle, fontSize: 12, verticalAlign: 'middle' }}>{formatDateTime(item.repelec_time)}</td>
+                            </>
                           )}
-                        </td>
-                      </tr>
-                    ))}
+                          
+                          {/* Дефект и комментарий с переносом текста (whiteSpace: 'normal') */}
+                          <td style={{ ...modalTdStyle, color: '#1F2937', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                            {d.description}
+                          </td>
+                          <td style={{ ...modalTdStyle, color: '#6B7280', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                            {d.comment || '—'}
+                          </td>
+                          <td style={{ ...modalTdStyle, fontWeight: 600, whiteSpace: 'normal', wordBreak: 'break-word' }}>{d.miss_part || '—'}</td>
+                          <td style={modalTdStyle}>{d.post || '—'}</td>
+                        </tr>
+                      ));
+                    })}
                   </tbody>
                 </table>
               </div>

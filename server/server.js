@@ -17048,9 +17048,6 @@ app.get('/api/voltage-spc-vin-history', async (req, res) => {
 /* ===================== REP ELEC REPORT ================================ */
 /* ====================================================================== */
 
-const REP_ELEC_NODE = 'REPELEC';
-const CP72_ULOC = 'CP72';
-
 // Хелпер: безопасный расчет номера недели
 function getWeekNumberForDate(dateStr) {
   const cleanDate = String(dateStr).split('T')[0];
@@ -17064,7 +17061,7 @@ function getWeekNumberForDate(dateStr) {
   return Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
 }
 
-// Хелпер: определение смены по времени (с учетом ротации недель)
+// Хелпер: определение смены по времени CP72 (с учетом ротации недель)
 function getShiftInfoByDate(dateStr) {
   const d = new Date(dateStr);
   const moscow = new Date(d.getTime() + 3 * 60 * 60 * 1000);
@@ -17210,7 +17207,7 @@ app.get('/api/repelec-report', async (req, res) => {
     const dataPoints = [];
 
     for (const p of periods) {
-      // Берем из tm_vhc_test_line_movement
+      // 1. VIN из REPELEC (берем из тестовой линии)
       const [repelecRows] = await mesPool.query(`
         SELECT UPPER(vin) AS VIN, MIN(gmt_create) AS REPELEC_TIME
         FROM tm_vhc_test_line_movement
@@ -17227,17 +17224,20 @@ app.get('/api/repelec-report', async (req, res) => {
       if (vins.length > 0) {
         const ph = vins.map(() => '?').join(',');
         
+        // 2. Время CP72
         const [cp72Rows] = await mesPool.query(`
           SELECT UPPER(vin) AS VIN, MIN(scan_time) AS CP72_TIME
           FROM ti_mes_movement
-          WHERE uloc_no = ? AND (is_deleted = 0 OR is_deleted IS NULL) AND vin IN (${ph})
+          WHERE uloc_no = 'CP72' AND (is_deleted = 0 OR is_deleted IS NULL) AND vin IN (${ph})
           GROUP BY vin
-        `, [CP72_ULOC, ...vins]);
+        `, [...vins]);
         const cp72Map = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
 
+        // 3. Модели
         const [modelRows] = await pool.query(`SELECT VIN, MODEL FROM work_order WHERE VIN IN (${ph})`, vins);
         const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
 
+        // 4. Распределение по сменам
         vins.forEach(v => {
           const repelecTime = repelecRows.find(r => r.VIN === v)?.REPELEC_TIME;
           const timeToUse = cp72Map.get(v) || repelecTime; 
@@ -17266,12 +17266,12 @@ app.get('/api/repelec-report', async (req, res) => {
 });
 
 // Эндпоинт 2: Данные для модального окна
-// Эндпоинт 2: Данные для модального окна
 app.get('/api/repelec-vins', async (req, res) => {
   try {
     const { dateFrom, dateTo, shift, model } = req.query;
     if (!dateFrom || !dateTo) return res.status(400).json({ error: 'dateFrom, dateTo обязательны' });
 
+    // 1. VIN из REPELEC
     const [repelecRows] = await mesPool.query(`
       SELECT UPPER(vin) AS VIN, MIN(gmt_create) AS REPELEC_TIME
       FROM tm_vhc_test_line_movement
@@ -17287,6 +17287,7 @@ app.get('/api/repelec-vins', async (req, res) => {
 
     const ph = vins.map(() => '?').join(',');
 
+    // 2. Время CP72
     const [cp72Rows] = await mesPool.query(`
       SELECT UPPER(vin) AS VIN, MIN(scan_time) AS CP72_TIME
       FROM ti_mes_movement
@@ -17295,9 +17296,11 @@ app.get('/api/repelec-vins', async (req, res) => {
     `, [...vins]);
     const cp72Map = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
 
+    // 3. Модели
     const [modelRows] = await pool.query(`SELECT VIN, MODEL FROM work_order WHERE VIN IN (${ph})`, vins);
     const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL || '—']));
 
+    // 4. Фильтрация по смене и модели
     let filteredVins = [];
     vins.forEach(v => {
       const repelecTime = repelecMap.get(v);
@@ -17317,9 +17320,9 @@ app.get('/api/repelec-vins', async (req, res) => {
 
     const vinsPh = filteredVins.map(() => '?').join(',');
 
-    // ОСТАВЛЯЕМ ТОЛЬКО ДЕФЕКТЫ ИЗ at_qm_defect_info
+    // 5. Дефекты ТОЛЬКО из at_qm_defect_info + добавлен MISS_PART
     const [defectRows] = await pool.query(`
-      SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_DESCRIPTION, PROBLEM_REPLENISH, POST_NAME
+      SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_DESCRIPTION, PROBLEM_REPLENISH, POST_NAME, MISS_PART
       FROM at_qm_defect_info 
       WHERE VIN IN (${vinsPh})
     `, filteredVins);
@@ -17331,6 +17334,8 @@ app.get('/api/repelec-vins', async (req, res) => {
       const problem = (r.PROBLEM_TYPE || '').trim();
       const desc = (r.PROBLEM_DESCRIPTION || '').trim();
       const comment = (r.PROBLEM_REPLENISH || '').trim();
+      const missPart = (r.MISS_PART || '').trim();
+      const postName = (r.POST_NAME || '').trim();
       
       let finalDesc = desc || `${part} ${problem}`.trim();
       if (!finalDesc) finalDesc = 'Без описания';
@@ -17339,7 +17344,8 @@ app.get('/api/repelec-vins', async (req, res) => {
       defectsByVin.get(r.VIN).push({
         description: finalDesc,
         comment: comment,
-        post: r.POST_NAME
+        post: postName,
+        miss_part: missPart
       });
     });
 
