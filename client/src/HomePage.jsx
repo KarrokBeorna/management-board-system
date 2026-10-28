@@ -35,6 +35,7 @@ import lineDefectsArchivePreview from './assets/archph.png';
 import reppsPreview from './assets/repps.png';
 import voltageSpcPreview from './assets/volt.png';
 import repelecPreview from './assets/repelec.png'; 
+import drrElectronicsPreview from './assets/123.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -362,6 +363,7 @@ export default function HomePage() {
     { to: "/vehicle-on-wheels", imgSrc: VehPreview, caption: "Vehicle on Wheels", accentColor: "#e22910" },
     { to: "/drr-cp6", imgSrc: drrCp6Preview, caption: "DRR CP6 Dashboard", accentColor: "#0EA5E9" },
     { to: "/drr-cp5", imgSrc: drrCp5Preview, caption: "DRR CP5 Dashboard", accentColor: "#8B5CF6" },
+    { to: "/drr-electronics-dashboard", imgSrc: drrElectronicsPreview, caption: "DRR Electronics Dashboard", accentColor: "#8B5CF6" },
     { to: "/all-drr-dashboard", imgSrc: allDrrPreview, caption: "All DRR Dashboard", accentColor: "#0EA5E9" },
     { to: "/drr-shift-dashboard", imgSrc: drrShiftPreview, caption: "DRR Shift Dashboard", accentColor: "#7C3AED" },
     { to: "/repps-report", imgSrc: reppsPreview, caption: "REPPS Report", accentColor: "#EC4899" },
@@ -394,7 +396,8 @@ export default function HomePage() {
     '/drr-cp5',
     '/all-drr-dashboard',
     '/drr-shift-dashboard',
-    '/drr-cp7-tup'
+    '/drr-cp7-tup',
+    '/drr-electronics-dashboard'
   ];
 
   const allDrrCards = allReportCards.filter(card => DRR_ROUTES.includes(card.to));

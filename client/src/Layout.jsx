@@ -103,6 +103,7 @@ export default function Layout() {
     location.pathname === '/defect-capture' ||
     location.pathname === '/drr-cp7-tup' ||
     location.pathname === '/daily-dashboard' ||
+    location.pathname === '/drr-electronics-dashboard' ||
     
 
     location.pathname === '/inspection' ||
