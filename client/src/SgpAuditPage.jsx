@@ -149,7 +149,6 @@ const neighborPointOptions = [
   'CPFINAL', 'CP8', 'Inbound', 'Outbound'
 ];
 
-// Анимация загрузки с мигающими точками
 const loadingAnimation = `
   @keyframes blink {
     0% { opacity: 0.2; }
@@ -163,7 +162,6 @@ const loadingAnimation = `
   .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
 `;
 
-// Парсер списка VIN (разделяет по запятым, пробелам, переносам строк)
 const parseVinList = (input) => {
   if (!input) return [];
   return input
@@ -310,7 +308,6 @@ export default function SgpAuditPage() {
     setTimePointsLoading(true);
     setTimePointsError(null);
     try {
-      // Всегда грузим все данные для вкладки, фильтрация списков/неполных VIN идет локально
       const res = await fetch(`${API_BASE}/api/time-points`);
       if (!res.ok) {
         const errorText = await res.text();
@@ -384,7 +381,6 @@ export default function SgpAuditPage() {
   const filteredTimePointsData = useMemo(() => {
     let result = allTimePointsData;
 
-    // Фильтрация по списку VIN или неполному VIN (6 цифр)
     if (tpVinSearch.trim()) {
       const searchTokens = parseVinList(tpVinSearch);
       if (searchTokens.length > 0) {
@@ -393,11 +389,9 @@ export default function SgpAuditPage() {
           const upperVin = d.vin.toUpperCase();
           return searchTokens.some(token => {
             const upperToken = token.toUpperCase();
-            // Если ввели ровно 6 символов, ищем по окончанию
             if (upperToken.length === 6) {
               return upperVin.endsWith(upperToken);
             }
-            // Иначе ищем вхождение (или полное совпадение)
             return upperVin.includes(upperToken);
           });
         });
@@ -523,10 +517,6 @@ export default function SgpAuditPage() {
             };
           }
         });
-      });
-
-      uniqueVins.forEach(vin => {
-        if (!map[vin]) map[vin] = { Модель: '-', Склад: '-', Локация: '-', Ячейка: '-' };
       });
 
       return map;
@@ -932,18 +922,29 @@ export default function SgpAuditPage() {
     setCpLoading(true);
     setCpError(null);
     try {
-      // Передаем весь список токенов (включая 6-значные) в бат-запросы
       const storageMap = await fetchStorageLocations(tokens);
       const modelsMap = await fetchModels(tokens);
       const locMap = await fetchCurrentLocations(tokens);
 
-      const rowData = tokens.map(vin => {
-        const s = storageMap[vin] || {};
-        const modelFromMap = modelsMap[vin];
+      const rowData = tokens.map(token => {
+        let fullVin = token;
+        
+        const findFullVin = (map) => Object.keys(map).find(k => k === token || (token.length === 6 && k.endsWith(token)));
+        
+        const locKey = findFullVin(locMap);
+        const storageKey = findFullVin(storageMap);
+        const modelKey = findFullVin(modelsMap);
+
+        if (locKey) fullVin = locKey;
+        else if (storageKey) fullVin = storageKey;
+        else if (modelKey) fullVin = modelKey;
+
+        const s = storageKey ? storageMap[storageKey] : {};
+        const modelFromMap = modelKey ? modelsMap[modelKey] : null;
         const modelFromStorage = s.Модель && s.Модель !== '-' ? s.Модель : '-';
         
         let displayLocation = '-';
-        const loc = locMap[vin];
+        const loc = locKey ? locMap[locKey] : null;
         if (loc) {
           if (loc.isInStorage) displayLocation = 'На складе';
           else if (loc.isSold) displayLocation = 'Продан';
@@ -951,13 +952,13 @@ export default function SgpAuditPage() {
         }
 
         return {
-          VIN: vin,
+          VIN: fullVin,
           Модель: modelFromMap || modelFromStorage,
           Склад: s.Склад || '-',
           Локация: s.Локация || '-',
           Ячейка: s.Ячейка || '-',
           'Результат проверки': '',
-          'Текущее расположение': displayLocation // добавим сразу в объект
+          'Текущее расположение': displayLocation
         };
       });
 

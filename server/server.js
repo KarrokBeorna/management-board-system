@@ -6028,9 +6028,8 @@ app.get('/api/vehicles-current-location', async (req, res) => {
     const vinList = vins.split(',').map(v => v.trim()).filter(Boolean);
     if (vinList.length === 0) return res.json([]);
 
-    const { clause: vinClause, params: vinParams } = buildVinClause(vinList);
-
     // 1. MES
+    const { clause: vinClauseMes, params: vinParamsMes } = buildVinClause(vinList, 'vin');
     const [mesRows] = await mesPool.query(
       `SELECT vin,
               MAX(IF(uloc_no = 'AGMBS01002', scan_time, NULL)) AS CP5,
@@ -6041,12 +6040,13 @@ app.get('/api/vehicles-current-location', async (req, res) => {
               MAX(IF(uloc_no = 'CPFINAL', scan_time, NULL)) AS CPFINAL,
               MAX(IF(uloc_no = 'AGMAS01004', scan_time, NULL)) AS CP8
        FROM ti_mes_movement
-       WHERE (${vinClause}) AND is_deleted = 0
+       WHERE (${vinClauseMes}) AND is_deleted = 0
        GROUP BY vin`,
-      vinParams
+      vinParamsMes
     );
 
-    // 2. IOT
+    // 2. IOT (ТУТ БЫЛА ОШИБКА: теперь используем wo.vin)
+    const { clause: vinClauseIot, params: vinParamsIot } = buildVinClause(vinList, 'wo.vin');
     const [iotRows] = await pool.query(
       `SELECT wo.vin,
               MAX(IF(aow.WC_NAME = 'TLWA', aow.CREATION_TIME, NULL)) AS TLWA,
@@ -6055,17 +6055,18 @@ app.get('/api/vehicles-current-location', async (req, res) => {
               MAX(IF(aow.WC_NAME = 'TLTT', aow.CREATION_TIME, NULL)) AS TLTT
        FROM work_order wo
        LEFT JOIN at_om_wiptrackinghistory aow ON wo.vin = aow.vin
-       WHERE (${vinClause})
+       WHERE (${vinClauseIot})
        GROUP BY wo.vin`,
-      vinParams
+      vinParamsIot
     );
 
     // 3. LES
+    const { clause: vinClauseLes, params: vinParamsLes } = buildVinClause(vinList, 'vin');
     const [storageRows] = await lesPool.query(
       `SELECT vin, ck_no, kq_no, kw_no, out_storage_time, in_storage_status
        FROM tv_biz_storage_car
-       WHERE (${vinClause})`,
-      vinParams
+       WHERE (${vinClauseLes})`,
+      vinParamsLes
     );
 
     const mesMap = new Map(mesRows.map(r => [r.vin, r]));
