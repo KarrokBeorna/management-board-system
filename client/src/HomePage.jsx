@@ -35,7 +35,7 @@ import lineDefectsArchivePreview from './assets/archph.png';
 import reppsPreview from './assets/repps.png';
 import voltageSpcPreview from './assets/volt.png';
 import repelecPreview from './assets/repelec.png'; 
-import drrElectronicsPreview from './assets/123.png';
+import drrElectronicsPreview from './assets/dshelec.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {
