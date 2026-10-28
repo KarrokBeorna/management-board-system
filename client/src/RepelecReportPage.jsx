@@ -119,10 +119,11 @@ export default function RepelecReportPage() {
           'VIN': item.vin,
           'Модель': item.model,
           'Время REPELEC': formatDateTime(item.repelec_time),
+          'Время CP72': formatDateTime(item.cp72_time),
           'Станция BMS': '—',
           'Модуль BMS': '—',
           'Результат BMS': '—',
-          'Ошибка BMS': '—',
+          'Описание ошибки BMS': '—',
         });
       } else {
         bmsList.forEach(b => {
@@ -130,10 +131,11 @@ export default function RepelecReportPage() {
             'VIN': item.vin,
             'Модель': item.model,
             'Время REPELEC': formatDateTime(item.repelec_time),
+            'Время CP72': formatDateTime(item.cp72_time),
             'Станция BMS': b.test_station,
             'Модуль BMS': b.module_name,
             'Результат BMS': b.result,
-            'Ошибка BMS': b.fault_content,
+            'Описание ошибки BMS': b.fault_content,
           });
         });
       }
@@ -148,7 +150,7 @@ export default function RepelecReportPage() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Ошибки REPELEC');
     ws['!cols'] = [
-      { wch: 22 }, { wch: 15 }, { wch: 20 }, 
+      { wch: 22 }, { wch: 15 }, { wch: 20 }, { wch: 20 }, 
       { wch: 20 }, { wch: 25 }, { wch: 15 }, { wch: 50 }
     ];
     
@@ -402,7 +404,7 @@ export default function RepelecReportPage() {
       {/* МОДАЛЬНОЕ ОКНО */}
       {modalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 20 }} onClick={closeModal}>
-          <div style={{ backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20, width: '100%', maxWidth: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20, width: '100%', maxWidth: '98vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#111827' }}>
@@ -437,11 +439,12 @@ export default function RepelecReportPage() {
                   <thead>
                     <tr>
                       <th style={{ ...modalThStyle, width: 165 }}>VIN</th>
-                      <th style={{ ...modalThStyle, width: 120 }}>Модель</th>
+                      <th style={{ ...modalThStyle, width: 110 }}>Модель</th>
                       <th style={{ ...modalThStyle, width: 140 }}>Время REPELEC</th>
+                      <th style={{ ...modalThStyle, width: 140 }}>Время CP72</th>
                       
-                      <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8', width: 150 }}>Станция BMS</th>
-                      <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8', width: 150 }}>Модуль BMS</th>
+                      <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8', width: 140 }}>Станция BMS</th>
+                      <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8', width: 140 }}>Модуль BMS</th>
                       <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8', width: 100 }}>Результат BMS</th>
                       <th style={{ ...modalThStyle, background: '#F3E8FF', color: '#6B21A8' }}>Описание ошибки BMS</th>
                     </tr>
@@ -465,6 +468,9 @@ export default function RepelecReportPage() {
                                 </td>
                                 <td rowSpan={rowCount} style={{ ...modalTdStyle, fontSize: 12, verticalAlign: 'middle' }}>
                                   {formatDateTime(item.repelec_time)}
+                                </td>
+                                <td rowSpan={rowCount} style={{ ...modalTdStyle, fontSize: 12, verticalAlign: 'middle', fontWeight: 600 }}>
+                                  {formatDateTime(item.cp72_time)}
                                 </td>
                               </>
                             )}

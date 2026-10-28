@@ -17211,7 +17211,9 @@ function buildReelecPeriods({ period, count, fromDate, toDate, baseDate }) {
   return out.reverse();
 }
 
-// Эндпоинт 1: Данные для графика
+// =======================================================================
+// ЭНДПОИНТ 1: Данные для графика
+// =======================================================================
 app.get('/api/repelec-report', async (req, res) => {
   try {
     const { period = 'all', count = 3, fromDate, toDate } = req.query;
@@ -17231,7 +17233,6 @@ app.get('/api/repelec-report', async (req, res) => {
     const dataPoints = [];
 
     for (const p of periods) {
-      // 1. VIN из REPELEC (берем из тестовой линии)
       const [repelecRows] = await mesPool.query(`
         SELECT UPPER(vin) AS VIN, MIN(gmt_create) AS REPELEC_TIME
         FROM tm_vhc_test_line_movement
@@ -17248,7 +17249,7 @@ app.get('/api/repelec-report', async (req, res) => {
       if (vins.length > 0) {
         const ph = vins.map(() => '?').join(',');
         
-        // 2. Время CP72
+        // Время CP72 (строго для фильтрации)
         const [cp72Rows] = await mesPool.query(`
           SELECT UPPER(vin) AS VIN, MIN(scan_time) AS CP72_TIME
           FROM ti_mes_movement
@@ -17257,17 +17258,16 @@ app.get('/api/repelec-report', async (req, res) => {
         `, [...vins]);
         const cp72Map = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
 
-        // 3. Модели
+        // Модели
         const [modelRows] = await pool.query(`SELECT VIN, MODEL FROM work_order WHERE VIN IN (${ph})`, vins);
         const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL]));
 
-        // 4. Распределение по сменам
+        // Распределение по сменам (строгая проверка CP72)
         vins.forEach(v => {
-          const repelecTime = repelecRows.find(r => r.VIN === v)?.REPELEC_TIME;
-          const timeToUse = cp72Map.get(v) || repelecTime; 
-          if (!timeToUse) return;
+          const cp72Time = cp72Map.get(v);
+          if (!cp72Time) return; // Игнорируем машины без CP72
 
-          const shiftLetter = getShiftInfoByDate(timeToUse);
+          const shiftLetter = getShiftInfoByDate(cp72Time); 
           const model = modelMap.get(v) || 'UNKNOWN';
 
           if (shiftLetter === 'A') {
@@ -17289,7 +17289,9 @@ app.get('/api/repelec-report', async (req, res) => {
   }
 });
 
-// Эндпоинт 2: Данные для модального окна
+// =======================================================================
+// ЭНДПОИНТ 2: Детализация модального окна
+// =======================================================================
 app.get('/api/repelec-vins', async (req, res) => {
   try {
     const { dateFrom, dateTo, shift, model } = req.query;
@@ -17324,15 +17326,13 @@ app.get('/api/repelec-vins', async (req, res) => {
     const [modelRows] = await pool.query(`SELECT VIN, MODEL FROM work_order WHERE VIN IN (${ph})`, vins);
     const modelMap = new Map(modelRows.map(r => [r.VIN, r.MODEL || '—']));
 
-    // 4. Фильтрация по смене и модели
+    // 4. Фильтрация
     let filteredVins = [];
     vins.forEach(v => {
-      const repelecTime = repelecMap.get(v);
       const cp72Time = cp72Map.get(v);
-      const timeToUse = cp72Time || repelecTime;
-      
-      if (!timeToUse) return;
-      const shiftLetter = getShiftInfoByDate(timeToUse);
+      if (!cp72Time) return;
+
+      const shiftLetter = getShiftInfoByDate(cp72Time);
       if (shiftLetter !== shift) return;
       
       const vModel = modelMap.get(v) || '—';
@@ -17344,7 +17344,7 @@ app.get('/api/repelec-vins', async (req, res) => {
 
     const vinsPh = filteredVins.map(() => '?').join(',');
 
-    // 5. Дефекты IOT
+    // 5. Дефекты IOT (оставляем для структуры, хотя фронт их скрыл)
     const [defectRows] = await pool.query(`
       SELECT VIN, CREATION_TIME, PART_NAME, PROBLEM_TYPE, PROBLEM_DESCRIPTION, PROBLEM_REPLENISH, POST_NAME, MISS_PART
       FROM at_qm_defect_info 
@@ -17365,6 +17365,7 @@ app.get('/api/repelec-vins', async (req, res) => {
       
       if (!defectsByVin.has(r.VIN)) defectsByVin.set(r.VIN, []);
       defectsByVin.get(r.VIN).push({
+        source: 'IOT',
         description: finalDesc,
         comment: comment,
         post: postName,
@@ -17378,7 +17379,7 @@ app.get('/api/repelec-vins', async (req, res) => {
       const [bmsRows] = await bmsPool.query(`
         SELECT UPPER(vin) AS VIN, test_station, module_name, result, fault_content 
         FROM qr_test_details 
-        WHERE result != 'OK' AND UPPER(vin) IN (${vinsPh})
+        WHERE result != 'OK' AND vin IN (${vinsPh})
       `, filteredVins);
       bmsDefectsRows = bmsRows;
     } catch (bmsErr) {
@@ -17389,6 +17390,7 @@ app.get('/api/repelec-vins', async (req, res) => {
     bmsDefectsRows.forEach(r => {
       if (!bmsByVin.has(r.VIN)) bmsByVin.set(r.VIN, []);
       bmsByVin.get(r.VIN).push({
+        source: 'BMS',
         test_station: r.test_station || '—',
         module_name: r.module_name || '—',
         result: r.result || '—',
@@ -17396,16 +17398,20 @@ app.get('/api/repelec-vins', async (req, res) => {
       });
     });
 
-    // 7. Объединение (IOT и BMS теперь отдельными массивами)
+    // 7. Объединение данных
     const uniqueVins = [...new Set(filteredVins)];
-
-    const result = uniqueVins.map(v => ({
-      vin: v,
-      model: modelMap.get(v) || '—',
-      repelec_time: repelecMap.get(v),
-      iot_defects: defectsByVin.get(v) || [],
-      bms_defects: bmsByVin.get(v) || []
-    }));
+    const result = uniqueVins.map(v => {
+      const iotDefects = defectsByVin.get(v) || [];
+      const bmsDefects = bmsByVin.get(v) || [];
+      return {
+        vin: v,
+        model: modelMap.get(v) || '—',
+        repelec_time: repelecMap.get(v),
+        cp72_time: cp72Map.get(v) || null,
+        iot_defects: iotDefects,
+        bms_defects: bmsDefects
+      };
+    });
 
     result.sort((a, b) => new Date(a.repelec_time) - new Date(b.repelec_time));
     res.json(result);
