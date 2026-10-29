@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 
 const API_BASE = '';
 
+// ===== ФУНКЦИИ (СТАРЫЕ ЦВЕТА) =====
 function getWeekNumber(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
@@ -63,6 +64,116 @@ function CarsWeekSum({ sum, sticky }) {
   );
 }
 
+// ===== УЛУЧШЕННЫЙ ПОИСК =====
+function SearchBar({ uniqueDefects, onSelect, selectedSearchItem, onClear }) {
+  const [localQuery, setLocalQuery] = useState(selectedSearchItem ? selectedSearchItem.label : '');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    setLocalQuery(selectedSearchItem ? selectedSearchItem.label : '');
+  }, [selectedSearchItem]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const suggestions = useMemo(() => {
+    if (!localQuery.trim() || (selectedSearchItem && localQuery === selectedSearchItem.label)) return [];
+    const q = localQuery.toLowerCase();
+    return uniqueDefects.filter(d =>
+      d.part.toLowerCase().includes(q) || d.defect.toLowerCase().includes(q)
+    ).slice(0, 50);
+  }, [localQuery, uniqueDefects, selectedSearchItem]);
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', width: 280 }}>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+        <span style={{ position: 'absolute', left: 10, color: '#9CA3AF', fontSize: 14 }}>🔍</span>
+        <input
+          type="text"
+          placeholder="Деталь или дефект..."
+          value={localQuery}
+          onChange={(e) => {
+            setLocalQuery(e.target.value);
+            if (selectedSearchItem) onClear();
+            setShowSuggestions(true);
+          }}
+          onFocus={() => setShowSuggestions(true)}
+          style={{ ...styles.filterSelect, paddingLeft: 32, paddingRight: 28, width: '100%' }}
+        />
+        {localQuery && (
+          <button
+            onClick={() => {
+              setLocalQuery('');
+              setShowSuggestions(false);
+              onClear();
+            }}
+            style={{
+              position: 'absolute',
+              right: 8,
+              background: 'transparent',
+              border: 'none',
+              color: '#9CA3AF',
+              cursor: 'pointer',
+              fontSize: 14,
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      
+      {showSuggestions && suggestions.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 4px)',
+          left: 0,
+          right: 0,
+          background: '#1F2937',
+          border: '1px solid #374151',
+          borderRadius: 8,
+          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)',
+          zIndex: 100,
+          maxHeight: 250,
+          overflowY: 'auto'
+        }}>
+          {suggestions.map((item, idx) => (
+            <div
+              key={idx}
+              onClick={() => {
+                setLocalQuery(item.label);
+                setShowSuggestions(false);
+                onSelect(item);
+              }}
+              style={{
+                padding: '10px 12px',
+                cursor: 'pointer',
+                color: '#E5E7EB',
+                fontSize: 13,
+                borderBottom: '1px solid #374151',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#374151'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              {item.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== ОСНОВНОЙ КОМПОНЕНТ =====
 export default function ReportPage() {
   const [rawData, setRawData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -81,11 +192,11 @@ export default function ReportPage() {
   const [carsLoading, setCarsLoading] = useState(false);
 
   const [userNotes, setUserNotes] = useState({});
-
   const loadDataRef = useRef();
 
   const [hiddenRows, setHiddenRows] = useState({});
   const [selectedRow, setSelectedRow] = useState(null);
+  const [selectedSearchItem, setSelectedSearchItem] = useState(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/defect-notes`)
@@ -217,15 +328,38 @@ export default function ReportPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const { models, rows, headerCarsPrev, headerCarsCurr, sumCarsPrev, sumCarsCurr, totalPrevSum, totalCurrSum } = useMemo(() => {
+  const uniqueDefects = useMemo(() => {
+    if (!Array.isArray(rawData)) return [];
+    const map = new Map();
+    rawData.forEach(d => {
+      const key = `${d.PART_NAME}|||${d.PROBLEM_TYPE}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          part: d.PART_NAME,
+          defect: d.PROBLEM_TYPE,
+          label: `${d.PART_NAME} ${d.PROBLEM_TYPE}`.trim()
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [rawData]);
+
+  const { models, rows, headerCarsPrev, headerCarsCurr, sumCarsPrev, sumCarsCurr } = useMemo(() => {
     if (!Array.isArray(rawData)) return {
-      models: ['ALL'], rows: [], headerCarsPrev: [], headerCarsCurr: [],
-      sumCarsPrev: 0, sumCarsCurr: 0, totalPrevSum: 0, totalCurrSum: 0
+      models: ['ALL'], rows: [], headerCarsPrev: [], headerCarsCurr: [], sumCarsPrev: 0, sumCarsCurr: 0
     };
 
     const modelSet = new Set(rawData.map(d => d.MODEL));
     const modelsArr = ['ALL', ...Array.from(modelSet).sort()];
-    const filtered = selectedModel === 'ALL' ? rawData : rawData.filter(d => d.MODEL === selectedModel);
+    
+    let filtered = selectedModel === 'ALL' ? rawData : rawData.filter(d => d.MODEL === selectedModel);
+    
+    if (selectedSearchItem) {
+      filtered = filtered.filter(d => 
+        d.PART_NAME === selectedSearchItem.part && 
+        d.PROBLEM_TYPE === selectedSearchItem.defect
+      );
+    }
 
     const grouped = {};
     filtered.forEach(item => {
@@ -271,20 +405,15 @@ export default function ReportPage() {
     const sumPrev = carsPrev.reduce((s, v) => s + v, 0);
     const sumCurr = carsCurr.reduce((s, v) => s + v, 0);
 
-    const totalPrevDef = resultRows.reduce((s, r) => s + r.totalPrevDef, 0);
-    const totalCurrDef = resultRows.reduce((s, r) => s + r.totalCurrDef, 0);
-
     return {
       models: modelsArr,
       rows: resultRows,
       headerCarsPrev: carsPrev,
       headerCarsCurr: carsCurr,
       sumCarsPrev: sumPrev,
-      sumCarsCurr: sumCurr,
-      totalPrevSum: totalPrevDef,
-      totalCurrSum: totalCurrDef
+      sumCarsCurr: sumCurr
     };
-  }, [rawData, selectedModel, prevWeekDays, currWeekDays, isMonday, sortDay, sortCW, carsCounts]);
+  }, [rawData, selectedModel, prevWeekDays, currWeekDays, isMonday, sortDay, sortCW, carsCounts, selectedSearchItem]);
 
   const handleToggleRow = (mpp) => {
     setHiddenRows(prev => ({ ...prev, [mpp]: !prev[mpp] }));
@@ -312,276 +441,266 @@ export default function ReportPage() {
   return (
     <div style={styles.app}>
       <h1 style={styles.title}>Контроль качества</h1>
+      
+      {/* === УЛУЧШЕННАЯ ПАНЕЛЬ ФИЛЬТРОВ === */}
       <div style={styles.filterBar}>
-        <span style={styles.filterLabel}>Чекпоинт:</span>
-        <select value={checkpoint} onChange={e => setCheckpoint(e.target.value)} style={styles.filterSelect}>
-          <option value="ALL">Все</option>
-          <option value="CP7">CP7</option>
-          <option value="CP8">CP8</option>
-        </select>
+        <div style={styles.filterGroup}>
+          <span style={styles.filterLabel}>Чекпоинт:</span>
+          <select value={checkpoint} onChange={e => setCheckpoint(e.target.value)} style={styles.filterSelect}>
+            <option value="ALL">Все</option>
+            <option value="CP7">CP7</option>
+            <option value="CP8">CP8</option>
+          </select>
+        </div>
 
-        <span style={styles.filterLabel}>Тип:</span>
-        <select value={defectType} onChange={e => setDefectType(e.target.value)} style={styles.filterSelect}>
-          <option value="default">Default</option>
-          <option value="offline">Offline</option>
-          <option value="online">Online</option>
-        </select>
+        <div style={styles.filterGroup}>
+          <span style={styles.filterLabel}>Тип:</span>
+          <select value={defectType} onChange={e => setDefectType(e.target.value)} style={styles.filterSelect}>
+            <option value="default">Default</option>
+            <option value="offline">Offline</option>
+            <option value="online">Online</option>
+          </select>
+        </div>
 
-        <span style={styles.filterLabel}>Модель:</span>
-        <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={styles.filterSelect}>
-          {models.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все модели' : m}</option>)}
-        </select>
+        <div style={styles.filterGroup}>
+          <span style={styles.filterLabel}>Модель:</span>
+          <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={styles.filterSelect}>
+            {models.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все модели' : m}</option>)}
+          </select>
+        </div>
 
-        <span style={styles.filterLabel}>Единицы:</span>
-        <select value={unit} onChange={e => setUnit(e.target.value)} style={styles.filterSelect}>
-          <option value="defects">Штуки</option>
-          <option value="dpu">DPU per 1000</option>
-        </select>
+        <div style={{ width: 1, height: 24, background: '#374151', margin: '0 8px' }} />
 
-        <span style={styles.filterLabel}>Смена:</span>
-        <select value={shift} onChange={e => setShift(e.target.value)} style={styles.filterSelect}>
-          <option value="all">Сутки</option>
-          <option value="A">A</option>
-          <option value="B">B</option>
-          <option value="C">C</option>
-        </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <SearchBar 
+            uniqueDefects={uniqueDefects} 
+            selectedSearchItem={selectedSearchItem} 
+            onSelect={setSelectedSearchItem} 
+            onClear={() => setSelectedSearchItem(null)} 
+          />
+        </div>
+
+        <div style={{ width: 1, height: 24, background: '#374151', margin: '0 8px' }} />
+
+        <div style={styles.filterGroup}>
+          <span style={styles.filterLabel}>Единицы:</span>
+          <select value={unit} onChange={e => setUnit(e.target.value)} style={styles.filterSelect}>
+            <option value="defects">Штуки</option>
+            <option value="dpu">DPU per 1000</option>
+          </select>
+        </div>
+
+        <div style={styles.filterGroup}>
+          <span style={styles.filterLabel}>Смена:</span>
+          <select value={shift} onChange={e => setShift(e.target.value)} style={styles.filterSelect}>
+            <option value="all">Сутки</option>
+            <option value="A">Смена A</option>
+            <option value="B">Смена B</option>
+            <option value="C">Смена C</option>
+          </select>
+        </div>
 
         {sortDay && <span style={styles.sortInfo}>Сорт: день {sortDay.week==='prev'?'прошл':'тек'} {sortDay.index+1} <button onClick={()=>setSortDay(null)} style={styles.clearBtn}>✕</button></span>}
         {sortCW && <span style={styles.sortInfo}>Сорт: CW{sortCW==='prev'?prevWeekNum:currWeekNum} <button onClick={()=>setSortCW(null)} style={styles.clearBtn}>✕</button></span>}
       </div>
 
-      <div style={styles.grid}>
-        {/* Первая строка заголовков */}
-        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop1, zIndex: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>Дефект</span>
-          {hiddenCount > 0 && (
-            <button
-              onClick={showAllRows}
-              title="Показать все скрытые строки"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: '#60A5FA',
-                cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              <span>👁️</span> {hiddenCount}
-            </button>
-          )}
-        </div>
-        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop1, zIndex: 10 }}>Ответственный</div>
-        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop1, zIndex: 10 }}>Действие</div>
-
-        {prevWeekDays.map((d, i) => (
-          <div key={`ph${i}`} style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
-            <button
-              onClick={() => { setSortCW(null); setSortDay(p => p?.week==='prev'&&p?.index===i?null:{week:'prev',index:i}); }}
-              style={{
-                ...styles.sortBtn,
-                background: sortDay?.week==='prev'&&sortDay?.index===i ? '#2563EB' : 'transparent',
-                color: sortDay?.week==='prev'&&sortDay?.index===i ? '#FFF' : '#D1D5DB',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                lineHeight: 1.2,
-              }}
-            >
-              <span>{formatDate(d)}</span>
-              <span>{getDayOfWeek(d)}</span>
-            </button>
+      {/* === ОБЕРТКА ДЛЯ ТАБЛИЦЫ (ЧТОБЫ НЕ ВЫЛЕЗАЛА) === */}
+      <div style={{ overflowX: 'auto', width: '100%', paddingBottom: 20 }}>
+        <div style={styles.grid}>
+          {/* 1-я строка заголовков */}
+          <div style={{ ...styles.dark, position: 'sticky', top: stickyTop1, zIndex: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Дефект</span>
+            {hiddenCount > 0 && (
+              <button onClick={showAllRows} title="Показать все скрытые строки" style={{ background: 'transparent', border: 'none', color: '#60A5FA', cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span>👁️</span> {hiddenCount}
+              </button>
+            )}
           </div>
-        ))}
-        <div style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
-          <button onClick={() => { setSortDay(null); setSortCW(p => p==='prev'?null:'prev'); }} style={{...styles.sortBtn, background: sortCW==='prev'?'#2563EB':'transparent', color: sortCW==='prev'?'#FFF':'#D1D5DB'}}>CW{prevWeekNum}</button>
-        </div>
+          <div style={{ ...styles.dark, position: 'sticky', top: stickyTop1, zIndex: 10 }}>Ответственный</div>
+          <div style={{ ...styles.dark, position: 'sticky', top: stickyTop1, zIndex: 10 }}>Действие</div>
 
-        {currWeekDays.map((d, i) => (
-          <div key={`ch${i}`} style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
-            <button
-              onClick={() => { setSortCW(null); setSortDay(p => p?.week==='curr'&&p?.index===i?null:{week:'curr',index:i}); }}
-              style={{
-                ...styles.sortBtn,
-                background: sortDay?.week==='curr'&&sortDay?.index===i ? '#2563EB' : 'transparent',
-                color: sortDay?.week==='curr'&&sortDay?.index===i ? '#FFF' : '#D1D5DB',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                lineHeight: 1.2,
-              }}
-            >
-              <span>{formatDate(d)}</span>
-              <span>{getDayOfWeek(d)}</span>
-            </button>
+          {prevWeekDays.map((d, i) => (
+            <div key={`ph${i}`} style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
+              <button onClick={() => { setSortCW(null); setSortDay(p => p?.week==='prev'&&p?.index===i?null:{week:'prev',index:i}); }} style={{ ...styles.sortBtn, background: sortDay?.week==='prev'&&sortDay?.index===i ? '#2563EB' : 'transparent', color: sortDay?.week==='prev'&&sortDay?.index===i ? '#FFF' : '#D1D5DB', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1.2 }}>
+                <span>{formatDate(d)}</span>
+                <span>{getDayOfWeek(d)}</span>
+              </button>
+            </div>
+          ))}
+          <div style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
+            <button onClick={() => { setSortDay(null); setSortCW(p => p==='prev'?null:'prev'); }} style={{...styles.sortBtn, background: sortCW==='prev'?'#2563EB':'transparent', color: sortCW==='prev'?'#FFF':'#D1D5DB'}}>CW{prevWeekNum}</button>
           </div>
-        ))}
-        <div style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
-          <button onClick={() => { setSortDay(null); setSortCW(p => p==='curr'?null:'curr'); }} style={{...styles.sortBtn, background: sortCW==='curr'?'#2563EB':'transparent', color: sortCW==='curr'?'#FFF':'#D1D5DB'}}>CW{currWeekNum}</button>
-        </div>
 
-        {/* Вторая строка заголовков */}
-        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop2, zIndex: 9 }}>Кол-во машин</div>
-        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop2, zIndex: 9 }}></div>
-        <div style={{ ...styles.dark, position: 'sticky', top: stickyTop2, zIndex: 9 }}></div>
-        {headerCarsPrev.map((v, i) => <CarCell key={`hcp${i}`} count={v} sticky />)}
-        <CarsWeekSum sum={sumCarsPrev} sticky />
-        {headerCarsCurr.map((v, i) => <CarCell key={`hcc${i}`} count={v} sticky />)}
-        <CarsWeekSum sum={sumCarsCurr} sticky />
+          {currWeekDays.map((d, i) => (
+            <div key={`ch${i}`} style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
+              <button onClick={() => { setSortCW(null); setSortDay(p => p?.week==='curr'&&p?.index===i?null:{week:'curr',index:i}); }} style={{ ...styles.sortBtn, background: sortDay?.week==='curr'&&sortDay?.index===i ? '#2563EB' : 'transparent', color: sortDay?.week==='curr'&&sortDay?.index===i ? '#FFF' : '#D1D5DB', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1.2 }}>
+                <span>{formatDate(d)}</span>
+                <span>{getDayOfWeek(d)}</span>
+              </button>
+            </div>
+          ))}
+          <div style={{ ...styles.hdr, position: 'sticky', top: stickyTop1, zIndex: 10 }}>
+            <button onClick={() => { setSortDay(null); setSortCW(p => p==='curr'?null:'curr'); }} style={{...styles.sortBtn, background: sortCW==='curr'?'#2563EB':'transparent', color: sortCW==='curr'?'#FFF':'#D1D5DB'}}>CW{currWeekNum}</button>
+          </div>
 
-        {/* Строки данных */}
-        {rows.map((row) => {
-          if (hiddenRows[row.MPP]) return null;
-          const dpuPrev = sumCarsPrev > 0 ? (row.totalPrevDef * 1000) / sumCarsPrev : 0;
-          const dpuCurr = sumCarsCurr > 0 ? (row.totalCurrDef * 1000) / sumCarsCurr : 0;
-          const note = userNotes[row.MPP] || { responsible: '', action: '' };
-          const isSelected = selectedRow === row.MPP;
+          {/* 2-я строка заголовков */}
+          <div style={{ ...styles.dark, position: 'sticky', top: stickyTop2, zIndex: 9 }}>Кол-во машин</div>
+          <div style={{ ...styles.dark, position: 'sticky', top: stickyTop2, zIndex: 9 }}></div>
+          <div style={{ ...styles.dark, position: 'sticky', top: stickyTop2, zIndex: 9 }}></div>
+          {headerCarsPrev.map((v, i) => <CarCell key={`hcp${i}`} count={v} sticky />)}
+          <CarsWeekSum sum={sumCarsPrev} sticky />
+          {headerCarsCurr.map((v, i) => <CarCell key={`hcc${i}`} count={v} sticky />)}
+          <CarsWeekSum sum={sumCarsCurr} sticky />
 
-          const selectedBoxShadow = isSelected ? 'inset 0 0 0 2px #FFFFFF' : undefined;
+          {/* Строки данных */}
+          {rows.map((row) => {
+            if (hiddenRows[row.MPP]) return null;
+            const dpuPrev = sumCarsPrev > 0 ? (row.totalPrevDef * 1000) / sumCarsPrev : 0;
+            const dpuCurr = sumCarsCurr > 0 ? (row.totalCurrDef * 1000) / sumCarsCurr : 0;
+            const note = userNotes[row.MPP] || { responsible: '', action: '' };
+            const isSelected = selectedRow === row.MPP;
+            const selectedBoxShadow = isSelected ? 'inset 0 0 0 2px #FFFFFF' : undefined;
 
-          return (
-            <React.Fragment key={row.MPP}>
-              <div
-                style={{
-                  ...styles.name,
-                  position: 'relative',
-                  overflow: 'visible',
-                  boxShadow: selectedBoxShadow,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                }}
-                onClick={() => setSelectedRow(isSelected ? null : row.MPP)}
-              >
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleToggleRow(row.MPP);
-                  }}
-                  title="Свернуть строку"
+            return (
+              <React.Fragment key={row.MPP}>
+                <div
                   style={{
-                    position: 'absolute',
-                    left: -20,
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#D1D5DB',
+                    ...styles.name,
+                    position: 'relative',
+                    overflow: 'visible',
+                    boxShadow: selectedBoxShadow,
                     cursor: 'pointer',
-                    fontSize: 14,
-                    width: 18,
-                    height: 18,
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: 0,
-                    zIndex: 1,
                   }}
+                  onClick={() => setSelectedRow(isSelected ? null : row.MPP)}
                 >
-                  ▾
-                </button>
-                <span style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}>
-                  {row.MPP}
-                </span>
-              </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleToggleRow(row.MPP); }}
+                    title="Свернуть строку"
+                    style={{ position: 'absolute', left: -20, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: '#D1D5DB', cursor: 'pointer', fontSize: 14, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, zIndex: 1 }}
+                  >
+                    ▾
+                  </button>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {row.MPP}
+                  </span>
+                </div>
 
-              <div style={{ ...styles.noteCell, boxShadow: selectedBoxShadow }}>
-                <select value={note.responsible} onChange={e => handleNoteSave(row.MPP, 'responsible', e.target.value)} style={styles.noteSelect}>
-                  {responsibleOptions.map(opt => <option key={opt} value={opt}>{opt || '—'}</option>)}
-                </select>
-                {note.updated_at && <div style={styles.noteDate}>{new Date(note.updated_at).toLocaleDateString('ru-RU')}</div>}
-              </div>
+                <div style={{ ...styles.noteCell, boxShadow: selectedBoxShadow }}>
+                  <select value={note.responsible} onChange={e => handleNoteSave(row.MPP, 'responsible', e.target.value)} style={styles.noteSelect}>
+                    {responsibleOptions.map(opt => <option key={opt} value={opt}>{opt || '—'}</option>)}
+                  </select>
+                  {note.updated_at && <div style={styles.noteDate}>{new Date(note.updated_at).toLocaleDateString('ru-RU')}</div>}
+                </div>
 
-              <div style={{ ...styles.noteCell, boxShadow: selectedBoxShadow }}>
-                <select value={note.action} onChange={e => handleNoteSave(row.MPP, 'action', e.target.value)} style={styles.noteSelect}>
-                  {actionOptions.map(opt => <option key={opt} value={opt}>{opt || '—'}</option>)}
-                </select>
-                {note.updated_at && <div style={styles.noteDate}>{new Date(note.updated_at).toLocaleDateString('ru-RU')}</div>}
-              </div>
+                <div style={{ ...styles.noteCell, boxShadow: selectedBoxShadow }}>
+                  <select value={note.action} onChange={e => handleNoteSave(row.MPP, 'action', e.target.value)} style={styles.noteSelect}>
+                    {actionOptions.map(opt => <option key={opt} value={opt}>{opt || '—'}</option>)}
+                  </select>
+                  {note.updated_at && <div style={styles.noteDate}>{new Date(note.updated_at).toLocaleDateString('ru-RU')}</div>}
+                </div>
 
-              {row.cellsPrev.map((defects, ci) => {
-                const dateStr = prevWeekDays[ci].toISOString().split('T')[0];
-                const cars = carsCounts[dateStr] || 0;
-                let value = isDPU ? (cars > 0 ? (defects * 1000) / cars : 0) : defects;
-                if (isDPU && value > 1000) value = 980;
-                const bg = colorFunc(value);
-                const textColor = isDPU ? (value > 300 ? '#FFF' : '#000') : (value > 15 ? '#FFF' : '#000');
-                return (
-                  <div key={`cp${row.MPP}${ci}`} style={{
-                    ...styles.val,
-                    background: bg,
-                    color: textColor,
-                    boxShadow: selectedBoxShadow,
-                  }}>
-                    {isDPU ? formatDPU(value) : value}
-                  </div>
-                );
-              })}
-              <div style={{
-                ...styles.total,
-                background: colorFunc(isDPU ? dpuPrev : row.totalPrevDef),
-                color: (isDPU ? dpuPrev : row.totalPrevDef) > (isDPU ? 300 : 15) ? '#FFF' : '#000',
-                boxShadow: selectedBoxShadow,
-              }}>
-                {isDPU ? formatDPU(dpuPrev) : row.totalPrevDef}
-              </div>
+                {row.cellsPrev.map((defects, ci) => {
+                  const dateStr = prevWeekDays[ci].toISOString().split('T')[0];
+                  const cars = carsCounts[dateStr] || 0;
+                  let value = isDPU ? (cars > 0 ? (defects * 1000) / cars : 0) : defects;
+                  if (isDPU && value > 1000) value = 980;
+                  const bg = colorFunc(value);
+                  const textColor = isDPU ? (value > 300 ? '#FFF' : '#000') : (value > 15 ? '#FFF' : '#000');
+                  return (
+                    <div key={`cp${row.MPP}${ci}`} style={{ ...styles.val, background: bg, color: textColor, boxShadow: selectedBoxShadow }}>
+                      {isDPU ? formatDPU(value) : value}
+                    </div>
+                  );
+                })}
+                <div style={{ ...styles.total, background: colorFunc(isDPU ? dpuPrev : row.totalPrevDef), color: (isDPU ? dpuPrev : row.totalPrevDef) > (isDPU ? 300 : 15) ? '#FFF' : '#000', boxShadow: selectedBoxShadow }}>
+                  {isDPU ? formatDPU(dpuPrev) : row.totalPrevDef}
+                </div>
 
-              {row.cellsCurr.map((defects, ci) => {
-                const dateStr = currWeekDays[ci].toISOString().split('T')[0];
-                const cars = carsCounts[dateStr] || 0;
-                let value = isDPU ? (cars > 0 ? (defects * 1000) / cars : 0) : defects;
-                if (isDPU && value > 1000) value = 980;
-                const bg = colorFunc(value);
-                const textColor = isDPU ? (value > 300 ? '#FFF' : '#000') : (value > 15 ? '#FFF' : '#000');
-                return (
-                  <div key={`cc${row.MPP}${ci}`} style={{
-                    ...styles.val,
-                    background: bg,
-                    color: textColor,
-                    boxShadow: selectedBoxShadow,
-                  }}>
-                    {isDPU ? formatDPU(value) : value}
-                  </div>
-                );
-              })}
-              <div style={{
-                ...styles.total,
-                background: colorFunc(isDPU ? dpuCurr : row.totalCurrDef),
-                color: (isDPU ? dpuCurr : row.totalCurrDef) > (isDPU ? 300 : 15) ? '#FFF' : '#000',
-                boxShadow: selectedBoxShadow,
-              }}>
-                {isDPU ? formatDPU(dpuCurr) : row.totalCurrDef}
-              </div>
-            </React.Fragment>
-          );
-        })}
+                {row.cellsCurr.map((defects, ci) => {
+                  const dateStr = currWeekDays[ci].toISOString().split('T')[0];
+                  const cars = carsCounts[dateStr] || 0;
+                  let value = isDPU ? (cars > 0 ? (defects * 1000) / cars : 0) : defects;
+                  if (isDPU && value > 1000) value = 980;
+                  const bg = colorFunc(value);
+                  const textColor = isDPU ? (value > 300 ? '#FFF' : '#000') : (value > 15 ? '#FFF' : '#000');
+                  return (
+                    <div key={`cc${row.MPP}${ci}`} style={{ ...styles.val, background: bg, color: textColor, boxShadow: selectedBoxShadow }}>
+                      {isDPU ? formatDPU(value) : value}
+                    </div>
+                  );
+                })}
+                <div style={{ ...styles.total, background: colorFunc(isDPU ? dpuCurr : row.totalCurrDef), color: (isDPU ? dpuCurr : row.totalCurrDef) > (isDPU ? 300 : 15) ? '#FFF' : '#000', boxShadow: selectedBoxShadow }}>
+                  {isDPU ? formatDPU(dpuCurr) : row.totalCurrDef}
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
+// === СТИЛИ (СТАРАЯ ТАБЛИЦА + НОВЫЕ ФИЛЬТРЫ) ===
 const styles = {
   app: { background: '#111827', minHeight: '100vh', padding: 20, fontFamily: 'Segoe UI, Arial, sans-serif', color: '#FFF' },
-  title: { marginBottom: 15, fontSize: 20, fontWeight: 600 },
-  filterBar: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 15, flexWrap: 'wrap' },
-  filterLabel: { fontSize: 14, color: '#D1D5DB' },
-  filterSelect: { padding: '6px 12px', borderRadius: 6, border: '1px solid #4B5563', background: '#1F2937', color: '#FFF', fontSize: 14, cursor: 'pointer' },
-  sortInfo: { fontSize: 12, color: '#60A5FA', display: 'flex', alignItems: 'center', gap: 5 },
+  title: { marginBottom: 20, fontSize: 22, fontWeight: 600 },
+  
+  // Новая панель фильтров
+  filterBar: { 
+    display: 'flex', 
+    alignItems: 'flex-end', 
+    gap: 16, 
+    marginBottom: 20, 
+    flexWrap: 'wrap',
+    background: '#1F2937',
+    padding: '16px 20px',
+    borderRadius: 12,
+    border: '1px solid #374151'
+  },
+  filterGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6
+  },
+  filterLabel: { 
+    fontSize: 12, 
+    color: '#9CA3AF', 
+    fontWeight: 600
+  },
+  filterSelect: { 
+    padding: '8px 12px', 
+    borderRadius: 8, 
+    border: '1px solid #4B5563', 
+    background: '#111827', 
+    color: '#FFF', 
+    fontSize: 13, 
+    cursor: 'pointer',
+    outline: 'none',
+    minWidth: 100
+  },
+  sortInfo: { 
+    fontSize: 12, 
+    color: '#60A5FA', 
+    display: 'flex', 
+    alignItems: 'center', 
+    gap: 5,
+    background: '#1E3A8A',
+    padding: '4px 10px',
+    borderRadius: 6,
+    marginLeft: 'auto'
+  },
   clearBtn: { background: '#EF4444', color: '#FFF', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 10, padding: '1px 5px' },
+
+  // СТАРАЯ ТАБЛИЦА
   grid: {
     display: 'grid',
     gridTemplateColumns: 'minmax(300px, 2fr) 110px 110px repeat(7, 60px) 60px repeat(7, 60px) 60px',
     border: '1px solid #4B5563',
     fontSize: 13,
+    minWidth: 1100 // Чтобы на узких экранах не сжималась в кашу, а появлялся скролл
   },
   dark: { background: '#1F2937', padding: '6px 8px', fontWeight: 600, border: '1px solid #4B5563', display: 'flex', alignItems: 'center', fontSize: 11 },
   hdr: { background: '#374151', padding: 4, fontWeight: 600, border: '1px solid #4B5563', textAlign: 'center', fontSize: 11 },
