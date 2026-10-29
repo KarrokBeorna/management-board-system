@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 
 const API_BASE = '';
 
-// ===== ФУНКЦИИ (СТАРЫЕ ЦВЕТА) =====
+// ===== ФУНКЦИИ ЦВЕТОВ (СТАРЫЕ) =====
 function getWeekNumber(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
@@ -44,10 +44,7 @@ function getDPUColor(value) {
 
 function CarCell({ count, sticky }) {
   return (
-    <div style={{
-      ...styles.cars,
-      ...(sticky ? { position: 'sticky', top: 36, zIndex: 9 } : {})
-    }}>
+    <div style={{ ...styles.cars, ...(sticky ? { position: 'sticky', top: 36, zIndex: 9 } : {}) }}>
       {count !== null ? count : '...'}
     </div>
   );
@@ -55,24 +52,17 @@ function CarCell({ count, sticky }) {
 
 function CarsWeekSum({ sum, sticky }) {
   return (
-    <div style={{
-      ...styles.cars,
-      ...(sticky ? { position: 'sticky', top: 36, zIndex: 9 } : {})
-    }}>
+    <div style={{ ...styles.cars, ...(sticky ? { position: 'sticky', top: 36, zIndex: 9 } : {}) }}>
       {sum !== null ? sum : '...'}
     </div>
   );
 }
 
-// ===== УЛУЧШЕННЫЙ ПОИСК =====
-function SearchBar({ uniqueDefects, onSelect, selectedSearchItem, onClear }) {
-  const [localQuery, setLocalQuery] = useState(selectedSearchItem ? selectedSearchItem.label : '');
+// ===== ПОИСК (С КНОПКОЙ И ENTER) =====
+function SearchBar({ uniqueDefects, onSearchChange }) {
+  const [localQuery, setLocalQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const containerRef = useRef(null);
-
-  useEffect(() => {
-    setLocalQuery(selectedSearchItem ? selectedSearchItem.label : '');
-  }, [selectedSearchItem]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -84,91 +74,93 @@ function SearchBar({ uniqueDefects, onSelect, selectedSearchItem, onClear }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const handleSearch = () => {
+    onSearchChange(localQuery); // Передаем текст в таблицу
+    setShowSuggestions(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  };
+
+  const handleClear = () => {
+    setLocalQuery('');
+    setShowSuggestions(false);
+    onSearchChange(''); // Мгновенный сброс таблицы
+  };
+
+  const handleSelectSuggestion = (item) => {
+    setLocalQuery(item.label);
+    onSearchChange(item.label); // Сразу применяем фильтр при клике на подсказку
+    setShowSuggestions(false);
+  };
+
   const suggestions = useMemo(() => {
-    if (!localQuery.trim() || (selectedSearchItem && localQuery === selectedSearchItem.label)) return [];
+    if (!localQuery.trim()) return [];
     const q = localQuery.toLowerCase();
     return uniqueDefects.filter(d =>
       d.part.toLowerCase().includes(q) || d.defect.toLowerCase().includes(q)
     ).slice(0, 50);
-  }, [localQuery, uniqueDefects, selectedSearchItem]);
+  }, [localQuery, uniqueDefects]);
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: 280 }}>
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-        <span style={{ position: 'absolute', left: 10, color: '#9CA3AF', fontSize: 14 }}>🔍</span>
-        <input
-          type="text"
-          placeholder="Деталь или дефект..."
-          value={localQuery}
-          onChange={(e) => {
-            setLocalQuery(e.target.value);
-            if (selectedSearchItem) onClear();
-            setShowSuggestions(true);
-          }}
-          onFocus={() => setShowSuggestions(true)}
-          style={{ ...styles.filterSelect, paddingLeft: 32, paddingRight: 28, width: '100%' }}
-        />
-        {localQuery && (
-          <button
-            onClick={() => {
-              setLocalQuery('');
-              setShowSuggestions(false);
-              onClear();
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+      <div ref={containerRef} style={{ position: 'relative', width: 280 }}>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <span style={{ position: 'absolute', left: 10, color: '#9CA3AF', fontSize: 14 }}>🔍</span>
+          <input
+            type="text"
+            placeholder="Деталь или дефект..."
+            value={localQuery}
+            onChange={(e) => {
+              setLocalQuery(e.target.value);
+              setShowSuggestions(true);
             }}
-            style={{
-              position: 'absolute',
-              right: 8,
-              background: 'transparent',
-              border: 'none',
-              color: '#9CA3AF',
-              cursor: 'pointer',
-              fontSize: 14,
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            ✕
-          </button>
+            onKeyDown={handleKeyDown}
+            onFocus={() => setShowSuggestions(true)}
+            style={{ ...styles.filterSelect, paddingLeft: 32, paddingRight: 28, width: '100%' }}
+          />
+          {localQuery && (
+            <button onClick={handleClear} style={{ position: 'absolute', right: 8, background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer', fontSize: 14 }}>
+              ✕
+            </button>
+          )}
+        </div>
+        
+        {showSuggestions && suggestions.length > 0 && (
+          <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, background: '#1F2937', border: '1px solid #374151', borderRadius: 8, boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)', zIndex: 100, maxHeight: 250, overflowY: 'auto' }}>
+            {suggestions.map((item, idx) => (
+              <div key={idx} onClick={() => handleSelectSuggestion(item)} style={{ padding: '10px 12px', cursor: 'pointer', color: '#E5E7EB', fontSize: 13, borderBottom: '1px solid #374151' }} onMouseEnter={(e) => e.currentTarget.style.background = '#374151'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                {item.label}
+              </div>
+            ))}
+          </div>
         )}
       </div>
-      
-      {showSuggestions && suggestions.length > 0 && (
-        <div style={{
-          position: 'absolute',
-          top: 'calc(100% + 4px)',
-          left: 0,
-          right: 0,
-          background: '#1F2937',
-          border: '1px solid #374151',
+
+      {/* НОВАЯ КНОПКА НАЙТИ */}
+      <button
+        onClick={handleSearch}
+        style={{
+          padding: '8px 16px',
           borderRadius: 8,
-          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)',
-          zIndex: 100,
-          maxHeight: 250,
-          overflowY: 'auto'
-        }}>
-          {suggestions.map((item, idx) => (
-            <div
-              key={idx}
-              onClick={() => {
-                setLocalQuery(item.label);
-                setShowSuggestions(false);
-                onSelect(item);
-              }}
-              style={{
-                padding: '10px 12px',
-                cursor: 'pointer',
-                color: '#E5E7EB',
-                fontSize: 13,
-                borderBottom: '1px solid #374151',
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = '#374151'}
-              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-            >
-              {item.label}
-            </div>
-          ))}
-        </div>
-      )}
+          background: '#60A5FA', // Светло-синий
+          color: '#FFFFFF',
+          border: 'none',
+          fontWeight: 600,
+          fontSize: 13,
+          cursor: 'pointer',
+          height: '36px', // Фиксируем высоту под инпут
+          transition: 'background 0.2s',
+          whiteSpace: 'nowrap'
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.background = '#3B82F6'}
+        onMouseLeave={(e) => e.currentTarget.style.background = '#60A5FA'}
+      >
+        Найти
+      </button>
     </div>
   );
 }
@@ -196,7 +188,9 @@ export default function ReportPage() {
 
   const [hiddenRows, setHiddenRows] = useState({});
   const [selectedRow, setSelectedRow] = useState(null);
-  const [selectedSearchItem, setSelectedSearchItem] = useState(null);
+  
+  // Текст, по которому реально фильтруется таблица (обновляется по кнопке)
+  const [searchText, setSearchText] = useState('');
 
   useEffect(() => {
     fetch(`${API_BASE}/api/defect-notes`)
@@ -354,10 +348,12 @@ export default function ReportPage() {
     
     let filtered = selectedModel === 'ALL' ? rawData : rawData.filter(d => d.MODEL === selectedModel);
     
-    if (selectedSearchItem) {
+    // ФИЛЬТРАЦИЯ ПО ТЕКСТУ
+    if (searchText.trim()) {
+      const q = searchText.trim().toLowerCase();
       filtered = filtered.filter(d => 
-        d.PART_NAME === selectedSearchItem.part && 
-        d.PROBLEM_TYPE === selectedSearchItem.defect
+        (d.PART_NAME && d.PART_NAME.toLowerCase().includes(q)) || 
+        (d.PROBLEM_TYPE && d.PROBLEM_TYPE.toLowerCase().includes(q))
       );
     }
 
@@ -413,7 +409,7 @@ export default function ReportPage() {
       sumCarsPrev: sumPrev,
       sumCarsCurr: sumCurr
     };
-  }, [rawData, selectedModel, prevWeekDays, currWeekDays, isMonday, sortDay, sortCW, carsCounts, selectedSearchItem]);
+  }, [rawData, selectedModel, prevWeekDays, currWeekDays, isMonday, sortDay, sortCW, carsCounts, searchText]);
 
   const handleToggleRow = (mpp) => {
     setHiddenRows(prev => ({ ...prev, [mpp]: !prev[mpp] }));
@@ -442,7 +438,6 @@ export default function ReportPage() {
     <div style={styles.app}>
       <h1 style={styles.title}>Контроль качества</h1>
       
-      {/* === УЛУЧШЕННАЯ ПАНЕЛЬ ФИЛЬТРОВ === */}
       <div style={styles.filterBar}>
         <div style={styles.filterGroup}>
           <span style={styles.filterLabel}>Чекпоинт:</span>
@@ -471,13 +466,9 @@ export default function ReportPage() {
 
         <div style={{ width: 1, height: 24, background: '#374151', margin: '0 8px' }} />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <SearchBar 
-            uniqueDefects={uniqueDefects} 
-            selectedSearchItem={selectedSearchItem} 
-            onSelect={setSelectedSearchItem} 
-            onClear={() => setSelectedSearchItem(null)} 
-          />
+        {/* ПОИСК С КНОПКОЙ */}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <SearchBar uniqueDefects={uniqueDefects} onSearchChange={setSearchText} />
         </div>
 
         <div style={{ width: 1, height: 24, background: '#374151', margin: '0 8px' }} />
@@ -504,7 +495,6 @@ export default function ReportPage() {
         {sortCW && <span style={styles.sortInfo}>Сорт: CW{sortCW==='prev'?prevWeekNum:currWeekNum} <button onClick={()=>setSortCW(null)} style={styles.clearBtn}>✕</button></span>}
       </div>
 
-      {/* === ОБЕРТКА ДЛЯ ТАБЛИЦЫ (ЧТОБЫ НЕ ВЫЛЕЗАЛА) === */}
       <div style={{ overflowX: 'auto', width: '100%', paddingBottom: 20 }}>
         <div style={styles.grid}>
           {/* 1-я строка заголовков */}
@@ -564,15 +554,7 @@ export default function ReportPage() {
             return (
               <React.Fragment key={row.MPP}>
                 <div
-                  style={{
-                    ...styles.name,
-                    position: 'relative',
-                    overflow: 'visible',
-                    boxShadow: selectedBoxShadow,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
+                  style={{ ...styles.name, position: 'relative', overflow: 'visible', boxShadow: selectedBoxShadow, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                   onClick={() => setSelectedRow(isSelected ? null : row.MPP)}
                 >
                   <button
@@ -643,64 +625,32 @@ export default function ReportPage() {
   );
 }
 
-// === СТИЛИ (СТАРАЯ ТАБЛИЦА + НОВЫЕ ФИЛЬТРЫ) ===
+// === СТИЛИ ===
 const styles = {
   app: { background: '#111827', minHeight: '100vh', padding: 20, fontFamily: 'Segoe UI, Arial, sans-serif', color: '#FFF' },
   title: { marginBottom: 20, fontSize: 22, fontWeight: 600 },
-  
-  // Новая панель фильтров
   filterBar: { 
-    display: 'flex', 
-    alignItems: 'flex-end', 
-    gap: 16, 
-    marginBottom: 20, 
-    flexWrap: 'wrap',
-    background: '#1F2937',
-    padding: '16px 20px',
-    borderRadius: 12,
-    border: '1px solid #374151'
+    display: 'flex', alignItems: 'flex-end', gap: 16, marginBottom: 20, flexWrap: 'wrap',
+    background: '#1F2937', padding: '16px 20px', borderRadius: 12, border: '1px solid #374151'
   },
-  filterGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6
-  },
-  filterLabel: { 
-    fontSize: 12, 
-    color: '#9CA3AF', 
-    fontWeight: 600
-  },
+  filterGroup: { display: 'flex', flexDirection: 'column', gap: 6 },
+  filterLabel: { fontSize: 12, color: '#9CA3AF', fontWeight: 600 },
   filterSelect: { 
-    padding: '8px 12px', 
-    borderRadius: 8, 
-    border: '1px solid #4B5563', 
-    background: '#111827', 
-    color: '#FFF', 
-    fontSize: 13, 
-    cursor: 'pointer',
-    outline: 'none',
-    minWidth: 100
+    padding: '8px 12px', borderRadius: 8, border: '1px solid #4B5563', background: '#111827', 
+    color: '#FFF', fontSize: 13, cursor: 'pointer', outline: 'none', minWidth: 100
   },
   sortInfo: { 
-    fontSize: 12, 
-    color: '#60A5FA', 
-    display: 'flex', 
-    alignItems: 'center', 
-    gap: 5,
-    background: '#1E3A8A',
-    padding: '4px 10px',
-    borderRadius: 6,
-    marginLeft: 'auto'
+    fontSize: 12, color: '#60A5FA', display: 'flex', alignItems: 'center', gap: 5,
+    background: '#1E3A8A', padding: '4px 10px', borderRadius: 6, marginLeft: 'auto'
   },
   clearBtn: { background: '#EF4444', color: '#FFF', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 10, padding: '1px 5px' },
-
-  // СТАРАЯ ТАБЛИЦА
+  
   grid: {
     display: 'grid',
     gridTemplateColumns: 'minmax(300px, 2fr) 110px 110px repeat(7, 60px) 60px repeat(7, 60px) 60px',
     border: '1px solid #4B5563',
     fontSize: 13,
-    minWidth: 1100 // Чтобы на узких экранах не сжималась в кашу, а появлялся скролл
+    minWidth: 1100
   },
   dark: { background: '#1F2937', padding: '6px 8px', fontWeight: 600, border: '1px solid #4B5563', display: 'flex', alignItems: 'center', fontSize: 11 },
   hdr: { background: '#374151', padding: 4, fontWeight: 600, border: '1px solid #4B5563', textAlign: 'center', fontSize: 11 },
