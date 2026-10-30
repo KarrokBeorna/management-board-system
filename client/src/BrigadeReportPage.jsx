@@ -277,7 +277,6 @@ const mppTableStyles = {
     fontSize: 13,
     whiteSpace: 'nowrap',
   },
-  // === НОВЫЕ стили для ячеек «Ответственный» / «Действие» ===
   noteCell: {
     background: '#1F2937',
     padding: '2px 4px',
@@ -999,7 +998,6 @@ function BrigadeMPPTable({ allMpps, onCellClick, metric, userNotes = {}, onNoteS
           <React.Fragment key={row.mpp}>
             <div style={mppTableStyles.name} title={row.mpp}>{row.mpp}</div>
 
-            {/* === НОВЫЕ ЯЧЕЙКИ: Ответственный / Действие === */}
             <div style={mppTableStyles.noteCell}>
               <select
                 value={note.responsible}
@@ -1652,7 +1650,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
   const [vins, setVins] = useState([]);
   const [vinsLoading, setVinsLoading] = useState(false);
 
-  // === НОВОЕ: заметки «Ответственный» / «Действие» (общие с Контролем качества) ===
   const [userNotes, setUserNotes] = useState({});
 
   const availableCheckpoints = ['CP7', 'CP8', 'PIP', 'TL'];
@@ -1660,7 +1657,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
 
   const formatValue = (value) => metric === 'dpu' ? Number(value).toFixed(2) : value;
 
-  // Загрузка заметок один раз при монтировании
   useEffect(() => {
     fetch(`${API_BASE}/api/defect-notes`)
       .then(res => res.json())
@@ -1775,7 +1771,6 @@ function BrigadeTrendReport({ brigades, password, executeWithPassword }) {
     setVins([]);
   };
 
-  // === НОВОЕ: сохранение заметки (Ответственный / Действие) ===
   const handleNoteSave = async (mpp, field, value) => {
     const current = userNotes[mpp] || { responsible: '', action: '' };
     const updated = { ...current, [field]: value };
@@ -2211,8 +2206,19 @@ function DictionaryPanel({
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 100;
 
+  // === ИСКЛЮЧАЕМ МОДЕЛИ JAECOO ИЗ СПРАВОЧНИКА (НЕ УДАЛЯЯ ИЗ БД) ===
+  const EXCLUDED_MODELS = ['JAECOO J6', 'JAECOO J7', 'JAECOO J8'];
+
+  // Формируем список моделей для выпадающих списков без исключенных
+  const availableModels = useMemo(() => {
+    return models.filter(m => !EXCLUDED_MODELS.includes(m));
+  }, [models]);
+
   const filteredDictionary = useMemo(() => {
     return dictionaryData.filter(entry => {
+      // Скрываем записи с исключенными моделями
+      if (EXCLUDED_MODELS.includes(entry.model)) return false;
+
       const matchModel = filterModel === 'ALL' || entry.model === filterModel;
       const matchBrigade = filterBrigade === 'ALL' || entry.brigade_name === filterBrigade;
       const searchLower = search.toLowerCase();
@@ -2487,7 +2493,8 @@ function DictionaryPanel({
               style={{ ...inputStyle, minWidth: '150px' }}
             >
               <option value="ALL">Все модели</option>
-              {models.map(model => <option key={model} value={model}>{model}</option>)}
+              {/* === ИСПОЛЬЗУЕМ ОТФИЛЬТРОВАННЫЙ СПИСОК === */}
+              {availableModels.map(model => <option key={model} value={model}>{model}</option>)}
             </select>
             <select
               value={filterBrigade}
@@ -2536,7 +2543,8 @@ function DictionaryPanel({
             >
                 <option value="">Модель</option>
                 <option value={ALL_MODELS_VALUE}>⭐ Все модели</option>
-                {models.map(model => (
+                {/* === ИСПОЛЬЗУЕМ ОТФИЛЬТРОВАННЫЙ СПИСОК === */}
+                {availableModels.map(model => (
                     <option key={model} value={model}>{model}</option>
                 ))}
             </select>

@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 const API_BASE = '';
 
+// ====== СТИЛИ ======
 const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
@@ -129,6 +130,7 @@ const tdStyle = {
 
 const PIE_COLORS = ['#10B981', '#EF4444'];
 
+// ====== ХЕЛПЕРЫ ДЛЯ ВРЕМЕНИ ======
 const getMoscowTime = () => new Date(Date.now() + 3 * 60 * 60 * 1000);
 
 const getMoscowMinutes = () => {
@@ -181,6 +183,19 @@ const getTimeRange = (timeFilter) => {
   return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
 };
 
+const getArchiveRange = (shiftDate, shift) => {
+  if (shift === 'all')     return { start: `${shiftDate} 00:00:00`, end: `${shiftDate} 23:59:59` };
+  if (shift === 'day')     return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
+  if (shift === 'night')   return { start: `${shiftDate} 01:31:00`, end: `${shiftDate} 07:50:00` };
+  if (shift === 'evening') {
+    const next = new Date(`${shiftDate}T12:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    const nextStr = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+    return { start: `${shiftDate} 16:41:00`, end: `${nextStr} 01:30:00` };
+  }
+  return null;
+};
+
 const getWeekNumber = (date) => {
   const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -226,6 +241,12 @@ export default function DrrElectronicsDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // === ИСТОРИЯ ===
+  const [snapshots, setSnapshots] = useState([]);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState('live');
+  const [archiveShift, setArchiveShift] = useState(null);
+  const isArchive = selectedSnapshotId !== 'live';
+
   const [vinList, setVinList] = useState([]);
   const [vinListStatus, setVinListStatus] = useState('');
   const [showVinModal, setShowVinModal] = useState(false);
@@ -260,6 +281,7 @@ export default function DrrElectronicsDashboardPage() {
       setDrrData(drrJson);
       setTopDefects(Array.isArray(defectsJson) ? defectsJson : []);
       setShiftInfo(getCurrentShiftInfo());
+      setArchiveShift(null);
     } catch (err) {
       setError(err.message);
       setTopDefects([]);
@@ -268,24 +290,86 @@ export default function DrrElectronicsDashboardPage() {
     }
   };
 
+  const loadSnapshot = async (id) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/drr-electronics-snapshot/${id}`);
+      if (!res.ok) throw new Error('Ошибка загрузки снимка');
+      const json = await res.json();
+      
+      setDrrData({
+        totalVins: json.totalVins || 0,
+        closedVins: json.closedVins || 0,
+        nokVins: json.nokVins || 0,
+        drrPercent: json.drrPercent || 0,
+      });
+      setTopDefects(Array.isArray(json.topDefects) ? json.topDefects : []);
+
+      setShiftInfo({
+        weekNumber: json.weekNumber != null ? json.weekNumber : '—',
+        shiftLetter: json.shiftLetter != null ? json.shiftLetter : '—',
+        shiftType: json.shift || 'all',
+      });
+      setArchiveShift({ shiftDate: json.shiftDate, shift: json.shift });
+    } catch (err) {
+      setError(err.message);
+      setTopDefects([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Загрузка списка снимков
   useEffect(() => {
-    loadData();
-  }, [timeFilter]);
+    fetch(`${API_BASE}/api/drr-electronics-snapshots?days=14`)
+      .then(res => res.json())
+      .then(json => {
+        const list = Array.isArray(json) ? json : [];
+        setSnapshots(list);
+        if (selectedSnapshotId !== 'live' && !list.some(s => String(s.id) === String(selectedSnapshotId))) {
+          setSelectedSnapshotId('live');
+        }
+      })
+      .catch(() => setSnapshots([]));
+  }, []);
+
+  useEffect(() => {
+    if (selectedSnapshotId === 'live') {
+      loadData();
+    } else {
+      loadSnapshot(selectedSnapshotId);
+    }
+  }, [selectedSnapshotId, timeFilter]);
+
+  useEffect(() => {
+    if (selectedSnapshotId === 'live') {
+      setShiftInfo(getCurrentShiftInfo());
+      setArchiveShift(null);
+    }
+  }, [selectedSnapshotId]);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setShiftInfo(getCurrentShiftInfo());
-      if (!isManualFilter) setTimeFilter(getDefaultTimeFilter());
+      if (selectedSnapshotId === 'live') {
+        setShiftInfo(getCurrentShiftInfo());
+        if (!isManualFilter) setTimeFilter(getDefaultTimeFilter());
+      }
     }, 60000);
     return () => clearInterval(interval);
-  }, [isManualFilter]);
+  }, [isManualFilter, selectedSnapshotId]);
 
   useEffect(() => {
+    if (selectedSnapshotId !== 'live') return;
     const interval = setInterval(loadData, 180000);
     return () => clearInterval(interval);
-  }, [timeFilter]);
+  }, [timeFilter, selectedSnapshotId]);
 
   const loadVinList = async (status) => {
+    if (selectedSnapshotId !== 'live') {
+      alert('В архиве список VIN недоступен — переключитесь на «Сейчас (live)».');
+      return;
+    }
     setVinModalLoading(true);
     setVinListStatus(status);
     setShowVinModal(true);
@@ -304,13 +388,24 @@ export default function DrrElectronicsDashboardPage() {
   };
 
   const loadMppVins = async (defect) => {
-    const { start, end } = getTimeRange(timeFilter);
+    let range;
+    if (selectedSnapshotId === 'live') {
+      range = getTimeRange(timeFilter);
+    } else {
+      if (!archiveShift) {
+        alert('Не удалось определить период снимка');
+        return;
+      }
+      range = getArchiveRange(archiveShift.shiftDate, archiveShift.shift);
+    }
+    if (!range) { alert('Некорректный период'); return; }
+
     setMppModalTitle(`${defect.test_station} / ${defect.module_name}`);
     setMppVins([]);
     setShowMppModal(true);
     setMppModalLoading(true);
     try {
-      const params = new URLSearchParams({ startTime: start, endTime: end, test_station: defect.test_station, module_name: defect.module_name });
+      const params = new URLSearchParams({ startTime: range.start, endTime: range.end, test_station: defect.test_station, module_name: defect.module_name });
       const res = await fetch(`${API_BASE}/api/drr-electronics-bms-mpp-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки');
       setMppVins(await res.json() || []);
@@ -325,6 +420,11 @@ export default function DrrElectronicsDashboardPage() {
     { name: 'DRR', value: drrData.drrPercent },
     { name: 'Не прямой сход', value: Math.max(0, 100 - drrData.drrPercent) },
   ];
+
+  const handleFilterClick = (filter) => {
+    setIsManualFilter(true);
+    setTimeFilter(filter);
+  };
 
   const displayLetter = shiftInfo.shiftLetter || '—';
 
@@ -343,12 +443,61 @@ export default function DrrElectronicsDashboardPage() {
             </div>
           </div>
           <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
+          
           <div style={filterGroupStyle}>
             {['all', 'day', 'evening', 'night'].map(f => (
-              <button key={f} style={timeFilterButtonStyle(timeFilter === f, f === 'all' ? '#6B7280' : f === 'day' ? '#F59E0B' : f === 'evening' ? '#3B82F6' : '#1F2937')} onClick={() => { setIsManualFilter(true); setTimeFilter(f); }}>
+              <button 
+                key={f} 
+                style={{ ...timeFilterButtonStyle(timeFilter === f, f === 'all' ? '#6B7280' : f === 'day' ? '#F59E0B' : f === 'evening' ? '#3B82F6' : '#1F2937'), opacity: isArchive ? 0.5 : 1, cursor: isArchive ? 'not-allowed' : 'pointer' }} 
+                onClick={() => { if (!isArchive) handleFilterClick(f); }}
+                disabled={isArchive}
+              >
                 {f === 'all' ? 'Сутки' : f === 'day' ? 'День' : f === 'evening' ? 'Вечер' : 'Ночь'}
               </button>
             ))}
+
+            {/* ВЫПАДАЮЩИЙ СПИСОК ИСТОРИИ */}
+            <select
+              value={selectedSnapshotId}
+              onChange={(e) => setSelectedSnapshotId(e.target.value)}
+              style={{
+                padding: '12px 24px',
+                borderRadius: '12px',
+                border: 'none',
+                fontWeight: 700,
+                fontSize: '1.4rem',
+                background: '#FFFFFF',
+                color: '#64748B',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                minWidth: 220,
+                appearance: 'none',
+                WebkitAppearance: 'none',
+                MozAppearance: 'none',
+                backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 16px center',
+                paddingRight: '44px',
+                transition: 'all 0.2s',
+              }}
+            >
+              <option value="live">Сейчас (live)</option>
+              {snapshots.map(s => {
+                const shiftLabel =
+                  s.shift === 'all' ? 'Сутки' :
+                  s.shift === 'day' ? 'День' :
+                  s.shift === 'evening' ? 'Вечер' :
+                  'Ночь';
+                const dateObj = new Date(s.shiftDate + 'T12:00:00');
+                const dd = String(dateObj.getDate()).padStart(2, '0');
+                const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                return (
+                  <option key={s.id} value={s.id}>
+                    {dd}.{mm} · {shiftLabel} ({s.drrPercent}%)
+                  </option>
+                );
+              })}
+            </select>
           </div>
         </div>
       </div>
@@ -370,7 +519,7 @@ export default function DrrElectronicsDashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
               <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none' }}>
-                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR</div>
+                <div style={{ fontSize: '2.2rem', fontWeight: 800, color: '#1E293B', marginBottom: '8px' }}>DRR{isArchive && ' · архив'}</div>
                 <div style={{ fontSize: '6.2rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>{drrData.drrPercent.toFixed(1)}%</div>
               </div>
             </div>
@@ -380,12 +529,12 @@ export default function DrrElectronicsDashboardPage() {
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.totalVins}</div>
               </div>
-              <div style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }} onClick={() => loadVinList('OK')}>
+              <div style={{ flex: 1, backgroundColor: '#059669', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: isArchive ? 'not-allowed' : 'pointer', opacity: isArchive ? 0.6 : 1 }} onClick={() => loadVinList('OK')}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>OK Авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.closedVins}</div>
               </div>
-              <div style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: 'pointer' }} onClick={() => loadVinList('NOK')}>
+              <div style={{ flex: 1, backgroundColor: '#DC2626', borderRadius: '12px', padding: '16px', textAlign: 'center', color: '#FFFFFF', minHeight: '140px', display: 'flex', flexDirection: 'column', justifyContent: 'center', cursor: isArchive ? 'not-allowed' : 'pointer', opacity: isArchive ? 0.6 : 1 }} onClick={() => loadVinList('NOK')}>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, opacity: 0.9 }}>NOK Авто</div>
                 <div style={{ width: '70%', height: '2px', backgroundColor: 'rgba(255,255,255,0.3)', margin: '10px auto' }}></div>
                 <div style={{ fontSize: '4rem', fontWeight: 900, lineHeight: 1 }}>{drrData.nokVins}</div>
@@ -395,7 +544,7 @@ export default function DrrElectronicsDashboardPage() {
 
           <div style={rightColumnStyle}>
             <div style={tableCardStyle}>
-              <h2 style={tableTitleStyle}>Топ незакрытых дефектов электроники BMS</h2>
+              <h2 style={tableTitleStyle}>Топ незакрытых дефектов электроники BMS{isArchive && ' (архив)'}</h2>
               <div style={tableScrollStyle}>
                 {topDefects.length > 0 ? (
                   <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
@@ -478,7 +627,7 @@ export default function DrrElectronicsDashboardPage() {
       {/* Модалка VIN по дефекту (BMS) */}
       {showMppModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }} onClick={() => setShowMppModal(false)}>
-          <div style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, width: '98%', maxWidth: 1800, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, width: '98%', maxWidth: 1600, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>VIN'ы по дефекту: {mppModalTitle}</h3>
               <button onClick={() => setShowMppModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }}>×</button>
@@ -491,12 +640,12 @@ export default function DrrElectronicsDashboardPage() {
               <>
                 <div style={{ marginBottom: 12, fontSize: 15, color: '#475569' }}>Всего: <b>{mppVins.length}</b></div>
                 <div style={{ overflowY: 'auto', border: '1px solid #E5E7EB', borderRadius: 8 }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1300 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1000 }}>
                     <thead>
                       <tr>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>VIN</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Время CP72</th>
-                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap', color: '#DC2626' }}>Порог NOK (CP72 + 5м)</th>
+                        <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>Порог NOK (CP72 + 5м)</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>ОК CP7</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>ОК Flash</th>
                         <th style={{ textAlign: 'left', padding: '8px', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, background: '#FFF', whiteSpace: 'nowrap' }}>ОК ERA</th>
