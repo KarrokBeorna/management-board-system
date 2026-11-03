@@ -5175,6 +5175,125 @@ app.get('/api/holds-sgp-retrospective-all-vins', async (req, res) => {
   }
 });
 
+app.get('/api/holds-sgp-history', async (req, res) => {
+  try {
+    const { period = 'all', count, fromDate, toDate, model } = req.query;
+
+    const periods = [];
+    const now = new Date();
+    const pad = (num) => String(num).padStart(2, '0');
+    const formatDateStr = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    const getISOWeek = (date) => {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    };
+
+    if (period === 'all') {
+      // 3 месяца
+      for (let i = 2; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+        const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+        periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${pad(lastDay)}`, type: 'month' });
+      }
+      // 4 недели (УБРАЛИ ГОД)
+      const dayOfWeek = now.getDay();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      for (let i = 3; i >= 0; i--) {
+        const start = new Date(monday);
+        start.setDate(monday.getDate() - i * 7);
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        periods.push({ label: `W${getISOWeek(start)}`, startDate: formatDateStr(start), endDate: formatDateStr(end), type: 'week' });
+      }
+      // 14 дней
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: formatDateStr(d), endDate: formatDateStr(d), type: 'day' });
+      }
+    } else {
+      const limit = parseInt(count, 10) || { month: 3, week: 4, day: 14, year: 2 }[period];
+      if (period === 'year') {
+        for (let i = limit - 1; i >= 0; i--) {
+          const y = now.getFullYear() - i;
+          periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+        }
+      } else if (period === 'month') {
+        for (let i = limit - 1; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+          const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+          periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${pad(lastDay)}`, type: 'month' });
+        }
+      } else if (period === 'week') {
+        const dayOfWeek = now.getDay();
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+        for (let i = limit - 1; i >= 0; i--) {
+          const start = new Date(monday);
+          start.setDate(monday.getDate() - i * 7);
+          const end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          // УБРАЛИ ГОД
+          periods.push({ label: `W${getISOWeek(start)}`, startDate: formatDateStr(start), endDate: formatDateStr(end), type: 'week' });
+        }
+      } else if (period === 'day') {
+        for (let i = limit - 1; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(now.getDate() - i);
+          periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: formatDateStr(d), endDate: formatDateStr(d), type: 'day' });
+        }
+      }
+    }
+
+    const fetchCount = async (startDate, endDate) => {
+      let sql = `
+        SELECT COUNT(DISTINCT vin) AS count
+        FROM higoplat_fusion_les.tv_quality_issue_detail
+        WHERE is_deleted = 0
+          AND gmt_create <= ? 
+          AND (clear_time > ? OR clear_time IS NULL)
+      `;
+      const params = [`${endDate} 23:59:59`, `${endDate} 23:59:59`];
+      
+      if (model && model !== 'ALL') {
+        sql += ` AND model = ?`;
+        params.push(model);
+      }
+      const [rows] = await lesPool.query(sql, params);
+      return rows[0]?.count || 0;
+    };
+
+    const results = [];
+    for (const p of periods) {
+      const count = await fetchCount(p.startDate, p.endDate);
+      results.push({ ...p, count });
+    }
+
+    if (period === 'all') {
+      res.json({
+        months: results.filter(r => r.type === 'month'),
+        weeks: results.filter(r => r.type === 'week'),
+        days: results.filter(r => r.type === 'day')
+      });
+    } else {
+      res.json({ data: results });
+    }
+  } catch (err) {
+    console.error('Ошибка holds-sgp-history:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 
