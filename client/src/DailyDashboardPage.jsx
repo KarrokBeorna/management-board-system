@@ -153,7 +153,8 @@ const toLocalDateStr = (d) => {
 
 const fetchSnapshotDetails = async (snap, type) => {
   if (!snap) return null;
-  const url = type === 'cp7' ? `/api/drr-cp7-snapshot/${snap.id}`
+  const url = type === 'cp6' ? `/api/drr-cp6-snapshot/${snap.id}`
+            : type === 'cp7' ? `/api/drr-cp7-snapshot/${snap.id}`
             : type === 'adas' ? `/api/drr-tl-snapshot/${snap.id}`
             : `/api/drr-cpfinal-snapshot/${snap.id}`;
   try {
@@ -182,19 +183,8 @@ export default function DailyDashboardPage() {
   const [activeMainTab, setActiveMainTab] = useState('mbs');
 
   return (
-    // Внешний контейнер: растягиваем на всю ширину и задаем серый фон
-    <div style={{ 
-      width: '100%', 
-      minHeight: '100vh', 
-      backgroundColor: '#F8FAFC', 
-      fontFamily: 'Inter, Segoe UI, Arial, sans-serif' 
-    }}>
-      {/* Внутренний контейнер: ограничиваем ширину и центрируем контент */}
-      <div style={{ 
-        padding: 30, 
-        maxWidth: 1400, 
-        margin: '0 auto' 
-      }}>
+    <div style={{ width: '100%', minHeight: '100vh', backgroundColor: '#F8FAFC', fontFamily: 'Inter, Segoe UI, Arial, sans-serif' }}>
+      <div style={{ padding: 30, maxWidth: 1500, margin: '0 auto' }}>
         
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
           <h1 style={{ color: '#1E293B', fontSize: 32, fontWeight: 900, margin: 0 }}>QUALITY DAILY REPORT</h1>
@@ -220,8 +210,24 @@ export default function DailyDashboardPage() {
 /* ===================== НОВЫЙ ОТЧЕТ (MBS) ===================== */
 function DailyReportMBS() {
   const [selectedWeekOffset, setSelectedWeekOffset] = useState(0);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    return toLocalDateStr(new Date()).slice(0, 7); // YYYY-MM
+  });
   const [loading, setLoading] = useState(true);
   const [rawData, setRawData] = useState([]);
+
+  // Генерируем список месяцев (текущий и 3 предыдущих)
+  const monthOptions = useMemo(() => {
+    const options = [];
+    const today = new Date();
+    for (let i = 0; i < 4; i++) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const val = toLocalDateStr(d).slice(0, 7);
+      const label = d.toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
+      options.push({ value: val, label: label.charAt(0).toUpperCase() + label.slice(1) });
+    }
+    return options;
+  }, []);
 
   const weekOptions = useMemo(() => {
     const options = [];
@@ -258,7 +264,8 @@ function DailyReportMBS() {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [cp7Res, adasRes, cpfinalRes] = await Promise.all([
+        const [cp6Res, cp7Res, adasRes, cpfinalRes] = await Promise.all([
+          fetch(`${API_BASE}/api/drr-cp6-snapshots?days=90&filter=all`).then(r => r.json()).catch(() => []),
           fetch(`${API_BASE}/api/drr-cp7-snapshots?days=90&filter=all`).then(r => r.json()).catch(() => []),
           fetch(`${API_BASE}/api/drr-tl-snapshots?days=90`).then(r => r.json()).catch(() => []),
           fetch(`${API_BASE}/api/drr-cpfinal-snapshots?days=90`).then(r => r.json()).catch(() => []),
@@ -266,30 +273,41 @@ function DailyReportMBS() {
         
         if (cancelled) return;
 
+        const cp6List = Array.isArray(cp6Res) ? cp6Res : [];
         const cp7List = Array.isArray(cp7Res) ? cp7Res : [];
         const adasList = Array.isArray(adasRes) ? adasRes : [];
         const cpfinalList = Array.isArray(cpfinalRes) ? cpfinalRes : [];
 
         const findSnap = (list, dateStr) => list.find(s => s && s.shiftDate === dateStr && s.shift === 'all');
-        const results = [];
+        
+        // Собираем дни для недели + все дни месяца
+        const allDaysToFetch = new Set([...daysOfWeek]);
+        const [year, month] = selectedMonth.split('-');
+        const daysInMonth = new Date(Number(year), Number(month), 0).getDate();
+        for (let d = 1; d <= daysInMonth; d++) {
+          allDaysToFetch.add(`${year}-${month}-${String(d).padStart(2, '0')}`);
+        }
 
-        for (const day of daysOfWeek) {
+        const results = [];
+        for (const day of Array.from(allDaysToFetch)) {
+          const idCp6 = findSnap(cp6List, day);
           const idCp7 = findSnap(cp7List, day);
           const idAdas = findSnap(adasList, day);
           const idCpFinal = findSnap(cpfinalList, day);
 
-          if (!idCp7 && !idAdas && !idCpFinal) {
-            results.push({ day, dCp7: null, dAdas: null, dCpFinal: null });
+          if (!idCp6 && !idCp7 && !idAdas && !idCpFinal) {
+            results.push({ day, dCp6: null, dCp7: null, dAdas: null, dCpFinal: null });
             continue;
           }
 
-          const [dCp7, dAdas, dCpFinal] = await Promise.all([
+          const [dCp6, dCp7, dAdas, dCpFinal] = await Promise.all([
+            fetchSnapshotDetails(idCp6, 'cp6'),
             fetchSnapshotDetails(idCp7, 'cp7'),
             fetchSnapshotDetails(idAdas, 'adas'),
             fetchSnapshotDetails(idCpFinal, 'cpfinal'),
           ]);
 
-          results.push({ day, dCp7, dAdas, dCpFinal });
+          results.push({ day, dCp6, dCp7, dAdas, dCpFinal });
         }
         
         if (!cancelled) setRawData(results);
@@ -301,103 +319,161 @@ function DailyReportMBS() {
     };
     loadData();
     return () => { cancelled = true; };
-  }, [daysOfWeek]);
+  }, [daysOfWeek, selectedMonth]);
 
+  // === ЕЖЕДНЕВНЫЕ МЕТРИКИ ===
   const daysMetrics = useMemo(() => {
     if (!daysOfWeek.length) return [];
     return daysOfWeek.map(day => {
       const dayData = rawData.find(r => r && r.day === day);
-      if (!dayData || (!dayData.dCp7 && !dayData.dAdas && !dayData.dCpFinal)) return null;
+      if (!dayData || (!dayData.dCp6 && !dayData.dCp7 && !dayData.dAdas && !dayData.dCpFinal)) return null;
       
-      const { dCp7, dAdas, dCpFinal } = dayData;
+      const { dCp6, dCp7, dAdas, dCpFinal } = dayData;
       
-      const defCp7 = dCp7?.topDefects?.reduce((s, x) => s + (Number(x?.defectCount) || 0), 0) || 0;
-      const defAdas = dAdas?.topDefects?.reduce((s, x) => s + (Number(x?.defectCount) || 0), 0) || 0;
-      const defCpFinal = dCpFinal?.topDefects?.reduce((s, x) => s + (Number(x?.defectCount) || 0), 0) || 0;
+      const getVals = (d) => {
+        if (!d) return { def: 0, tot: 0, ok: 0, drr: 0 };
+        // Защита: у CP6 поле okVins, у CP7 - closedVins, у CPFinal - okVins
+        const def = d.topDefects?.reduce((s, x) => s + (Number(x?.defectCount) || 0), 0) || 0;
+        return { 
+          def, 
+          tot: Number(d.totalVins) || 0, 
+          ok: Number(d.closedVins || d.okVins) || 0, 
+          drr: Number(d.drrPercent) || 0 
+        };
+      };
 
-      const totCp7 = Number(dCp7?.totalVins) || 0;
-      const totAdas = Number(dAdas?.totalVins) || 0;
-      const totCpFinal = Number(dCpFinal?.totalVins) || 0;
+      const v6 = getVals(dCp6);
+      const v7 = getVals(dCp7);
+      const vA = getVals(dAdas);
+      const vF = getVals(dCpFinal);
 
-      const okCp7 = Number(dCp7?.closedVins) || 0;
-      const okAdas = Number(dAdas?.closedVins) || 0;
-      const okCpFinal = Number(dCpFinal?.okVins) || 0;
-
-      const drrCp7 = Number(dCp7?.drrPercent) || 0;
-      const drrAdas = Number(dAdas?.drrPercent) || 0;
-      const drrCpFinal = Number(dCpFinal?.drrPercent) || 0;
+      const dpuCp6 = v6.tot ? v6.def / v6.tot : 0;
+      const dpuCp7 = v7.tot ? v7.def / v7.tot : 0;
+      const dpuAdas = vA.tot ? vA.def / vA.tot : 0;
+      const dpuCpFinal = vF.tot ? vF.def / vF.tot : 0;
 
       return {
-        drr: { cp7: drrCp7, adas: drrAdas, cpfinal: drrCpFinal },
-        dpu: { 
-          cp7: totCp7 ? defCp7 / totCp7 : 0, 
-          adas: totAdas ? defAdas / totAdas : 0, 
-          cpfinal: totCpFinal ? defCpFinal / totCpFinal : 0 
-        },
-        drrAvg: (drrCp7 + drrAdas + drrCpFinal) / 3,
-        drrMult: (drrCp7 / 100) * (drrAdas / 100) * (drrCpFinal / 100) * 100,
-        drrSummed: (totCp7 + totAdas + totCpFinal) > 0 
-          ? ((okCp7 + okAdas + okCpFinal) / (totCp7 + totAdas + totCpFinal)) * 100 
+        drr: { cp6: v6.drr, cp7: v7.drr, adas: vA.drr, cpfinal: vF.drr },
+        dpu: { cp6: dpuCp6, cp7: dpuCp7, adas: dpuAdas, cpfinal: dpuCpFinal },
+        drrAvg: (v6.drr + v7.drr + vA.drr + vF.drr) / 4,
+        drrMult: (v6.drr / 100) * (v7.drr / 100) * (vA.drr / 100) * (vF.drr / 100) * 100,
+        drrSummed: (v6.tot + v7.tot + vA.tot + vF.tot) > 0 
+          ? ((v6.ok + v7.ok + vA.ok + vF.ok) / (v6.tot + v7.tot + vA.tot + vF.tot)) * 100 
           : 0,
-        dpuTotal: (totCp7 ? defCp7 / totCp7 : 0) + (totAdas ? defAdas / totAdas : 0) + (totCpFinal ? defCpFinal / totCpFinal : 0),
-        _raw: { totCp7, totAdas, totCpFinal, okCp7, okAdas, okCpFinal, defCp7, defAdas, defCpFinal }
+        dpuTotal: dpuCp6 + dpuCp7 + dpuAdas + dpuCpFinal,
+        _raw: { 
+          totCp6: v6.tot, totCp7: v7.tot, totAdas: vA.tot, totCpFinal: vF.tot,
+          okCp6: v6.ok, okCp7: v7.ok, okAdas: vA.ok, okCpFinal: vF.ok,
+          defCp6: v6.def, defCp7: v7.def, defAdas: vA.def, defCpFinal: vF.def
+        }
       };
     });
   }, [rawData, daysOfWeek]);
 
+  // === НЕДЕЛЬНЫЕ МЕТРИКИ ===
   const weekMetrics = useMemo(() => {
     const validDays = daysMetrics.filter(Boolean);
-    const empty = { drr: { cp7: 0, adas: 0, cpfinal: 0 }, dpu: { cp7: 0, adas: 0, cpfinal: 0 }, drrAvg: 0, drrMult: 0, drrSummed: 0, dpuTotal: 0 };
+    const empty = { drr: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 }, dpu: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 }, drrAvg: 0, drrMult: 0, drrSummed: 0, dpuTotal: 0 };
     if (validDays.length === 0) return empty;
 
-    // Исправлено: одинаковый регистр CpFinal во всех переменных
-    let weekSumDrrCp7 = 0, weekSumDrrAdas = 0, weekSumDrrCpFinal = 0;
-    let weekSumTotalCp7 = 0, weekSumTotalAdas = 0, weekSumTotalCpFinal = 0;
-    let weekSumOkCp7 = 0, weekSumOkAdas = 0, weekSumOkCpFinal = 0;
-    let weekSumDefCp7 = 0, weekSumDefAdas = 0, weekSumDefCpFinal = 0;
+    let sums = {
+      drr: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 },
+      tot: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 },
+      ok: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 },
+      def: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 }
+    };
 
     validDays.forEach(d => {
-      weekSumDrrCp7 += d.drr.cp7;
-      weekSumDrrAdas += d.drr.adas;
-      weekSumDrrCpFinal += d.drr.cpfinal;
-      weekSumTotalCp7 += d._raw.totCp7;
-      weekSumTotalAdas += d._raw.totAdas;
-      weekSumTotalCpFinal += d._raw.totCpFinal;
-      weekSumOkCp7 += d._raw.okCp7;
-      weekSumOkAdas += d._raw.okAdas;
-      weekSumOkCpFinal += d._raw.okCpFinal;
-      weekSumDefCp7 += d._raw.defCp7;
-      weekSumDefAdas += d._raw.defAdas;
-      weekSumDefCpFinal += d._raw.defCpFinal;
+      sums.drr.cp6 += d.drr.cp6; sums.drr.cp7 += d.drr.cp7; sums.drr.adas += d.drr.adas; sums.drr.cpfinal += d.drr.cpfinal;
+      sums.tot.cp6 += d._raw.totCp6; sums.tot.cp7 += d._raw.totCp7; sums.tot.adas += d._raw.totAdas; sums.tot.cpfinal += d._raw.totCpFinal;
+      sums.ok.cp6 += d._raw.okCp6; sums.ok.cp7 += d._raw.okCp7; sums.ok.adas += d._raw.okAdas; sums.ok.cpfinal += d._raw.okCpFinal;
+      sums.def.cp6 += d._raw.defCp6; sums.def.cp7 += d._raw.defCp7; sums.def.adas += d._raw.defAdas; sums.def.cpfinal += d._raw.defCpFinal;
     });
 
     const cnt = validDays.length;
     return {
-      drr: { 
-        cp7: weekSumDrrCp7 / cnt, 
-        adas: weekSumDrrAdas / cnt, 
-        cpfinal: weekSumDrrCpFinal / cnt 
-      },
+      drr: { cp6: sums.drr.cp6/cnt, cp7: sums.drr.cp7/cnt, adas: sums.drr.adas/cnt, cpfinal: sums.drr.cpfinal/cnt },
       dpu: { 
-        cp7: weekSumTotalCp7 > 0 ? (weekSumDefCp7 / weekSumTotalCp7) : 0, 
-        adas: weekSumTotalAdas > 0 ? (weekSumDefAdas / weekSumTotalAdas) : 0, 
-        cpfinal: weekSumTotalCpFinal > 0 ? (weekSumDefCpFinal / weekSumTotalCpFinal) : 0 
+        cp6: sums.tot.cp6 > 0 ? (sums.def.cp6 / sums.tot.cp6) : 0, 
+        cp7: sums.tot.cp7 > 0 ? (sums.def.cp7 / sums.tot.cp7) : 0, 
+        adas: sums.tot.adas > 0 ? (sums.def.adas / sums.tot.adas) : 0, 
+        cpfinal: sums.tot.cpfinal > 0 ? (sums.def.cpfinal / sums.tot.cpfinal) : 0 
       },
-      drrAvg: ((weekSumDrrCp7 + weekSumDrrAdas + weekSumDrrCpFinal) / cnt) / 3,
-      drrMult: ((weekSumDrrCp7 / cnt) / 100) * ((weekSumDrrAdas / cnt) / 100) * ((weekSumDrrCpFinal / cnt) / 100) * 100,
-      drrSummed: (weekSumTotalCp7 + weekSumTotalAdas + weekSumTotalCpFinal) > 0 
-        ? ((weekSumOkCp7 + weekSumOkAdas + weekSumOkCpFinal) / (weekSumTotalCp7 + weekSumTotalAdas + weekSumTotalCpFinal)) * 100 
+      drrAvg: ((sums.drr.cp6 + sums.drr.cp7 + sums.drr.adas + sums.drr.cpfinal) / cnt) / 4,
+      drrMult: ((sums.drr.cp6/cnt)/100) * ((sums.drr.cp7/cnt)/100) * ((sums.drr.adas/cnt)/100) * ((sums.drr.cpfinal/cnt)/100) * 100,
+      drrSummed: (sums.tot.cp6 + sums.tot.cp7 + sums.tot.adas + sums.tot.cpfinal) > 0 
+        ? ((sums.ok.cp6 + sums.ok.cp7 + sums.ok.adas + sums.ok.cpfinal) / (sums.tot.cp6 + sums.tot.cp7 + sums.tot.adas + sums.tot.cpfinal)) * 100 
         : 0,
-      dpuTotal: (weekSumTotalCp7 > 0 ? (weekSumDefCp7 / weekSumTotalCp7) : 0) 
-              + (weekSumTotalAdas > 0 ? (weekSumDefAdas / weekSumTotalAdas) : 0) 
-              + (weekSumTotalCpFinal > 0 ? (weekSumDefCpFinal / weekSumTotalCpFinal) : 0)
+      dpuTotal: (sums.tot.cp6 > 0 ? (sums.def.cp6 / sums.tot.cp6) : 0) + (sums.tot.cp7 > 0 ? (sums.def.cp7 / sums.tot.cp7) : 0) + (sums.tot.adas > 0 ? (sums.def.adas / sums.tot.adas) : 0) + (sums.tot.cpfinal > 0 ? (sums.def.cpfinal / sums.tot.cpfinal) : 0)
     };
   }, [daysMetrics]);
+
+  // === МЕТРИКИ ЗА МЕСЯЦ ===
+  const monthMetrics = useMemo(() => {
+    const monthData = rawData.filter(r => r.day.startsWith(selectedMonth));
+    const validDays = monthData.filter(r => r.dCp6 || r.dCp7 || r.dAdas || r.dCpFinal);
+    
+    const empty = { drr: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 }, dpu: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 }, drrAvg: 0, drrMult: 0, drrSummed: 0, dpuTotal: 0 };
+    if (validDays.length === 0) return empty;
+
+    let sums = {
+      drr: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 },
+      tot: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 },
+      ok: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 },
+      def: { cp6: 0, cp7: 0, adas: 0, cpfinal: 0 }
+    };
+
+    validDays.forEach(r => {
+      const getVals = (d) => {
+        if (!d) return { def: 0, tot: 0, ok: 0, drr: 0 };
+        return { 
+          def: d.topDefects?.reduce((s, x) => s + (Number(x?.defectCount) || 0), 0) || 0,
+          tot: Number(d.totalVins) || 0, 
+          ok: Number(d.closedVins || d.okVins) || 0, 
+          drr: Number(d.drrPercent) || 0 
+        };
+      };
+      
+      const v6 = getVals(r.dCp6);
+      const v7 = getVals(r.dCp7);
+      const vA = getVals(r.dAdas);
+      const vF = getVals(r.dCpFinal);
+
+      sums.drr.cp6 += v6.drr; sums.drr.cp7 += v7.drr; sums.drr.adas += vA.drr; sums.drr.cpfinal += vF.drr;
+      sums.tot.cp6 += v6.tot; sums.tot.cp7 += v7.tot; sums.tot.adas += vA.tot; sums.tot.cpfinal += vF.tot;
+      sums.ok.cp6 += v6.ok; sums.ok.cp7 += v7.ok; sums.ok.adas += vA.ok; sums.ok.cpfinal += vF.ok;
+      sums.def.cp6 += v6.def; sums.def.cp7 += v7.def; sums.def.adas += vA.def; sums.def.cpfinal += vF.def;
+    });
+
+    const cnt = validDays.length;
+    return {
+      drr: { cp6: sums.drr.cp6/cnt, cp7: sums.drr.cp7/cnt, adas: sums.drr.adas/cnt, cpfinal: sums.drr.cpfinal/cnt },
+      dpu: { 
+        cp6: sums.tot.cp6 > 0 ? (sums.def.cp6 / sums.tot.cp6) : 0, 
+        cp7: sums.tot.cp7 > 0 ? (sums.def.cp7 / sums.tot.cp7) : 0, 
+        adas: sums.tot.adas > 0 ? (sums.def.adas / sums.tot.adas) : 0, 
+        cpfinal: sums.tot.cpfinal > 0 ? (sums.def.cpfinal / sums.tot.cpfinal) : 0 
+      },
+      drrAvg: ((sums.drr.cp6 + sums.drr.cp7 + sums.drr.adas + sums.drr.cpfinal) / cnt) / 4,
+      drrMult: ((sums.drr.cp6/cnt)/100) * ((sums.drr.cp7/cnt)/100) * ((sums.drr.adas/cnt)/100) * ((sums.drr.cpfinal/cnt)/100) * 100,
+      drrSummed: (sums.tot.cp6 + sums.tot.cp7 + sums.tot.adas + sums.tot.cpfinal) > 0 
+        ? ((sums.ok.cp6 + sums.ok.cp7 + sums.ok.adas + sums.ok.cpfinal) / (sums.tot.cp6 + sums.tot.cp7 + sums.tot.adas + sums.tot.cpfinal)) * 100 
+        : 0,
+      dpuTotal: (sums.tot.cp6 > 0 ? (sums.def.cp6 / sums.tot.cp6) : 0) + (sums.tot.cp7 > 0 ? (sums.def.cp7 / sums.tot.cp7) : 0) + (sums.tot.adas > 0 ? (sums.def.adas / sums.tot.adas) : 0) + (sums.tot.cpfinal > 0 ? (sums.def.cpfinal / sums.tot.cpfinal) : 0)
+    };
+  }, [rawData, selectedMonth]);
 
   const allDefects = useMemo(() => {
     const defectsList = [];
     
-    rawData.forEach(({ dCp7, dAdas, dCpFinal }) => {
+    rawData.forEach(({ dCp6, dCp7, dAdas, dCpFinal }) => {
+      // === ДОБАВЛЕН CP6 ===
+      if (Array.isArray(dCp6?.topDefects)) {
+        dCp6.topDefects.forEach(item => {
+          if (!item) return;
+          defectsList.push({ circle: 'CP6', mpp: item.mpp || '—', count: Number(item.defectCount) || 0 });
+        });
+      }
       if (Array.isArray(dCp7?.topDefects)) {
         dCp7.topDefects.forEach(item => {
           if (!item) return;
@@ -440,24 +516,38 @@ function DailyReportMBS() {
 
   return (
     <div>
-      <div style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px' }}>
-        <span style={{ fontWeight: 700, color: '#475569' }}>Выберите неделю:</span>
-        <select 
-          value={selectedWeekOffset} 
-          onChange={e => setSelectedWeekOffset(Number(e.target.value))} 
-          style={{ ...inputStyle, minWidth: 250, fontWeight: 600, color: '#1E293B' }}
-        >
-          {weekOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-        </select>
+      <div style={{ ...cardStyle, display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontWeight: 700, color: '#475569' }}>Неделя:</span>
+          <select 
+            value={selectedWeekOffset} 
+            onChange={e => setSelectedWeekOffset(Number(e.target.value))} 
+            style={{ ...inputStyle, minWidth: 200, fontWeight: 600, color: '#1E293B' }}
+          >
+            {weekOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontWeight: 700, color: '#475569' }}>Месяц:</span>
+          <select 
+            value={selectedMonth} 
+            onChange={e => setSelectedMonth(e.target.value)} 
+            style={{ ...inputStyle, minWidth: 150, fontWeight: 600, color: '#1E293B' }}
+          >
+            {monthOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          </select>
+        </div>
       </div>
 
       <div style={cardStyle}>
-        <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 16, color: '#1E293B' }}>Показатели за неделю</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 16, color: '#1E293B' }}>Показатели за неделю и месяц</h2>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={{ ...thStyle, textAlign: 'left' }}>Показатель</th>
+                <th style={thStyle}>Месяц</th>
                 <th style={thStyle}>Неделя</th>
                 {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day, i) => (
                   <th key={day} style={thStyle}>
@@ -468,52 +558,74 @@ function DailyReportMBS() {
             </thead>
             <tbody>
               <tr>
+                <td style={tdRowHeaderStyle}>DRR CP6</td>
+                <td style={{ ...tdStyle, fontWeight: 700, color: '#7C3AED', backgroundColor: '#F3E8FF' }}>{fmt(monthMetrics.drr.cp6)}</td>
+                <td style={{ ...tdStyle, fontWeight: 700, color: '#7C3AED', backgroundColor: '#F3E8FF' }}>{fmt(weekMetrics.drr.cp6)}</td>
+                {daysMetrics.map((m, i) => <td key={i} style={tdStyle}>{m ? fmt(m.drr.cp6) : '—'}</td>)}
+              </tr>
+              <tr>
                 <td style={tdRowHeaderStyle}>DRR CP7</td>
+                <td style={{ ...tdStyle, fontWeight: 700, color: '#2563EB', backgroundColor: '#EFF6FF' }}>{fmt(monthMetrics.drr.cp7)}</td>
                 <td style={{ ...tdStyle, fontWeight: 700, color: '#2563EB', backgroundColor: '#EFF6FF' }}>{fmt(weekMetrics.drr.cp7)}</td>
                 {daysMetrics.map((m, i) => <td key={i} style={tdStyle}>{m ? fmt(m.drr.cp7) : '—'}</td>)}
               </tr>
               <tr>
                 <td style={tdRowHeaderStyle}>DRR ADAS</td>
+                <td style={{ ...tdStyle, fontWeight: 700, color: '#2563EB', backgroundColor: '#EFF6FF' }}>{fmt(monthMetrics.drr.adas)}</td>
                 <td style={{ ...tdStyle, fontWeight: 700, color: '#2563EB', backgroundColor: '#EFF6FF' }}>{fmt(weekMetrics.drr.adas)}</td>
                 {daysMetrics.map((m, i) => <td key={i} style={tdStyle}>{m ? fmt(m.drr.adas) : '—'}</td>)}
               </tr>
               <tr>
                 <td style={tdRowHeaderStyle}>DRR CPFinal</td>
+                <td style={{ ...tdStyle, fontWeight: 700, color: '#2563EB', backgroundColor: '#EFF6FF' }}>{fmt(monthMetrics.drr.cpfinal)}</td>
                 <td style={{ ...tdStyle, fontWeight: 700, color: '#2563EB', backgroundColor: '#EFF6FF' }}>{fmt(weekMetrics.drr.cpfinal)}</td>
                 {daysMetrics.map((m, i) => <td key={i} style={tdStyle}>{m ? fmt(m.drr.cpfinal) : '—'}</td>)}
               </tr>
               <tr>
+                <td style={tdRowHeaderStyle}>DPU CP6</td>
+                <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706', backgroundColor: '#FEF3C7' }}>{fmt(monthMetrics.dpu.cp6, true)}</td>
+                <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706', backgroundColor: '#FEF3C7' }}>{fmt(weekMetrics.dpu.cp6, true)}</td>
+                {daysMetrics.map((m, i) => <td key={i} style={tdStyle}>{m ? fmt(m.dpu.cp6, true) : '—'}</td>)}
+              </tr>
+              <tr>
                 <td style={tdRowHeaderStyle}>DPU CP7</td>
+                <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706', backgroundColor: '#FEF3C7' }}>{fmt(monthMetrics.dpu.cp7, true)}</td>
                 <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706', backgroundColor: '#FEF3C7' }}>{fmt(weekMetrics.dpu.cp7, true)}</td>
                 {daysMetrics.map((m, i) => <td key={i} style={tdStyle}>{m ? fmt(m.dpu.cp7, true) : '—'}</td>)}
               </tr>
               <tr>
                 <td style={tdRowHeaderStyle}>DPU ADAS</td>
+                <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706', backgroundColor: '#FEF3C7' }}>{fmt(monthMetrics.dpu.adas, true)}</td>
                 <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706', backgroundColor: '#FEF3C7' }}>{fmt(weekMetrics.dpu.adas, true)}</td>
                 {daysMetrics.map((m, i) => <td key={i} style={tdStyle}>{m ? fmt(m.dpu.adas, true) : '—'}</td>)}
               </tr>
               <tr>
                 <td style={tdRowHeaderStyle}>DPU CPFinal</td>
+                <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706', backgroundColor: '#FEF3C7' }}>{fmt(monthMetrics.dpu.cpfinal, true)}</td>
                 <td style={{ ...tdStyle, fontWeight: 700, color: '#D97706', backgroundColor: '#FEF3C7' }}>{fmt(weekMetrics.dpu.cpfinal, true)}</td>
                 {daysMetrics.map((m, i) => <td key={i} style={tdStyle}>{m ? fmt(m.dpu.cpfinal, true) : '—'}</td>)}
               </tr>
               <tr style={{ backgroundColor: '#FFF7ED' }}>
                 <td style={{ ...tdRowHeaderStyle, backgroundColor: '#FFEDD5' }}>DPU Общий (Сумма)</td>
+                <td style={{ ...tdStyle, fontWeight: 800, color: '#C2410C' }}>{fmt(monthMetrics.dpuTotal, true)}</td>
                 <td style={{ ...tdStyle, fontWeight: 800, color: '#C2410C' }}>{fmt(weekMetrics.dpuTotal, true)}</td>
                 {daysMetrics.map((m, i) => <td key={i} style={{ ...tdStyle, fontWeight: 600, color: '#C2410C' }}>{m ? fmt(m.dpuTotal, true) : '—'}</td>)}
               </tr>
               <tr style={{ backgroundColor: '#F8FAFC' }}>
                 <td style={{ ...tdRowHeaderStyle, borderTop: '2px solid #E2E8F0' }}>DRR Усредненный</td>
+                <td style={{ ...tdStyle, fontWeight: 800, color: '#059669', borderTop: '2px solid #E2E8F0' }}>{fmt(monthMetrics.drrAvg)}</td>
                 <td style={{ ...tdStyle, fontWeight: 800, color: '#059669', borderTop: '2px solid #E2E8F0' }}>{fmt(weekMetrics.drrAvg)}</td>
                 {daysMetrics.map((m, i) => <td key={i} style={{ ...tdStyle, borderTop: '2px solid #E2E8F0', fontWeight: 600 }}>{m ? fmt(m.drrAvg) : '—'}</td>)}
               </tr>
               <tr style={{ backgroundColor: '#F8FAFC' }}>
                 <td style={tdRowHeaderStyle}>DRR Перемноженный</td>
+                <td style={{ ...tdStyle, fontWeight: 800, color: '#059669' }}>{fmt(monthMetrics.drrMult)}</td>
                 <td style={{ ...tdStyle, fontWeight: 800, color: '#059669' }}>{fmt(weekMetrics.drrMult)}</td>
                 {daysMetrics.map((m, i) => <td key={i} style={{ ...tdStyle, fontWeight: 600 }}>{m ? fmt(m.drrMult) : '—'}</td>)}
               </tr>
               <tr style={{ backgroundColor: '#F8FAFC' }}>
                 <td style={tdRowHeaderStyle}>DRR Суммированный</td>
+                <td style={{ ...tdStyle, fontWeight: 800, color: '#059669' }}>{fmt(monthMetrics.drrSummed)}</td>
                 <td style={{ ...tdStyle, fontWeight: 800, color: '#059669' }}>{fmt(weekMetrics.drrSummed)}</td>
                 {daysMetrics.map((m, i) => <td key={i} style={{ ...tdStyle, fontWeight: 600 }}>{m ? fmt(m.drrSummed) : '—'}</td>)}
               </tr>
@@ -540,7 +652,7 @@ function DailyReportMBS() {
             ) : (
               allDefects.map((item, idx) => (
                 <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC' }}>
-                  <td style={{ ...tdStyle, fontWeight: 700, color: item.circle === 'CP7' ? '#2563EB' : item.circle === 'ADAS' ? '#7C3AED' : '#10B981' }}>
+                  <td style={{ ...tdStyle, fontWeight: 700, color: item.circle === 'CP6' ? '#7C3AED' : item.circle === 'CP7' ? '#2563EB' : item.circle === 'ADAS' ? '#8B5CF6' : '#10B981' }}>
                     {item.circle}
                   </td>
                   <td style={{ ...tdStyle, textAlign: 'left' }}>{item.mpp}</td>
@@ -558,7 +670,6 @@ function DailyReportMBS() {
 /* ===================== СТАРЫЙ ОТЧЕТ (IOT) ===================== */
 function DailyReportIOT() {
   const [useEnglish, setUseEnglish] = useState(false);
-
   const [weekData, setWeekData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedWeekOffset, setSelectedWeekOffset] = useState(0);

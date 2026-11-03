@@ -7,7 +7,8 @@ const containerStyle = {
   padding: '20px',
   fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
   width: '100%',
-  height: '100vh',
+  // 👇 ИЗМЕНЕНО: Чтобы страница при масштабе 75% заполняла весь экран по высоте
+  height: 'calc(100vh / 0.75)',
   boxSizing: 'border-box',
   backgroundColor: '#F8FAFC',
   display: 'flex',
@@ -228,6 +229,15 @@ const getCurrentShiftInfo = () => {
 };
 
 export default function DrrTLDashboardPage() {
+  // 👇 ДОБАВЛЕНО: Устанавливаем масштаб 75% для страницы
+  useEffect(() => {
+    document.body.style.zoom = '75%';
+    return () => {
+      document.body.style.zoom = '100%';
+    };
+  }, []);
+  // 👆 КОНЕЦ ДОБАВЛЕНИЯ
+
   const [timeFilter, setTimeFilter] = useState(getDefaultTimeFilter());
   const [isManualFilter, setIsManualFilter] = useState(false);
   const [shiftInfo, setShiftInfo] = useState(getCurrentShiftInfo());

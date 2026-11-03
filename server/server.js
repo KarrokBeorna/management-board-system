@@ -13671,14 +13671,50 @@ async function saveDrrCp6Snapshot(shiftDate, shift) {
       computeCp6SpotRepaintRows(range.start, range.end, 'repaint'),
     ]);
 
+    // === РАСЧЕТ TOP DEFECTS ДЛЯ СОХРАНЕНИЯ ===
+    let topDefects = [];
+    if (dash.nokVins > 0) {
+      const [{ vins: psoutRows }, psinRows] = await Promise.all([
+        getCp6PsoutVins(range.start, range.end),
+        getCp6PsinVins(range.start, range.end),
+      ]);
+      const { nokSet } = await classifyCp6VinsExtended(psoutRows, psinRows);
+      const nokVins = [...nokSet];
+
+      if (nokVins.length > 0) {
+        const ph = nokVins.map(() => '?').join(',');
+        const [defectRows] = await pool.query(`
+          SELECT d.VIN, wo.MODEL, d.PART_NAME, d.PROBLEM_TYPE, d.PROBLEM_GRADE, d.STATUS
+          FROM at_paint_qm_defect_info d
+          LEFT JOIN work_order wo ON wo.VIN = d.VIN
+          WHERE d.VIN IN (${ph})
+        `, nokVins);
+
+        const map = new Map();
+        defectRows.forEach(d => {
+          const status = (d.STATUS || '').toUpperCase();
+          if (CP6_DEFECT_CLOSED_STATUSES.has(status)) return;
+
+          const mpp = `${d.MODEL || '—'} ${d.PART_NAME || ''} ${d.PROBLEM_TYPE || ''}`
+            .replace(/\s+/g, ' ').trim();
+          const grade = d.PROBLEM_GRADE || '—';
+          const key = `${mpp}|${grade}`;
+          if (!map.has(key)) map.set(key, { mpp, grade, defectCount: 0 });
+          map.get(key).defectCount += 1;
+        });
+        topDefects = [...map.values()].sort((a, b) => b.defectCount - a.defectCount);
+      }
+    }
+    // =========================================
+
     await notesPool.query(`
       INSERT INTO drr_cp6_snapshots
         (shift_date, week_number, shift, shift_letter,
          total_records, total_vins, ok_vins, nok_vins, drr_percent,
          spot_vins, repaint_vins, other_vins,
          active_at_paint, transit_count, psin_vins,
-         spot_rows, repaint_rows)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         spot_rows, repaint_rows, top_defects)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         snapshot_time = CURRENT_TIMESTAMP,
         week_number = VALUES(week_number),
@@ -13695,13 +13731,14 @@ async function saveDrrCp6Snapshot(shiftDate, shift) {
         transit_count = VALUES(transit_count),
         psin_vins = VALUES(psin_vins),
         spot_rows = VALUES(spot_rows),
-        repaint_rows = VALUES(repaint_rows)
+        repaint_rows = VALUES(repaint_rows),
+        top_defects = VALUES(top_defects)
     `, [
       shiftDate, weekNumber, shift, shiftLetter,
       dash.totalRecords, dash.totalVins, dash.okVins, dash.nokVins, dash.drrPercent,
       dash.spotVins, dash.repaintVins, dash.otherVins,
       dash.activeAtPaint, dash.transitCount, dash.psinVins,
-      JSON.stringify(spotRows), JSON.stringify(repaintRows),
+      JSON.stringify(spotRows), JSON.stringify(repaintRows), JSON.stringify(topDefects),
     ]);
 
     console.log(`[DRR CP6 snapshot] ${shiftDate} W${weekNumber} ${shift}(${shiftLetter}) → ${dash.drrPercent}% (${dash.okVins}/${dash.totalVins})`);
@@ -13799,18 +13836,25 @@ app.get('/api/drr-cp6-snapshot/:id', async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Снимок не найден' });
 
     const r = rows[0];
-    let spotRows = [], repaintRows = [];
+    let spotRows = [], repaintRows = [], topDefects = [];
+    
     try {
       spotRows = r.spot_rows ? (typeof r.spot_rows === 'string' ? JSON.parse(r.spot_rows) : r.spot_rows) : [];
     } catch { spotRows = []; }
+    
     try {
       repaintRows = r.repaint_rows ? (typeof r.repaint_rows === 'string' ? JSON.parse(r.repaint_rows) : r.repaint_rows) : [];
     } catch { repaintRows = []; }
+
+    try {
+      topDefects = r.top_defects ? (typeof r.top_defects === 'string' ? JSON.parse(r.top_defects) : r.top_defects) : [];
+    } catch { topDefects = []; }
 
     res.json({
       ...enrichCp6Snapshot(r),
       spotRows,
       repaintRows,
+      topDefects, // Отдаем сохраненные данные
     });
   } catch (err) {
     console.error('Ошибка /api/drr-cp6-snapshot/:id:', err.message);
@@ -17530,7 +17574,7 @@ app.get('/api/repelec-vins', async (req, res) => {
     endDateObj.setDate(endDateObj.getDate() + 1);
     const eDateNext = `${endDateObj.getFullYear()}-${String(endDateObj.getMonth() + 1).padStart(2, '0')}-${String(endDateObj.getDate()).padStart(2, '0')}`;
 
-    // 1. Ищем машины с CP72 за этот период (с учетом смен)
+    // 1. Ищем машины с CP72 за этот период
     const [cp72Rows] = await mesPool.query(`
       SELECT UPPER(vin) AS VIN, MIN(scan_time) AS CP72_TIME
       FROM ti_mes_movement
@@ -17542,10 +17586,9 @@ app.get('/api/repelec-vins', async (req, res) => {
     if (cp72Rows.length === 0) return res.json([]);
     let vins = cp72Rows.map(r => r.VIN);
     const cp72Map = new Map(cp72Rows.map(r => [r.VIN, r.CP72_TIME]));
-
     const ph = vins.map(() => '?').join(',');
 
-    // 2. Проверяем наличие в REPELEC и забираем время
+    // 2. Проверяем наличие в REPELEC
     const [repelecRows] = await mesPool.query(`
       SELECT UPPER(vin) AS VIN, MIN(gmt_create) AS REPELEC_TIME
       FROM tm_vhc_test_line_movement
@@ -17562,20 +17605,16 @@ app.get('/api/repelec-vins', async (req, res) => {
     // 4. Фильтрация
     let filteredVins = [];
     vins.forEach(v => {
-      if (!repelecMap.has(v)) return; // Нет в REPELEC - отбрасываем
-
+      if (!repelecMap.has(v)) return;
       const cp72Time = cp72Map.get(v);
       const shiftLetter = getShiftInfoByDate(cp72Time);
-      
       if (shiftLetter !== shift) return;
-      
       const vModel = modelMap.get(v) || '—';
       if (model && model !== 'ALL' && vModel !== model) return;
       filteredVins.push(v);
     });
 
     if (filteredVins.length === 0) return res.json([]);
-
     const vinsPh = filteredVins.map(() => '?').join(',');
 
     // 5. Дефекты IOT
@@ -17585,67 +17624,66 @@ app.get('/api/repelec-vins', async (req, res) => {
       WHERE VIN IN (${vinsPh})
     `, filteredVins);
 
-    const defectsByVin = new Map();
+    const iotByVin = new Map();
     defectRows.forEach(r => {
-      const part = (r.PART_NAME || '').trim();
-      const problem = (r.PROBLEM_TYPE || '').trim();
-      const desc = (r.PROBLEM_DESCRIPTION || '').trim();
-      const comment = (r.PROBLEM_REPLENISH || '').trim();
-      const missPart = (r.MISS_PART || '').trim();
-      const postName = (r.POST_NAME || '').trim();
-      
-      let finalDesc = desc || `${part} ${problem}`.trim();
-      if (!finalDesc) finalDesc = 'Без описания';
-      
-      if (!defectsByVin.has(r.VIN)) defectsByVin.set(r.VIN, []);
-      defectsByVin.get(r.VIN).push({
-        source: 'IOT',
-        description: finalDesc,
-        comment: comment,
-        post: postName,
-        miss_part: missPart
+      if (!iotByVin.has(r.VIN)) iotByVin.set(r.VIN, []);
+      iotByVin.get(r.VIN).push({
+        time: r.CREATION_TIME, part_name: r.PART_NAME || '—', problem_type: r.PROBLEM_TYPE || '—',
+        description: r.PROBLEM_DESCRIPTION || '—', comment: r.PROBLEM_REPLENISH || '—',
+        post: r.POST_NAME || '—', miss_part: r.MISS_PART || '—'
       });
     });
 
-    // 6. Дефекты BMS
+    // 6. Дефекты BMS (Добавлен DISTINCT для предотвращения дубликатов)
     let bmsDefectsRows = [];
     try {
       const [bmsRows] = await bmsPool.query(`
-        SELECT UPPER(vin) AS VIN, test_station, module_name, result, fault_content 
+        SELECT DISTINCT UPPER(vin) AS VIN, test_station, module_name, result, fault_content 
         FROM qr_test_details 
         WHERE result != 'OK' AND vin IN (${vinsPh})
       `, filteredVins);
       bmsDefectsRows = bmsRows;
     } catch (bmsErr) {
-      console.error('⚠️ Ошибка загрузки BMS для REPELEC:', bmsErr.message);
+      console.error('⚠️ Ошибка загрузки BMS:', bmsErr.message);
     }
 
+    // 7. Заметки BMS из БД
+    const [notesRows] = await notesPool.query(`
+      SELECT vin, test_station, module_name, fault_content, note_text 
+      FROM repelec_bms_notes WHERE vin IN (${vinsPh})
+    `, filteredVins);
+    
+    const notesMap = new Map();
+    notesRows.forEach(r => {
+      const key = `${r.vin}|${r.test_station}|${r.module_name}|${r.fault_content}`;
+      notesMap.set(key, r.note_text);
+    });
+
+    // 8. Сборка BMS с заметками
     const bmsByVin = new Map();
     bmsDefectsRows.forEach(r => {
       if (!bmsByVin.has(r.VIN)) bmsByVin.set(r.VIN, []);
+      
+      const key = `${r.VIN}|${r.test_station}|${r.module_name}|${r.fault_content}`;
       bmsByVin.get(r.VIN).push({
-        source: 'BMS',
         test_station: r.test_station || '—',
         module_name: r.module_name || '—',
         result: r.result || '—',
-        fault_content: r.fault_content || '—'
+        fault_content: r.fault_content || '—',
+        note: notesMap.get(key) || '' // Привязываем заметку
       });
     });
 
-    // 7. Объединение
+    // 9. Итог
     const uniqueVins = [...new Set(filteredVins)];
-    const result = uniqueVins.map(v => {
-      const iotDefects = defectsByVin.get(v) || [];
-      const bmsDefects = bmsByVin.get(v) || [];
-      return {
-        vin: v,
-        model: modelMap.get(v) || '—',
-        repelec_time: repelecMap.get(v),
-        cp72_time: cp72Map.get(v) || null,
-        iot_defects: iotDefects,
-        bms_defects: bmsDefects
-      };
-    });
+    const result = uniqueVins.map(v => ({
+      vin: v,
+      model: modelMap.get(v) || '—',
+      repelec_time: repelecMap.get(v),
+      cp72_time: cp72Map.get(v) || null,
+      iot_defects: iotByVin.get(v) || [],
+      bms_defects: bmsByVin.get(v) || []
+    }));
 
     result.sort((a, b) => new Date(a.repelec_time) - new Date(b.repelec_time));
     res.json(result);
@@ -17656,7 +17694,26 @@ app.get('/api/repelec-vins', async (req, res) => {
   }
 });
 
-
+// Сохранение заметки к конкретному дефекту BMS
+app.post('/api/repelec-bms-notes', async (req, res) => {
+  try {
+    const { vin, test_station, module_name, fault_content, note } = req.body;
+    if (!vin || !test_station || !module_name || !fault_content) {
+      return res.status(400).json({ error: 'Не все обязательные поля переданы' });
+    }
+    
+    await notesPool.query(`
+      INSERT INTO repelec_bms_notes (vin, test_station, module_name, fault_content, note_text) 
+      VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE note_text = VALUES(note_text)
+    `, [vin, test_station, module_name, fault_content, note || '']);
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Ошибка сохранения заметки BMS:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 
