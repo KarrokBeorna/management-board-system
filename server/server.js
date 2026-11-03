@@ -1134,6 +1134,136 @@ app.get('/api/model-status-drr-cp8-details', async (req, res) => {
   }
 });
 
+// ================== ДАННЫЕ ПО КОМПЛЕКТАЦИЯМ (DPU & DRR) ==================
+app.get('/api/model-status-complectations-daily', async (req, res) => {
+  // --- DRR по комплектациям (всё в MES через mesPool) ---
+  const fetchDrrComplectations = async (nodeNature) => {
+    const [rows] = await mesPool.query(`
+      SELECT
+        TRIM(all_cars.MODEL) AS model,
+        IFNULL(TRIM(tbmr.material_desc), 'Не указана') AS complectation,
+        DATE_FORMAT(all_cars.PERIOD_DATE, '%Y-%m-%d') AS period,
+        ROUND(100 - IFNULL(remzone.REMZONE_COUNT, 0) * 100.0 / NULLIF(all_cars.TOTAL, 0), 1) AS value
+      FROM (
+        SELECT too.product AS MODEL, too.material_no,
+               DATE(DATE_SUB(tvvm.scan_time, INTERVAL 470 MINUTE)) AS PERIOD_DATE,
+               COUNT(DISTINCT tvv.VIN) AS TOTAL
+        FROM tm_vhc_vehicle tvv
+        JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+        JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+        WHERE tvvm.node_nature = ?
+          AND tvvm.scan_time >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+        GROUP BY too.product, too.material_no, PERIOD_DATE
+      ) all_cars
+      LEFT JOIN (
+        SELECT too.product AS MODEL, too.material_no,
+               DATE(DATE_SUB(tvvm.scan_time, INTERVAL 470 MINUTE)) AS PERIOD_DATE,
+               COUNT(DISTINCT tvv.VIN) AS REMZONE_COUNT
+        FROM tm_vhc_vehicle tvv
+        JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+        JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+        WHERE tvvm.node_nature = ?
+          AND tvvm.scan_time >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+          AND tvv.VIN IN (SELECT DISTINCT VIN FROM tm_vhc_test_line_movement WHERE node_nature LIKE 'REP%')
+        GROUP BY too.product, too.material_no, PERIOD_DATE
+      ) remzone ON all_cars.MODEL = remzone.MODEL
+               AND all_cars.material_no = remzone.material_no
+               AND all_cars.PERIOD_DATE = remzone.PERIOD_DATE
+      LEFT JOIN tm_bas_material_relation tbmr
+        ON tbmr.material_no = all_cars.material_no AND tbmr.is_deleted = 0
+      WHERE all_cars.TOTAL > 0
+    `, [nodeNature, nodeNature]);
+    return rows;
+  };
+
+  // --- DPU по комплектациям (pool для фактов + mesPool для complectation + склейка) ---
+  const fetchDpuComplectations = async (wcList, includeAllSources) => {
+    const wcStr = wcList.map(w => `'${w}'`).join(',');
+    const defectUnion = includeAllSources
+      ? `SELECT VIN, (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE FROM at_qm_defect_info
+         UNION ALL SELECT VIN, (OFFLINE OR OFFLINE1 OR OFFLINE2) FROM at_biw_qm_defect_info
+         UNION ALL SELECT VIN, (OFFLINE OR OFFLINE1 OR OFFLINE2) FROM at_paint_qm_defect_info`
+      : `SELECT VIN, (OFFLINE OR OFFLINE1 OR OFFLINE2) AS S_OFFLINE FROM at_qm_defect_info`;
+
+    const [facts] = await pool.query(`
+      SELECT
+        aowth.VIN,
+        TRIM(aowth.MODEL) AS model,
+        DATE_FORMAT(DATE(DATE_SUB(aowth.CREATION_TIME, INTERVAL 470 MINUTE)), '%Y-%m-%d') AS d,
+        COUNT(QM_DEF.VIN) AS DEF_C
+      FROM at_om_wiptrackinghistory aowth
+      JOIN (${defectUnion}) QM_DEF ON QM_DEF.VIN = aowth.VIN AND QM_DEF.S_OFFLINE = 1
+      WHERE aowth.WC_NAME IN (${wcStr})
+        AND aowth.CREATION_TIME >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+      GROUP BY aowth.VIN, aowth.MODEL, d
+    `);
+
+    if (facts.length === 0) return [];
+
+    const vins = [...new Set(facts.map(r => r.VIN))];
+    const chunkSize = 2000;
+    const vinToComp = {};
+    for (let i = 0; i < vins.length; i += chunkSize) {
+      const chunk = vins.slice(i, i + chunkSize);
+      const [mats] = await mesPool.query(`
+        SELECT tvv.VIN,
+               IFNULL(TRIM(tbmr.material_desc), 'Не указана') AS complectation
+        FROM tm_vhc_vehicle tvv
+        JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+        LEFT JOIN tm_bas_material_relation tbmr
+          ON tbmr.material_no = too.material_no AND tbmr.is_deleted = 0
+        WHERE tvv.VIN IN (?)
+      `, [chunk]);
+      mats.forEach(m => { vinToComp[m.VIN] = m.complectation; });
+    }
+
+    const agg = {};
+    facts.forEach(f => {
+      const comp = vinToComp[f.VIN] || 'Не указана';
+      const key = `${f.model}|${comp}|${f.d}`;
+      if (!agg[key]) {
+        agg[key] = { model: f.model, complectation: comp, period: f.d, vinCount: 0, defSum: 0 };
+      }
+      agg[key].vinCount += 1;
+      agg[key].defSum += Number(f.DEF_C) || 0;
+    });
+
+    return Object.values(agg).map(a => ({
+      model: a.model,
+      complectation: a.complectation,
+      period: a.period,
+      value: a.vinCount > 0 ? +(a.defSum / a.vinCount).toFixed(2) : 0,
+    }));
+  };
+
+  try {
+    let cp7Dpu = [], cp8Dpu = [], cp7Drr = [], cp8Drr = [];
+
+    try {
+      cp7Dpu = await fetchDpuComplectations(
+        ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'PIP1', 'PIP2', 'PIP9'], true
+      );
+    } catch (e) { console.error('CP7 DPU ERROR:', e.message); }
+
+    try {
+      cp8Dpu = await fetchDpuComplectations(
+        ['CP8', 'CP8 Gate', 'CP8-gate', '360', 'ADAS', 'ADAS+RB', 'TEST TRACK', 'TRACK', 'WA', 'WT'], false
+      );
+    } catch (e) { console.error('CP8 DPU ERROR:', e.message); }
+
+    try { cp7Drr = await fetchDrrComplectations('Key_Uloc_Type_CP7'); }
+    catch (e) { console.error('CP7 DRR ERROR:', e.message); }
+
+    try { cp8Drr = await fetchDrrComplectations('Key_Uloc_Type_CPFINAL'); }
+    catch (e) { console.error('CP8 DRR ERROR:', e.message); }
+
+    res.json({ cp7Dpu, cp8Dpu, cp7Drr, cp8Drr });
+  } catch (err) {
+    console.error('Общая ошибка комплектаций:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================== CPA SCORE ==================
 app.get('/api/cpa-scores', async (req, res) => {
   try {
