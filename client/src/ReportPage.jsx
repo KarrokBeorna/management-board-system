@@ -141,7 +141,7 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
   );
 }
 
-// ===== ПОИСК (ДВА БЛОКА: ДЕТАЛЬ И ДЕФЕКТ) =====
+// ===== ПОИСК =====
 function SearchBar({ uniqueDefects, onSearchChange }) {
   const [partQuery, setPartQuery] = useState('');
   const [defectQuery, setDefectQuery] = useState('');
@@ -274,7 +274,7 @@ export default function ReportPage() {
 
   const [checkpoint, setCheckpoint] = useState('CP7');
   const [defectType, setDefectType] = useState('default');
-  const [selectedModels, setSelectedModels] = useState([]);
+  const [selectedModels, setSelectedModels] = useState([]); 
   const [unit, setUnit] = useState('defects');
   const [shift, setShift] = useState('all');
 
@@ -501,11 +501,11 @@ export default function ReportPage() {
     return arr;
   }, [rows]);
 
-  // Формируем строку только для типа дефекта
+  // Синхронизировано с выпадающим списком
   const defectTypeText = useMemo(() => {
-    if (defectType === 'online') return 'Онлайн';
-    if (defectType === 'offline') return 'Оффлайн';
-    return 'Default';
+    if (defectType === 'online') return 'Online';
+    if (defectType === 'offline') return 'Offline';
+    return 'Все';
   }, [defectType]);
 
   const totalRow = useMemo(() => {
@@ -548,9 +548,15 @@ export default function ReportPage() {
     setTrendLoading(true);
     try {
       const fetchTrend = (periodType) => {
-        const modelParam = row.isTotal 
-          ? (selectedModels.length === 1 ? selectedModels[0] : 'ALL')
-          : row.MODEL;
+        // ИСПРАВЛЕНИЕ: передаем все выбранные модели и поиск
+        let modelParam = 'ALL';
+        if (row.isTotal) {
+          if (selectedModels.length > 0 && selectedModels.length < availableModels.length) {
+            modelParam = selectedModels.join(',');
+          }
+        } else {
+          modelParam = row.MODEL;
+        }
 
         const params = new URLSearchParams({
           partName: row.isTotal ? 'ALL' : row.PART_NAME,
@@ -559,7 +565,9 @@ export default function ReportPage() {
           checkpoint,
           defectType,
           shift,
-          periodType
+          periodType,
+          searchPart: row.isTotal ? searchPart : '',
+          searchDefect: row.isTotal ? searchDefect : ''
         });
         return fetch(`${API_BASE}/api/report-page-defect-trend?${params.toString()}`).then(r => r.json());
       };
@@ -701,7 +709,7 @@ export default function ReportPage() {
             const isSelected = selectedRow === row.MPP;
             const selectedBoxShadow = isSelected ? 'inset 0 0 0 2px #FFFFFF' : undefined;
             
-            // Стили для строки ИТОГО (глубокий синий, не поддается логике цветов)
+            // Стили для строки ИТОГО (глубокий синий)
             const totalBg = '#1E3A8A';
             const totalBorder = '#3B82F6';
             const rowBg = row.isTotal ? totalBg : '#1F2937';

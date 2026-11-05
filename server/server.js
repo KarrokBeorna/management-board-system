@@ -317,7 +317,8 @@ app.get('/api/cars-count', async (req, res) => {
   }
 });
 
-// ================== ДАШБОРД (основной + Daily Top) – с новыми списками постов ==================
+
+// 2. Основная таблица (с учетом смен и костылем "Отсутствие")
 app.get('/api/defects-dashboard', async (req, res) => {
   try {
     const { checkpoint, defectType, shift = 'all' } = req.query;
@@ -345,56 +346,43 @@ app.get('/api/defects-dashboard', async (req, res) => {
 
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
+    // ФИКС: Добавлен костыль "Отсутствие" для оффлайн
     let whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr})`;
     if (type === 'offline') {
-      whereClause += ` AND QM_DEF.S_OFFLINE = 1`;
+      whereClause += ` AND (QM_DEF.S_OFFLINE = 1 OR QM_DEF.PROBLEM_TYPE = 'Отсутствие')`;
     } else if (type === 'online') {
-      whereClause += ` AND QM_DEF.S_OFFLINE = 0`;
+      whereClause += ` AND QM_DEF.S_OFFLINE = 0 AND QM_DEF.PROBLEM_TYPE <> 'Отсутствие'`;
     }
 
-    // ---------- SHIFT_DATE ----------
-    // 07:50 = 470 мин, 16:40 = 1000 мин, 16:41 = 1001 мин
-    // 01:30 = 90 мин, 01:31 = 91 мин
+    // ---------- ЛОГИКА СМЕН ----------
     const minutesExpr = `(HOUR(QM_DEF.CREATION_TIME) * 60 + MINUTE(QM_DEF.CREATION_TIME))`;
 
     let shiftDateExpr;
     if (shift === 'all') {
       shiftDateExpr = `DATE(QM_DEF.CREATION_TIME)`;
     } else if (shift === 'C') {
-      // Ночь: 01:31 — 07:49 (нижняя граница включительно, верхняя до 07:50)
-      shiftDateExpr = `
-        CASE WHEN ${minutesExpr} BETWEEN 91 AND 469
-             THEN DATE(QM_DEF.CREATION_TIME) END
-      `;
+      shiftDateExpr = `CASE WHEN ${minutesExpr} BETWEEN 91 AND 469 THEN DATE(QM_DEF.CREATION_TIME) END`;
     } else if (shift === 'A') {
-      // Чётная неделя → A = вечер, Нечётная → A = день
       shiftDateExpr = `
         CASE
           WHEN WEEKOFYEAR(QM_DEF.CREATION_TIME) % 2 = 0 THEN
             CASE
-              WHEN ${minutesExpr} BETWEEN 1001 AND 1439
-                THEN DATE(QM_DEF.CREATION_TIME)
-              WHEN ${minutesExpr} BETWEEN 0 AND 90
-                THEN DATE_SUB(DATE(QM_DEF.CREATION_TIME), INTERVAL 1 DAY)
+              WHEN ${minutesExpr} BETWEEN 1001 AND 1439 THEN DATE(QM_DEF.CREATION_TIME)
+              WHEN ${minutesExpr} BETWEEN 0 AND 90 THEN DATE_SUB(DATE(QM_DEF.CREATION_TIME), INTERVAL 1 DAY)
             END
           ELSE
-            CASE WHEN ${minutesExpr} BETWEEN 470 AND 1000
-                 THEN DATE(QM_DEF.CREATION_TIME) END
+            CASE WHEN ${minutesExpr} BETWEEN 470 AND 1000 THEN DATE(QM_DEF.CREATION_TIME) END
         END
       `;
     } else if (shift === 'B') {
-      // Чётная неделя → B = день, Нечётная → B = вечер
       shiftDateExpr = `
         CASE
           WHEN WEEKOFYEAR(QM_DEF.CREATION_TIME) % 2 = 0 THEN
-            CASE WHEN ${minutesExpr} BETWEEN 470 AND 1000
-                 THEN DATE(QM_DEF.CREATION_TIME) END
+            CASE WHEN ${minutesExpr} BETWEEN 470 AND 1000 THEN DATE(QM_DEF.CREATION_TIME) END
           ELSE
             CASE
-              WHEN ${minutesExpr} BETWEEN 1001 AND 1439
-                THEN DATE(QM_DEF.CREATION_TIME)
-              WHEN ${minutesExpr} BETWEEN 0 AND 90
-                THEN DATE_SUB(DATE(QM_DEF.CREATION_TIME), INTERVAL 1 DAY)
+              WHEN ${minutesExpr} BETWEEN 1001 AND 1439 THEN DATE(QM_DEF.CREATION_TIME)
+              WHEN ${minutesExpr} BETWEEN 0 AND 90 THEN DATE_SUB(DATE(QM_DEF.CREATION_TIME), INTERVAL 1 DAY)
             END
         END
       `;
@@ -469,11 +457,10 @@ app.get('/api/defects-dashboard', async (req, res) => {
   }
 });
 
-
-// ================== ДИНАМИКА ДЕФЕКТА ДЛЯ REPORT PAGE ==================
-app.get('/api/report-page-defect-trend', async (req, res) => { // <-- ИЗМЕНЕНО НАЗВАНИЕ
+// 3. Динамика дефекта для графиков (с поддержкой поиска, моделей и костыля "Отсутствие")
+app.get('/api/report-page-defect-trend', async (req, res) => {
   try {
-    const { partName, problemType, model, checkpoint, periodType, shift = 'all', defectType = 'default' } = req.query;
+    const { partName, problemType, model, checkpoint, periodType, shift = 'all', defectType = 'default', searchPart, searchDefect } = req.query;
     if (!periodType) return res.status(400).json({ error: 'periodType обязателен' });
 
     const cp7Posts = ['CP7', 'CP7 Audit', 'CP7 Gate', 'CP7-gate', 'REPAIR', 'REPAIR_Final', 'EXT1', 'PIP2', 'PIP4', 'PIP9'];
@@ -490,22 +477,43 @@ app.get('/api/report-page-defect-trend', async (req, res) => { // <-- ИЗМЕН
 
     const postListStr = postList.map(p => `'${p}'`).join(',');
 
+    // ФИКС: Добавлен костыль "Отсутствие"
     let whereClause = ` AND QM_DEF.POST_NAME IN (${postListStr})`;
-    if (defectType === 'offline') whereClause += ` AND QM_DEF.S_OFFLINE = 1`;
-    else if (defectType === 'online') whereClause += ` AND QM_DEF.S_OFFLINE = 0`;
+    if (defectType === 'offline') {
+      whereClause += ` AND (QM_DEF.S_OFFLINE = 1 OR QM_DEF.PROBLEM_TYPE = 'Отсутствие')`;
+    } else if (defectType === 'online') {
+      whereClause += ` AND QM_DEF.S_OFFLINE = 0 AND QM_DEF.PROBLEM_TYPE <> 'Отсутствие'`;
+    }
+
+    // ФИКС 1: Исключаем пустые детали и дефекты, как в основном дашборде
+    whereClause += ` AND QM_DEF.PART_NAME IS NOT NULL AND TRIM(QM_DEF.PART_NAME) <> ''`;
+    whereClause += ` AND QM_DEF.PROBLEM_TYPE IS NOT NULL AND TRIM(QM_DEF.PROBLEM_TYPE) <> ''`;
 
     const queryParams = [];
-    if (partName && partName !== 'ALL') {
+    
+    // Обработка поиска по детали
+    if (searchPart) {
+      whereClause += ` AND QM_DEF.PART_NAME LIKE ?`;
+      queryParams.push(`%${searchPart}%`);
+    } else if (partName && partName !== 'ALL') {
       whereClause += ` AND QM_DEF.PART_NAME = ?`;
       queryParams.push(partName);
     }
-    if (problemType && problemType !== 'ALL') {
+
+    // Обработка поиска по дефекту
+    if (searchDefect) {
+      whereClause += ` AND QM_DEF.PROBLEM_TYPE LIKE ?`;
+      queryParams.push(`%${searchDefect}%`);
+    } else if (problemType && problemType !== 'ALL') {
       whereClause += ` AND QM_DEF.PROBLEM_TYPE = ?`;
       queryParams.push(problemType);
     }
-    if (model && model !== 'ALL') {
-      whereClause += ` AND wo.MODEL = ?`;
-      queryParams.push(model);
+
+    // Обработка множественного выбора моделей
+    const modelList = (model && model !== 'ALL') ? model.split(',') : [];
+    if (modelList.length > 0) {
+      whereClause += ` AND wo.MODEL IN (${modelList.map(() => '?').join(',')})`;
+      queryParams.push(...modelList);
     }
 
     // Логика смен
@@ -613,16 +621,17 @@ app.get('/api/report-page-defect-trend', async (req, res) => { // <-- ИЗМЕН
       else if (periodType === 'week') carCondition = `DATE_FORMAT(DATE(CREATION_TIME), '%x-W%v') = ?`;
       else carCondition = `DATE(CREATION_TIME) = ?`;
 
+      // ФИКС 2: Считаем машины только по CP72, как в основном дашборде
       let carSql = `
         SELECT COUNT(DISTINCT VIN) AS total
         FROM at_om_wiptrackinghistory
-        WHERE WC_NAME IN (${postListStr})
+        WHERE WC_NAME IN ('CP72')
           AND ${carCondition}
       `;
       const carParams = [period];
-      if (model && model !== 'ALL') {
-        carSql += ` AND MODEL = ?`;
-        carParams.push(model);
+      if (modelList.length > 0) {
+        carSql += ` AND MODEL IN (${modelList.map(() => '?').join(',')})`;
+        carParams.push(...modelList);
       }
       const [carRows] = await pool.query(carSql, carParams);
       const totalCars = carRows[0]?.total || 0;
