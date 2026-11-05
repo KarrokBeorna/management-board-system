@@ -5292,11 +5292,9 @@ app.get('/api/holds-sgp-retrospective', async (req, res) => {
 //   reason     — агрегированная причина (режим «Агрегированные причины»)
 app.get('/api/holds-sgp-retrospective-vins', async (req, res) => {
   try {
-    const { model, issue_desc, reason, date } = req.query;
-    if (!model || !date || (!issue_desc && !reason)) {
-      return res
-        .status(400)
-        .json({ error: 'model, date и (issue_desc или reason) обязательны' });
+    const { model, issue_desc, issue_descs, reason, date } = req.query;
+    if (!model || !date) {
+      return res.status(400).json({ error: 'model и date обязательны' });
     }
 
     const endOfDay = new Date(date);
@@ -5308,25 +5306,30 @@ app.get('/api/holds-sgp-retrospective-vins', async (req, res) => {
     if (issue_desc) {
       whereIssue = ` AND qid.issue_desc = ? `;
       params.push(issue_desc);
+    } else if (reason) {
+      // Поиск по агрегированной причине (с учетом хвостов)
+      whereIssue = ` AND (
+        qid.issue_desc = ? 
+        OR qid.issue_desc LIKE CONCAT(?, ' - по%') 
+        OR qid.issue_desc LIKE CONCAT(?, ' по%')
+        OR qid.issue_desc LIKE CONCAT(?, '- по%')
+        OR qid.issue_desc LIKE CONCAT(?, '-по%')
+      ) `;
+      params.push(reason, reason, reason, reason, reason);
+    } else if (issue_descs) {
+      try {
+        const descList = JSON.parse(issue_descs);
+        if (Array.isArray(descList) && descList.length > 0) {
+          whereIssue = ` AND qid.issue_desc IN (${descList.map(() => '?').join(',')}) `;
+          params.push(...descList);
+        } else {
+          return res.json([]);
+        }
+      } catch (e) {
+        return res.status(400).json({ error: 'Неверный формат issue_descs' });
+      }
     } else {
-      // Покрываем все варианты склейки, которые схлопывает aggregateReason:
-      //   "reason - по запросу ..."
-      //   "reason -по запросу ..."
-      //   "reason- по запросу ..."
-      //   "reason-по запросу ..."
-      //   "reason по запросу ..."
-      //   "reason" (точное совпадение без запроса)
-      whereIssue = `
-        AND (
-          qid.issue_desc = ?
-          OR qid.issue_desc LIKE CONCAT(?, ' - по запросу%')
-          OR qid.issue_desc LIKE CONCAT(?, ' -по запросу%')
-          OR qid.issue_desc LIKE CONCAT(?, '- по запросу%')
-          OR qid.issue_desc LIKE CONCAT(?, '-по запросу%')
-          OR qid.issue_desc LIKE CONCAT(?, ' по запросу%')
-        )
-      `;
-      params.push(reason, reason, reason, reason, reason, reason);
+      return res.status(400).json({ error: 'Не передан ни issue_desc, ни issue_descs, ни reason' });
     }
 
     params.push(endOfDay, endOfDay);

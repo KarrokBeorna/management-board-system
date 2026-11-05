@@ -201,7 +201,7 @@ const getShiftsForDate = (dateStr) => {
     weekNumber: weekNum,
     a: { letter: 'A', type: aType, ...getShiftRange(dateStr, aType) },
     b: { letter: 'B', type: bType, ...getShiftRange(dateStr, bType) },
-    c: { letter: 'C', type: 'night', ...getShiftRange(dateStr, 'night') } // Добавили ночную смену
+    c: { letter: 'C', type: 'night', ...getShiftRange(dateStr, 'night') } 
   };
 };
 
@@ -806,8 +806,8 @@ function WeeklyPhotosBlock({ photos, loading, shiftLetter }) {
   );
 }
 
-function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter }) {
-  const [matrix, setMatrix] = useState({ weeks: [], rows: [] });
+function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter, filterShortage }) {
+  const [matrix, setMatrix] = useState({ weeks: [], rows: [], shortageCount: 0 });
   const [loadingTop, setLoadingTop] = useState(false);
   const [photos, setPhotos] = useState([]);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
@@ -816,13 +816,18 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
 
   const periodTotalVins = weeks.reduce((s, w) => s + (w.totalVins || 0), 0);
   const periodClosedVins = weeks.reduce((s, w) => s + (w.closedVins || 0), 0);
+  
+  // Логика "Без shortage": знаменатель не меняется, а числитель (OK) увеличивается на кол-во shortage
+  const shortage = matrix.shortageCount || 0;
+  const adjustedClosedVins = periodClosedVins + (filterShortage ? shortage : 0);
+  
   const avgDrr = periodTotalVins > 0
-    ? +((periodClosedVins / periodTotalVins) * 100).toFixed(1)
+    ? +((adjustedClosedVins / periodTotalVins) * 100).toFixed(1)
     : 0;
 
   useEffect(() => {
     if (weeks.length === 0) {
-      setMatrix({ weeks: [], rows: [] });
+      setMatrix({ weeks: [], rows: [], shortageCount: 0 });
       return;
     }
     setLoadingTop(true);
@@ -861,7 +866,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
         requests.push(
           fetch(`${API_BASE}${endpoint}?${params}`)
             .then(r => r.json())
-            .then(arr => ({ week: w, list: Array.isArray(arr) ? arr : [] })) // УБРАН .slice(0, 20)
+            .then(arr => ({ week: w, list: Array.isArray(arr) ? arr : [] }))
             .catch(() => ({ week: w, list: [] }))
         );
       }
@@ -870,14 +875,25 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
     Promise.all(requests)
       .then(results => {
         const mppMap = new Map();
+        let localShortageCount = 0;
+
         results.forEach(({ week, list }) => {
           const key = weekKeyOf(week);
           list.forEach(item => {
+            // Проверяем на "отсутствие"
+            const isShortage = item.mpp && item.mpp.toLowerCase().includes('отсутствие');
+            
+            if (isShortage) {
+              localShortageCount += item.defectCount;
+              if (filterShortage) return; // Пропускаем добавление в таблицу, если включен фильтр
+            }
+
             if (!mppMap.has(item.mpp)) mppMap.set(item.mpp, { mpp: item.mpp, counts: {} });
             // Суммируем дефекты за все дни этой недели
             mppMap.get(item.mpp).counts[key] = (mppMap.get(item.mpp).counts[key] || 0) + item.defectCount;
           });
         });
+        
         const rows = Array.from(mppMap.values())
           .map(r => ({ ...r, total: Object.values(r.counts).reduce((s, v) => s + v, 0) }))
           .sort((a, b) => b.total - a.total);
@@ -888,11 +904,11 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
           year: w.year,
         }));
 
-        setMatrix({ weeks: weeksOrder, rows });
+        setMatrix({ weeks: weeksOrder, rows, shortageCount: localShortageCount });
       })
       .finally(() => setLoadingTop(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, weekKey, shiftLetter]);
+  }, [type, weekKey, shiftLetter, filterShortage]);
 
   useEffect(() => {
     if (weeks.length === 0) {
@@ -918,7 +934,7 @@ function WeeklyCheckpointBlock({ type, title, periodLabel, weeks, shiftLetter })
       </div>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-        <PieBlock drrPercent={avgDrr} okVins={periodClosedVins} totalVins={periodTotalVins} />
+        <PieBlock drrPercent={avgDrr} okVins={adjustedClosedVins} totalVins={periodTotalVins} />
 
         <div style={{
           flex: 1, minWidth: 0, height: 320, overflow: 'auto',
@@ -1002,6 +1018,9 @@ function WeeklyAnalyticsView() {
 
   const [loading, setLoading] = useState(false);
   const [viewType, setViewType] = useState('all'); // 'all' | 'shifts'
+  
+  // Стейт для кнопки "Без shortage"
+  const [filterShortage, setFilterShortage] = useState(false);
 
   const [fromWeekStart, setFromWeekStart] = useState('');
   const [toWeekStart, setToWeekStart] = useState('');
@@ -1117,6 +1136,19 @@ function WeeklyAnalyticsView() {
           >
             Смены
           </button>
+          
+          <button 
+            style={{
+              ...filterButtonStyle(filterShortage, '#EF4444'),
+              border: filterShortage ? 'none' : '1px solid #EF4444',
+              color: filterShortage ? '#FFFFFF' : '#EF4444',
+              background: filterShortage ? '#EF4444' : '#FFFFFF'
+            }} 
+            onClick={() => setFilterShortage(!filterShortage)}
+            title="Убрать дефекты 'Отсутствие' из таблицы (влияет на расчет DRR)"
+          >
+            🚫 Без shortage
+          </button>
         </div>
 
         <label style={{ fontSize: '1rem', fontWeight: 700, color: '#475569', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1151,23 +1183,23 @@ function WeeklyAnalyticsView() {
       ) : (
         viewType === 'all' ? (
           <>
-            <WeeklyCheckpointBlock type="cp7" title="DRR CP7" periodLabel={periodLabel} weeks={cp7Filtered} shiftLetter="ALL" />
-            <WeeklyCheckpointBlock type="adas" title="DRR ADAS" periodLabel={periodLabel} weeks={adasFiltered} shiftLetter="ALL" />
-            <WeeklyCheckpointBlock type="cpfinal" title="DRR CPFinal" periodLabel={periodLabel} weeks={cpFinalFiltered} shiftLetter="ALL" />
+            <WeeklyCheckpointBlock type="cp7" title="DRR CP7" periodLabel={periodLabel} weeks={cp7Filtered} shiftLetter="ALL" filterShortage={filterShortage} />
+            <WeeklyCheckpointBlock type="adas" title="DRR ADAS" periodLabel={periodLabel} weeks={adasFiltered} shiftLetter="ALL" filterShortage={filterShortage} />
+            <WeeklyCheckpointBlock type="cpfinal" title="DRR CPFinal" periodLabel={periodLabel} weeks={cpFinalFiltered} shiftLetter="ALL" filterShortage={filterShortage} />
           </>
         ) : (
           <div style={twoColStyle}>
             <div style={columnStyle}>
               <div style={columnHeaderStyle(false)}>СМЕНА A</div>
-              <WeeklyCheckpointBlock type="cp7" title="DRR CP7" periodLabel={periodLabel} weeks={cp7FilteredA} shiftLetter="A" />
-              <WeeklyCheckpointBlock type="adas" title="DRR ADAS" periodLabel={periodLabel} weeks={adasFilteredA} shiftLetter="A" />
-              <WeeklyCheckpointBlock type="cpfinal" title="DRR CPFinal" periodLabel={periodLabel} weeks={cpFinalFilteredA} shiftLetter="A" />
+              <WeeklyCheckpointBlock type="cp7" title="DRR CP7" periodLabel={periodLabel} weeks={cp7FilteredA} shiftLetter="A" filterShortage={filterShortage} />
+              <WeeklyCheckpointBlock type="adas" title="DRR ADAS" periodLabel={periodLabel} weeks={adasFilteredA} shiftLetter="A" filterShortage={filterShortage} />
+              <WeeklyCheckpointBlock type="cpfinal" title="DRR CPFinal" periodLabel={periodLabel} weeks={cpFinalFilteredA} shiftLetter="A" filterShortage={filterShortage} />
             </div>
             <div style={columnStyle}>
               <div style={columnHeaderStyle(true)}>СМЕНА B</div>
-              <WeeklyCheckpointBlock type="cp7" title="DRR CP7" periodLabel={periodLabel} weeks={cp7FilteredB} shiftLetter="B" />
-              <WeeklyCheckpointBlock type="adas" title="DRR ADAS" periodLabel={periodLabel} weeks={adasFilteredB} shiftLetter="B" />
-              <WeeklyCheckpointBlock type="cpfinal" title="DRR CPFinal" periodLabel={periodLabel} weeks={cpFinalFilteredB} shiftLetter="B" />
+              <WeeklyCheckpointBlock type="cp7" title="DRR CP7" periodLabel={periodLabel} weeks={cp7FilteredB} shiftLetter="B" filterShortage={filterShortage} />
+              <WeeklyCheckpointBlock type="adas" title="DRR ADAS" periodLabel={periodLabel} weeks={adasFilteredB} shiftLetter="B" filterShortage={filterShortage} />
+              <WeeklyCheckpointBlock type="cpfinal" title="DRR CPFinal" periodLabel={periodLabel} weeks={cpFinalFilteredB} shiftLetter="B" filterShortage={filterShortage} />
             </div>
           </div>
         )

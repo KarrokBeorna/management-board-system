@@ -247,7 +247,6 @@ export default function HoldsSgpPage() {
       const res = await fetch(`${API_BASE}/api/holds-sgp-history?${params.toString()}`);
       if (res.ok) {
         const json = await res.json();
-        // Безопасно сливаем стейт, чтобы не потерять месяцы и недели при фильтрации
         setTrendsData(prev => ({ ...prev, ...json }));
       }
     } catch (err) {
@@ -316,6 +315,7 @@ export default function HoldsSgpPage() {
   useEffect(() => { if (activeTab === 'analytics') { loadRetrospective(); } }, [activeTab]);
   useEffect(() => { if (activeTab === 'analytics') { loadTrends(); } }, [chartPeriod, chartCount, chartFromDate, chartToDate, chartModel, activeTab]);
 
+  // ====== ИСПРАВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ VIN ======
   const handleVinClick = async (model, label, date, opts = {}) => {
     const { reason } = opts;
     setVinLoading(true);
@@ -323,13 +323,29 @@ export default function HoldsSgpPage() {
     setVinModalTitle(`${model} - ${label} (${formatShortDate(date)})`);
 
     try {
-      const params = new URLSearchParams({ model, date });
+      const params = new URLSearchParams({ model: String(model).trim(), date });
+      
       if (reason) {
-        const matchingDescs = [...new Set(retroData.filter(r => r.model === model && aggregateReason(r.issue_desc) === reason).map(r => r.issue_desc))];
-        params.set('issue_descs', JSON.stringify(matchingDescs));
+        const rReason = reason.trim();
+        // Ищем точные совпадения с учетом пробелов
+        const matchingDescs = [
+          ...new Set(
+            retroData
+              .filter(r => String(r.model).trim() === String(model).trim() && aggregateReason(r.issue_desc).trim() === rReason)
+              .map(r => r.issue_desc)
+          )
+        ];
+        
+        if (matchingDescs.length > 0) {
+          params.set('issue_descs', JSON.stringify(matchingDescs));
+        } else {
+          // Страховка: если массив пуст, передаем саму причину для поиска по LIKE на бэке
+          params.set('reason', rReason);
+        }
       } else {
         params.set('issue_desc', label);
       }
+
       const res = await fetch(`${API_BASE}/api/holds-sgp-retrospective-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки VIN');
       setVinList(await res.json());
@@ -394,7 +410,6 @@ export default function HoldsSgpPage() {
     return uniqueVinsByDate[`${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, '0')}-${String(first.getDate()).padStart(2, '0')}`] || 0;
   }, [retroDates, uniqueVinsByDate]);
 
-  // ФОЛЛБЭК: если бэкенд не отдал days, берем из старой ретроспективы
   const daysDataToRender = (trendsData.days && trendsData.days.length > 0) 
     ? trendsData.days 
     : retroDates.map(date => ({ label: formatShortDate(date), count: uniqueVinsByDate[date] || 0 }));
@@ -617,7 +632,6 @@ export default function HoldsSgpPage() {
             <button onClick={() => setAnalyticsView('aggregated')} style={subTabStyle(analyticsView === 'aggregated')}>Агрегированные причины холдов</button>
           </div>
 
-          {/* БЛОК ФИЛЬТРОВ ДЛЯ ГРАФИКОВ (как в референсе) */}
           <div style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', border: '1px solid #F0F0F5' }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -653,7 +667,6 @@ export default function HoldsSgpPage() {
             </div>
           </div>
 
-          {/* ГРАФИКИ */}
           {chartPeriod === 'all' ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 2.3fr)', gap: 16, marginBottom: 20, alignItems: 'start' }}>
               {renderTrendChart('📅 3 месяца', trendsData.months, '#60A5FA')}
