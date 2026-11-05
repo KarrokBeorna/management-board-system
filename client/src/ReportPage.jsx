@@ -66,6 +66,7 @@ function SearchBar({ uniqueDefects, onSearchChange }) {
 
   useEffect(() => {
     const handleClickOutside = (e) => {
+      // Теперь containerRef включает в себя и кнопку тоже
       if (containerRef.current && !containerRef.current.contains(e.target)) {
         setShowSuggestions(false);
       }
@@ -106,8 +107,10 @@ function SearchBar({ uniqueDefects, onSearchChange }) {
   }, [localQuery, uniqueDefects]);
 
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-      <div ref={containerRef} style={{ position: 'relative', width: 280 }}>
+    // 👇 ПЕРЕНЕСЛИ ref СЮДА (на общий контейнер)
+    <div ref={containerRef} style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+      
+      <div style={{ position: 'relative', width: 280 }}>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <span style={{ position: 'absolute', left: 10, color: '#9CA3AF', fontSize: 14 }}>🔍</span>
           <input
@@ -140,7 +143,7 @@ function SearchBar({ uniqueDefects, onSearchChange }) {
         )}
       </div>
 
-      {/* НОВАЯ КНОПКА НАЙТИ */}
+      {/* Кнопка находится внутри containerRef, теперь клик по ней не вызовет перерисовку до срабатывания onClick */}
       <button
         onClick={handleSearch}
         style={{
@@ -152,7 +155,7 @@ function SearchBar({ uniqueDefects, onSearchChange }) {
           fontWeight: 600,
           fontSize: 13,
           cursor: 'pointer',
-          height: '36px', // Фиксируем высоту под инпут
+          height: '36px',
           transition: 'background 0.2s',
           whiteSpace: 'nowrap'
         }}

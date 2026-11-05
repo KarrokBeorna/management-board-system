@@ -1135,6 +1135,7 @@ app.get('/api/model-status-drr-cp8-details', async (req, res) => {
 });
 
 // ================== ДАННЫЕ ПО КОМПЛЕКТАЦИЯМ (DPU & DRR) ==================
+// ================== ДАННЫЕ ПО КОМПЛЕКТАЦИЯМ (DPU & DRR) ==================
 app.get('/api/model-status-complectations-daily', async (req, res) => {
   // --- DRR по комплектациям (всё в MES через mesPool) ---
   const fetchDrrComplectations = async (nodeNature) => {
