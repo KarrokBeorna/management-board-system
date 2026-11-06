@@ -119,6 +119,7 @@ export default function DrrReportPage() {
   const [shopLoading, setShopLoading] = useState(false);
   const [shopModel, setShopModel] = useState('ALL');
   const [importingMapping, setImportingMapping] = useState(false);
+  const [exportingMapping, setExportingMapping] = useState(false); // ← ЭКСПОРТ
 
   // ==== ТАБЛИЦЫ ИЗ DAILY DASHBOARD ====
   const yesterday = useMemo(() => {
@@ -494,6 +495,50 @@ export default function DrrReportPage() {
       }
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  // ← ЭКСПОРТ: скачать текущий справочник в Excel
+  const handleMappingExport = async () => {
+    try {
+      setExportingMapping(true);
+      const res = await fetch(`${API_BASE}/api/part-defect-shop-mapping`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const rows = await res.json();
+
+      if (!Array.isArray(rows) || rows.length === 0) {
+        alert('Справочник пуст — нечего экспортировать');
+        return;
+      }
+
+      // Заголовки ровно те, что понимает handleMappingImport
+      const exportData = rows.map(r => ({
+        shop: r.shop || '',
+        part_name: r.part_name || '',
+        defect_type: r.defect_type || '',
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws['!cols'] = [
+        { wch: 10 },   // shop
+        { wch: 45 },   // part_name
+        { wch: 35 },   // defect_type
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Mapping');
+      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+
+      const today = new Date().toISOString().slice(0, 10);
+      saveAs(
+        new Blob([buf], { type: 'application/octet-stream' }),
+        `Справочник_дефектов_${today}.xlsx`
+      );
+    } catch (err) {
+      console.error('Ошибка экспорта справочника:', err);
+      alert('Ошибка экспорта: ' + err.message);
+    } finally {
+      setExportingMapping(false);
+    }
   };
 
   useEffect(() => {
@@ -992,20 +1037,35 @@ export default function DrrReportPage() {
               background: shopTab === 'PS' ? '#10B981' : '#F3F4F6',
             }}>🎨 Цех окраски</button>
 
-            <label style={{
-              ...buttonStyle,
-              background: '#8B5CF6',
-              cursor: 'pointer',
-              marginLeft: 'auto',
-            }}>
-              {importingMapping ? '⏳ Импорт...' : '📋 Импорт справочника'}
-              <input
-                type="file"
-                accept=".xlsx, .xls"
-                onChange={handleMappingImport}
-                style={{ display: 'none' }}
-              />
-            </label>
+            {/* ← ЭКСПОРТ: две кнопки рядом — Экспорт и Импорт */}
+            <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+              <button
+                onClick={handleMappingExport}
+                disabled={exportingMapping}
+                style={{
+                  ...buttonStyle,
+                  background: '#0891B2',
+                  cursor: exportingMapping ? 'wait' : 'pointer',
+                  opacity: exportingMapping ? 0.7 : 1,
+                }}
+              >
+                {exportingMapping ? '⏳ Экспорт...' : '📤 Экспорт справочника'}
+              </button>
+
+              <label style={{
+                ...buttonStyle,
+                background: '#8B5CF6',
+                cursor: 'pointer',
+              }}>
+                {importingMapping ? '⏳ Импорт...' : '📋 Импорт справочника'}
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  onChange={handleMappingImport}
+                  style={{ display: 'none' }}
+                />
+              </label>
+            </div>
           </div>
 
           {shopTab === 'graphs' && (
