@@ -90,12 +90,14 @@ const shopNames = {
   AS: 'Цех сборки (AS)',
   BS: 'Цех сварки (BS)',
   PS: 'Цех окраски (PS)',
+  LS: 'Логистика (LS)',
 };
 
 const shopColors = {
   AS: '#F59E0B',
   BS: '#3B82F6',
   PS: '#10B981',
+  LS: '#8B5CF6',
 };
 
 export default function DrrReportPage() {
@@ -421,11 +423,13 @@ export default function DrrReportPage() {
           'body': 'BS', 'bodyshop': 'BS',
           'assembly': 'AS', 'assemblyshop': 'AS',
           'paint': 'PS', 'paintshop': 'PS',
-          'bs': 'BS', 'as': 'AS', 'ps': 'PS',
+          'logistics': 'LS', 'logistic': 'LS',
+          'bs': 'BS', 'as': 'AS', 'ps': 'PS', 'ls': 'LS',
           // RU
           'сборка': 'AS', 'сборочный': 'AS', 'цехсборки': 'AS',
           'сварка': 'BS', 'сварочный': 'BS', 'цехсварки': 'BS',
           'окраска': 'PS', 'окрасочный': 'PS', 'цехокраски': 'PS',
+          'логистика': 'LS', 'цехлогистики': 'LS', 'логистический': 'LS',
           // ИСКЛЮЧЕНИЕ из всех цехов — сохраняется в БД как '0'
           '0': '0',
           'none': '0',
@@ -494,7 +498,7 @@ export default function DrrReportPage() {
           alert(
             'Ни одна строка не распознана.\n\n' +
             'Первая строка файла:\n' + JSON.stringify(json[0], null, 2) + '\n\n' +
-            'В колонке shop допустимы: AS / BS / PS / 0 (исключить из всех цехов) / пусто или - (пропустить).\n' +
+            'В колонке shop допустимы: AS / BS / PS / LS / 0 (исключить) / пусто или - (пропустить).\n' +
             'Точные причины — в консоли (F12).'
           );
           return;
@@ -583,7 +587,7 @@ export default function DrrReportPage() {
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab === 'workshops' && ['AS', 'BS', 'PS'].includes(shopTab)) {
+    if (activeTab === 'workshops' && ['AS', 'BS', 'PS', 'LS'].includes(shopTab)) {
       loadShopData(shopTab);
     }
   }, [shopTab, shopModel, activeTab]);
@@ -621,15 +625,17 @@ export default function DrrReportPage() {
   const shopChartData = useMemo(() => {
     if (!drrData) return [];
     return drrData.weeks.map((week, idx) => {
-      const asValue = parseFloat(drrData.AS[idx]) || 0;
-      const bsValue = parseFloat(drrData.BS[idx]) || 0;
-      const psValue = parseFloat(drrData.PS[idx]) || 0;
+      const asValue = parseFloat(drrData.AS?.[idx]) || 0;
+      const bsValue = parseFloat(drrData.BS?.[idx]) || 0;
+      const psValue = parseFloat(drrData.PS?.[idx]) || 0;
+      const lsValue = parseFloat(drrData.LS?.[idx]) || 0;
 
       return {
         week,
         AS: Math.max(0, Math.min(100, 100 - asValue)),
         BS: bsValue,
         PS: psValue,
+        LS: lsValue,
       };
     });
   }, [drrData]);
@@ -1023,6 +1029,10 @@ export default function DrrReportPage() {
               ...tabStyle(shopTab === 'PS'),
               background: shopTab === 'PS' ? '#10B981' : '#F3F4F6',
             }}>🎨 Цех окраски</button>
+            <button onClick={() => setShopTab('LS')} style={{
+              ...tabStyle(shopTab === 'LS'),
+              background: shopTab === 'LS' ? '#8B5CF6' : '#F3F4F6',
+            }}>🚚 Логистика</button>
 
             <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
               <button
@@ -1115,6 +1125,21 @@ export default function DrrReportPage() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
+
+                  <div style={cardStyle}>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, color: '#8B5CF6', marginBottom: 20 }}>🚚 Логистика (LS) — DRR %</h2>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={shopChartData} margin={{ top: 20, right: 20, left: 20, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F5" />
+                        <XAxis dataKey="week" />
+                        <YAxis domain={['dataMin - 3', 'dataMax + 3']} />
+                        <Tooltip formatter={(v) => `${v}%`} />
+                        <Bar dataKey="LS" fill="#8B5CF6" barSize={40} radius={[8, 8, 0, 0]}>
+                          <LabelList dataKey="LS" position="top" formatter={(v) => `${parseFloat(v).toFixed(2)}%`} style={{ fill: '#1F2937', fontSize: 11, fontWeight: 600 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </>
               ) : (
                 <p style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Нет данных. Загрузите справочник.</p>
@@ -1122,7 +1147,7 @@ export default function DrrReportPage() {
             </>
           )}
 
-          {['AS', 'BS', 'PS'].includes(shopTab) && (
+          {['AS', 'BS', 'PS', 'LS'].includes(shopTab) && (
             <div style={cardStyle}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
                 <h2 style={{ fontSize: 20, fontWeight: 700, color: shopColors[shopTab], margin: 0 }}>
@@ -1355,9 +1380,13 @@ export default function DrrReportPage() {
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Пара учитывается в <b>цехе окраски</b></td>
                   </tr>
                   <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', fontWeight: 700, color: '#8B5CF6' }}>LS</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Пара учитывается в <b>цехе логистики</b></td>
+                  </tr>
+                  <tr>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', fontWeight: 700, color: '#64748B' }}>0</td>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>
-                      <b>Исключить из всех цехов</b> — пара остаётся в БД, но не учитывается ни в AS, ни в BS, ни в PS. Удобно, когда дефект есть, но к цеху не относится.
+                      <b>Исключить из всех цехов</b> — пара остаётся в БД, но не учитывается ни в AS, ни в BS, ни в PS, ни в LS.
                     </td>
                   </tr>
                   <tr>
@@ -1376,6 +1405,7 @@ export default function DrrReportPage() {
                 <li><b>AS</b> → также <code>Assembly</code>, <code>Сборка</code>, <code>Сборочный</code>, <code>Цех сборки</code></li>
                 <li><b>BS</b> → также <code>Body</code>, <code>Сварка</code>, <code>Сварочный</code>, <code>Цех сварки</code></li>
                 <li><b>PS</b> → также <code>Paint</code>, <code>Окраска</code>, <code>Окрасочный</code>, <code>Цех окраски</code></li>
+                <li><b>LS</b> → также <code>Logistics</code>, <code>Логистика</code>, <code>Цех логистики</code></li>
                 <li><b>0</b> → также <code>none</code>, <code>no</code>, <code>excluded</code>, <code>исключить</code>, <code>не относится</code>, <code>нет</code></li>
               </ul>
 
@@ -1385,7 +1415,7 @@ export default function DrrReportPage() {
               <div style={{ backgroundColor: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
                 <ul style={{ paddingLeft: 20, margin: 0 }}>
                   <li style={{ marginBottom: 6 }}>
-                    <b>Одна пара = один цех.</b> Нельзя, чтобы «BDM + Нарушена работа» была одновременно и в AS, и в BS. Если попытаетесь — победит последняя строка в файле.
+                    <b>Одна пара = один цех.</b> Нельзя, чтобы «BDM + Нарушена работа» была одновременно и в AS, и в BS, и в LS. Если попытаетесь — победит последняя строка в файле.
                   </li>
                   <li style={{ marginBottom: 6 }}>
                     <b>Правка part_name или defect_type = новая строка.</b> Импорт обновляет только <code>shop</code> для существующей пары. Если изменить название детали или дефекта — добавится новая запись, а старая останется в БД (для чистки нужен SQL).
@@ -1426,16 +1456,16 @@ export default function DrrReportPage() {
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#16A34A' }}>→ в цехе сборки</td>
                   </tr>
                   <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#8B5CF6', fontWeight: 700 }}>LS</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Упаковка</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Повреждение</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#16A34A' }}>→ в цехе логистики</td>
+                  </tr>
+                  <tr>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#64748B', fontWeight: 700 }}>0</td>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>BDM</td>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Сбой программирования</td>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#64748B' }}>→ нигде не учитывается</td>
-                  </tr>
-                  <tr>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#3B82F6', fontWeight: 700 }}>BS</td>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Передняя дверь</td>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Зазор</td>
-                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#16A34A' }}>→ в цехе сварки</td>
                   </tr>
                   <tr>
                     <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#94A3B8', fontStyle: 'italic' }}>—</td>

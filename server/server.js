@@ -5651,57 +5651,59 @@ app.post('/api/part-defect-shop-mapping', async (req, res) => {
 });
 
 // DRR по цехам
+// DRR по цехам
 app.get('/api/drr-by-shop', async (req, res) => {
   try {
     const { weeks = 10 } = req.query;
-    
+
     const [mappingRows] = await notesPool.query('SELECT * FROM part_defect_shop_mapping');
-    if (!mappingRows.length) return res.json({ weeks: [], AS: [], BS: [], PS: [], hasMapping: false });
-    
-    const shopMapping = { AS: [], BS: [], PS: [] };
+    if (!mappingRows.length) return res.json({ weeks: [], AS: [], BS: [], PS: [], LS: [], hasMapping: false });
+
+    const shopMapping = { AS: [], BS: [], PS: [], LS: [] };
     mappingRows.forEach(m => {
       if (shopMapping[m.shop]) {
-        shopMapping[m.shop].push({ 
-          part_name: String(m.part_name).trim(), 
-          defect_type: String(m.defect_type).trim() 
+        shopMapping[m.shop].push({
+          part_name: String(m.part_name).trim(),
+          defect_type: String(m.defect_type).trim(),
         });
       }
     });
-    
+
     const today = new Date();
     const currentMonday = new Date(today);
     const dayOfWeek = today.getDay();
     currentMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-    
-    const result = { weeks: [], AS: [], BS: [], PS: [], hasMapping: true };
-    
+
+    const result = { weeks: [], AS: [], BS: [], PS: [], LS: [], hasMapping: true };
+
     for (let i = 0; i < weeks; i++) {
       const monday = new Date(currentMonday);
       monday.setDate(currentMonday.getDate() - i * 7);
       const sunday = new Date(monday);
       sunday.setDate(monday.getDate() + 6);
-      
+
       const weekStart = formatLocalDate(monday);
       const weekEnd = formatLocalDate(sunday);
       const weekNum = getISOWeek(monday);
-      
+
       result.weeks.unshift(`CW${weekNum}`);
-      
-      for (const shop of ['AS', 'BS', 'PS']) {
+
+      // LS добавлен в цикл наравне с AS/BS/PS
+      for (const shop of ['AS', 'BS', 'PS', 'LS']) {
         const parts = shopMapping[shop];
-        
+
         if (!parts.length) {
           result[shop].unshift(0);
           continue;
         }
-        
+
         const [carsRows] = await pool.query(`
           SELECT COUNT(DISTINCT VIN) AS TOTAL
           FROM at_om_wiptrackinghistory
           WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
         `, [weekStart, weekEnd]);
         const totalCars = carsRows[0]?.TOTAL || 0;
-        
+
         const conditions = [];
         const params = [];
         parts.forEach(p => {
@@ -5709,20 +5711,20 @@ app.get('/api/drr-by-shop', async (req, res) => {
           params.push(p.part_name, p.defect_type);
         });
         const whereClause = conditions.join(' OR ');
-        
+
         // УМНЫЙ КОСТЫЛЬ ПО ЦЕХАМ
+        // AS, PS, LS — все дефекты (операторы путают онлайн/оффлайн)
+        // BS — оффлайн + только серьёзные онлайн (A/B/A1/B1 или есть replenish)
         let offlineCondition = '';
-        if (shop === 'AS' || shop === 'PS') {
-            // Для Сборки и Окраски берем ВСЕ, так как операторы путают онлайн/оффлайн
-            offlineCondition = '1 = 1';
+        if (shop === 'AS' || shop === 'PS' || shop === 'LS') {
+          offlineCondition = '1 = 1';
         } else {
-            // Для Сварки берем оффлайн + только серьезные онлайн, чтобы не было шума
-            offlineCondition = `
-              IS_OFF = 1 
-              OR (IS_OFF = 0 AND (PROBLEM_GRADE IN ('A', 'B', 'A1', 'B1') OR (PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> '')))
-            `;
+          offlineCondition = `
+            IS_OFF = 1 
+            OR (IS_OFF = 0 AND (PROBLEM_GRADE IN ('A', 'B', 'A1', 'B1') OR (PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> '')))
+          `;
         }
-        
+
         const [defectRows] = await pool.query(`
           SELECT COUNT(DISTINCT VIN) AS DEFECT_VINS
           FROM (
@@ -5744,11 +5746,11 @@ app.get('/api/drr-by-shop', async (req, res) => {
           WHERE (${whereClause})
             AND (${offlineCondition})
         `, [weekStart, weekEnd, weekStart, weekEnd, weekStart, weekEnd, ...params]);
-        
+
         const defectVins = defectRows[0]?.DEFECT_VINS || 0;
         let drr = 0;
         if (totalCars > 0) drr = (1 - (defectVins / totalCars)) * 100;
-        
+
         result[shop].unshift(parseFloat(drr.toFixed(2)));
       }
     }
