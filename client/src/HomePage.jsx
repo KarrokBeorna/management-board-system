@@ -37,7 +37,6 @@ import voltageSpcPreview from './assets/volt.png';
 import repelecPreview from './assets/repelec.png'; 
 import drrElectronicsPreview from './assets/dshelec.png';
 
-
 // ====== СТИЛИ ======
 const sectionStyle = {
   backgroundColor: '#FFFFFF',
