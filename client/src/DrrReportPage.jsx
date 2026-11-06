@@ -119,7 +119,8 @@ export default function DrrReportPage() {
   const [shopLoading, setShopLoading] = useState(false);
   const [shopModel, setShopModel] = useState('ALL');
   const [importingMapping, setImportingMapping] = useState(false);
-  const [exportingMapping, setExportingMapping] = useState(false); // ← ЭКСПОРТ
+  const [exportingMapping, setExportingMapping] = useState(false);
+  const [showHelpMapping, setShowHelpMapping] = useState(false);
 
   // ==== ТАБЛИЦЫ ИЗ DAILY DASHBOARD ====
   const yesterday = useMemo(() => {
@@ -197,6 +198,13 @@ export default function DrrReportPage() {
       setCount(defaults[newPeriod] || 3);
     }
   };
+
+  // Блокируем прокрутку страницы, пока открыта справка
+  useEffect(() => {
+    if (showHelpMapping) document.body.style.overflow = 'hidden';
+    else document.body.style.overflow = '';
+    return () => { document.body.style.overflow = ''; };
+  }, [showHelpMapping]);
 
   // ==== DRR загрузка ====
   useEffect(() => {
@@ -348,7 +356,7 @@ export default function DrrReportPage() {
   const handleMappingImport = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    e.target.value = ''; // чтобы можно было загрузить тот же файл повторно
+    e.target.value = '';
 
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -365,12 +373,10 @@ export default function DrrReportPage() {
           return;
         }
 
-        // Диагностика — открой консоль браузера, увидишь реальные колонки
         const headers = Object.keys(json[0] || {});
         console.log('📋 Колонки файла:', headers);
         console.log('📋 Первая строка:', json[0]);
 
-        // Нормализация: убираем BOM, пробелы, регистр, разделители
         const norm = (s) =>
           String(s ?? '')
             .replace(/^\uFEFF/, '')
@@ -410,7 +416,6 @@ export default function DrrReportPage() {
           return;
         }
 
-        // Поддержка распространённых вариаций цехов
         const shopMap = {
           // EN
           'body': 'BS', 'bodyshop': 'BS',
@@ -421,6 +426,16 @@ export default function DrrReportPage() {
           'сборка': 'AS', 'сборочный': 'AS', 'цехсборки': 'AS',
           'сварка': 'BS', 'сварочный': 'BS', 'цехсварки': 'BS',
           'окраска': 'PS', 'окрасочный': 'PS', 'цехокраски': 'PS',
+          // ИСКЛЮЧЕНИЕ из всех цехов — сохраняется в БД как '0'
+          '0': '0',
+          'none': '0',
+          'no': '0',
+          'excluded': '0',
+          'exclude': '0',
+          'неотносится': '0',
+          'исключить': '0',
+          'исключено': '0',
+          'нет': '0',
         };
 
         const skipped = [];
@@ -433,14 +448,13 @@ export default function DrrReportPage() {
           const mappedShop = shopMap[norm(rawShop)] || null;
 
           if (!rawPart || !rawDefect || !mappedShop) {
-            // пустые строки не считаем «пропущенными»
             if (rawPart || rawDefect || rawShop) {
               skipped.push({
-                row: i + 2, // +2 = номер строки в Excel (1-заголовки)
+                row: i + 2,
                 part: rawPart,
                 defect: rawDefect,
                 shop: rawShop,
-                reason: !mappedShop ? `цех "${rawShop}" не распознан` : 'пустое поле',
+                reason: !mappedShop ? `shop "${rawShop}" не распознан` : 'пустое поле',
               });
             }
             return;
@@ -453,15 +467,34 @@ export default function DrrReportPage() {
           });
         });
 
-        console.log('✅ К отправке:', mappings.length);
+        // Дедупликация внутри файла. Побеждает последняя строка.
+        const byKey = new Map();
+        const dupes = [];
+        mappings.forEach(m => {
+          const k = `${m.part_name}|${m.defect_type}`;
+          if (byKey.has(k)) {
+            dupes.push({
+              part: m.part_name,
+              defect: m.defect_type,
+              replacedShop: byKey.get(k).shop,
+              keptShop: m.shop,
+            });
+          }
+          byKey.set(k, m);
+        });
+        const dedupedMappings = Array.from(byKey.values());
+
+        console.log('✅ К отправке (уникальных):', dedupedMappings.length);
+        console.log('🔁 Дублей в файле:', dupes.length);
         console.log('⚠️ Пропущено:', skipped.length);
         if (skipped.length) console.table(skipped.slice(0, 20));
+        if (dupes.length) console.table(dupes.slice(0, 20));
 
-        if (!mappings.length) {
+        if (!dedupedMappings.length) {
           alert(
             'Ни одна строка не распознана.\n\n' +
             'Первая строка файла:\n' + JSON.stringify(json[0], null, 2) + '\n\n' +
-            'Цех должен быть: AS / BODY / ASSEMBLY / СБОРКА, BS / СВАРКА, PS / PAINT / ОКРАСКА.\n' +
+            'В колонке shop допустимы: AS / BS / PS / 0 (исключить из всех цехов) / пусто или - (пропустить).\n' +
             'Точные причины — в консоли (F12).'
           );
           return;
@@ -470,7 +503,7 @@ export default function DrrReportPage() {
         const res = await fetch(`${API_BASE}/api/part-defect-shop-mapping`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mappings }),
+          body: JSON.stringify({ mappings: dedupedMappings }),
         });
 
         if (!res.ok) {
@@ -478,8 +511,12 @@ export default function DrrReportPage() {
           throw new Error(`HTTP ${res.status}: ${text}`);
         }
 
-        const result = await res.json();
-        let msg = `✅ Загружено ${mappings.length} записей`;
+        await res.json();
+
+        let msg = `✅ Загружено ${dedupedMappings.length} записей`;
+        if (dupes.length) {
+          msg += `\n🔁 В файле было ${dupes.length} дублей (оставлено последнее значение shop)`;
+        }
         if (skipped.length) {
           msg += `\n⚠️ Пропущено ${skipped.length}:\n` +
             skipped.slice(0, 5).map(s => `• стр.${s.row}: ${s.reason}`).join('\n');
@@ -497,7 +534,6 @@ export default function DrrReportPage() {
     reader.readAsArrayBuffer(file);
   };
 
-  // ← ЭКСПОРТ: скачать текущий справочник в Excel
   const handleMappingExport = async () => {
     try {
       setExportingMapping(true);
@@ -510,7 +546,6 @@ export default function DrrReportPage() {
         return;
       }
 
-      // Заголовки ровно те, что понимает handleMappingImport
       const exportData = rows.map(r => ({
         shop: r.shop || '',
         part_name: r.part_name || '',
@@ -519,9 +554,9 @@ export default function DrrReportPage() {
 
       const ws = XLSX.utils.json_to_sheet(exportData);
       ws['!cols'] = [
-        { wch: 10 },   // shop
-        { wch: 45 },   // part_name
-        { wch: 35 },   // defect_type
+        { wch: 10 },
+        { wch: 45 },
+        { wch: 35 },
       ];
 
       const wb = XLSX.utils.book_new();
@@ -553,7 +588,6 @@ export default function DrrReportPage() {
     }
   }, [shopTab, shopModel, activeTab]);
 
-  // ==== Обработка данных DRR ====
   const chartData = useMemo(() => {
     return dataPoints.map(point => {
       const modelValues = Object.entries(point)
@@ -568,7 +602,6 @@ export default function DrrReportPage() {
   const barDataKey = selectedModel === 'ALL' ? 'maxValue' : selectedModel;
   const modelKeys = Object.keys(modelColors);
 
-  // ==== Обработка данных DPU OFF ====
   const dpuOffChartData = useMemo(() => {
     return dpuOffDataPoints.map(point => {
       const modelValues = Object.entries(point)
@@ -634,10 +667,8 @@ export default function DrrReportPage() {
         <button onClick={() => setActiveTab('cp78')} style={tabStyle(activeTab === 'cp78')}>По CP7/СР8</button>
       </div>
 
-      {/* ========== ПО ЗАВОДУ ========== */}
       {activeTab === 'factory' && (
         <>
-          {/* ==== КАРТОЧКА 1: DRR ==== */}
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
               <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937' }}>Выход годной продукции с первого раза - Ретроспектива</h2>
@@ -666,37 +697,21 @@ export default function DrrReportPage() {
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>От:</span>
-                      <input
-                        type="date"
-                        value={fromDate}
-                        onChange={(e) => setFromDate(e.target.value)}
-                        style={inputStyle}
-                      />
+                      <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={inputStyle} />
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>По:</span>
-                      <input
-                        type="date"
-                        value={toDate}
-                        onChange={(e) => setToDate(e.target.value)}
-                        style={inputStyle}
-                      />
+                      <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={inputStyle} />
                       {(fromDate || toDate) && (
                         <button
                           onClick={() => { setFromDate(''); setToDate(''); }}
                           style={{ ...buttonStyle, background: '#9CA3AF', padding: '4px 10px' }}
-                        >
-                          ✕
-                        </button>
+                        >✕</button>
                       )}
                     </div>
                   </>
                 )}
                 <label style={{ fontSize: 14, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 6 }}>
                   Модель:
-                  <select
-                    value={selectedModel}
-                    onChange={e => setSelectedModel(e.target.value)}
-                    style={inputStyle}
-                  >
+                  <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} style={inputStyle}>
                     <option value="ALL">Все</option>
                     {modelKeys.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
@@ -721,10 +736,7 @@ export default function DrrReportPage() {
                       barSize={28}
                       radius={[6, 6, 0, 0]}
                       label={{
-                        fill: '#DC2626',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        position: 'top',
+                        fill: '#DC2626', fontSize: 12, fontWeight: 600, position: 'top',
                         formatter: (v) => v !== null && v !== undefined ? `${v}%` : '',
                       }}
                     >
@@ -741,11 +753,7 @@ export default function DrrReportPage() {
                       <tr style={{ backgroundColor: '#F9FAFB' }}>
                         <th style={{ ...thStyle, width: colWidth, paddingLeft: 16 }}>Модель</th>
                         {chartData.map((point, idx) => (
-                          <th key={idx} style={{
-                            ...thStyle,
-                            width: colWidth,
-                            backgroundColor: typeColors[point.type]
-                          }}>
+                          <th key={idx} style={{ ...thStyle, width: colWidth, backgroundColor: typeColors[point.type] }}>
                             {point.label}
                           </th>
                         ))}
@@ -765,9 +773,7 @@ export default function DrrReportPage() {
                             const val = modelKey === 'total' ? point.maxValue : point[modelKey];
                             return (
                               <td key={idx} style={{
-                                ...tdStyle,
-                                width: colWidth,
-                                backgroundColor: typeColors[point.type],
+                                ...tdStyle, width: colWidth, backgroundColor: typeColors[point.type],
                                 color: val !== null && val !== undefined ? '#1F2937' : '#9CA3AF'
                               }}>
                                 {val !== null && val !== undefined ? `${val}%` : ''}
@@ -783,15 +789,10 @@ export default function DrrReportPage() {
             )}
           </div>
 
-          {/* ==== КАРТОЧКА 2: DPU OFF ==== */}
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
               <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937' }}>DPU OFF - Ретроспектива</h2>
-              <div style={{ fontSize: 13, color: '#6B7280' }}>
-                {/* Фильтры те же, что и у DRR-графика — управляются общими полями выше */}
-              </div>
             </div>
-
             {dpuOffLoading ? (
               <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Загрузка данных...</p>
             ) : (
@@ -809,10 +810,7 @@ export default function DrrReportPage() {
                       barSize={28}
                       radius={[6, 6, 0, 0]}
                       label={{
-                        fill: '#DC2626',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        position: 'top',
+                        fill: '#DC2626', fontSize: 12, fontWeight: 600, position: 'top',
                         formatter: (v) => v !== null && v !== undefined ? `${v}` : '',
                       }}
                     >
@@ -829,11 +827,7 @@ export default function DrrReportPage() {
                       <tr style={{ backgroundColor: '#F9FAFB' }}>
                         <th style={{ ...thStyle, width: colWidth, paddingLeft: 16 }}>Модель</th>
                         {dpuOffChartData.map((point, idx) => (
-                          <th key={idx} style={{
-                            ...thStyle,
-                            width: colWidth,
-                            backgroundColor: typeColors[point.type]
-                          }}>
+                          <th key={idx} style={{ ...thStyle, width: colWidth, backgroundColor: typeColors[point.type] }}>
                             {point.label}
                           </th>
                         ))}
@@ -853,9 +847,7 @@ export default function DrrReportPage() {
                             const val = modelKey === 'total' ? point.total : point[modelKey];
                             return (
                               <td key={idx} style={{
-                                ...tdStyle,
-                                width: colWidth,
-                                backgroundColor: typeColors[point.type],
+                                ...tdStyle, width: colWidth, backgroundColor: typeColors[point.type],
                                 color: val !== null && val !== undefined ? '#1F2937' : '#9CA3AF'
                               }}>
                                 {val !== null && val !== undefined ? val : ''}
@@ -871,9 +863,7 @@ export default function DrrReportPage() {
             )}
           </div>
 
-          {/* ===== Таблицы из Daily Dashboard ===== */}
           <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 20 }}>
-            {/* DRR TOP 3 */}
             <div style={{ ...cardStyle, flex: 1, minWidth: 300 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1F2937', margin: 0 }}>DRR TOP 3</h2>
@@ -913,7 +903,6 @@ export default function DrrReportPage() {
               )}
             </div>
 
-            {/* TOP 5 A/B */}
             <div style={{ ...cardStyle, flex: 1, minWidth: 300 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1F2937', margin: 0 }}>TOP 5 A/B дефектов на CP7 и CP8</h2>
@@ -971,7 +960,6 @@ export default function DrrReportPage() {
             </div>
           </div>
 
-          {/* DRR TOP 3 — неделя */}
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
               <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1F2937', margin: 0 }}>
@@ -1016,7 +1004,6 @@ export default function DrrReportPage() {
         </>
       )}
 
-      {/* ========== ПО ЦЕХАМ ========== */}
       {activeTab === 'workshops' && (
         <>
           <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1037,7 +1024,6 @@ export default function DrrReportPage() {
               background: shopTab === 'PS' ? '#10B981' : '#F3F4F6',
             }}>🎨 Цех окраски</button>
 
-            {/* ← ЭКСПОРТ: две кнопки рядом — Экспорт и Импорт */}
             <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
               <button
                 onClick={handleMappingExport}
@@ -1052,11 +1038,7 @@ export default function DrrReportPage() {
                 {exportingMapping ? '⏳ Экспорт...' : '📤 Экспорт справочника'}
               </button>
 
-              <label style={{
-                ...buttonStyle,
-                background: '#8B5CF6',
-                cursor: 'pointer',
-              }}>
+              <label style={{ ...buttonStyle, background: '#8B5CF6', cursor: 'pointer' }}>
                 {importingMapping ? '⏳ Импорт...' : '📋 Импорт справочника'}
                 <input
                   type="file"
@@ -1065,6 +1047,21 @@ export default function DrrReportPage() {
                   style={{ display: 'none' }}
                 />
               </label>
+
+              <button
+                onClick={() => setShowHelpMapping(true)}
+                title="Как заполнять справочник"
+                style={{
+                  ...buttonStyle,
+                  background: '#0F172A',
+                  padding: '8px 14px',
+                  fontSize: 16,
+                  minWidth: 40,
+                  justifyContent: 'center',
+                }}
+              >
+                ?
+              </button>
             </div>
           </div>
 
@@ -1161,15 +1158,8 @@ export default function DrrReportPage() {
                           cx="50%"
                           cy="50%"
                           outerRadius={120}
-                          label={{
-                            fill: '#1F2937',
-                            fontSize: 12,
-                            formatter: (value) => `${value}`
-                          }}
-                          labelLine={{
-                            stroke: '#6B7280',
-                            strokeWidth: 1
-                          }}
+                          label={{ fill: '#1F2937', fontSize: 12, formatter: (value) => `${value}` }}
+                          labelLine={{ stroke: '#6B7280', strokeWidth: 1 }}
                         >
                           {pieData.map((_, index) => (
                             <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
@@ -1224,7 +1214,6 @@ export default function DrrReportPage() {
         </>
       )}
 
-      {/* ========== ПО CP7/CP8 ========== */}
       {activeTab === 'cp78' && (
         <div style={cardStyle}>
           <p style={{ fontSize: 16, color: '#374151', marginBottom: 20, textAlign: 'center' }}>
@@ -1247,6 +1236,241 @@ export default function DrrReportPage() {
             >
               Перейти к DRR Defects Top CP7/СP8
             </a>
+          </div>
+        </div>
+      )}
+
+      {/* ===== МОДАЛКА-СПРАВКА ПО СПРАВОЧНИКУ ===== */}
+      {showHelpMapping && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.72)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 3000,
+            padding: 20,
+          }}
+          onClick={() => setShowHelpMapping(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: 20,
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+              width: '100%',
+              maxWidth: 880,
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              fontFamily: 'Inter, Segoe UI, Arial, sans-serif',
+              color: '#1E293B',
+            }}
+          >
+            <div style={{
+              padding: '20px 28px',
+              borderBottom: '1px solid #E2E8F0',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexShrink: 0,
+            }}>
+              <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: '#1E293B' }}>
+                📋 Как заполнять справочник дефектов
+              </h2>
+              <button
+                onClick={() => setShowHelpMapping(false)}
+                style={{
+                  background: 'none', border: 'none',
+                  fontSize: 26, cursor: 'pointer', color: '#64748B',
+                  lineHeight: 1, padding: 4,
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ padding: '24px 28px', overflowY: 'auto', fontSize: 14, lineHeight: 1.6 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: '0 0 10px 0' }}>
+                🔄 Как это работает
+              </h3>
+              <ol style={{ paddingLeft: 20, margin: '0 0 20px 0' }}>
+                <li>Нажмите <b>📤 Экспорт справочника</b> — скачается файл со всеми текущими записями.</li>
+                <li>Откройте его в Excel, отредактируйте или добавьте строки.</li>
+                <li>Сохраните файл в формате <b>.xlsx</b>.</li>
+                <li>Нажмите <b>📋 Импорт справочника</b> и выберите файл.</li>
+              </ol>
+
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: '0 0 10px 0' }}>
+                📊 Три колонки файла
+              </h3>
+              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20, fontSize: 13 }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#F1F5F9' }}>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '2px solid #CBD5E1', width: 140 }}>Колонка</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '2px solid #CBD5E1' }}>Что писать</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', fontWeight: 600 }}>shop</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Код цеха (см. таблицу ниже)</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', fontWeight: 600 }}>part_name</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Название детали — как в MES (без пробелов в начале/конце)</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', fontWeight: 600 }}>defect_type</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Тип дефекта — как в MES</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: '0 0 10px 0' }}>
+                🏭 Значения колонки <code style={{ background: '#F1F5F9', padding: '2px 6px', borderRadius: 4 }}>shop</code>
+              </h3>
+              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20, fontSize: 13 }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#F1F5F9' }}>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '2px solid #CBD5E1', width: 140 }}>Значение</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '2px solid #CBD5E1' }}>Что произойдёт</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', fontWeight: 700, color: '#F59E0B' }}>AS</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Пара учитывается в <b>цехе сборки</b></td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', fontWeight: 700, color: '#3B82F6' }}>BS</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Пара учитывается в <b>цехе сварки</b></td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', fontWeight: 700, color: '#10B981' }}>PS</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Пара учитывается в <b>цехе окраски</b></td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', fontWeight: 700, color: '#64748B' }}>0</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>
+                      <b>Исключить из всех цехов</b> — пара остаётся в БД, но не учитывается ни в AS, ни в BS, ни в PS. Удобно, когда дефект есть, но к цеху не относится.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', fontWeight: 700, color: '#94A3B8' }}>пусто или —</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>
+                      <b>Пропустить строку</b> — ничего не изменится в БД для этой пары.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: '0 0 10px 0' }}>
+                🔤 Распознаваемые синонимы
+              </h3>
+              <ul style={{ paddingLeft: 20, margin: '0 0 20px 0' }}>
+                <li><b>AS</b> → также <code>Assembly</code>, <code>Сборка</code>, <code>Сборочный</code>, <code>Цех сборки</code></li>
+                <li><b>BS</b> → также <code>Body</code>, <code>Сварка</code>, <code>Сварочный</code>, <code>Цех сварки</code></li>
+                <li><b>PS</b> → также <code>Paint</code>, <code>Окраска</code>, <code>Окрасочный</code>, <code>Цех окраски</code></li>
+                <li><b>0</b> → также <code>none</code>, <code>no</code>, <code>excluded</code>, <code>исключить</code>, <code>не относится</code>, <code>нет</code></li>
+              </ul>
+
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: '0 0 10px 0' }}>
+                ⚠️ Важные правила
+              </h3>
+              <div style={{ backgroundColor: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
+                <ul style={{ paddingLeft: 20, margin: 0 }}>
+                  <li style={{ marginBottom: 6 }}>
+                    <b>Одна пара = один цех.</b> Нельзя, чтобы «BDM + Нарушена работа» была одновременно и в AS, и в BS. Если попытаетесь — победит последняя строка в файле.
+                  </li>
+                  <li style={{ marginBottom: 6 }}>
+                    <b>Правка part_name или defect_type = новая строка.</b> Импорт обновляет только <code>shop</code> для существующей пары. Если изменить название детали или дефекта — добавится новая запись, а старая останется в БД (для чистки нужен SQL).
+                  </li>
+                  <li style={{ marginBottom: 6 }}>
+                    <b>Удаление строки из Excel не удаляет из БД.</b> Если строку нужно убрать — сначала экспорт, потом SQL DELETE, потом импорт.
+                  </li>
+                  <li>
+                    <b>Регистр не важен при сравнении.</b> Но <code>part_name</code> и <code>defect_type</code> в БД останутся в том виде, в каком попали туда в первый раз.
+                  </li>
+                </ul>
+              </div>
+
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: '0 0 10px 0' }}>
+                🔁 Дубли в файле
+              </h3>
+              <p style={{ margin: '0 0 16px 0' }}>
+                Если в Excel окажутся две строки с одинаковой парой <code>(part_name, defect_type)</code>, применится значение <b>последней</b> строки. Импорт предупредит об этом в алерте после завершения.
+              </p>
+
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', margin: '0 0 10px 0' }}>
+                ✅ Пример
+              </h3>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#F1F5F9' }}>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '2px solid #CBD5E1' }}>shop</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '2px solid #CBD5E1' }}>part_name</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '2px solid #CBD5E1' }}>defect_type</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '2px solid #CBD5E1' }}>Результат</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#F59E0B', fontWeight: 700 }}>AS</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>BDM</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Нарушена работа</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#16A34A' }}>→ в цехе сборки</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#64748B', fontWeight: 700 }}>0</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>BDM</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Сбой программирования</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#64748B' }}>→ нигде не учитывается</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#3B82F6', fontWeight: 700 }}>BS</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Передняя дверь</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Зазор</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#16A34A' }}>→ в цехе сварки</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#94A3B8', fontStyle: 'italic' }}>—</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Капот</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0' }}>Вмятина</td>
+                    <td style={{ padding: '8px 12px', borderBottom: '1px solid #E2E8F0', color: '#94A3B8' }}>→ пропущено</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{
+              padding: '16px 28px',
+              borderTop: '1px solid #E2E8F0',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              flexShrink: 0,
+            }}>
+              <button
+                onClick={() => setShowHelpMapping(false)}
+                style={{
+                  padding: '10px 24px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background: '#2563EB',
+                  color: '#FFFFFF',
+                  fontWeight: 700,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(37,99,235,0.25)',
+                }}
+              >
+                Понятно
+              </button>
+            </div>
           </div>
         </div>
       )}
