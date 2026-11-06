@@ -1125,21 +1125,6 @@ export default function DrrReportPage() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
-
-                  <div style={cardStyle}>
-                    <h2 style={{ fontSize: 20, fontWeight: 700, color: '#8B5CF6', marginBottom: 20 }}>🚚 Логистика (LS) — DRR %</h2>
-                    <ResponsiveContainer width="100%" height={250}>
-                      <BarChart data={shopChartData} margin={{ top: 20, right: 20, left: 20, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F5" />
-                        <XAxis dataKey="week" />
-                        <YAxis domain={['dataMin - 3', 'dataMax + 3']} />
-                        <Tooltip formatter={(v) => `${v}%`} />
-                        <Bar dataKey="LS" fill="#8B5CF6" barSize={40} radius={[8, 8, 0, 0]}>
-                          <LabelList dataKey="LS" position="top" formatter={(v) => `${parseFloat(v).toFixed(2)}%`} style={{ fill: '#1F2937', fontSize: 11, fontWeight: 600 }} />
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
                 </>
               ) : (
                 <p style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Нет данных. Загрузите справочник.</p>
