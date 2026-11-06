@@ -6642,6 +6642,27 @@ app.get('/api/vehicles-model-complect', async (req, res) => {
 // LAST_MODIFIED_TIME НЕ используем.
 const CP7_GRACE_MS = 20 * 60 * 1000;
 
+/* ====================================================================== */
+/* CP7: список PART_NAME, которые исключаются из всех расчётов             */
+/* (ни DRR %, ни топ дефектов, ни списки VIN, ни снапшоты)                */
+/* ====================================================================== */
+const CP7_EXCLUDED_PART_PATTERNS = [
+  'Штрих-код BZD',
+];
+
+// Возвращает SQL-фрагмент вида:
+//   AND (d.PART_NAME IS NULL OR (d.PART_NAME NOT LIKE '%Штрих-код BZD%'))
+// или пустую строку, если список паттернов пуст.
+// Примечание: IS NULL нужен, иначе NULL NOT LIKE '...' в WHERE = false,
+// и дефекты с пустым PART_NAME выпадут из выборки.
+function buildCp7ExcludedPartSql(column = 'PART_NAME') {
+  if (!CP7_EXCLUDED_PART_PATTERNS.length) return '';
+  const conds = CP7_EXCLUDED_PART_PATTERNS
+    .map(p => `${column} NOT LIKE '%${p.replace(/'/g, "''")}%'`)
+    .join(' AND ');
+  return `AND (${column} IS NULL OR (${conds}))`;
+}
+
 function isDefectNokCp7(defectRow, cp72Ms) {
   const repairTimes = [defectRow.REPAIR_TIME, defectRow.REPAIR_TIME1]
     .filter(t => t != null && t !== '')
@@ -6711,7 +6732,7 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
     const vins = cp72Rows.map(r => r.VIN);
     const placeholders = vins.map(() => '?').join(',');
 
-    // Дефекты — из IOT
+    // Дефекты — из IOT. Исключаем «Штрих-код BZD».
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN, d.STATUS, d.CREATION_TIME,
@@ -6719,6 +6740,7 @@ app.get('/api/drr-cp7-dashboard', async (req, res) => {
       FROM at_qm_defect_info d
       WHERE d.VIN IN (${placeholders})
         AND d.POST_NAME IN (${postListStr})
+        ${buildCp7ExcludedPartSql('d.PART_NAME')}
     `, vins);
 
     const vinHasNok = new Map();
@@ -6785,6 +6807,7 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
     const vins = cp72Rows.map(r => r.VIN);
     const placeholders = vins.map(() => '?').join(',');
 
+    // Исключаем «Штрих-код BZD».
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN,
@@ -6800,6 +6823,7 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
       LEFT JOIN work_order wo ON wo.VIN = d.VIN
       WHERE d.POST_NAME IN (${postListStr})
         AND d.VIN IN (${placeholders})
+        ${buildCp7ExcludedPartSql('d.PART_NAME')}
     `, [...vins]);
 
     const nokDefects = [];
@@ -6841,7 +6865,6 @@ app.get('/api/drr-cp7-top-defects', async (req, res) => {
         defectCount: d.defectCount,
       }))
       .sort((a, b) => b.defectCount - a.defectCount);
-      
 
     res.json(topDefects);
   } catch (err) {
@@ -6871,12 +6894,14 @@ app.get('/api/drr-cp7-vins', async (req, res) => {
     const vins = cp72Rows.map(r => r.VIN);
     const placeholders = vins.map(() => '?').join(',');
 
+    // Исключаем «Штрих-код BZD».
     const [defectRows] = await pool.query(`
       SELECT d.VIN, d.STATUS, d.CREATION_TIME,
              d.REPAIR_TIME, d.REPAIR_TIME1
       FROM at_qm_defect_info d
       WHERE d.VIN IN (${placeholders})
         AND d.POST_NAME IN (${postListStr})
+        ${buildCp7ExcludedPartSql('d.PART_NAME')}
     `, vins);
 
     const nokSet = new Set();
@@ -6942,6 +6967,7 @@ app.get('/api/drr-cp7-mpp-vins', async (req, res) => {
     const vins = cp72Rows.map(r => r.VIN);
     const placeholders = vins.map(() => '?').join(',');
 
+    // Исключаем «Штрих-код BZD» (страховка — если такой MPP как-то попадёт в клик).
     const [defectRows] = await pool.query(`
       SELECT
         d.VIN, wo.MODEL,
@@ -6957,10 +6983,11 @@ app.get('/api/drr-cp7-mpp-vins', async (req, res) => {
         AND wo.MODEL = ?
         AND d.PART_NAME = ?
         AND d.PROBLEM_TYPE = ?
+        ${buildCp7ExcludedPartSql('d.PART_NAME')}
     `, [...vins, model, part_name, problem_type]);
 
-    const resultList = []; // <--- ИЗМЕНЕНО: используем массив вместо Map
-    
+    const resultList = [];
+
     defectRows.forEach(row => {
       const cp72TimeStr = cp72TimeMap.get(row.VIN);
       if (!cp72TimeStr) return;
@@ -6976,7 +7003,6 @@ app.get('/api/drr-cp7-mpp-vins', async (req, res) => {
         .filter(t => !Number.isNaN(t));
       const repairMs = repairTimes.length > 0 ? Math.min(...repairTimes) : null;
 
-      // <--- ИЗМЕНЕНО: просто пушим все записи в массив
       resultList.push({
         vin: row.VIN,
         model: row.MODEL || '—',
@@ -7091,6 +7117,7 @@ async function saveDrrCp7Snapshot(shiftDate, shift, filterName) {
       const vins = cp72Rows.map(r => r.VIN);
       const ph = vins.map(() => '?').join(',');
 
+      // Исключаем «Штрих-код BZD» (в любой вариации написания) из расчёта.
       const [defectRows] = await pool.query(`
         SELECT
           d.VIN, d.STATUS, d.CREATION_TIME,
@@ -7100,6 +7127,7 @@ async function saveDrrCp7Snapshot(shiftDate, shift, filterName) {
         LEFT JOIN work_order wo ON wo.VIN = d.VIN
         WHERE d.VIN IN (${ph})
           AND d.POST_NAME IN (${postListStr})
+          ${buildCp7ExcludedPartSql('d.PART_NAME')}
       `, vins);
 
       const vinHasNok = new Map();
@@ -7141,7 +7169,6 @@ async function saveDrrCp7Snapshot(shiftDate, shift, filterName) {
 
       topDefects = Array.from(defectGroupMap.values())
         .sort((a, b) => b.defectCount - a.defectCount);
-
     }
 
     await notesPool.query(`
