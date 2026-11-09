@@ -61,7 +61,7 @@ const snapshotSelectStyle = {
   color: '#64748B',
   cursor: 'pointer',
   boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-  minWidth: 220,
+  minWidth: 240,
   appearance: 'none',
   WebkitAppearance: 'none',
   MozAppearance: 'none',
@@ -215,19 +215,6 @@ const getTimeRange = (timeFilter) => {
   return { start: `${todayStr} 00:00:00`, end: `${todayStr} 23:59:59` };
 };
 
-const getArchiveRange = (shiftDate, shift) => {
-  if (shift === 'all')     return { start: `${shiftDate} 00:00:00`, end: `${shiftDate} 23:59:59` };
-  if (shift === 'day')     return { start: `${shiftDate} 07:50:00`, end: `${shiftDate} 16:40:00` };
-  if (shift === 'night')   return { start: `${shiftDate} 01:31:00`, end: `${shiftDate} 07:50:00` };
-  if (shift === 'evening') {
-    const next = new Date(`${shiftDate}T12:00:00Z`);
-    next.setUTCDate(next.getUTCDate() + 1);
-    const nextStr = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
-    return { start: `${shiftDate} 16:41:00`, end: `${nextStr} 01:30:00` };
-  }
-  return null;
-};
-
 const getWeekNumber = (date) => {
   const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -301,7 +288,7 @@ export default function DrrCp6Page() {
 
   const [snapshots, setSnapshots] = useState([]);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState('live');
-  const [archiveMeta, setArchiveMeta] = useState(null); // { shiftDate, shift }
+  const [archiveMeta, setArchiveMeta] = useState(null);
 
   const [vinList, setVinList] = useState([]);
   const [vinListStatus, setVinListStatus] = useState('');
@@ -309,6 +296,7 @@ export default function DrrCp6Page() {
   const [vinModalLoading, setVinModalLoading] = useState(false);
 
   const isArchive = selectedSnapshotId !== 'live';
+  const [excludeOthers, setExcludeOthers] = useState(false);
 
   /* ===================== Загрузка live-данных ===================== */
   const loadData = async () => {
@@ -442,6 +430,8 @@ export default function DrrCp6Page() {
     try {
       const { start, end } = getTimeRange(timeFilter);
       const params = new URLSearchParams({ startTime: start, endTime: end, status });
+      if (excludeOthers) params.append('excludeOthers', 'true');
+
       const res = await fetch(`${API_BASE}/api/drr-cp6-vins?${params.toString()}`);
       if (!res.ok) throw new Error('Ошибка загрузки списка VIN');
       const json = await res.json();
@@ -475,9 +465,16 @@ export default function DrrCp6Page() {
     }
   };
 
+  /* ===================== Пересчет данных ===================== */
+  const currentTotalVins = data.totalVins;
+  const currentOkVins = excludeOthers ? data.okVins + data.otherVins : data.okVins;
+  const currentNokVins = excludeOthers ? data.nokVins - data.otherVins : data.nokVins;
+  const currentDrrPercent = currentTotalVins > 0 ? (currentOkVins / currentTotalVins) * 100 : 0;
+  const currentOtherVins = excludeOthers ? 0 : data.otherVins;
+
   const pieData = [
-    { name: 'DRR (OK)', value: data.drrPercent },
-    { name: 'NOK', value: Math.max(0, 100 - data.drrPercent) },
+    { name: 'DRR (OK)', value: currentDrrPercent },
+    { name: 'NOK', value: Math.max(0, 100 - currentDrrPercent) },
   ];
 
   const handleFilterClick = (filter) => {
@@ -520,50 +517,83 @@ export default function DrrCp6Page() {
 
           <div style={{ width: '1px', height: '60px', backgroundColor: '#D1D5DB' }} />
 
-          <div style={filterGroupStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button
-              style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280', isArchive)}
-              onClick={() => handleFilterClick('all')}
-              disabled={isArchive}
-            >Сутки</button>
-            <button
-              style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B', isArchive)}
-              onClick={() => handleFilterClick('day')}
-              disabled={isArchive}
-            >День</button>
-            <button
-              style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6', isArchive)}
-              onClick={() => handleFilterClick('evening')}
-              disabled={isArchive}
-            >Вечер</button>
-            <button
-              style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937', isArchive)}
-              onClick={() => handleFilterClick('night')}
-              disabled={isArchive}
-            >Ночь</button>
-
-            <select
-              value={selectedSnapshotId}
-              onChange={(e) => setSelectedSnapshotId(e.target.value)}
-              style={snapshotSelectStyle}
+              onClick={() => setExcludeOthers(!excludeOthers)}
+              title="Исключить авто из категории «Остальные» из расчета NOK и DRR%"
+              style={{
+                padding: '6px 14px',
+                borderRadius: '20px',
+                border: '1px solid #EF4444',
+                background: excludeOthers ? '#EF4444' : '#FFFFFF',
+                color: excludeOthers ? '#FFFFFF' : '#EF4444',
+                fontWeight: 700,
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s',
+                height: '48px',
+                whiteSpace: 'nowrap',
+              }}
             >
-              <option value="live">Сейчас (live)</option>
-              {snapshots.map(s => {
-                const shiftLabel =
-                  s.shift === 'all' ? 'Сутки' :
-                  s.shift === 'day' ? 'День' :
-                  s.shift === 'evening' ? 'Вечер' :
-                  'Ночь';
-                const dateObj = new Date(s.shiftDate + 'T12:00:00');
-                const dd = String(dateObj.getDate()).padStart(2, '0');
-                const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-                return (
-                  <option key={s.id} value={s.id}>
-                    {dd}.{mm} · {shiftLabel} ({s.drrPercent}%)
-                  </option>
-                );
-              })}
-            </select>
+              <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>🚫</span>
+              Без «остальные»
+            </button>
+
+            <div style={filterGroupStyle}>
+              <button
+                style={timeFilterButtonStyle(timeFilter === 'all', '#6B7280', isArchive)}
+                onClick={() => handleFilterClick('all')}
+                disabled={isArchive}
+              >Сутки</button>
+              <button
+                style={timeFilterButtonStyle(timeFilter === 'day', '#F59E0B', isArchive)}
+                onClick={() => handleFilterClick('day')}
+                disabled={isArchive}
+              >День</button>
+              <button
+                style={timeFilterButtonStyle(timeFilter === 'evening', '#3B82F6', isArchive)}
+                onClick={() => handleFilterClick('evening')}
+                disabled={isArchive}
+              >Вечер</button>
+              <button
+                style={timeFilterButtonStyle(timeFilter === 'night', '#1F2937', isArchive)}
+                onClick={() => handleFilterClick('night')}
+                disabled={isArchive}
+              >Ночь</button>
+
+              <select
+                value={selectedSnapshotId}
+                onChange={(e) => setSelectedSnapshotId(e.target.value)}
+                style={snapshotSelectStyle}
+                title={excludeOthers ? 'Режим: Без «остальные»' : 'Режим: С «остальными»'}
+              >
+                <option value="live">
+                  Сейчас (live){excludeOthers ? ' · Без «ост.»' : ''}
+                </option>
+                {snapshots.map(s => {
+                  const shiftLabel =
+                    s.shift === 'all' ? 'Сутки' :
+                    s.shift === 'day' ? 'День' :
+                    s.shift === 'evening' ? 'Вечер' :
+                    'Ночь';
+                  const dateObj = new Date(s.shiftDate + 'T12:00:00');
+                  const dd = String(dateObj.getDate()).padStart(2, '0');
+                  const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+
+                  const sOk = excludeOthers ? (s.okVins + s.otherVins) : s.okVins;
+                  const sDrr = s.totalVins > 0 ? (sOk / s.totalVins) * 100 : 0;
+
+                  return (
+                    <option key={s.id} value={s.id}>
+                      {dd}.{mm} · {shiftLabel} ({sDrr.toFixed(1)}%){excludeOthers ? ' · Без «ост.»' : ''}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
           </div>
         </div>
       </div>
@@ -595,7 +625,7 @@ export default function DrrCp6Page() {
                   </Pie>
                   <Tooltip
                     formatter={(value, name) => {
-                      const count = name === 'DRR (OK)' ? data.okVins : data.nokVins;
+                      const count = name === 'DRR (OK)' ? currentOkVins : currentNokVins;
                       return [`${value.toFixed(1)}% (${count} VIN)`, name];
                     }}
                     contentStyle={{ fontSize: '1.5rem', borderRadius: '16px' }}
@@ -611,7 +641,7 @@ export default function DrrCp6Page() {
                   DRR{isArchive && ' · архив'}
                 </div>
                 <div style={{ fontSize: '5.4rem', fontWeight: 900, color: '#1E293B', lineHeight: 1 }}>
-                  {data.drrPercent.toFixed(1)}%
+                  {currentDrrPercent.toFixed(1)}%
                 </div>
               </div>
             </div>
@@ -633,7 +663,7 @@ export default function DrrCp6Page() {
                   </div>
                 </div>
                 <div style={{ fontSize: '0.68rem', opacity: 0.75, fontWeight: 600, textAlign: 'center', marginTop: 'auto' }}>
-                  Прошли PSOUT: {data.totalVins}
+                  Прошли PSOUT: {currentTotalVins}
                 </div>
               </div>
 
@@ -657,7 +687,7 @@ export default function DrrCp6Page() {
                   <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1 }}>{data.transitCount}</div>
                 </div>
                 <div style={{ fontSize: '0.68rem', opacity: 0.85, fontWeight: 600, textAlign: 'center', marginTop: 'auto' }}>
-                  Прошли OK: {data.okVins}
+                  Прошли OK: {currentOkVins}
                 </div>
               </div>
 
@@ -679,7 +709,7 @@ export default function DrrCp6Page() {
                 </div>
                 <div style={{ height: VALUE_SECTION_HEIGHT, display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ fontSize: '3rem', fontWeight: 900, lineHeight: 1, minWidth: 60, textAlign: 'center' }}>
-                    {data.nokVins}
+                    {currentNokVins}
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, flex: 1 }}>
                     <div style={subBlockStyle}>
@@ -692,7 +722,7 @@ export default function DrrCp6Page() {
                     </div>
                     <div style={subBlockStyle}>
                       <div style={{ fontSize: '0.68rem', fontWeight: 700, opacity: 0.95, letterSpacing: 0.2, lineHeight: 1.1 }}>Остальные</div>
-                      <div style={{ fontSize: '1.35rem', fontWeight: 900, lineHeight: 1.1 }}>{data.otherVins}</div>
+                      <div style={{ fontSize: '1.35rem', fontWeight: 900, lineHeight: 1.1 }}>{currentOtherVins}</div>
                     </div>
                   </div>
                 </div>

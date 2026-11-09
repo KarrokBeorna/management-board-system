@@ -13545,7 +13545,7 @@ app.get('/api/drr-cp6-dashboard', async (req, res) => {
 /* ====================================================================== */
 app.get('/api/drr-cp6-vins', async (req, res) => {
   try {
-    const { startTime, endTime, status } = req.query;
+    const { startTime, endTime, status, excludeOthers } = req.query;
     if (!startTime || !endTime || !status) {
       return res.status(400).json({ error: 'startTime, endTime и status обязательны' });
     }
@@ -13558,13 +13558,22 @@ app.get('/api/drr-cp6-vins', async (req, res) => {
     const psoutTimeByVin = new Map(psoutRows.map(r => [r.vin, r.psout_last_time]));
     const psinTimeByVin  = new Map(psinRows.map(r => [r.vin, r.psin_last_time]));
 
-    const { okSet, nokSet } = await classifyCp6VinsExtended(psoutRows, psinRows);
+    const { okSet, nokSet, otherSet } = await classifyCp6VinsExtended(psoutRows, psinRows);
 
     let vins;
-    if (status === 'ALL') vins = [...new Set([...psoutRows.map(r => r.vin), ...psinRows.map(r => r.vin)])];
-    else if (status === 'OK') vins = [...okSet];
-    else if (status === 'NOK') vins = [...nokSet];
-    else return res.status(400).json({ error: 'Неизвестный status' });
+    const isExclude = excludeOthers === 'true';
+    
+    if (status === 'ALL') {
+      vins = [...new Set([...psoutRows.map(r => r.vin), ...psinRows.map(r => r.vin)])];
+    } else if (status === 'OK') {
+      // Если фильтр включен, авто из otherSet переходят в OK
+      vins = isExclude ? [...new Set([...okSet, ...otherSet])] : [...okSet];
+    } else if (status === 'NOK') {
+      // Если фильтр включен, авто из otherSet исключаются из NOK
+      vins = isExclude ? [...nokSet].filter(v => !otherSet.has(v)) : [...nokSet];
+    } else {
+      return res.status(400).json({ error: 'Неизвестный status' });
+    }
 
     if (vins.length === 0) return res.json([]);
 
@@ -16995,8 +17004,9 @@ if (!fs.existsSync(DRR_SHIFT_UPLOAD_DIR)) {
   fs.mkdirSync(DRR_SHIFT_UPLOAD_DIR, { recursive: true });
 }
 
-const DRR_SHIFT_PHOTO_TTL_MS = 2 * 24 * 60 * 60 * 1000;   // 2 дня
-const DRR_SHIFT_MARK_TTL_MS  = 24 * 60 * 60 * 1000;       // 1 сутки
+// 365 дней — фото живут год. Не удаляем "в фоне", пока не решите иначе.
+const DRR_SHIFT_PHOTO_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+const DRR_SHIFT_MARK_TTL_MS = 365 * 24 * 60 * 60 * 1000; // 365 дней
 
 /* ---------- ФОТО ---------- */
 
@@ -17032,8 +17042,9 @@ async function cleanupOldDrrShiftPhotos() {
     console.error('[DRR SHIFT PHOTOS] Ошибка очистки:', err.message);
   }
 }
-cleanupOldDrrShiftPhotos();
-setInterval(cleanupOldDrrShiftPhotos, 60 * 60 * 1000);
+
+//cleanupOldDrrShiftPhotos();
+setInterval(cleanupOldDrrShiftPhotos, 24 * 60 * 60 * 1000);
 
 /* Загрузка фото */
 app.post('/api/drr-shift-photos/upload', async (req, res) => {
@@ -17150,7 +17161,7 @@ async function cleanupOldDrrShiftMarks() {
   }
 }
 cleanupOldDrrShiftMarks();
-setInterval(cleanupOldDrrShiftMarks, 60 * 60 * 1000);
+setInterval(cleanupOldDrrShiftMarks, 24 * 60 * 60 * 1000);
 
 // Список меток по префиксу
 app.get('/api/drr-shift-marks', async (req, res) => {
