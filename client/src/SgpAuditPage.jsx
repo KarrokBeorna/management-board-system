@@ -82,7 +82,6 @@ const parseDbDate = (str) => {
 };
 
 // ============ WATERFALL / CANDLE ============
-// data: [{name, count}] — 15 элементов: [0] = baseline (день до первого отображаемого), [1..14] = отображаемые дни.
 const StockCandleChart = ({ data, color = '#A78BFA' }) => {
   if (!data || data.length < 2) {
     return <div style={{ height: 340, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF', fontSize: 13 }}>Нет данных</div>;
@@ -532,8 +531,10 @@ export default function SgpAuditPage() {
     for (let i = 2; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
       const target = d.getTime() > now.getTime() ? endOfToday : d.getTime();
-      const mn = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      stockMonths.push({ name: `${mn[d.getMonth()]} ${d.getFullYear()}`, count: calculateStockAt(target) });
+      // Формат YYYY-MM вместо MMM YYYY
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      stockMonths.push({ name: `${yyyy}-${mm}`, count: calculateStockAt(target) });
     }
 
     return { flowMonths, flowWeeks, flowDays, stockMonths, stockWeeks, stockDays, stockDaysAll };
@@ -578,7 +579,6 @@ export default function SgpAuditPage() {
     finally { setBlockReasonsLoading(false); }
   };
 
-  // ОДНА линия по центру, если передан threshold
   const renderBufferTrendChart = (title, data, color, threshold = null) => (
     <div style={{ backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, border: '1px solid #E5E7EB', boxShadow: '0 2px 6px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <h3 style={{ fontSize: 14, fontWeight: 700, color: '#374151', marginBottom: 12, textAlign: 'center' }}>{title}</h3>
@@ -609,7 +609,6 @@ export default function SgpAuditPage() {
     </div>
   );
 
-  // fetch helpers
   const fetchCurrentLocations = async (vinList) => {
     if (!vinList || vinList.length === 0) return {};
     try {
