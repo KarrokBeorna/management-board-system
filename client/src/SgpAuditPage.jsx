@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  LineChart, Line
+  LineChart, Line, LabelList
 } from 'recharts';
 
 const API_BASE = '';
@@ -170,6 +170,20 @@ const parseVinList = (input) => {
     .filter(v => v.length > 0);
 };
 
+const formatShortDate = (dateStr) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const parseDbDate = (str) => {
+  if (!str) return 0;
+  const isoStr = String(str).includes('T') ? str : str.replace(' ', 'T');
+  const t = new Date(isoStr).getTime();
+  return isNaN(t) ? 0 : t;
+};
+
 export default function SgpAuditPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('checkpoints');
@@ -217,10 +231,39 @@ export default function SgpAuditPage() {
   const [neighborLocations, setNeighborLocations] = useState({});
   const [neighborModelComplect, setNeighborModelComplect] = useState({});
 
-  // Новые состояния для фильтров соседей
   const [neighborFilters, setNeighborFilters] = useState({});
   const [activeNeighborFilterColumn, setActiveNeighborFilterColumn] = useState(null);
   const [neighborFilterDropdownPos, setNeighborFilterDropdownPos] = useState({ top: 0, left: 0 });
+
+  // ====== BUFFER STATUS REPORT ======
+  const [bufferData, setBufferData] = useState([]);
+  const [bufferLoading, setBufferLoading] = useState(false);
+  const [bufferError, setBufferError] = useState(null);
+  
+  // Фильтры (Скриншот)
+  const [bufferChartPeriod, setBufferChartPeriod] = useState('all');
+  const [bufferChartModel, setBufferChartModel] = useState('ALL');
+  
+  // Фильтры таблицы
+  const [bufferCriterionFilter, setBufferCriterionFilter] = useState('ALL');
+  const [bufferBlockFilter, setBufferBlockFilter] = useState('ALL');
+  const [bufferModelFilter, setBufferModelFilter] = useState('ALL');
+  
+  // По умолчанию сортируем по CP8 (самые свежие в буфере сверху)
+  const [bufferSort, setBufferSort] = useState({ column: 'cp8_time', direction: 'desc' });
+  
+  // Фильтры времени Buffer
+  const [bufferTimeFilters, setBufferTimeFilters] = useState({});
+
+  // Пагинация таблицы
+  const [bufferPage, setBufferPage] = useState(0);
+  const bufferPageSize = 50;
+
+  // Модалка причин блокировки
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [blockReasonsData, setBlockReasonsData] = useState({ active: [], cleared: [] });
+  const [blockReasonsLoading, setBlockReasonsLoading] = useState(false);
+  const [selectedBlockVin, setSelectedBlockVin] = useState('');
 
   // Analytics (скрыта)
   const [auditStartDate, setAuditStartDate] = useState('');
@@ -241,6 +284,22 @@ export default function SgpAuditPage() {
   const [exportReasonLoading, setExportReasonLoading] = useState(false);
 
   const availableModels = ['ALL', 'ESTEO MX', 'JELAND J6', 'JELAND J7', 'JELAND J8', 'TENET A8'];
+
+  // Извлекаем уникальные модели из данных Buffer для фильтра
+  const bufferAvailableModels = useMemo(() => {
+    const models = [...new Set(bufferData.map(d => d.model))].filter(m => m && m !== '—');
+    return ['ALL', ...models.sort()];
+  }, [bufferData]);
+
+  // Блокировка скролла при открытых модалках
+  useEffect(() => {
+    if (showBlockModal || showExportModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [showBlockModal, showExportModal]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -274,11 +333,17 @@ export default function SgpAuditPage() {
         setSelectedReason('');
         setCustomReason('');
         setExportSearch('');
+        setShowBlockModal(false);
       }
     };
     document.addEventListener('keydown', handleEsc);
     return () => document.removeEventListener('keydown', handleEsc);
   }, []);
+
+  // Сброс страницы при изменении фильтров таблицы Buffer
+  useEffect(() => {
+    setBufferPage(0);
+  }, [bufferCriterionFilter, bufferBlockFilter, bufferModelFilter, bufferTimeFilters]);
 
   const formatDateTime = (dt) => {
     if (!dt) return '-';
@@ -302,6 +367,19 @@ export default function SgpAuditPage() {
     const hh = String(d.getHours()).padStart(2, '0');
     const min = String(d.getMinutes()).padStart(2, '0');
     return `${dd}.${mm} ${hh}:${min}`;
+  };
+
+  const formatTimeDiff = (time1, time2) => {
+    if (!time1 || !time2) return '—';
+    const diffMs = parseDbDate(time1) - parseDbDate(time2);
+    if (diffMs < 0) return '0 ч';
+    const h = Math.floor(diffMs / 3600000);
+    const m = Math.floor((diffMs % 3600000) / 60000);
+    if (h > 24) {
+      const d = Math.floor(h / 24);
+      return `${d} д ${h % 24} ч`;
+    }
+    return `${h} ч ${m} мин`;
   };
 
   const loadTimePoints = async () => {
@@ -331,6 +409,20 @@ export default function SgpAuditPage() {
   useEffect(() => {
     if (activeTab === 'timepoints') {
       loadTimePoints();
+    }
+    if (activeTab === 'buffer') {
+      setBufferLoading(true);
+      setBufferError(null);
+      fetch(`${API_BASE}/api/buffer-status-data`)
+        .then(res => res.json())
+        .then(json => {
+          setBufferData(Array.isArray(json) ? json : []);
+          setBufferLoading(false);
+        })
+        .catch(err => {
+          setBufferError(err.message);
+          setBufferLoading(false);
+        });
     }
   }, [activeTab]);
 
@@ -450,6 +542,271 @@ export default function SgpAuditPage() {
     setTimePointsData(allTimePointsData);
     setTimePointsPage(0);
   };
+
+  // ====== Логика Buffer Status Report (ТАБЛИЦА) ======
+  const filteredBufferData = useMemo(() => {
+    let result = bufferData;
+    
+    // Фильтры таблицы
+    if (bufferCriterionFilter !== 'ALL') {
+      result = result.filter(d => d.criterion === bufferCriterionFilter);
+    }
+    
+    if (bufferBlockFilter === 'Блок') {
+      result = result.filter(d => d.block_status.startsWith('Блок'));
+    } else if (bufferBlockFilter === 'Не блок') {
+      result = result.filter(d => d.block_status === 'Не блок');
+    }
+
+    if (bufferModelFilter !== 'ALL') {
+      result = result.filter(d => d.model === bufferModelFilter);
+    }
+
+    // Фильтры времени Buffer
+    const timeFields = [
+      { key: 'cp72_time', from: 'cp72From', to: 'cp72To' },
+      { key: 'adas_time', from: 'tladasFrom', to: 'tladasTo' },
+      { key: 'tltt_time', from: 'tlttFrom', to: 'tlttTo' },
+      { key: 'cp8_time', from: 'cp8From', to: 'cp8To' },
+      { key: 'in_storage_time', from: 'inboundFrom', to: 'inboundTo' },
+    ];
+
+    timeFields.forEach(({ key, from, to }) => {
+      const fromVal = bufferTimeFilters[from];
+      const toVal = bufferTimeFilters[to];
+      
+      if (fromVal) {
+        const fromTime = new Date(fromVal).getTime();
+        result = result.filter(d => d[key] && parseDbDate(d[key]) >= fromTime);
+      }
+      if (toVal) {
+        const toTime = new Date(toVal).getTime();
+        result = result.filter(d => d[key] && parseDbDate(d[key]) <= toTime);
+      }
+    });
+
+    // Умная сортировка
+    result.sort((a, b) => {
+      let valA, valB;
+      const dir = bufferSort.direction === 'asc' ? 1 : -1;
+
+      if (bufferSort.column === 'diff_cp8_sgp') {
+         valA = parseDbDate(a.in_storage_time) - parseDbDate(a.cp8_time);
+         valB = parseDbDate(b.in_storage_time) - parseDbDate(b.cp8_time);
+      } else if (bufferSort.column === 'diff_cp8_cp72') {
+         valA = parseDbDate(a.cp8_time) - parseDbDate(a.cp72_time);
+         valB = parseDbDate(b.cp8_time) - parseDbDate(b.cp72_time);
+      } else if (bufferSort.column.endsWith('_time')) {
+         valA = parseDbDate(a[bufferSort.column]);
+         valB = parseDbDate(b[bufferSort.column]);
+      } else {
+         valA = a[bufferSort.column] || '';
+         valB = b[bufferSort.column] || '';
+      }
+
+      if (valA < valB) return -1 * dir;
+      if (valA > valB) return 1 * dir;
+      return 0;
+    });
+
+    return result;
+  }, [bufferData, bufferCriterionFilter, bufferBlockFilter, bufferModelFilter, bufferSort, bufferTimeFilters]);
+
+  // ====== Логика Buffer Status Report (ГРАФИКИ - НЕЗАВИСИМО ОТ ТАБЛИЦЫ) ======
+  const bufferChartsData = useMemo(() => {
+    // Базовые данные для графиков (берем все машины)
+    let chartCars = bufferData;
+
+    // Применяем фильтр по модели (верхний)
+    if (bufferChartModel !== 'ALL') {
+      chartCars = chartCars.filter(d => d.model === bufferChartModel);
+    }
+
+    // Применяем фильтры по времени (если вы их задали, графики тоже должны их учитывать)
+    const timeFields = [
+      { key: 'cp72_time', from: 'cp72From', to: 'cp72To' },
+      { key: 'adas_time', from: 'tladasFrom', to: 'tladasTo' },
+      { key: 'tltt_time', from: 'tlttFrom', to: 'tlttTo' },
+      { key: 'cp8_time', from: 'cp8From', to: 'cp8To' },
+      { key: 'in_storage_time', from: 'inboundFrom', to: 'inboundTo' },
+    ];
+
+    timeFields.forEach(({ key, from, to }) => {
+      const fromVal = bufferTimeFilters[from];
+      const toVal = bufferTimeFilters[to];
+      if (fromVal) {
+        const fromTime = new Date(fromVal).getTime();
+        chartCars = chartCars.filter(d => d[key] && parseDbDate(d[key]) >= fromTime);
+      }
+      if (toVal) {
+        const toTime = new Date(toVal).getTime();
+        chartCars = chartCars.filter(d => d[key] && parseDbDate(d[key]) <= toTime);
+      }
+    });
+
+
+    // ========== 1. ДАННЫЕ ДЛЯ ПОТОКА (График новых непринятых) ==========
+    const flowCars = chartCars
+      .filter(d => d.criterion === 'Не принято' && d.cp8_time)
+      .sort((a, b) => parseDbDate(a.cp8_time) - parseDbDate(b.cp8_time));
+
+    const fMonthsMap = new Map();
+    const fWeeksMap = new Map();
+    const fDaysMap = new Map();
+
+    flowCars.forEach(item => {
+      const d = new Date(item.cp8_time);
+      const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      fMonthsMap.set(mKey, (fMonthsMap.get(mKey) || 0) + 1);
+
+      const tmp = new Date(d);
+      const dayNum = tmp.getDay() || 7;
+      tmp.setDate(tmp.getDate() + 4 - dayNum);
+      const yearStart = new Date(tmp.getFullYear(), 0, 1);
+      const weekNo = Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
+      const wKey = `W${String(weekNo).padStart(2, '0')}`;
+      fWeeksMap.set(wKey, (fWeeksMap.get(wKey) || 0) + 1);
+
+      const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      fDaysMap.set(dKey, (fDaysMap.get(dKey) || 0) + 1);
+    });
+
+    const flowMonths = Array.from(fMonthsMap.entries()).map(([name, count]) => ({ name, count })).slice(-3);
+    const flowWeeks = Array.from(fWeeksMap.entries()).map(([name, count]) => ({ name, count })).slice(-4);
+    const flowDays = Array.from(fDaysMap.entries()).map(([name, count]) => ({ name: formatShortDate(name), count })).slice(-14);
+
+
+    // ========== 2. ДАННЫЕ ДЛЯ ОСТАТКА (Накопительный итог) ==========
+    const stockCars = chartCars.filter(d => d.cp8_time);
+
+    const now = new Date();
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).getTime();
+    
+    const calculateStockAt = (endOfPeriodTimestamp) => {
+      let count = 0;
+      stockCars.forEach(car => {
+        const cp8Ms = parseDbDate(car.cp8_time);
+        const storageMs = car.in_storage_time ? parseDbDate(car.in_storage_time) : Infinity;
+        if (cp8Ms <= endOfPeriodTimestamp && storageMs > endOfPeriodTimestamp) {
+          count++;
+        }
+      });
+      return count;
+    };
+
+    const stockMonths = [];
+    const stockWeeks = [];
+    const stockDays = [];
+
+    // Дни
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, 23, 59, 59);
+      stockDays.push({ name: formatShortDate(d), count: calculateStockAt(d.getTime()) });
+    }
+
+    // Недели
+    for (let i = 3; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() || 7) + 1 - i * 7, 23, 59, 59);
+      const sunday = new Date(d);
+      sunday.setDate(d.getDate() + 6);
+      const targetTime = sunday.getTime() > now.getTime() ? endOfToday : sunday.getTime();
+      const weekNum = Math.ceil((((targetTime - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000) + 1) / 7);
+      stockWeeks.push({ name: `W${String(weekNum).padStart(2, '0')}`, count: calculateStockAt(targetTime) });
+    }
+
+    // Месяцы
+    for (let i = 2; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+      const targetTime = d.getTime() > now.getTime() ? endOfToday : d.getTime();
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      stockMonths.push({ name: `${monthNames[d.getMonth()]} ${d.getFullYear()}`, count: calculateStockAt(targetTime) });
+    }
+
+    return { 
+      flowMonths, flowWeeks, flowDays,
+      stockMonths, stockWeeks, stockDays 
+    };
+  }, [bufferData, bufferChartModel, bufferTimeFilters]);
+
+  const handleBufferSort = (column) => {
+    setBufferSort(prev => ({
+      column,
+      direction: prev.column === column && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const clearBufferFilters = () => {
+    setBufferCriterionFilter('ALL');
+    setBufferBlockFilter('ALL');
+    setBufferModelFilter('ALL');
+    setBufferTimeFilters({});
+    setBufferChartModel('ALL');
+  };
+
+  const exportBufferToExcel = () => {
+    if (!filteredBufferData.length) return;
+    const exportData = filteredBufferData.map(item => ({
+      'VIN': item.vin,
+      'Модель': item.model,
+      'CP72': formatDateTime(item.cp72_time),
+      'ADAS': formatDateTime(item.adas_time),
+      'TLTT': formatDateTime(item.tltt_time),
+      'CP8': formatDateTime(item.cp8_time),
+      'Постановка на СГП': formatDateTime(item.in_storage_time),
+      'Критерий потеряшки': item.criterion,
+      'Время CP8 → СГП': formatTimeDiff(item.in_storage_time, item.cp8_time),
+      'Время CP8 → CP72': formatTimeDiff(item.cp8_time, item.cp72_time),
+      'Статус блокировки': item.block_status,
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Buffer Status');
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    XLSX.writeFile(wb, `Buffer_Status_${dateStr}.xlsx`);
+  };
+
+  // ====== Загрузка причин блокировки ======
+  const openBlockReasons = async (vin) => {
+    setSelectedBlockVin(vin);
+    setShowBlockModal(true);
+    setBlockReasonsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/buffer-status-block-reasons?vin=${vin}`);
+      if (res.ok) {
+        const json = await res.json();
+        setBlockReasonsData(json);
+      } else {
+        setBlockReasonsData({ active: [], cleared: [] });
+      }
+    } catch (err) {
+      console.error(err);
+      setBlockReasonsData({ active: [], cleared: [] });
+    } finally {
+      setBlockReasonsLoading(false);
+    }
+  };
+
+  const renderBufferTrendChart = (title, data, color) => (
+    <div style={{ backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, border: '1px solid #E5E7EB', boxShadow: '0 2px 6px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <h3 style={{ fontSize: 14, fontWeight: 700, color: '#374151', marginBottom: 12, textAlign: 'center' }}>{title}</h3>
+      {data && data.length > 0 ? (
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={data} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F3F4F6" />
+            <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} height={28} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} axisLine={false} tickLine={false} />
+            <Tooltip cursor={{ fill: '#F9FAFB' }} contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+            <Bar dataKey="count" fill={color} radius={[4, 4, 0, 0]} barSize={20}>
+              <LabelList dataKey="count" position="top" style={{ fontSize: 10, fontWeight: 700, fill: '#374151' }} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      ) : (
+        <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF', fontSize: 13 }}>Нет данных</div>
+      )}
+    </div>
+  );
 
   // ====== Получение текущего расположения (батчевое) ======
   const fetchCurrentLocations = async (vinList) => {
@@ -873,15 +1230,26 @@ export default function SgpAuditPage() {
     { label: 'Outbound', fromKey: 'outboundFrom', toKey: 'outboundTo' },
   ];
 
-  const renderTimeFilter = ({ label, fromKey, toKey }) => (
+  const leftBufferTimeFilters = [
+    { label: 'CP72', fromKey: 'cp72From', toKey: 'cp72To' },
+    { label: 'ADAS', fromKey: 'tladasFrom', toKey: 'tladasTo' },
+    { label: 'TLTT', fromKey: 'tlttFrom', toKey: 'tlttTo' },
+  ];
+
+  const rightBufferTimeFilters = [
+    { label: 'CP8', fromKey: 'cp8From', toKey: 'cp8To' },
+    { label: 'Inbound', fromKey: 'inboundFrom', toKey: 'inboundTo' },
+  ];
+
+  const renderTimeFilter = ({ label, fromKey, toKey }, filtersState, setFiltersState) => (
     <div style={timeFilterBlockStyle}>
       <span style={timeFilterLabelStyle}>{label}</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
         <span style={{ fontSize: 10, color: '#9CA3AF', fontWeight: 600 }}>От</span>
         <input
           type="datetime-local"
-          value={tpFilters[fromKey] || ''}
-          onChange={(e) => setTpFilters(prev => ({ ...prev, [fromKey]: e.target.value }))}
+          value={filtersState[fromKey] || ''}
+          onChange={(e) => setFiltersState(prev => ({ ...prev, [fromKey]: e.target.value }))}
           style={{ ...inputStyle, fontSize: 10, padding: '4px 6px', width: '100%' }}
         />
       </div>
@@ -889,8 +1257,8 @@ export default function SgpAuditPage() {
         <span style={{ fontSize: 10, color: '#9CA3AF', fontWeight: 600 }}>По</span>
         <input
           type="datetime-local"
-          value={tpFilters[toKey] || ''}
-          onChange={(e) => setTpFilters(prev => ({ ...prev, [toKey]: e.target.value }))}
+          value={filtersState[toKey] || ''}
+          onChange={(e) => setFiltersState(prev => ({ ...prev, [toKey]: e.target.value }))}
           style={{ ...inputStyle, fontSize: 10, padding: '4px 6px', width: '100%' }}
         />
       </div>
@@ -1140,12 +1508,15 @@ export default function SgpAuditPage() {
     borderBottom: '2px solid #E5E7EB',
     background: '#F9FAFB',
     whiteSpace: 'nowrap',
+    position: 'sticky',
+    top: 0,
   };
 
   const tdStyle = {
     padding: '10px 14px',
     borderBottom: '1px solid #F0F0F5',
     color: '#1F2937',
+    whiteSpace: 'nowrap',
   };
 
   return (
@@ -1200,6 +1571,9 @@ export default function SgpAuditPage() {
         <button onClick={() => setActiveTab('neighbors')} style={tabStyle(activeTab === 'neighbors')}>
           Соседи по точке
         </button>
+        <button onClick={() => setActiveTab('buffer')} style={tabStyle(activeTab === 'buffer')}>
+          Buffer Status Report
+        </button>
       </div>
 
       {activeTab === 'timepoints' && (
@@ -1250,14 +1624,14 @@ export default function SgpAuditPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {leftTimeFilters.map(filter => (
                 <React.Fragment key={filter.label}>
-                  {renderTimeFilter(filter)}
+                  {renderTimeFilter(filter, tpFilters, setTpFilters)}
                 </React.Fragment>
               ))}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {rightTimeFilters.map(filter => (
                 <React.Fragment key={filter.label}>
-                  {renderTimeFilter(filter)}
+                  {renderTimeFilter(filter, tpFilters, setTpFilters)}
                 </React.Fragment>
               ))}
             </div>
@@ -1588,6 +1962,290 @@ export default function SgpAuditPage() {
         </div>
       )}
 
+      {activeTab === 'buffer' && (
+        <div style={cardStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937', margin: 0 }}>
+              🚗 Buffer Status Report
+            </h2>
+            <button style={{ ...buttonStyle, background: '#059669' }} onClick={exportBufferToExcel}>
+              📊 Экспорт Excel
+            </button>
+          </div>
+
+          {bufferLoading ? (
+            <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+              <style>{loadingAnimation}</style>
+              <div className="loading-dots" style={{ display: 'inline-block' }}>
+                <span>Загрузка данных</span>
+                <span>.</span><span>.</span><span>.</span>
+              </div>
+            </div>
+          ) : bufferError ? (
+            <div style={{ color: '#DC2626', textAlign: 'center', padding: 40 }}>❌ {bufferError}</div>
+          ) : (
+            <>
+              {/* ФИЛЬТРЫ ВЕРХНИЕ */}
+              <div style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', border: '1px solid #F0F0F5' }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
+                    <button onClick={() => setBufferChartPeriod('all')} style={tabStyle(bufferChartPeriod === 'all')}>Все</button>
+                    <button onClick={() => setBufferChartPeriod('year')} style={tabStyle(bufferChartPeriod === 'year')}>Год</button>
+                    <button onClick={() => setBufferChartPeriod('month')} style={tabStyle(bufferChartPeriod === 'month')}>Месяц</button>
+                    <button onClick={() => setBufferChartPeriod('week')} style={tabStyle(bufferChartPeriod === 'week')}>Неделя</button>
+                    <button onClick={() => setBufferChartPeriod('day')} style={tabStyle(bufferChartPeriod === 'day')}>День</button>
+                  </div>
+
+                  <label style={{ fontSize: 14, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+                    Модель:
+                    <select value={bufferChartModel} onChange={e => setBufferChartModel(e.target.value)} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB' }}>
+                      {bufferAvailableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              {/* ЗАГОЛОВОК ГРАФИКОВ ПОТОКА */}
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#1F2937', marginBottom: 16 }}>
+                Поток: График новых непринятых автомобилей (по дате CP8)
+              </div>
+
+              {/* ГРАФИКИ ПОТОКА */}
+              {bufferChartPeriod === 'all' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 2.3fr)', gap: 16, marginBottom: 40, alignItems: 'start' }}>
+                  {renderBufferTrendChart('📅 Не принято (3 месяца)', bufferChartsData.flowMonths, '#60A5FA')}
+                  {renderBufferTrendChart('📆 Не принято (4 недели)', bufferChartsData.flowWeeks, '#34D399')}
+                  {renderBufferTrendChart('📊 Не принято (14 дней)', bufferChartsData.flowDays, '#FBBF24')}
+                </div>
+              ) : (
+                <div style={{ marginBottom: 40 }}>
+                  {renderBufferTrendChart(`📊 Выбранный период (${bufferChartPeriod === 'year' ? 'Год' : bufferChartPeriod === 'month' ? 'Месяц' : bufferChartPeriod === 'week' ? 'Неделя' : 'День'})`, bufferChartsData.flowDays, '#FBBF24')}
+                </div>
+              )}
+
+              {/* ЗАГОЛОВОК ГРАФИКОВ ОСТАТКА */}
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#1F2937', marginBottom: 16 }}>
+                Остаток: Общее количество автомобилей в буфере на конец периода
+              </div>
+
+              {/* ГРАФИКИ ОСТАТКА */}
+              {bufferChartPeriod === 'all' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 2.3fr)', gap: 16, marginBottom: 30, alignItems: 'start' }}>
+                  {renderBufferTrendChart('📅 Остаток (3 месяца)', bufferChartsData.stockMonths, '#A78BFA')}
+                  {renderBufferTrendChart('📆 Остаток (4 недели)', bufferChartsData.stockWeeks, '#F472B6')}
+                  {renderBufferTrendChart('📊 Остаток (14 дней)', bufferChartsData.stockDays, '#FB923C')}
+                </div>
+              ) : (
+                <div style={{ marginBottom: 30 }}>
+                  {renderBufferTrendChart(`📊 Остаток за период (${bufferChartPeriod === 'year' ? 'Год' : bufferChartPeriod === 'month' ? 'Месяц' : bufferChartPeriod === 'week' ? 'Неделя' : 'День'})`, bufferChartsData.stockDays, '#FB923C')}
+                </div>
+              )}
+
+              {/* ФИЛЬТРЫ ВРЕМЕНИ */}
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: '1fr 1fr', 
+                gap: 10, 
+                marginBottom: 20,
+                padding: 16,
+                backgroundColor: '#F9FAFB',
+                borderRadius: 12,
+                border: '1px solid #E5E7EB',
+              }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {leftBufferTimeFilters.map(filter => (
+                    <React.Fragment key={filter.label}>
+                      {renderTimeFilter(filter, bufferTimeFilters, setBufferTimeFilters)}
+                    </React.Fragment>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {rightBufferTimeFilters.map(filter => (
+                    <React.Fragment key={filter.label}>
+                      {renderTimeFilter(filter, bufferTimeFilters, setBufferTimeFilters)}
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+
+              {/* ИНДИКАТОР АКТИВНЫХ ФИЛЬТРОВ */}
+              {(bufferCriterionFilter !== 'ALL' || bufferBlockFilter !== 'ALL' || bufferModelFilter !== 'ALL' || Object.keys(bufferTimeFilters).length > 0) && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#4B5563' }}>Активные фильтры:</span>
+                  {bufferCriterionFilter !== 'ALL' && <span style={{ padding: '4px 10px', background: '#FEF3C7', color: '#92400E', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>Критерий: {bufferCriterionFilter}</span>}
+                  {bufferBlockFilter !== 'ALL' && <span style={{ padding: '4px 10px', background: '#FEE2E2', color: '#991B1B', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>Статус: {bufferBlockFilter}</span>}
+                  {bufferModelFilter !== 'ALL' && <span style={{ padding: '4px 10px', background: '#E0F2FE', color: '#0369A1', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>Модель: {bufferModelFilter}</span>}
+                  {Object.keys(bufferTimeFilters).length > 0 && <span style={{ padding: '4px 10px', background: '#EFF6FF', color: '#1E40AF', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>Есть фильтры по времени</span>}
+                  <button onClick={clearBufferFilters} style={{ background: 'none', border: 'none', color: '#DC2626', textDecoration: 'underline', cursor: 'pointer', fontSize: 13 }}>Сбросить все</button>
+                </div>
+              )}
+
+              {/* ФИЛЬТРЫ ТАБЛИЦЫ */}
+              <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap', backgroundColor: '#F9FAFB', padding: 12, borderRadius: 8 }}>
+                <label style={labelStyle}>
+                  Критерий потеряшки:
+                  <select value={bufferCriterionFilter} onChange={e => setBufferCriterionFilter(e.target.value)} style={inputStyle}>
+                    <option value="ALL">Все</option>
+                    <option value="Принято">Принято</option>
+                    <option value="Не принято">Не принято</option>
+                    <option value="Ожидает CP8">Ожидает CP8</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  Статус блокировки:
+                  <select value={bufferBlockFilter} onChange={e => setBufferBlockFilter(e.target.value)} style={inputStyle}>
+                    <option value="ALL">Все</option>
+                    <option value="Блок">Блок</option>
+                    <option value="Не блок">Не блок</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  Модель авто:
+                  <select value={bufferModelFilter} onChange={e => setBufferModelFilter(e.target.value)} style={inputStyle}>
+                    {bufferAvailableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              {/* ТАБЛИЦА */}
+              <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid #E5E7EB', maxHeight: 'calc(100vh - 400px)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 1300 }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+                    <tr style={{ backgroundColor: '#F9FAFB' }}>
+                      {/* VIN - БЕЗ ТРЕУГОЛЬНИКА */}
+                      <th style={thStyle}>VIN</th>
+                      
+                      {/* Модель - БЕЗ ТРЕУГОЛЬНИКА */}
+                      <th style={thStyle}>Модель</th>
+
+                      {/* Остальные - С ТРЕУГОЛЬНИКАМИ */}
+                      <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('cp72_time')}>
+                        Дата CP72
+                        <span style={{ marginLeft: 4, color: bufferSort.column === 'cp72_time' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>
+                          {bufferSort.column === 'cp72_time' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}
+                        </span>
+                      </th>
+                      <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('adas_time')}>
+                        Дата ADAS
+                        <span style={{ marginLeft: 4, color: bufferSort.column === 'adas_time' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>
+                          {bufferSort.column === 'adas_time' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}
+                        </span>
+                      </th>
+                      <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('tltt_time')}>
+                        Дата TLTT
+                        <span style={{ marginLeft: 4, color: bufferSort.column === 'tltt_time' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>
+                          {bufferSort.column === 'tltt_time' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}
+                        </span>
+                      </th>
+                      <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('cp8_time')}>
+                        Дата CP8
+                        <span style={{ marginLeft: 4, color: bufferSort.column === 'cp8_time' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>
+                          {bufferSort.column === 'cp8_time' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}
+                        </span>
+                      </th>
+                      <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('in_storage_time')}>
+                        Постановка на СГП
+                        <span style={{ marginLeft: 4, color: bufferSort.column === 'in_storage_time' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>
+                          {bufferSort.column === 'in_storage_time' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}
+                        </span>
+                      </th>
+
+                      {/* Критерий - БЕЗ ТРЕУГОЛЬНИКА */}
+                      <th style={thStyle}>Критерий потеряшки</th>
+
+                      <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('diff_cp8_sgp')}>
+                        Время CP8 → СГП
+                        <span style={{ marginLeft: 4, color: bufferSort.column === 'diff_cp8_sgp' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>
+                          {bufferSort.column === 'diff_cp8_sgp' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}
+                        </span>
+                      </th>
+                      <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('diff_cp8_cp72')}>
+                        Время CP8 → CP72
+                        <span style={{ marginLeft: 4, color: bufferSort.column === 'diff_cp8_cp72' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>
+                          {bufferSort.column === 'diff_cp8_cp72' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}
+                        </span>
+                      </th>
+                      <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('block_status')}>
+                        Статус блокировки
+                        <span style={{ marginLeft: 4, color: bufferSort.column === 'block_status' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>
+                          {bufferSort.column === 'block_status' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}
+                        </span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredBufferData.length > 0 ? (
+                      filteredBufferData.slice(bufferPage * bufferPageSize, (bufferPage + 1) * bufferPageSize).map((item, idx) => (
+                        <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                          <td style={tdStyle}>{item.vin}</td>
+                          <td style={tdStyle}>{item.model}</td>
+                          <td style={tdStyle}>{formatDateTime(item.cp72_time)}</td>
+                          <td style={tdStyle}>{formatDateTime(item.adas_time)}</td>
+                          <td style={tdStyle}>{formatDateTime(item.tltt_time)}</td>
+                          <td style={tdStyle}>{formatDateTime(item.cp8_time)}</td>
+                          <td style={tdStyle}>{formatDateTime(item.in_storage_time)}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700, color: item.criterion === 'Не принято' ? '#DC2626' : (item.criterion === 'Принято' ? '#059669' : '#9CA3AF') }}>
+                            {item.criterion}
+                          </td>
+                          <td style={tdStyle}>{formatTimeDiff(item.in_storage_time, item.cp8_time)}</td>
+                          <td style={tdStyle}>{formatTimeDiff(item.cp8_time, item.cp72_time)}</td>
+                          <td 
+                            style={{ 
+                              ...tdStyle, 
+                              color: item.block_status.startsWith('Блок') ? '#DC2626' : '#1F2937', 
+                              cursor: item.block_status.startsWith('Блок') ? 'pointer' : 'default', 
+                              textDecoration: item.block_status.startsWith('Блок') ? 'underline' : 'none',
+                              fontWeight: item.block_status.startsWith('Блок') ? 700 : 400
+                            }}
+                            onClick={() => item.block_status.startsWith('Блок') && openBlockReasons(item.vin)}
+                            title={item.block_status.startsWith('Блок') ? 'Нажмите, чтобы посмотреть причины' : ''}
+                          >
+                            {item.block_status}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={11} style={{ ...tdStyle, textAlign: 'center', padding: 30 }}>
+                          Нет данных по выбранным фильтрам
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* ПАГИНАЦИЯ */}
+              {filteredBufferData.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
+                  <span style={{ fontSize: 14, color: '#6B7280' }}>Всего записей: {filteredBufferData.length}</span>
+                  {Math.ceil(filteredBufferData.length / bufferPageSize) > 1 && (
+                    <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                      <button 
+                        onClick={() => setBufferPage(p => Math.max(0, p - 1))} 
+                        disabled={bufferPage === 0} 
+                        style={{ ...buttonStyle, background: '#9CA3AF' }}
+                      >
+                        ← Назад
+                      </button>
+                      <span style={{ fontWeight: 500 }}>{bufferPage + 1} / {Math.ceil(filteredBufferData.length / bufferPageSize)}</span>
+                      <button 
+                        onClick={() => setBufferPage(p => Math.min(Math.ceil(filteredBufferData.length / bufferPageSize) - 1, p + 1))} 
+                        disabled={bufferPage === Math.ceil(filteredBufferData.length / bufferPageSize) - 1} 
+                        style={{ ...buttonStyle, background: '#9CA3AF' }}
+                      >
+                        Вперёд →
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {activeTab === 'checkpoints' && (
         <>
           <div style={{ marginBottom: 24, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', border: '1px solid #F0F0F5' }}>
@@ -1837,6 +2495,87 @@ export default function SgpAuditPage() {
                 📥 Экспорт
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* МОДАЛКА ПРИЧИН БЛОКИРОВКИ */}
+      {showBlockModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 2000,
+        }} onClick={() => setShowBlockModal(false)}>
+          <div style={{
+            backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24,
+            width: '90%', maxWidth: 800, maxHeight: '80vh',
+            display: 'flex', flexDirection: 'column',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#1F2937' }}>
+                Причины блокировки: <span style={{ color: '#DC2626' }}>{selectedBlockVin}</span>
+              </h3>
+              <button onClick={() => setShowBlockModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280' }}>×</button>
+            </div>
+
+            {blockReasonsLoading ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка...</div>
+            ) : (
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                
+                <h4 style={{ fontSize: 16, fontWeight: 700, color: '#DC2626', marginBottom: 12, borderBottom: '1px solid #FCA5A5', paddingBottom: 4 }}>
+                  Активные причины ({blockReasonsData.active.length})
+                </h4>
+                {blockReasonsData.active.length > 0 ? (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 24 }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#FEF2F2' }}>
+                        <th style={{ ...thStyle, color: '#991B1B' }}>Причина</th>
+                        <th style={{ ...thStyle, color: '#991B1B', width: 160 }}>Дата блокировки</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {blockReasonsData.active.map((r, i) => (
+                        <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#FEF2F2' }}>
+                          <td style={{ ...tdStyle, fontWeight: 600 }}>{r.reason}</td>
+                          <td style={tdStyle}>{formatDateTime(r.block_date)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p style={{ color: '#059669', fontSize: 14, marginBottom: 24 }}>Нет активных блокировок</p>
+                )}
+
+                <h4 style={{ fontSize: 16, fontWeight: 700, color: '#059669', marginBottom: 12, borderBottom: '1px solid #A7F3D0', paddingBottom: 4 }}>
+                  Разблокированные ранее ({blockReasonsData.cleared.length})
+                </h4>
+                {blockReasonsData.cleared.length > 0 ? (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#ECFDF5' }}>
+                        <th style={{ ...thStyle, color: '#065F46' }}>Причина</th>
+                        <th style={{ ...thStyle, color: '#065F46', width: 160 }}>Дата блокировки</th>
+                        <th style={{ ...thStyle, color: '#065F46', width: 160 }}>Дата разблокировки</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {blockReasonsData.cleared.map((r, i) => (
+                        <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#ECFDF5' }}>
+                          <td style={{ ...tdStyle, color: '#4B5563' }}>{r.reason}</td>
+                          <td style={{ ...tdStyle, color: '#4B5563' }}>{formatDateTime(r.block_date)}</td>
+                          <td style={{ ...tdStyle, color: '#059669', fontWeight: 600 }}>{formatDateTime(r.unblock_date)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p style={{ color: '#9CA3AF', fontSize: 14 }}>Нет разблокированных причин</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

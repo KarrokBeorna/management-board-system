@@ -6631,6 +6631,163 @@ app.get('/api/vehicles-model-complect', async (req, res) => {
 });
 
 
+app.get('/api/buffer-status-data', async (req, res) => {
+  try {
+    // 1. Берем ВСЕ машины из заказов (MES)
+    const [baseRows] = await mesPool.query(`
+      SELECT vin, MAX(product) AS model
+      FROM tm_ofm_order
+      WHERE is_deleted = 0
+      GROUP BY vin
+    `);
+
+    if (baseRows.length === 0) return res.json([]);
+    const vins = baseRows.map(r => r.vin);
+    
+    // Чанки для безопасных IN (...)
+    const chunks = [];
+    for (let i = 0; i < vins.length; i += 2000) chunks.push(vins.slice(i, i + 2000));
+
+    const cpMap = new Map();
+    const iotMap = new Map();
+    const lesMap = new Map();
+    const issueMap = new Map();
+
+    for (const chunk of chunks) {
+      const ph = chunk.map(() => '?').join(',');
+
+      // 2. CP8 и CP72 (MES) - вытаскиваем оба времени разом
+      const [cpRows] = await mesPool.query(`
+        SELECT vin, 
+               MAX(IF(uloc_no = 'AGMAS01004', scan_time, NULL)) AS cp8_time,
+               MAX(IF(uloc_no = 'CP72', scan_time, NULL)) AS cp72_time
+        FROM ti_mes_movement
+        WHERE vin IN (${ph}) AND is_deleted = 0
+        GROUP BY vin
+      `, chunk);
+      cpRows.forEach(r => cpMap.set(r.vin, r));
+
+      // 3. ADAS и TLTT (IOT)
+      const [iotRows] = await pool.query(`
+        SELECT vin, 
+               MAX(IF(WC_NAME = 'TLADAS', CREATION_TIME, NULL)) AS adas_time, 
+               MAX(IF(WC_NAME = 'TLTT', CREATION_TIME, NULL)) AS tltt_time
+        FROM at_om_wiptrackinghistory
+        WHERE vin IN (${ph})
+        GROUP BY vin
+      `, chunk);
+      iotRows.forEach(r => iotMap.set(r.vin, r));
+
+      // 4. Постановка на СГП (LES)
+      const [lesRows] = await lesPool.query(`
+        SELECT vin, in_storage_time
+        FROM tv_biz_storage_car
+        WHERE vin IN (${ph})
+      `, chunk);
+      lesRows.forEach(r => lesMap.set(r.vin, r));
+
+      // 5. Статус блокировки качества (LES)
+      const [issueRows] = await lesPool.query(`
+        SELECT vin, COUNT(DISTINCT issue_desc) AS issue_count
+        FROM tv_quality_issue_detail
+        WHERE vin IN (${ph}) AND is_deleted = 0 AND status = 0 AND clear_time IS NULL
+        GROUP BY vin
+      `, chunk);
+      issueRows.forEach(r => issueMap.set(r.vin, r));
+    }
+
+    // 6. Собираем итог
+    const result = baseRows.map(base => {
+      const vin = base.vin;
+      const cp = cpMap.get(vin) || {};
+      const iot = iotMap.get(vin) || {};
+      const les = lesMap.get(vin) || {};
+      const issue = issueMap.get(vin);
+
+      const cp8_time = cp.cp8_time || null;
+      const cp72_time = cp.cp72_time || null;
+      const in_storage_time = les.in_storage_time || null;
+
+      // Логика потеряшки
+      let criterion = 'Ожидает CP8';
+      if (cp8_time) {
+        if (in_storage_time && new Date(in_storage_time) >= new Date(cp8_time)) {
+          criterion = 'Принято';
+        } else {
+          criterion = 'Не принято';
+        }
+      }
+
+      let block_status = 'Не блок';
+      if (issue && issue.issue_count > 0) {
+        block_status = issue.issue_count === 1 ? 'Блок (1 причина)' : `Блок (${issue.issue_count} причины)`;
+      }
+
+      return {
+        vin,
+        model: base.model || '—',
+        cp72_time,
+        adas_time: iot.adas_time || null,
+        tltt_time: iot.tltt_time || null,
+        cp8_time,
+        in_storage_time,
+        criterion,
+        block_status
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка Buffer Status Report:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/buffer-status-block-reasons', async (req, res) => {
+  try {
+    const { vin } = req.query;
+    if (!vin) return res.status(400).json({ error: 'vin обязателен' });
+
+    // Запрашиваем все записи по VIN из LES
+    const [rows] = await lesPool.query(`
+      SELECT 
+        issue_desc AS reason,
+        gmt_create AS block_date,
+        clear_time AS unblock_date,
+        status,
+        COALESCE(clear_man, create_man) AS responsible
+      FROM tv_quality_issue_detail
+      WHERE vin = ? AND is_deleted = 0
+      ORDER BY gmt_create DESC
+    `, [vin]);
+
+    const active = [];
+    const cleared = [];
+
+    rows.forEach(row => {
+      const item = {
+        reason: row.reason,
+        block_date: row.block_date,
+        unblock_date: row.unblock_date,
+        responsible: row.responsible
+      };
+
+      // Если статус 0 и нет времени разблокировки — причина активна
+      if (row.status === 0 && !row.unblock_date) {
+        active.push(item);
+      } else {
+        cleared.push(item);
+      }
+    });
+
+    res.json({ active, cleared });
+  } catch (err) {
+    console.error('Ошибка получения причин блокировки:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 /* ====================================================================== */
 /* ================== DRR CP7 — ОСНОВНЫЕ ЭНДПОИНТЫ ====================== */
 /* ====================================================================== */
