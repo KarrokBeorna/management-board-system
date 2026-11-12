@@ -36,6 +36,8 @@ import reppsPreview from './assets/repps.png';
 import voltageSpcPreview from './assets/volt.png';
 import repelecPreview from './assets/repelec.png'; 
 import drrElectronicsPreview from './assets/dshelec.png';
+import ecToolPreview from './assets/123.png';
+import workshopPreview from './assets/123.png';//поменять надо
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -367,8 +369,9 @@ export default function HomePage() {
     { to: "/all-drr-dashboard", imgSrc: allDrrPreview, caption: "All DRR Dashboard", accentColor: "#0EA5E9" },
     { to: "/drr-shift-dashboard", imgSrc: drrShiftPreview, caption: "DRR Shift Dashboard", accentColor: "#7C3AED" },
     { to: "/repps-report", imgSrc: reppsPreview, caption: "REPPS Report", accentColor: "#EC4899" },
-    { to: "/voltage-spc", imgSrc: voltageSpcPreview, caption: "Voltage SPC Report", accentColor: "#F59E0B" },
+    { to: "/voltage-spc", imgSrc: voltageSpcPreview, caption: "Voltage SPC Report", accentColor: "#0bf52a" },
     { to: "/repelec-report", imgSrc: repelecPreview, caption: "REPELEC Report", accentColor: "#F59E0B" },
+    { to: "/ec-tool-report", imgSrc: ecToolPreview, caption: "EC Tool Report", accentColor: "#2e0bf5" },
   ];
 
   const allServiceCards = [
@@ -382,7 +385,8 @@ export default function HomePage() {
     { to: "/brigade-report", imgSrc: brigPreview, caption: "Brigade Report Service", accentColor: "#3B82F6" },
     { to: "/vrt-report", imgSrc: vrtPreview, caption: "VRT Report Service", accentColor: "#7C3AED" },
     { to: "http://10.27.195.25:30000/defect-capture", imgSrc: defectCapturePreview, caption: "Defect Capture", accentColor: "#10B981" },
-    { to: "http://10.27.195.25:30000/line-defects-archive", imgSrc: lineDefectsArchivePreview, caption: "Line Defects Archive", accentColor: "#10B981" }
+    { to: "http://10.27.195.25:30000/line-defects-archive", imgSrc: lineDefectsArchivePreview, caption: "Line Defects Archive", accentColor: "#10B981" },
+    { to: "/workshop-update", imgSrc: workshopPreview, caption: "Workshop (Справочники)", accentColor: "#10B981" },
   ];
 
   // DRR-отчёты выносим в отдельную вкладку

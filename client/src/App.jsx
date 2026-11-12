@@ -39,6 +39,8 @@ import VoltageSpcPage from './VoltageSpcPage';
 import DrrCp7TupDashboardPage from './DrrCp7TupDashboardPage';
 import RepelecReportPage from './RepelecReportPage';
 import DrrElectronicsDashboardPage from './DrrElectronicsDashboardPage';
+import WorkshopUpdate from './WorkshopUpdate';
+import ECToolReportPage from './ECToolReportPage';
 
 
 import InspectionPage from './InspectionPage';
@@ -85,6 +87,8 @@ export default function App() {
         <Route path="/drr-cp7-tup" element={<DrrCp7TupDashboardPage />} />
         <Route path="/repelec-report" element={<RepelecReportPage />} />
         <Route path="/drr-electronics-dashboard" element={<DrrElectronicsDashboardPage />} />
+        <Route path="/workshop-update" element={<WorkshopUpdate />} />
+        <Route path="/ec-tool-report" element={<ECToolReportPage />} />
 
 
 

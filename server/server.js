@@ -6678,9 +6678,9 @@ app.get('/api/buffer-status-data', async (req, res) => {
       `, chunk);
       iotRows.forEach(r => iotMap.set(r.vin, r));
 
-      // 4. Постановка на СГП (LES)
+      // 4. Постановка на СГП и складская локация (LES) -- ОБНОВЛЕНО
       const [lesRows] = await lesPool.query(`
-        SELECT vin, in_storage_time
+        SELECT vin, in_storage_time, ck_no, kq_no, kw_no
         FROM tv_biz_storage_car
         WHERE vin IN (${ph})
       `, chunk);
@@ -6708,6 +6708,11 @@ app.get('/api/buffer-status-data', async (req, res) => {
       const cp72_time = cp.cp72_time || null;
       const in_storage_time = les.in_storage_time || null;
 
+      // Формируем складскую локацию (склеиваем через дефис, если есть данные)
+      const storage_location = (les.ck_no || les.kq_no || les.kw_no) 
+        ? [les.ck_no, les.kq_no, les.kw_no].filter(v => v && v !== 'N/A').join('-') 
+        : '-';
+
       // Логика потеряшки
       let criterion = 'Ожидает CP8';
       if (cp8_time) {
@@ -6726,6 +6731,7 @@ app.get('/api/buffer-status-data', async (req, res) => {
       return {
         vin,
         model: base.model || '—',
+        storage_location, // <-- ДОБАВЛЕНО В ОТВЕТ
         cp72_time,
         adas_time: iot.adas_time || null,
         tltt_time: iot.tltt_time || null,
@@ -19206,9 +19212,691 @@ app.get('/api/drr-electronics-snapshot/:id', async (req, res) => {
 });
 
 
+// ======================================================================
+// ХЕЛПЕР: Безопасная дата YYYY-MM-DD (без сдвига часового пояса)
+// ======================================================================
+function getLocalDateString(date) {
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+// ======================================================================
+// ХЕЛПЕР: Расчет ISO-недели
+// ======================================================================
+function getWeekNumberForDate(date) {
+  const d = new Date(date);
+  d.setHours(12, 0, 0, 0);
+  const dayNum = d.getDay() || 7;
+  d.setDate(d.getDate() + 4 - dayNum);
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+// ======================================================================
+// ЭНДПОИНТ: EC Tool Report (Гайковёрты)
+// ======================================================================
+app.get('/api/ec-tool-report', async (req, res) => {
+  try {
+    const { period = 'all', count = 3, fromDate, toDate } = req.query;
+    const limit = parseInt(count, 10) || 3;
+
+    // Опорная дата — последняя запись в базе (защита от расхождения часов сервера)
+    let now;
+    if (fromDate) {
+      now = new Date(fromDate);
+    } else {
+      const [maxRow] = await pool.query(
+        `SELECT MAX(CREATION_TIME) AS max_d FROM at_qm_defect_info`
+      );
+      now = maxRow[0].max_d ? new Date(maxRow[0].max_d) : new Date();
+    }
+
+    // ------------------------------------------------------------------
+    // ОКНО ДАННЫХ
+    // ИСПРАВЛЕНО: раньше без ручных дат окно было ВСЕГДА «3 месяца назад
+    // → сейчас» независимо от period/count — поэтому парето (pieData)
+    // и топ-3 не реагировали на фильтр «14 дней» / «4 недели» и т.д.
+    // Теперь окно строго соответствует выбранному фильтру.
+    // ------------------------------------------------------------------
+    let globalStart, globalEnd;
+    if (fromDate && toDate) {
+      globalStart = fromDate;
+      globalEnd = toDate;
+    } else {
+      let startDate;
+      if (period === 'day') {
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - (limit - 1));
+      } else if (period === 'week') {
+        const dow = now.getDay();
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1) - (limit - 1) * 7);
+        startDate = monday;
+      } else {
+        // month: limit месяцев включая текущий; all: 3 месяца включая текущий
+        // (раньше all начинался на месяц РАНЬШЕ первого столбца графика)
+        const monthsBack = period === 'all' ? 2 : limit - 1;
+        startDate = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
+      }
+
+      // Тёмная таблица на фронте всегда показывает прошлую + текущую неделю —
+      // окно обязано их покрывать, иначе таблица опустеет при коротких фильтрах
+      const dow = now.getDay();
+      const prevMonday = new Date(now);
+      prevMonday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1) - 7);
+      if (prevMonday < startDate) startDate = prevMonday;
+
+      globalStart = getLocalDateString(startDate);
+      globalEnd = getLocalDateString(now);
+    }
+
+    // Данные в PROBLEM_DESCRIPTION, дата — datetime без STR_TO_DATE
+    const [defects] = await pool.query(`
+      SELECT
+        VIN,
+        CONCAT(PART_NAME, ' ', PROBLEM_DESCRIPTION) AS MPP,
+        PART_NAME,
+        PROBLEM_DESCRIPTION AS TOOL,
+        DATE_FORMAT(CREATION_TIME, '%Y-%m-%d') AS CREATION_TIME,
+        1 AS DEFECTS_COUNT
+      FROM at_qm_defect_info
+      WHERE PROBLEM_DESCRIPTION LIKE '%-EC-%'
+        AND CREATION_TIME >= ?
+        AND CREATION_TIME < DATE_ADD(?, INTERVAL 1 DAY)
+    `, [`${globalStart} 00:00:00`, globalEnd]);
+
+    console.log(`[EC-Tool] Период ${globalStart}..${globalEnd} (${period} x${limit}), найдено дефектов: ${defects.length}`);
+
+    // CP72 для DPU
+    const [cp72Rows] = await mesPool.query(`
+      SELECT VIN, DATE_FORMAT(MIN(scan_time), '%Y-%m-%d') AS cp72_date
+      FROM ti_mes_movement
+      WHERE uloc_no = 'CP72' AND is_deleted = 0
+        AND scan_time >= ? AND scan_time < DATE_ADD(?, INTERVAL 1 DAY)
+      GROUP BY VIN
+    `, [`${globalStart} 00:00:00`, globalEnd]);
+
+    const carsByDate = {};
+    cp72Rows.forEach(r => {
+      if (r.cp72_date) carsByDate[r.cp72_date] = (carsByDate[r.cp72_date] || 0) + 1;
+    });
+
+    // Топ-3 инструмента — группируем по PROBLEM_DESCRIPTION
+    // (теперь — строго внутри окна выбранного фильтра)
+    const toolMap = {};
+    defects.forEach(d => { toolMap[d.TOOL] = (toolMap[d.TOOL] || 0) + 1; });
+    const sortedTools = Object.keys(toolMap).sort((a, b) => toolMap[b] - toolMap[a]);
+    const top3Tools = sortedTools.slice(0, 3);
+    const pieData = sortedTools.map(name => ({ name, value: toolMap[name] }));
+
+    // Периоды
+    const monthNames = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+    const periods = [];
+    if (period === 'all' && (!fromDate || !toDate)) {
+      for (let i = 2; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0');
+        const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+        periods.push({ type: 'month', label: `${monthNames[d.getMonth()]} ${y}`, start: `${y}-${m}-01`, end: `${y}-${m}-${String(lastDay).padStart(2, '0')}` });
+      }
+      const dayOfWeek = now.getDay();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      for (let i = 3; i >= 0; i--) {
+        const start = new Date(monday); start.setDate(monday.getDate() - i * 7);
+        const end = new Date(start); end.setDate(start.getDate() + 6);
+        periods.push({ type: 'week', label: `W${getWeekNumberForDate(start)}`, start: getLocalDateString(start), end: getLocalDateString(end) });
+      }
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(now); d.setDate(now.getDate() - i);
+        const ds = getLocalDateString(d);
+        periods.push({ type: 'day', label: `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`, start: ds, end: ds });
+      }
+    } else {
+      const baseDate = fromDate ? new Date(fromDate) : now;
+      if (period === 'day') {
+        for (let i = limit - 1; i >= 0; i--) {
+          const d = new Date(baseDate); d.setDate(baseDate.getDate() - i);
+          const ds = getLocalDateString(d);
+          periods.push({ type: 'day', label: `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`, start: ds, end: ds });
+        }
+      } else if (period === 'week') {
+        const dayOfWeek = baseDate.getDay();
+        const monday = new Date(baseDate);
+        monday.setDate(baseDate.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+        for (let i = limit - 1; i >= 0; i--) {
+          const start = new Date(monday); start.setDate(monday.getDate() - i * 7);
+          const end = new Date(start); end.setDate(start.getDate() + 6);
+          periods.push({ type: 'week', label: `W${getWeekNumberForDate(start)}`, start: getLocalDateString(start), end: getLocalDateString(end) });
+        }
+      } else if (period === 'month') {
+        for (let i = limit - 1; i >= 0; i--) {
+          const d = new Date(baseDate.getFullYear(), baseDate.getMonth() - i, 1);
+          const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0');
+          const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+          periods.push({ type: 'month', label: `${monthNames[d.getMonth()]} ${y}`, start: `${y}-${m}-01`, end: `${y}-${m}-${String(lastDay).padStart(2, '0')}` });
+        }
+      }
+    }
+
+    // Машины за произвольный диапазон (YMD-строки сравниваются лексикографически)
+    const carsInRange = (s, e) => {
+      let sum = 0;
+      for (const [d, c] of Object.entries(carsByDate)) {
+        if (d >= s && d <= e) sum += c;
+      }
+      return sum;
+    };
+
+    // Агрегация для графиков
+    // НОВОЕ: поле cars — машин за период точки. Фронт использует его для DPU
+    // вместо парсинга подписей (надёжно для дней/недель/месяцев).
+    const dataPoints = periods.map(p => {
+      const inPeriod = defects.filter(d => d.CREATION_TIME >= p.start && d.CREATION_TIME <= p.end);
+      const pt = {
+        type: p.type, label: p.label,
+        start: p.start, end: p.end, startDate: p.start, endDate: p.end,
+        total: inPeriod.length,
+        cars: carsInRange(p.start, p.end),
+      };
+      top3Tools.forEach(tool => {
+        pt[tool] = inPeriod.filter(d => d.TOOL === tool).length;
+      });
+      return pt;
+    });
+
+    res.json({ dataPoints, pieData, top3Tools, defects, carsByDate });
+  } catch (err) {
+    console.error('Ошибка /api/ec-tool-report:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 
+/* ====================================================================== */
+/* ================== IOT DEFECT WORKSHOP SERVICE ======================= */
+/* ====================================================================== */
+const ExcelJS = require('exceljs');
+const archiver = require('archiver');
+const AdmZip = require('adm-zip');
+
+const WS_MAX_ZIP_BYTES = 200 * 1024 * 1024;
+
+const wsChunk = (arr, size) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
+
+const wsCellValue = (cell) => {
+  if (!cell) return '';
+  const v = cell.value;
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') {
+    if (Array.isArray(v.richText)) return v.richText.map(r => r.text).join('');
+    if (typeof v.text === 'string') return v.text;
+    if (v.result !== undefined && v.result !== null) return String(v.result);
+    return '';
+  }
+  return String(v);
+};
+
+// ======================================================================
+// 1. Данные
+// ======================================================================
+app.get('/api/workshop/data', async (req, res) => {
+  try {
+    const [parts] = await notesPool.query('SELECT * FROM ws_parts');
+    const [incidents] = await notesPool.query('SELECT * FROM ws_incidents');
+    const [positions] = await notesPool.query('SELECT * FROM ws_positions');
+    const [partIncidents] = await notesPool.query('SELECT * FROM ws_part_incidents');
+    const [partPositions] = await notesPool.query('SELECT * FROM ws_part_positions');
+
+    res.json({
+      parts,
+      incidents,
+      positions,
+      links: { partIncidents, partPositions },
+    });
+  } catch (err) {
+    console.error('Ошибка /api/workshop/data:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ======================================================================
+// 2. Синхронизация из IOT
+// ======================================================================
+app.post('/api/workshop/sync-iot', async (req, res) => {
+  let conn;
+  try {
+    conn = await notesPool.getConnection();
+    await conn.beginTransaction();
+
+    // --- 2.1 Синхронизация справочника позиций из car_position ---
+    const [carPositions] = await pool.query('SELECT position_code, position_desc FROM car_position');
+    const posValues = [];
+    const knownPositionDescs = new Set();
+    const descToCode = new Map();
+
+    carPositions.forEach(p => {
+      if (p.position_code && p.position_desc) {
+        const code = String(p.position_code).trim();
+        const desc = String(p.position_desc).trim();
+        posValues.push([code, desc]);
+        knownPositionDescs.add(desc);
+        if (!descToCode.has(desc)) descToCode.set(desc, code);
+      }
+    });
+
+    for (const batch of wsChunk(posValues, 500)) {
+      await conn.query('INSERT IGNORE INTO ws_positions (code, desc_text) VALUES ?', [batch]);
+    }
+
+    // --- 2.2 Синхронизация связей из car_part_position ---
+    const [carPartPositions] = await pool.query('SELECT part_code, position_code FROM car_part_position');
+    const cppLinks = [];
+    const partsFromCpp = new Map();
+
+    carPartPositions.forEach(p => {
+      if (p.part_code && p.position_code) {
+        const partCode = String(p.part_code).trim();
+        const posCode = String(p.position_code).trim();
+        cppLinks.push([partCode, posCode]);
+        partsFromCpp.set(partCode, [partCode, partCode]); // desc временно = код, перезапишется из дефектов
+      }
+    });
+
+    // --- 2.3 Синхронизация дефектов, деталей и топ-инцидентов ---
+    const [defects] = await pool.query(`
+      SELECT DISTINCT
+        part_code              AS partCode,
+        PART_NAME              AS partDesc,
+        PROBLEM_CLASSIFICATION AS incidentCode,
+        PROBLEM_TYPE           AS incidentDesc,
+        position               AS positionDesc
+      FROM at_qm_defect_info
+      WHERE part_code IS NOT NULL AND part_code != ''
+        AND PART_NAME IS NOT NULL AND PART_NAME != ''
+        AND PROBLEM_TYPE IS NOT NULL AND PROBLEM_TYPE != ''
+        AND CREATION_TIME >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+    `);
+
+    const partsMap = new Map(partsFromCpp);
+    const incidentsMap = new Map();
+    const textPositionsMap = new Map();
+    const partIncidentLinksSet = new Set();
+    const partPositionLinksSet = new Set();
+
+    // Заполняем связки из car_part_position
+    cppLinks.forEach(([pc, pos]) => partPositionLinksSet.add(`${pc}|${pos}`));
+
+    defects.forEach(row => {
+      const partCode = String(row.partCode).trim();
+      const partDesc = String(row.partDesc || '').trim();
+      const incCode = row.incidentCode ? String(row.incidentCode).trim() : '';
+      const incDesc = row.incidentDesc ? String(row.incidentDesc).trim() : '';
+      const posDesc = row.positionDesc ? String(row.positionDesc).trim() : '';
+
+      if (partCode && partDesc) partsMap.set(partCode, [partCode, partDesc]);
+
+      if (incCode && incDesc) {
+        incidentsMap.set(incCode, [incCode, incDesc]);
+        if (partCode) partIncidentLinksSet.add(`${partCode}|${incCode}`);
+      }
+
+      if (posDesc && partCode) {
+        let posCode = descToCode.get(posDesc);
+        if (!posCode) {
+          // Текстовая позиция, которой нет в справочнике car_position
+          posCode = posDesc;
+          textPositionsMap.set(posDesc, [posDesc, posDesc]);
+        }
+        partPositionLinksSet.add(`${partCode}|${posCode}`);
+      }
+    });
+
+    const partIncidentLinks = [...partIncidentLinksSet].map(s => s.split('|'));
+    const partPositionLinks = [...partPositionLinksSet].map(s => s.split('|'));
+
+    // Вставляем всё батчами
+    for (const batch of wsChunk([...partsMap.values()], 500)) {
+      await conn.query('INSERT IGNORE INTO ws_parts (code, desc_text) VALUES ?', [batch]);
+    }
+    for (const batch of wsChunk([...incidentsMap.values()], 500)) {
+      await conn.query('INSERT IGNORE INTO ws_incidents (code, desc_text) VALUES ?', [batch]);
+    }
+    for (const batch of wsChunk([...textPositionsMap.values()], 500)) {
+      await conn.query('INSERT IGNORE INTO ws_positions (code, desc_text) VALUES ?', [batch]);
+    }
+    for (const batch of wsChunk(partIncidentLinks, 500)) {
+      await conn.query('INSERT IGNORE INTO ws_part_incidents (part_code, problem_code) VALUES ?', [batch]);
+    }
+    for (const batch of wsChunk(partPositionLinks, 500)) {
+      await conn.query('INSERT IGNORE INTO ws_part_positions (part_code, position_code) VALUES ?', [batch]);
+    }
+
+    await conn.commit();
+    res.json({ success: true, synced: defects.length });
+  } catch (err) {
+    if (conn) { try { await conn.rollback(); } catch {} }
+    console.error('Ошибка синхронизации Workshop:', err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+// ======================================================================
+// 3. Сохранение изменений
+// ======================================================================
+app.post('/api/workshop/save', async (req, res) => {
+  let conn;
+  try {
+    const { parts, incidents, positions, links } = req.body || {};
+
+    conn = await notesPool.getConnection();
+    await conn.beginTransaction();
+
+    if (Array.isArray(parts) && parts.length > 0) {
+      const values = parts.filter(p => p && p.code).map(p => [
+        String(p.code).trim(), String(p.desc_text || '').trim(), p.have_child ? 1 : 0, p.is_deleted ? 1 : 0,
+      ]);
+      for (const batch of wsChunk(values, 500)) {
+        await conn.query(`INSERT INTO ws_parts (code, desc_text, have_child, is_deleted) VALUES ? ON DUPLICATE KEY UPDATE desc_text = VALUES(desc_text), have_child = VALUES(have_child), is_deleted = VALUES(is_deleted)`, [batch]);
+      }
+    }
+
+    if (Array.isArray(incidents) && incidents.length > 0) {
+      const values = incidents.filter(i => i && i.code).map(i => [
+        String(i.code).trim(), String(i.desc_text || '').trim(), i.is_deleted ? 1 : 0,
+      ]);
+      for (const batch of wsChunk(values, 500)) {
+        await conn.query(`INSERT INTO ws_incidents (code, desc_text, is_deleted) VALUES ? ON DUPLICATE KEY UPDATE desc_text = VALUES(desc_text), is_deleted = VALUES(is_deleted)`, [batch]);
+      }
+    }
+
+    if (Array.isArray(positions) && positions.length > 0) {
+      const values = positions.filter(p => p && p.code).map(p => [
+        String(p.code).trim(),
+        p.desc_text ? String(p.desc_text).trim() : null,
+        p.export_code ? String(p.export_code).trim() : null, // Для "хвостов" (Верх, Лев)
+        p.is_deleted ? 1 : 0,
+      ]);
+      for (const batch of wsChunk(values, 500)) {
+        await conn.query(`INSERT INTO ws_positions (code, desc_text, export_code, is_deleted) VALUES ? ON DUPLICATE KEY UPDATE desc_text = VALUES(desc_text), export_code = VALUES(export_code), is_deleted = VALUES(is_deleted)`, [batch]);
+      }
+    }
+
+    if (links && Array.isArray(links.partIncidents)) {
+      await conn.query('DELETE FROM ws_part_incidents');
+      const values = links.partIncidents.filter(li => li && li.part_code && li.problem_code).map(li => [String(li.part_code).trim(), String(li.problem_code).trim()]);
+      for (const batch of wsChunk(values, 500)) {
+        await conn.query('INSERT IGNORE INTO ws_part_incidents (part_code, problem_code) VALUES ?', [batch]);
+      }
+    }
+
+    if (links && Array.isArray(links.partPositions)) {
+      await conn.query('DELETE FROM ws_part_positions');
+      const values = links.partPositions.filter(lp => lp && lp.part_code && lp.position_code).map(lp => [String(lp.part_code).trim(), String(lp.position_code).trim()]);
+      for (const batch of wsChunk(values, 500)) {
+        await conn.query('INSERT IGNORE INTO ws_part_positions (part_code, position_code) VALUES ?', [batch]);
+      }
+    }
+
+    await conn.commit();
+    res.json({ success: true });
+  } catch (err) {
+    if (conn) { try { await conn.rollback(); } catch {} }
+    console.error('Ошибка сохранения Workshop:', err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+// ======================================================================
+// 4. Проверка перед экспортом
+// ======================================================================
+app.get('/api/workshop/export-check', async (req, res) => {
+  try {
+    const [positions] = await notesPool.query('SELECT * FROM ws_positions WHERE is_deleted = 0');
+    const [partPositions] = await notesPool.query('SELECT * FROM ws_part_positions');
+
+    // Позиции без кода: текстовые (Верх, Лев), у которых export_code пуст
+    const unmapped = positions.filter(p => {
+      const isNumeric = /^\d+$/.test(p.code); // 115 - число
+      const hasExportCode = p.export_code && p.export_code.trim();
+      return !isNumeric && !hasExportCode;
+    });
+
+    const unmappedSet = new Set(unmapped.map(p => p.code));
+    const lostLinks = partPositions.filter(pp => unmappedSet.has(pp.position_code)).length;
+
+    res.json({
+      totalPositions: positions.length,
+      mappedPositions: positions.length - unmapped.length,
+      unmappedPositions: unmapped.map(p => ({ code: p.code, desc_text: p.desc_text })),
+      lostLinks,
+      readyToExport: unmapped.length === 0,
+    });
+  } catch (err) {
+    console.error('Ошибка /api/workshop/export-check:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ======================================================================
+// 5. Экспорт ZIP
+// ======================================================================
+app.get('/api/workshop/export', async (req, res) => {
+  try {
+    const [parts] = await notesPool.query('SELECT * FROM ws_parts');
+    const [incidents] = await notesPool.query('SELECT * FROM ws_incidents');
+    const [positions] = await notesPool.query('SELECT * FROM ws_positions');
+    const [partIncidents] = await notesPool.query('SELECT * FROM ws_part_incidents');
+    const [partPositions] = await notesPool.query('SELECT * FROM ws_part_positions');
+
+    const activeParts = parts.filter(p => !p.is_deleted);
+    const activeIncidents = incidents.filter(i => !i.is_deleted);
+    const activePositions = positions.filter(p => !p.is_deleted);
+
+    const activePartCodes = new Set(activeParts.map(p => p.code));
+    const activeIncidentCodes = new Set(activeIncidents.map(i => i.code));
+
+    // Карта: code → export_code (для текстовых) или сам code (для числовых)
+    const positionCodeMap = new Map();
+    activePositions.forEach(p => {
+      const isNumeric = /^\d+$/.test(p.code);
+      const ec = (p.export_code || '').trim();
+      if (isNumeric) {
+        positionCodeMap.set(p.code, p.code);
+      } else if (ec) {
+        positionCodeMap.set(p.code, ec);
+      }
+    });
+
+    const activePartIncidents = partIncidents.filter(pi =>
+      activePartCodes.has(pi.part_code) && activeIncidentCodes.has(pi.problem_code)
+    );
+    // Оставляем только те связи, для которых есть маппинг позиции
+    const activePartPositions = partPositions.filter(pp =>
+      activePartCodes.has(pp.part_code) && positionCodeMap.has(pp.position_code)
+    );
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="Workshop_Dictionaries.zip"');
+
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    archive.on('error', (err) => {
+      console.error('Ошибка архива Workshop:', err);
+      if (!res.headersSent) res.status(500).end(); else res.end();
+    });
+    archive.pipe(res);
+
+    const wbParts = new ExcelJS.Workbook();
+    const wsParts = wbParts.addWorksheet('Sheet1');
+    wsParts.addRow(['code', 'desc', 'haveChild']);
+    activeParts.forEach(p => wsParts.addRow([p.code, p.desc_text, p.have_child ? 'true' : 'false']));
+    archive.append(Buffer.from(await wbParts.xlsx.writeBuffer()), { name: 'Детали Part.xlsx' });
+
+    const wbInc = new ExcelJS.Workbook();
+    const wsInc = wbInc.addWorksheet('Sheet1');
+    wsInc.addRow(['code', 'desc']);
+    activeIncidents.forEach(i => wsInc.addRow([i.code, i.desc_text]));
+    archive.append(Buffer.from(await wbInc.xlsx.writeBuffer()), { name: 'Ошибки Incident.xlsx' });
+
+    const wbPI = new ExcelJS.Workbook();
+    const wsPI = wbPI.addWorksheet('Sheet1');
+    wsPI.addRow(['partCode', 'problemCode']);
+    activePartIncidents.forEach(pi => wsPI.addRow([pi.part_code, pi.problem_code]));
+    archive.append(Buffer.from(await wbPI.xlsx.writeBuffer()), { name: 'Деталь дефект Part Incidents (1).xlsx' });
+
+    const wbPos = new ExcelJS.Workbook();
+    const wsPos = wbPos.addWorksheet('Sheet1');
+    wsPos.addRow(['partCode', 'positionCode']);
+    activePartPositions.forEach(pp => {
+      wsPos.addRow([pp.part_code, positionCodeMap.get(pp.position_code)]);
+    });
+    archive.append(Buffer.from(await wbPos.xlsx.writeBuffer()), { name: 'Локации Part Position.xlsx' });
+
+    const wbGrp = new ExcelJS.Workbook();
+    const wsGrp = wbGrp.addWorksheet('Sheet1');
+    wsGrp.addRow(['code', 'desc']);
+    activeIncidents.forEach(i => wsGrp.addRow([i.code, i.desc_text]));
+    archive.append(Buffer.from(await wbGrp.xlsx.writeBuffer()), { name: 'Ошибки и их группы Incident Group.xlsx' });
+
+    await archive.finalize();
+  } catch (err) {
+    console.error('Ошибка экспорта Workshop:', err);
+    if (!res.headersSent) res.status(500).json({ error: err.message }); else res.end();
+  }
+});
+
+// ======================================================================
+// 6. Импорт ZIP
+// ======================================================================
+app.post('/api/workshop/import', async (req, res) => {
+  let conn;
+  try {
+    const { data: base64Data } = req.body || {};
+    if (!base64Data) return res.status(400).json({ error: 'Нет данных для импорта' });
+
+    const zipBuffer = Buffer.from(base64Data, 'base64');
+    if (zipBuffer.length > WS_MAX_ZIP_BYTES) {
+      return res.status(413).json({ error: `ZIP больше ${WS_MAX_ZIP_BYTES / 1024 / 1024} МБ` });
+    }
+
+    let zip;
+    try { zip = new AdmZip(zipBuffer); } catch (e) { return res.status(400).json({ error: 'Неверный формат ZIP' }); }
+
+    const zipEntries = zip.getEntries();
+    const hasPartsFile = zipEntries.some(e => e.entryName.includes('Детали Part'));
+    const hasIncidentsFile = zipEntries.some(e => e.entryName.includes('Ошибки Incident'));
+    const hasPartIncidentsFile = zipEntries.some(e => e.entryName.includes('Деталь дефект Part Incidents'));
+    const hasPartPositionsFile = zipEntries.some(e => e.entryName.includes('Локации Part Position'));
+
+    if (!hasPartsFile && !hasIncidentsFile && !hasPartIncidentsFile && !hasPartPositionsFile) {
+      return res.status(400).json({ error: 'В ZIP нет ожидаемых файлов' });
+    }
+
+    conn = await notesPool.getConnection();
+    await conn.beginTransaction();
+
+    // Строим reverse-map: export_code (число) → code (число или текст)
+    const [existingPositions] = await conn.query('SELECT code, export_code FROM ws_positions WHERE is_deleted = 0');
+    const reverseMap = new Map();
+    existingPositions.forEach(p => {
+      const isNumeric = /^\d+$/.test(p.code);
+      if (isNumeric) reverseMap.set(p.code, p.code);
+      else if (p.export_code) reverseMap.set(p.export_code.trim(), p.code);
+    });
+
+    const skippedPositionCodes = new Set();
+
+    if (hasPartIncidentsFile) await conn.query('DELETE FROM ws_part_incidents');
+    if (hasPartPositionsFile) await conn.query('DELETE FROM ws_part_positions');
+
+    for (const entry of zipEntries) {
+      const fileName = entry.entryName;
+      if (!fileName.endsWith('.xlsx')) continue;
+
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(entry.getData());
+      const ws = wb.getWorksheet(1);
+      if (!ws) continue;
+
+      if (fileName.includes('Детали Part.xlsx')) {
+        const rows = [];
+        ws.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return;
+          const code = wsCellValue(row.getCell(1)).trim();
+          const desc = wsCellValue(row.getCell(2)).trim();
+          const hcRaw = wsCellValue(row.getCell(3)).trim().toLowerCase();
+          const hc = (hcRaw === 'true' || hcRaw === '1') ? 1 : 0;
+          if (code) rows.push([code, desc, hc, 0]);
+        });
+        for (const batch of wsChunk(rows, 500)) {
+          await conn.query(`INSERT INTO ws_parts (code, desc_text, have_child, is_deleted) VALUES ? ON DUPLICATE KEY UPDATE desc_text = VALUES(desc_text), have_child = VALUES(have_child), is_deleted = 0`, [batch]);
+        }
+      }
+      else if (fileName.includes('Ошибки Incident.xlsx')) {
+        const rows = [];
+        ws.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return;
+          const code = wsCellValue(row.getCell(1)).trim();
+          const desc = wsCellValue(row.getCell(2)).trim();
+          if (code) rows.push([code, desc, 0]);
+        });
+        for (const batch of wsChunk(rows, 500)) {
+          await conn.query(`INSERT INTO ws_incidents (code, desc_text, is_deleted) VALUES ? ON DUPLICATE KEY UPDATE desc_text = VALUES(desc_text), is_deleted = 0`, [batch]);
+        }
+      }
+      else if (fileName.includes('Деталь дефект Part Incidents')) {
+        const rows = [];
+        ws.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return;
+          const pc = wsCellValue(row.getCell(1)).trim();
+          const prc = wsCellValue(row.getCell(2)).trim();
+          if (pc && prc) rows.push([pc, prc]);
+        });
+        for (const batch of wsChunk(rows, 500)) {
+          await conn.query('INSERT IGNORE INTO ws_part_incidents (part_code, problem_code) VALUES ?', [batch]);
+        }
+      }
+      else if (fileName.includes('Локации Part Position')) {
+        const rows = [];
+        ws.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return;
+          const pc = wsCellValue(row.getCell(1)).trim();
+          const posCodeInFile = wsCellValue(row.getCell(2)).trim();
+          if (!pc || !posCodeInFile) return;
+
+          const internalCode = reverseMap.get(posCodeInFile);
+          if (internalCode) rows.push([pc, internalCode]);
+          else skippedPositionCodes.add(posCodeInFile);
+        });
+        for (const batch of wsChunk(rows, 500)) {
+          await conn.query('INSERT IGNORE INTO ws_part_positions (part_code, position_code) VALUES ?', [batch]);
+        }
+      }
+    }
+
+    await conn.commit();
+    res.json({ success: true, skippedPositionCodes: [...skippedPositionCodes] });
+  } catch (err) {
+    if (conn) { try { await conn.rollback(); } catch {} }
+    console.error('Ошибка импорта Workshop:', err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+// ======================================================================
 
 
 

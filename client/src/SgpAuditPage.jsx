@@ -510,13 +510,11 @@ export default function SgpAuditPage() {
       return count;
     };
 
-    // 15 дней: baseline + 14 отображаемых
-    const stockDaysAll = [];
-    for (let i = 14; i >= 0; i--) {
+    const stockDays = [];
+    for (let i = 13; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, 23, 59, 59);
-      stockDaysAll.push({ name: formatShortDate(d), count: calculateStockAt(d.getTime()) });
+      stockDays.push({ name: formatShortDate(d), count: calculateStockAt(d.getTime()) });
     }
-    const stockDays = stockDaysAll.slice(1);
 
     const stockWeeks = [];
     for (let i = 3; i >= 0; i--) {
@@ -524,7 +522,7 @@ export default function SgpAuditPage() {
       const sunday = new Date(d); sunday.setDate(d.getDate() + 6);
       const target = sunday.getTime() > now.getTime() ? endOfToday : sunday.getTime();
       const weekNum = Math.ceil((((target - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000) + 1) / 7);
-      stockWeeks.push({ name: `W${String(weekNum).padStart(2, '0')}`, count: calculateStockAt(target) });
+      stockWeeks.push({ name: `W${String(weekNum).padStart(2,'0')}`, count: calculateStockAt(target) });
     }
 
     const stockMonths = [];
@@ -537,8 +535,30 @@ export default function SgpAuditPage() {
       stockMonths.push({ name: `${yyyy}-${mm}`, count: calculateStockAt(target) });
     }
 
-    return { flowMonths, flowWeeks, flowDays, stockMonths, stockWeeks, stockDays, stockDaysAll };
+    return { flowMonths, flowWeeks, flowDays, stockMonths, stockWeeks, stockDays };
   }, [bufferData, bufferChartModel, bufferTimeFilters]);
+
+  // ===== CANDLE CHART (независимый от фильтров) =====
+  const candleChartData = useMemo(() => {
+    const stockCars = bufferData.filter(d => d.cp8_time);
+    const now = new Date();
+    const calculateStockAt = (endTs) => {
+      let count = 0;
+      stockCars.forEach(car => {
+        const cp8Ms = parseDbDate(car.cp8_time);
+        const storageMs = car.in_storage_time ? parseDbDate(car.in_storage_time) : Infinity;
+        if (cp8Ms <= endTs && storageMs > endTs) count++;
+      });
+      return count;
+    };
+
+    const stockDaysAll = [];
+    for (let i = 14; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, 23, 59, 59);
+      stockDaysAll.push({ name: formatShortDate(d), count: calculateStockAt(d.getTime()) });
+    }
+    return stockDaysAll;
+  }, [bufferData]);
 
   const handleBufferSort = (column) => setBufferSort(prev => ({ column, direction: prev.column === column && prev.direction === 'asc' ? 'desc' : 'asc' }));
 
@@ -552,6 +572,7 @@ export default function SgpAuditPage() {
     const exportData = filteredBufferData.map(item => ({
       'VIN': item.vin,
       'Модель': item.model,
+      'Расположение на складе': item.storage_location || '-', // <-- ДОБАВЛЕНО
       'CP72': formatDateTime(item.cp72_time),
       'TLTT': formatDateTime(item.tltt_time),
       'CP8': formatDateTime(item.cp8_time),
@@ -1147,12 +1168,12 @@ export default function SgpAuditPage() {
                 <div style={{ marginBottom: 20 }}>{renderBufferTrendChart(`📊 Остаток (${bufferChartPeriod === 'year' ? 'Год' : bufferChartPeriod === 'month' ? 'Месяц' : bufferChartPeriod === 'week' ? 'Неделя' : 'День'})`, bufferChartsData.stockDays, '#FB923C', STOCK_THRESHOLD)}</div>
               )}
 
-              {/* СВЕЧНОЙ (waterfall) ГРАФИК — динамика остатка по 14 дням */}
+              {/* СВЕЧНОЙ (waterfall) ГРАФИК — динамика остатка по 14 дням (НЕЗАВИСИМЫЙ ОТ ФИЛЬТРОВ) */}
               <div style={{ backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, border: '1px solid #E5E7EB', boxShadow: '0 2px 6px rgba(0,0,0,0.02)', marginBottom: 30 }}>
                 <h3 style={{ fontSize: 14, fontWeight: 700, color: '#374151', marginBottom: 12, textAlign: 'center' }}>
                   📈 Динамика остатка по 14 дням (изменение день-к-дню, линия — накопленный остаток)
                 </h3>
-                <StockCandleChart data={bufferChartsData.stockDaysAll} color="#A78BFA" />
+                <StockCandleChart data={candleChartData} color="#A78BFA" />
               </div>
 
               {/* Фильтры времени (без ADAS) */}
@@ -1192,7 +1213,7 @@ export default function SgpAuditPage() {
                 </label>
               </div>
 
-              {/* ТАБЛИЦА (ADAS убран, CP8→CP72 сразу после CP8) */}
+              {/* ТАБЛИЦА (Расположение на складе в конце) */}
               <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid #E5E7EB', maxHeight: 'calc(100vh - 400px)' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 1200 }}>
                   <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
@@ -1207,6 +1228,7 @@ export default function SgpAuditPage() {
                       <th style={thStyle}>Критерий потеряшки</th>
                       <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('diff_cp8_sgp')}>Время CP8 → СГП <span style={{ marginLeft: 4, color: bufferSort.column === 'diff_cp8_sgp' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>{bufferSort.column === 'diff_cp8_sgp' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}</span></th>
                       <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('block_status')}>Статус блокировки <span style={{ marginLeft: 4, color: bufferSort.column === 'block_status' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>{bufferSort.column === 'block_status' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}</span></th>
+                      <th style={thStyle}>Расположение на складе</th> {/* ПЕРЕМЕЩЕНО В КОНЕЦ */}
                     </tr>
                   </thead>
                   <tbody>
@@ -1222,8 +1244,9 @@ export default function SgpAuditPage() {
                         <td style={{ ...tdStyle, fontWeight: 700, color: item.criterion === 'Не принято' ? '#DC2626' : (item.criterion === 'Принято' ? '#059669' : '#9CA3AF') }}>{item.criterion}</td>
                         <td style={tdStyle}>{formatTimeDiff(item.in_storage_time, item.cp8_time)}</td>
                         <td style={{ ...tdStyle, color: item.block_status.startsWith('Блок') ? '#DC2626' : '#1F2937', cursor: item.block_status.startsWith('Блок') ? 'pointer' : 'default', textDecoration: item.block_status.startsWith('Блок') ? 'underline' : 'none', fontWeight: item.block_status.startsWith('Блок') ? 700 : 400 }} onClick={() => item.block_status.startsWith('Блок') && openBlockReasons(item.vin)} title={item.block_status.startsWith('Блок') ? 'Причины' : ''}>{item.block_status}</td>
+                        <td style={tdStyle}>{item.storage_location || '-'}</td> {/* ПЕРЕМЕЩЕНО В КОНЕЦ */}
                       </tr>
-                    )) : <tr><td colSpan={10} style={{ ...tdStyle, textAlign: 'center', padding: 30 }}>Нет данных</td></tr>}
+                    )) : <tr><td colSpan={11} style={{ ...tdStyle, textAlign: 'center', padding: 30 }}>Нет данных</td></tr>}
                   </tbody>
                 </table>
               </div>
