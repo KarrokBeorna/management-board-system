@@ -36,7 +36,7 @@ import reppsPreview from './assets/repps.png';
 import voltageSpcPreview from './assets/volt.png';
 import repelecPreview from './assets/repelec.png'; 
 import drrElectronicsPreview from './assets/dshelec.png';
-import ecToolPreview from './assets/123.png';
+import ecToolPreview from './assets/ectool.png';
 import workshopPreview from './assets/123.png';//поменять надо
 
 // ====== СТИЛИ ======

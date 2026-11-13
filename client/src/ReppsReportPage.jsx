@@ -705,7 +705,8 @@ function SpotRepaintReport() {
 /* ===================== ОСНОВНАЯ СТРАНИЦА ============================== */
 /* ====================================================================== */
 export default function ReppsReportPage() {
-  const [activeSubTab, setActiveSubTab] = useState('repps');
+  // ИЗМЕНЕНО: по умолчанию открывается вкладка 'spot-repaint'
+  const [activeSubTab, setActiveSubTab] = useState('spot-repaint');
 
   const [period, setPeriod] = useState('all');
   const [count, setCount] = useState(3);

@@ -61,7 +61,7 @@ const thStyleSmall = {
 
 const tdStyleSmall = {
   padding: '10px 12px', borderBottom: '1px solid #F1F5F9',
-  color: '#1E293B', fontSize: '0.85rem', wordBreak: 'break-word',
+  color: '#1E293B', fontSize: '0.85rem',
 };
 
 const inputStyle = {
@@ -127,9 +127,10 @@ const Table = memo(({
   showLinksButton, links, searchValue, onSearchChange, highlighted, focusedCode, showHideEmptyToggle, hideEmpty, onToggleHideEmpty 
 }) => {
   const isAllSelected = data.length > 0 && data.every(row => selected.has(row.code));
+  const tableMinWidth = showLinksButton ? 560 : 480;
 
   return (
-    <div style={{ ...reportBlockStyle, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ ...reportBlockStyle, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
@@ -154,11 +155,20 @@ const Table = memo(({
         </div>
       </div>
 
-      <div style={{ height: '450px', overflowY: 'auto', border: '1px solid #F1F5F9', borderRadius: '8px' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+      <div style={{ height: '450px', overflow: 'auto', border: '1px solid #F1F5F9', borderRadius: '8px' }}>
+        <table style={{ width: '100%', minWidth: tableMinWidth, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+          <colgroup>
+            <col style={{ width: 40 }} />
+            {columns.map(c => (
+              <col key={c.key} style={{ width: c.key === 'desc_text' ? 'auto' : 120 }} />
+            ))}
+            {showLinksButton && <col style={{ width: 80 }} />}
+            <col style={{ width: 60 }} />
+          </colgroup>
+
           <thead>
             <tr>
-              <th style={{ ...thStyleSmall, width: 40, textAlign: 'center' }} title="Выбрать все видимые">
+              <th style={{ ...thStyleSmall, textAlign: 'center' }} title="Выбрать все видимые">
                 <input 
                   type="checkbox" 
                   checked={isAllSelected} 
@@ -166,9 +176,13 @@ const Table = memo(({
                   disabled={data.length === 0}
                 />
               </th>
-              {columns.map(c => <th key={c.key} style={{ ...thStyleSmall, width: c.key === 'desc_text' ? 'auto' : 120 }}>{c.label}</th>)}
-              {showLinksButton && <th style={{ ...thStyleSmall, width: 80, textAlign: 'center' }}>Связи</th>}
-              <th style={{ ...thStyleSmall, width: 60, textAlign: 'center' }}>Действия</th>
+              {columns.map(c => (
+                <th key={c.key} style={{ ...thStyleSmall, ...(c.key === 'desc_text' ? { whiteSpace: 'normal' } : {}) }}>
+                  {c.label}
+                </th>
+              ))}
+              {showLinksButton && <th style={{ ...thStyleSmall, textAlign: 'center' }}>Связи</th>}
+              <th style={{ ...thStyleSmall, textAlign: 'center' }}>Действия</th>
             </tr>
           </thead>
           <tbody>
@@ -188,12 +202,12 @@ const Table = memo(({
               let rowBg = i % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
               let borderLeft = '4px solid transparent';
 
-              if (isSelected) rowBg = '#DBEAFE'; // Синий для чекбоксов
+              if (isSelected) rowBg = '#DBEAFE';
               else if (isFocused) {
-                rowBg = '#F1F5F9'; // Серый для фокуса
+                rowBg = '#F1F5F9';
                 borderLeft = '4px solid #1E293B';
               } else if (isHighlighted) {
-                rowBg = '#FEF3C7'; // Желтый для связей
+                rowBg = '#FEF3C7';
                 borderLeft = '4px solid #F59E0B';
               }
 
@@ -213,11 +227,26 @@ const Table = memo(({
                   <td style={{ ...tdStyleSmall, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                     <input type="checkbox" checked={isSelected} onChange={() => onSelect(row.code)} />
                   </td>
-                  {columns.map(c => (
-                    <td key={c.key} style={{...tdStyleSmall, color: (c.key === 'desc_text' && isSameText) ? '#94A3B8' : '#1E293B'}}>
-                      {c.render ? c.render(row) : (row[c.key] ?? '—')}
-                    </td>
-                  ))}
+                  {columns.map(c => {
+                    const isDesc = c.key === 'desc_text';
+                    const isCode = c.key === 'code';
+
+                    return (
+                      <td 
+                        key={c.key} 
+                        style={{
+                          ...tdStyleSmall,
+                          ...(isDesc 
+                            ? { whiteSpace: 'normal', wordBreak: 'normal', overflowWrap: 'break-word' } 
+                            : { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }),
+                          color: isDesc && isSameText ? '#94A3B8' : '#1E293B'
+                        }}
+                        title={isCode ? row[c.key] : undefined}
+                      >
+                        {c.render ? c.render(row) : (row[c.key] ?? '—')}
+                      </td>
+                    );
+                  })}
 
                   {showLinksButton && (
                     <td style={{ ...tdStyleSmall, textAlign: 'center', padding: '10px 4px' }} onClick={e => e.stopPropagation()}>
@@ -541,6 +570,16 @@ export default function WorkshopUpdate() {
   const [viewLinksFor, setViewLinksFor] = useState(null);
 
   const fileInputRef = useRef(null);
+
+  // Установка масштаба 75% при открытии
+  useEffect(() => {
+    const html = document.documentElement;
+    const prevZoom = html.style.zoom;
+    html.style.zoom = '0.75';
+    return () => {
+      html.style.zoom = prevZoom;
+    };
+  }, []);
 
   const showToast = useCallback((message, type = 'success') => {
     setToast({ message, type, id: Date.now() });
