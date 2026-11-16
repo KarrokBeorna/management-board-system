@@ -249,6 +249,8 @@ export default function SgpAuditPage() {
   const [bufferLoading, setBufferLoading] = useState(false);
   const [bufferError, setBufferError] = useState(null);
   const [bufferChartPeriod, setBufferChartPeriod] = useState('all');
+  const [bufferChartCount, setBufferChartCount] = useState(3);
+  const [countInputVal, setCountInputVal] = useState(3);
   const [bufferChartModel, setBufferChartModel] = useState('ALL');
   const [bufferCriterionFilter, setBufferCriterionFilter] = useState('ALL');
   const [bufferBlockFilter, setBufferBlockFilter] = useState('ALL');
@@ -276,6 +278,14 @@ export default function SgpAuditPage() {
     const models = [...new Set(bufferData.map(d => d.model))].filter(m => m && m !== '—');
     return ['ALL', ...models.sort()];
   }, [bufferData]);
+
+  // ДЕБАУНС ДЛЯ ИНПУТА КОЛИЧЕСТВА ПЕРИОДОВ
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setBufferChartCount(countInputVal);
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [countInputVal]);
 
   useEffect(() => {
     if (showBlockModal || showExportModal) document.body.style.overflow = 'hidden';
@@ -452,7 +462,6 @@ export default function SgpAuditPage() {
     else if (bufferBlockFilter === 'Не блок') result = result.filter(d => d.block_status === 'Не блок');
     if (bufferModelFilter !== 'ALL') result = result.filter(d => d.model === bufferModelFilter);
 
-    // ADAS удалён
     const timeFields = [
       { key: 'cp72_time', from: 'cp72From', to: 'cp72To' },
       { key: 'tltt_time', from: 'tlttFrom', to: 'tlttTo' },
@@ -485,7 +494,7 @@ export default function SgpAuditPage() {
     return result;
   }, [bufferData, bufferCriterionFilter, bufferBlockFilter, bufferModelFilter, bufferSort, bufferTimeFilters]);
 
-  // ===== BUFFER charts =====
+  // ===== BUFFER charts (Оптимизировано) =====
   const bufferChartsData = useMemo(() => {
     let chartCars = bufferData;
     if (bufferChartModel !== 'ALL') chartCars = chartCars.filter(d => d.model === bufferChartModel);
@@ -504,101 +513,91 @@ export default function SgpAuditPage() {
     const now = new Date();
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).getTime();
 
-    // ПОТОК
     const flowCars = chartCars.filter(d => d.criterion === 'Не принято' && d.cp8_time);
-    
-    // 3 месяца
-    const flowMonths = [];
-    for (let i = 2; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const startTs = d.getTime();
-      const endTs = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59).getTime();
-      const count = flowCars.filter(c => {
-        const t = parseDbDate(c.cp8_time);
-        return t >= startTs && t <= endTs;
-      }).length;
-      // Короткий формат: 09.26
-      const displayName = `${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getFullYear()).slice(2)}`;
-      flowMonths.push({ name: displayName, count });
-    }
-
-    // 4 недели
-    const flowWeeks = [];
-    const currentMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() || 7) + 1, 0, 0, 0);
-    for (let i = 3; i >= 0; i--) {
-      const startOfWeek = new Date(currentMonday);
-      startOfWeek.setDate(currentMonday.getDate() - i * 7);
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(startOfWeek.getDate() + 6);
-      endOfWeek.setHours(23, 59, 59, 999);
-      
-      const startTs = startOfWeek.getTime();
-      const endTs = endOfWeek.getTime() > now.getTime() ? endOfToday : endOfWeek.getTime();
-      
-      const count = flowCars.filter(c => {
-        const t = parseDbDate(c.cp8_time);
-        return t >= startTs && t <= endTs;
-      }).length;
-      const weekNum = Math.ceil((((endOfWeek - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000) + 1) / 7);
-      flowWeeks.push({ name: `W${String(weekNum).padStart(2,'0')}`, count });
-    }
-
-    // 14 дней
-    const flowDays = [];
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
-      const startTs = d.getTime();
-      const endTs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).getTime();
-      const count = flowCars.filter(c => {
-        const t = parseDbDate(c.cp8_time);
-        return t >= startTs && t <= endTs;
-      }).length;
-      flowDays.push({ name: formatShortDate(d), count });
-    }
-
-    // ОСТАТОК
     const stockCars = chartCars.filter(d => d.cp8_time);
-    const calculateStockAt = (endTs) => {
-      let count = 0;
-      stockCars.forEach(car => {
-        const cp8Ms = parseDbDate(car.cp8_time);
-        const storageMs = car.in_storage_time ? parseDbDate(car.in_storage_time) : Infinity;
-        if (cp8Ms <= endTs && storageMs > endTs) count++;
-      });
-      return count;
+
+    const calcFlow = (startTs, endTs) => flowCars.filter(c => { const t = parseDbDate(c.cp8_time); return t >= startTs && t <= endTs; }).length;
+    const calcStock = (endTs) => stockCars.filter(car => { const cp8Ms = parseDbDate(car.cp8_time); const storageMs = car.in_storage_time ? parseDbDate(car.in_storage_time) : Infinity; return cp8Ms <= endTs && storageMs > endTs; }).length;
+
+    const generateMonths = (count) => {
+      const res = [];
+      for (let i = count - 1; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const startTs = d.getTime();
+        const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+        const endTs = endOfMonth.getTime() > now.getTime() ? endOfToday : endOfMonth.getTime();
+        const name = `${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getFullYear()).slice(2)}`;
+        res.push({ name, startTs, endTs });
+      }
+      return res;
     };
 
-    const stockDays = [];
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i, 23, 59, 59);
-      stockDays.push({ name: formatShortDate(d), count: calculateStockAt(d.getTime()) });
+    const generateWeeks = (count) => {
+      const res = [];
+      const currentMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() || 7) + 1, 0, 0, 0);
+      for (let i = count - 1; i >= 0; i--) {
+        const startOfWeek = new Date(currentMonday);
+        startOfWeek.setDate(currentMonday.getDate() - i * 7);
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6);
+        endOfWeek.setHours(23, 59, 59, 999);
+        const endTs = endOfWeek.getTime() > now.getTime() ? endOfToday : endOfWeek.getTime();
+        const weekNum = Math.ceil((((endOfWeek - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000) + 1) / 7);
+        const name = `W${String(weekNum).padStart(2,'0')}`;
+        res.push({ name, startTs: startOfWeek.getTime(), endTs });
+      }
+      return res;
+    };
+
+    const generateDays = (count) => {
+      const res = [];
+      for (let i = count - 1; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+        const startTs = d.getTime();
+        const endTs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).getTime();
+        const name = formatShortDate(d);
+        res.push({ name, startTs, endTs });
+      }
+      return res;
+    };
+
+    const generateYears = (count) => {
+      const res = [];
+      for (let i = count - 1; i >= 0; i--) {
+        const y = now.getFullYear() - i;
+        const startTs = new Date(y, 0, 1).getTime();
+        const endTs = new Date(y, 11, 31, 23, 59, 59).getTime();
+        res.push({ name: String(y), startTs, endTs });
+      }
+      return res;
+    };
+
+    let result = {};
+
+    // Считаем только то, что нужно для текущего вида
+    if (bufferChartPeriod === 'all') {
+      result.defFlowMonths = generateMonths(3).map(m => ({ name: m.name, count: calcFlow(m.startTs, m.endTs) }));
+      result.defFlowWeeks = generateWeeks(4).map(w => ({ name: w.name, count: calcFlow(w.startTs, w.endTs) }));
+      result.defFlowDays = generateDays(14).map(d => ({ name: d.name, count: calcFlow(d.startTs, d.endTs) }));
+      result.defStockMonths = generateMonths(3).map(m => ({ name: m.name, count: calcStock(m.endTs) }));
+      result.defStockWeeks = generateWeeks(4).map(w => ({ name: w.name, count: calcStock(w.endTs) }));
+      result.defStockDays = generateDays(14).map(d => ({ name: d.name, count: calcStock(d.endTs) }));
+    } else if (bufferChartPeriod === 'year') {
+      result.dynFlow = generateYears(bufferChartCount).map(y => ({ name: y.name, count: calcFlow(y.startTs, y.endTs) }));
+      result.dynStock = generateYears(bufferChartCount).map(y => ({ name: y.name, count: calcStock(y.endTs) }));
+    } else if (bufferChartPeriod === 'month') {
+      result.dynFlow = generateMonths(bufferChartCount).map(m => ({ name: m.name, count: calcFlow(m.startTs, m.endTs) }));
+      result.dynStock = generateMonths(bufferChartCount).map(m => ({ name: m.name, count: calcStock(m.endTs) }));
+    } else if (bufferChartPeriod === 'week') {
+      result.dynFlow = generateWeeks(bufferChartCount).map(w => ({ name: w.name, count: calcFlow(w.startTs, w.endTs) }));
+      result.dynStock = generateWeeks(bufferChartCount).map(w => ({ name: w.name, count: calcStock(w.endTs) }));
+    } else if (bufferChartPeriod === 'day') {
+      result.dynFlow = generateDays(bufferChartCount).map(d => ({ name: d.name, count: calcFlow(d.startTs, d.endTs) }));
+      result.dynStock = generateDays(bufferChartCount).map(d => ({ name: d.name, count: calcStock(d.endTs) }));
     }
 
-    const stockWeeks = [];
-    const currentMondayStock = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() || 7) + 1, 0, 0, 0);
-    for (let i = 3; i >= 0; i--) {
-      const startOfWeek = new Date(currentMondayStock);
-      startOfWeek.setDate(currentMondayStock.getDate() - i * 7);
-      const endOfWeek = new Date(startOfWeek);
-      endOfWeek.setDate(startOfWeek.getDate() + 6);
-      endOfWeek.setHours(23, 59, 59, 999);
-      
-      const target = endOfWeek.getTime() > now.getTime() ? endOfToday : endOfWeek.getTime();
-      const weekNum = Math.ceil((((endOfWeek - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000) + 1) / 7);
-      stockWeeks.push({ name: `W${String(weekNum).padStart(2,'0')}`, count: calculateStockAt(target) });
-    }
-
-    const stockMonths = [];
-    for (let i = 2; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
-      const target = endOfMonth.getTime() > now.getTime() ? endOfToday : endOfMonth.getTime();
-      const displayName = `${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getFullYear()).slice(2)}`;
-      stockMonths.push({ name: displayName, count: calculateStockAt(target) });
-    }
-
-    return { flowMonths, flowWeeks, flowDays, stockMonths, stockWeeks, stockDays };
-  }, [bufferData, bufferChartModel, bufferTimeFilters]);
+    return result;
+  }, [bufferData, bufferChartModel, bufferTimeFilters, bufferChartCount, bufferChartPeriod]);
 
   // ===== CANDLE CHART (независимый от фильтров) =====
   const candleChartData = useMemo(() => {
@@ -1192,12 +1191,27 @@ export default function SgpAuditPage() {
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Период:</span>
-                    <button onClick={() => setBufferChartPeriod('all')} style={tabStyle(bufferChartPeriod === 'all')}>Все</button>
-                    <button onClick={() => setBufferChartPeriod('year')} style={tabStyle(bufferChartPeriod === 'year')}>Год</button>
-                    <button onClick={() => setBufferChartPeriod('month')} style={tabStyle(bufferChartPeriod === 'month')}>Месяц</button>
-                    <button onClick={() => setBufferChartPeriod('week')} style={tabStyle(bufferChartPeriod === 'week')}>Неделя</button>
-                    <button onClick={() => setBufferChartPeriod('day')} style={tabStyle(bufferChartPeriod === 'day')}>День</button>
+                    <button onClick={() => { setBufferChartPeriod('all'); setCountInputVal(3); setBufferChartCount(3); }} style={tabStyle(bufferChartPeriod === 'all')}>Все</button>
+                    <button onClick={() => { setBufferChartPeriod('year'); setCountInputVal(3); setBufferChartCount(3); }} style={tabStyle(bufferChartPeriod === 'year')}>Год</button>
+                    <button onClick={() => { setBufferChartPeriod('month'); setCountInputVal(3); setBufferChartCount(3); }} style={tabStyle(bufferChartPeriod === 'month')}>Месяц</button>
+                    <button onClick={() => { setBufferChartPeriod('week'); setCountInputVal(4); setBufferChartCount(4); }} style={tabStyle(bufferChartPeriod === 'week')}>Неделя</button>
+                    <button onClick={() => { setBufferChartPeriod('day'); setCountInputVal(14); setBufferChartCount(14); }} style={tabStyle(bufferChartPeriod === 'day')}>День</button>
                   </div>
+                  
+                  {bufferChartPeriod !== 'all' && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#4B5563' }}>
+                      Кол-во периодов:
+                      <input
+                        type="number"
+                        min="1"
+                        max="50"
+                        value={countInputVal}
+                        onChange={(e) => setCountInputVal(parseInt(e.target.value, 10) || 1)}
+                        style={{ ...inputStyle, width: 80 }}
+                      />
+                    </label>
+                  )}
+
                   <label style={{ fontSize: 14, color: '#4B5563', display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>Модель:
                     <select value={bufferChartModel} onChange={e => setBufferChartModel(e.target.value)} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB' }}>
                       {bufferAvailableModels.map(m => <option key={m} value={m}>{m === 'ALL' ? 'Все' : m}</option>)}
@@ -1210,24 +1224,37 @@ export default function SgpAuditPage() {
               <div style={{ fontSize: 16, fontWeight: 700, color: '#1F2937', marginBottom: 16 }}>Поток: График новых непринятых автомобилей (по дате CP8)</div>
               {bufferChartPeriod === 'all' ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 2.3fr)', gap: 16, marginBottom: 40, alignItems: 'start' }}>
-                  {renderBufferTrendChart('📅 Не принято (3 месяца)', bufferChartsData.flowMonths, '#60A5FA')}
-                  {renderBufferTrendChart('📆 Не принято (4 недели)', bufferChartsData.flowWeeks, '#34D399')}
-                  {renderBufferTrendChart('📊 Не принято (14 дней)', bufferChartsData.flowDays, '#FBBF24')}
+                  {renderBufferTrendChart('📅 Не принято (3 месяца)', bufferChartsData.defFlowMonths, '#60A5FA')}
+                  {renderBufferTrendChart('📆 Не принято (4 недели)', bufferChartsData.defFlowWeeks, '#34D399')}
+                  {renderBufferTrendChart('📊 Не принято (14 дней)', bufferChartsData.defFlowDays, '#FBBF24')}
                 </div>
               ) : (
-                <div style={{ marginBottom: 40 }}>{renderBufferTrendChart(`📊 Поток (${bufferChartPeriod === 'year' ? 'Год' : bufferChartPeriod === 'month' ? 'Месяц' : bufferChartPeriod === 'week' ? 'Неделя' : 'День'})`, bufferChartsData.flowDays, '#FBBF24')}</div>
+                <div style={{ marginBottom: 40 }}>
+                  {renderBufferTrendChart(
+                    `📊 Поток (${bufferChartPeriod === 'year' ? 'Год' : bufferChartPeriod === 'month' ? 'Месяц' : bufferChartPeriod === 'week' ? 'Неделя' : 'День'})`,
+                    bufferChartsData.dynFlow, 
+                    '#FBBF24'
+                  )}
+                </div>
               )}
 
               {/* ОСТАТОК */}
               <div style={{ fontSize: 16, fontWeight: 700, color: '#1F2937', marginBottom: 16 }}>Остаток: Общее количество автомобилей в буфере на конец периода</div>
               {bufferChartPeriod === 'all' ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 2.3fr)', gap: 16, marginBottom: 20, alignItems: 'start' }}>
-                  {renderBufferTrendChart('📅 Остаток (3 месяца)', bufferChartsData.stockMonths, '#A78BFA', STOCK_THRESHOLD)}
-                  {renderBufferTrendChart('📆 Остаток (4 недели)', bufferChartsData.stockWeeks, '#F472B6', STOCK_THRESHOLD)}
-                  {renderBufferTrendChart('📊 Остаток (14 дней)', bufferChartsData.stockDays, '#FB923C', STOCK_THRESHOLD)}
+                  {renderBufferTrendChart('📅 Остаток (3 месяца)', bufferChartsData.defStockMonths, '#A78BFA', STOCK_THRESHOLD)}
+                  {renderBufferTrendChart('📆 Остаток (4 недели)', bufferChartsData.defStockWeeks, '#F472B6', STOCK_THRESHOLD)}
+                  {renderBufferTrendChart('📊 Остаток (14 дней)', bufferChartsData.defStockDays, '#FB923C', STOCK_THRESHOLD)}
                 </div>
               ) : (
-                <div style={{ marginBottom: 20 }}>{renderBufferTrendChart(`📊 Остаток (${bufferChartPeriod === 'year' ? 'Год' : bufferChartPeriod === 'month' ? 'Месяц' : bufferChartPeriod === 'week' ? 'Неделя' : 'День'})`, bufferChartsData.stockDays, '#FB923C', STOCK_THRESHOLD)}</div>
+                <div style={{ marginBottom: 20 }}>
+                  {renderBufferTrendChart(
+                    `📊 Остаток (${bufferChartPeriod === 'year' ? 'Год' : bufferChartPeriod === 'month' ? 'Месяц' : bufferChartPeriod === 'week' ? 'Неделя' : 'День'})`, 
+                    bufferChartsData.dynStock, 
+                    '#FB923C', 
+                    STOCK_THRESHOLD
+                  )}
+                </div>
               )}
 
               {/* СВЕЧНОЙ (waterfall) ГРАФИК */}
