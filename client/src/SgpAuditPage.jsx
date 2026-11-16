@@ -501,27 +501,63 @@ export default function SgpAuditPage() {
       if (bufferTimeFilters[to]) { const t = new Date(bufferTimeFilters[to]).getTime(); chartCars = chartCars.filter(d => d[key] && parseDbDate(d[key]) <= t); }
     });
 
+    const now = new Date();
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).getTime();
+
     // ПОТОК
-    const flowCars = chartCars.filter(d => d.criterion === 'Не принято' && d.cp8_time).sort((a, b) => parseDbDate(a.cp8_time) - parseDbDate(b.cp8_time));
-    const fMonthsMap = new Map(), fWeeksMap = new Map(), fDaysMap = new Map();
-    flowCars.forEach(item => {
-      const d = new Date(item.cp8_time);
-      fMonthsMap.set(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`, (fMonthsMap.get(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`) || 0) + 1);
-      const tmp = new Date(d); const dayNum = tmp.getDay() || 7; tmp.setDate(tmp.getDate() + 4 - dayNum);
-      const yearStart = new Date(tmp.getFullYear(), 0, 1);
-      const weekNo = Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
-      fWeeksMap.set(`W${String(weekNo).padStart(2,'0')}`, (fWeeksMap.get(`W${String(weekNo).padStart(2,'0')}`) || 0) + 1);
-      const dKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      fDaysMap.set(dKey, (fDaysMap.get(dKey) || 0) + 1);
-    });
-    const flowMonths = Array.from(fMonthsMap.entries()).map(([name, count]) => ({ name, count })).slice(-3);
-    const flowWeeks = Array.from(fWeeksMap.entries()).map(([name, count]) => ({ name, count })).slice(-4);
-    const flowDays = Array.from(fDaysMap.entries()).map(([name, count]) => ({ name: formatShortDate(name), count })).slice(-14);
+    const flowCars = chartCars.filter(d => d.criterion === 'Не принято' && d.cp8_time);
+    
+    // 3 месяца
+    const flowMonths = [];
+    for (let i = 2; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const startTs = d.getTime();
+      const endTs = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59).getTime();
+      const count = flowCars.filter(c => {
+        const t = parseDbDate(c.cp8_time);
+        return t >= startTs && t <= endTs;
+      }).length;
+      // Короткий формат: 09.26
+      const displayName = `${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getFullYear()).slice(2)}`;
+      flowMonths.push({ name: displayName, count });
+    }
+
+    // 4 недели
+    const flowWeeks = [];
+    const currentMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() || 7) + 1, 0, 0, 0);
+    for (let i = 3; i >= 0; i--) {
+      const startOfWeek = new Date(currentMonday);
+      startOfWeek.setDate(currentMonday.getDate() - i * 7);
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      endOfWeek.setHours(23, 59, 59, 999);
+      
+      const startTs = startOfWeek.getTime();
+      const endTs = endOfWeek.getTime() > now.getTime() ? endOfToday : endOfWeek.getTime();
+      
+      const count = flowCars.filter(c => {
+        const t = parseDbDate(c.cp8_time);
+        return t >= startTs && t <= endTs;
+      }).length;
+      const weekNum = Math.ceil((((endOfWeek - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000) + 1) / 7);
+      flowWeeks.push({ name: `W${String(weekNum).padStart(2,'0')}`, count });
+    }
+
+    // 14 дней
+    const flowDays = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const startTs = d.getTime();
+      const endTs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59).getTime();
+      const count = flowCars.filter(c => {
+        const t = parseDbDate(c.cp8_time);
+        return t >= startTs && t <= endTs;
+      }).length;
+      flowDays.push({ name: formatShortDate(d), count });
+    }
 
     // ОСТАТОК
     const stockCars = chartCars.filter(d => d.cp8_time);
-    const now = new Date();
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).getTime();
     const calculateStockAt = (endTs) => {
       let count = 0;
       stockCars.forEach(car => {
@@ -539,22 +575,26 @@ export default function SgpAuditPage() {
     }
 
     const stockWeeks = [];
+    const currentMondayStock = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() || 7) + 1, 0, 0, 0);
     for (let i = 3; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() || 7) + 1 - i * 7, 23, 59, 59);
-      const sunday = new Date(d); sunday.setDate(d.getDate() + 6);
-      const target = sunday.getTime() > now.getTime() ? endOfToday : sunday.getTime();
-      const weekNum = Math.ceil((((target - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000) + 1) / 7);
+      const startOfWeek = new Date(currentMondayStock);
+      startOfWeek.setDate(currentMondayStock.getDate() - i * 7);
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      endOfWeek.setHours(23, 59, 59, 999);
+      
+      const target = endOfWeek.getTime() > now.getTime() ? endOfToday : endOfWeek.getTime();
+      const weekNum = Math.ceil((((endOfWeek - new Date(now.getFullYear(), 0, 1).getTime()) / 86400000) + 1) / 7);
       stockWeeks.push({ name: `W${String(weekNum).padStart(2,'0')}`, count: calculateStockAt(target) });
     }
 
     const stockMonths = [];
     for (let i = 2; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
-      const target = d.getTime() > now.getTime() ? endOfToday : d.getTime();
-      // Формат YYYY-MM вместо MMM YYYY
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      stockMonths.push({ name: `${yyyy}-${mm}`, count: calculateStockAt(target) });
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+      const target = endOfMonth.getTime() > now.getTime() ? endOfToday : endOfMonth.getTime();
+      const displayName = `${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getFullYear()).slice(2)}`;
+      stockMonths.push({ name: displayName, count: calculateStockAt(target) });
     }
 
     return { flowMonths, flowWeeks, flowDays, stockMonths, stockWeeks, stockDays };
@@ -594,7 +634,7 @@ export default function SgpAuditPage() {
     const exportData = filteredBufferData.map(item => ({
       'VIN': item.vin,
       'Модель': item.model,
-      'Расположение на складе': item.storage_location || '-', // <-- ДОБАВЛЕНО
+      'Расположение на складе': item.storage_location || '-',
       'CP72': formatDateTime(item.cp72_time),
       'TLTT': formatDateTime(item.tltt_time),
       'CP8': formatDateTime(item.cp8_time),
@@ -1178,7 +1218,7 @@ export default function SgpAuditPage() {
                 <div style={{ marginBottom: 40 }}>{renderBufferTrendChart(`📊 Поток (${bufferChartPeriod === 'year' ? 'Год' : bufferChartPeriod === 'month' ? 'Месяц' : bufferChartPeriod === 'week' ? 'Неделя' : 'День'})`, bufferChartsData.flowDays, '#FBBF24')}</div>
               )}
 
-              {/* ОСТАТОК — здесь по одной пунктирной линии (y=5) на каждом графике */}
+              {/* ОСТАТОК */}
               <div style={{ fontSize: 16, fontWeight: 700, color: '#1F2937', marginBottom: 16 }}>Остаток: Общее количество автомобилей в буфере на конец периода</div>
               {bufferChartPeriod === 'all' ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 2.3fr)', gap: 16, marginBottom: 20, alignItems: 'start' }}>
@@ -1190,7 +1230,7 @@ export default function SgpAuditPage() {
                 <div style={{ marginBottom: 20 }}>{renderBufferTrendChart(`📊 Остаток (${bufferChartPeriod === 'year' ? 'Год' : bufferChartPeriod === 'month' ? 'Месяц' : bufferChartPeriod === 'week' ? 'Неделя' : 'День'})`, bufferChartsData.stockDays, '#FB923C', STOCK_THRESHOLD)}</div>
               )}
 
-              {/* СВЕЧНОЙ (waterfall) ГРАФИК — динамика остатка по 14 дням (НЕЗАВИСИМЫЙ ОТ ФИЛЬТРОВ) */}
+              {/* СВЕЧНОЙ (waterfall) ГРАФИК */}
               <div style={{ backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, border: '1px solid #E5E7EB', boxShadow: '0 2px 6px rgba(0,0,0,0.02)', marginBottom: 30 }}>
                 <h3 style={{ fontSize: 14, fontWeight: 700, color: '#374151', marginBottom: 12, textAlign: 'center' }}>
                   📈 Динамика остатка по 14 дням (изменение день-к-дню, линия — накопленный остаток)
@@ -1198,7 +1238,7 @@ export default function SgpAuditPage() {
                 <StockCandleChart data={candleChartData} color="#A78BFA" />
               </div>
 
-              {/* Фильтры времени (без ADAS) */}
+              {/* Фильтры времени */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20, padding: 16, backgroundColor: '#F9FAFB', borderRadius: 12, border: '1px solid #E5E7EB' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{leftBufferTimeFilters.map(f => <React.Fragment key={f.label}>{renderTimeFilter(f, bufferTimeFilters, setBufferTimeFilters)}</React.Fragment>)}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{rightBufferTimeFilters.map(f => <React.Fragment key={f.label}>{renderTimeFilter(f, bufferTimeFilters, setBufferTimeFilters)}</React.Fragment>)}</div>
@@ -1235,7 +1275,7 @@ export default function SgpAuditPage() {
                 </label>
               </div>
 
-              {/* ТАБЛИЦА (Расположение на складе в конце) */}
+              {/* ТАБЛИЦА */}
               <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid #E5E7EB', maxHeight: 'calc(100vh - 400px)' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 1200 }}>
                   <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
@@ -1250,7 +1290,7 @@ export default function SgpAuditPage() {
                       <th style={thStyle}>Критерий потеряшки</th>
                       <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('diff_cp8_sgp')}>Время CP8 → СГП <span style={{ marginLeft: 4, color: bufferSort.column === 'diff_cp8_sgp' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>{bufferSort.column === 'diff_cp8_sgp' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}</span></th>
                       <th style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => handleBufferSort('block_status')}>Статус блокировки <span style={{ marginLeft: 4, color: bufferSort.column === 'block_status' ? '#2563EB' : '#D1D5DB', fontSize: 10 }}>{bufferSort.column === 'block_status' ? (bufferSort.direction === 'asc' ? '▲' : '▼') : '▼'}</span></th>
-                      <th style={thStyle}>Расположение на складе</th> {/* ПЕРЕМЕЩЕНО В КОНЕЦ */}
+                      <th style={thStyle}>Расположение на складе</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1266,7 +1306,7 @@ export default function SgpAuditPage() {
                         <td style={{ ...tdStyle, fontWeight: 700, color: item.criterion === 'Не принято' ? '#DC2626' : (item.criterion === 'Принято' ? '#059669' : '#9CA3AF') }}>{item.criterion}</td>
                         <td style={tdStyle}>{formatTimeDiff(item.in_storage_time, item.cp8_time)}</td>
                         <td style={{ ...tdStyle, color: item.block_status.startsWith('Блок') ? '#DC2626' : '#1F2937', cursor: item.block_status.startsWith('Блок') ? 'pointer' : 'default', textDecoration: item.block_status.startsWith('Блок') ? 'underline' : 'none', fontWeight: item.block_status.startsWith('Блок') ? 700 : 400 }} onClick={() => item.block_status.startsWith('Блок') && openBlockReasons(item.vin)} title={item.block_status.startsWith('Блок') ? 'Причины' : ''}>{item.block_status}</td>
-                        <td style={tdStyle}>{item.storage_location || '-'}</td> {/* ПЕРЕМЕЩЕНО В КОНЕЦ */}
+                        <td style={tdStyle}>{item.storage_location || '-'}</td>
                       </tr>
                     )) : <tr><td colSpan={11} style={{ ...tdStyle, textAlign: 'center', padding: 30 }}>Нет данных</td></tr>}
                   </tbody>
