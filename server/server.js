@@ -87,6 +87,17 @@ const bmsPool = mysql.createPool({
   dateStrings: true,
 });
 
+const hunterwaPool = mysql.createPool({
+  host: process.env.HUNTERWA_HOST,
+  port: parseInt(process.env.HUNTERWA_PORT) || 3306,
+  user: process.env.HUNTERWA_USER,
+  password: process.env.HUNTERWA_PASSWORD,
+  database: process.env.HUNTERWA_NAME,
+  waitForConnections: true,
+  connectTimeout: 10000,
+  dateStrings: true,
+});
+
 // ================== NOTES AVAILABILITY ==================
 let notesAvailable = false;
 
@@ -166,6 +177,17 @@ async function checkBmsDatabaseConnection() {
   }
 }
 
+async function checkHunterwaDatabaseConnection() {
+  try {
+    const connection = await hunterwaPool.getConnection();
+    console.log('✅ БД HunterWA (hunterwa_db): Подключение успешно!');
+    connection.release();
+    return true;
+  } catch (err) {
+    console.error('❌ БД HunterWA (hunterwa_db) ОШИБКА:', err.message);
+    return false;
+  }
+}
 
 // ================== OPC UA ЧТЕНИЕ ПЛК ==================
 const { OPCUAClient, MessageSecurityMode, SecurityPolicy } = require('node-opcua');
@@ -19981,6 +20003,11 @@ async function startServer() {
   // Проверка BMS (выведет лог "✅ БД BMS (launch_db): Подключение успешно!")
   const bmsOk = await checkBmsDatabaseConnection(); 
   const notesOk = await checkNotesDatabaseConnection();
+  const hunterwaOk = await checkHunterwaDatabaseConnection();
+
+  if (!hunterwaOk) {
+    console.log('⚠️ Внимание: БД HunterWA недоступна. Маршруты /api/hunterwa/* будут выдавать ошибку.');
+  }
 
   // Если основная БД или LES недоступны — останавливаем сервер (как было)
   if (!dbOk || !lesOk) {
