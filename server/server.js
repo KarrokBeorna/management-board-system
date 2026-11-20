@@ -19439,6 +19439,283 @@ app.get('/api/ec-tool-report', async (req, res) => {
 
 
 
+// ================== РАЗВАЛ-СХОЖДЕНИЕ (HUNTER WA) ==================
+// ================== IoT: NCATable_* по VIN ==================
+// Источник: at_im_execute_result (VIN, creation_time) → at_im_execute_result_info (ITEM_NAME/ITEM_VALUE)
+// Берём ПОСЛЕДНИЙ скан по creation_time (как в Excel).
+async function fetchIotNcaValues(fullVin) {
+  if (!fullVin || fullVin.length < 10) return {};
+  try {
+    const [ers] = await pool.execute(
+      `SELECT id FROM at_im_execute_result
+        WHERE vin = ?
+        ORDER BY creation_time DESC
+        LIMIT 1`,
+      [fullVin]
+    );
+    if (ers.length === 0) return {};
+
+    const [items] = await pool.execute(
+      `SELECT item_name, item_value
+         FROM at_im_execute_result_info
+        WHERE ier_id = ? AND item_name LIKE 'NCATable%'`,
+      [ers[0].id]
+    );
+
+    const map = {};
+    for (const it of items) {
+      if (!it.item_name) continue;
+      if (it.item_name.endsWith('_Result')) continue; // маркеры Y/Z — пропускаем
+      map[it.item_name] = it.item_value;
+    }
+    return map;
+  } catch (e) {
+    console.error('[IoT NCA] error for VIN', fullVin, e.message);
+    return {};
+  }
+}
+// 1. Получение списка моделей (без префикса AGM>)
+app.get('/api/alignment-models', async (req, res) => {
+  try {
+    const [rows] = await hunterwaPool.execute(`
+      SELECT DISTINCT full_model_name 
+      FROM reports 
+      WHERE full_model_name LIKE 'AGM>%' 
+      ORDER BY full_model_name
+    `);
+    // Убираем AGM> на бэкенде, чтобы фронт не страдал
+    const models = rows.map(r => r.full_model_name.replace('AGM>', '').trim());
+    res.json(models);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Ошибка получения моделей' });
+  }
+});
+
+// 2. Получение агрегированных данных для графиков (по множеству VIN)
+app.get('/api/alignment-charts', async (req, res) => {
+  const { model, startDate, endDate } = req.query;
+  
+  if (!model || !startDate || !endDate) {
+    return res.status(400).json({ error: 'Необходимы параметры: model, startDate, endDate' });
+  }
+
+  try {
+    const dbModelName = `AGM>${model}`;
+    const startDateTime = `${startDate} 00:00:00`;
+    const endDateTime = `${endDate} 23:59:59`;
+
+    const [rows] = await hunterwaPool.execute(`
+      SELECT 
+        DATE_FORMAT(r.begin_date, '%Y-%m-%d') as date,
+        
+        -- ===== ПЕРЕДНИЙ МОСТ =====
+        AVG(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: левый' THEN v.after_value END) AS avg_f_camber_l,
+        AVG(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: правый' THEN v.after_value END) AS avg_f_camber_r,
+        
+        AVG(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: левое' THEN v.after_value END) AS avg_f_toe_l,
+        AVG(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: правое' THEN v.after_value END) AS avg_f_toe_r,
+        AVG(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: суммарное' THEN v.after_value END) AS avg_f_toe_total,
+
+        -- ===== ЗАДНИЙ МОСТ =====
+        AVG(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: левый' THEN v.after_value END) AS avg_r_camber_l,
+        AVG(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: правый' THEN v.after_value END) AS avg_r_camber_r,
+        
+        AVG(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: левое' THEN v.after_value END) AS avg_r_toe_l,
+        AVG(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: правое' THEN v.after_value END) AS avg_r_toe_r,
+        AVG(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: суммарное' THEN v.after_value END) AS avg_r_toe_total,
+
+        COUNT(DISTINCT r.vin) AS cars_count
+      FROM reports r
+      JOIN report_axles ax ON ax.report_id = r.id
+      JOIN report_axle_values v ON v.axle_id = ax.id
+      WHERE r.full_model_name = ? 
+        AND r.begin_date >= ? 
+        AND r.begin_date <= ?
+      GROUP BY date  -- ИСПРАВЛЕНО ТУТ
+      ORDER BY date ASC
+    `, [dbModelName, startDateTime, endDateTime]);
+
+    res.json(rows);
+  } catch (error) {
+    console.error('[ALIGNMENT CHARTS API] Ошибка:', error);
+    res.status(500).json({ error: 'Ошибка при получении данных для графиков' });
+  }
+});
+
+// ================== РАЗВАЛ-СХОЖДЕНИЕ: ОТЧЁТ ПО VIN ==================
+// Hunter = короткий VIN (TG049519), IoT = полный VIN (EDXDD21B4TG049519)
+// Ответ: массив отчётов Hunter + в каждом поле `iot` с NCATable_* значениями из IoT
+app.get('/api/alignment-report', async (req, res) => {
+  let { vin } = req.query;
+  if (!vin) return res.status(400).json({ error: 'VIN parameter is required' });
+  vin = vin.trim();
+
+  try {
+    // 1. Что искать в Hunter (если ввели полный VIN — отрезаем хвост из 8 символов)
+    let hunterQueryVin = vin;
+    if (vin.length > 10) {
+      hunterQueryVin = vin.slice(-8); // например, TG049519
+    }
+
+    // 2. Ищем отчёт в HunterWA
+    const [rows] = await hunterwaPool.execute(`
+      SELECT 
+        r.id AS report_id, r.vin, r.begin_date, r.full_model_name,
+        
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: левый' THEN v.before_value END) AS f_camber_l_before,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: левый' THEN v.after_value END) AS f_camber_l_after,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: левый' THEN v.spec_min END) AS f_camber_l_min,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: левый' THEN v.spec_max END) AS f_camber_l_max,
+        
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: правый' THEN v.before_value END) AS f_camber_r_before,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: правый' THEN v.after_value END) AS f_camber_r_after,
+
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: левое' THEN v.before_value END) AS f_toe_l_before,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: левое' THEN v.after_value END) AS f_toe_l_after,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: левое' THEN v.spec_min END) AS f_toe_l_min,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: левое' THEN v.spec_max END) AS f_toe_l_max,
+        
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: правое' THEN v.before_value END) AS f_toe_r_before,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: правое' THEN v.after_value END) AS f_toe_r_after,
+        
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: суммарное' THEN v.before_value END) AS f_toe_total_before,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: суммарное' THEN v.after_value END) AS f_toe_total_after,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: суммарное' THEN v.spec_min END) AS f_toe_total_min,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: суммарное' THEN v.spec_max END) AS f_toe_total_max,
+
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Продольный наклон шкворня: левый' THEN v.before_value END) AS f_caster_l_before,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Продольный наклон шкворня: левый' THEN v.after_value END) AS f_caster_l_after,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Продольный наклон шкворня: левый' THEN v.spec_min END) AS f_caster_l_min,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Продольный наклон шкворня: левый' THEN v.spec_max END) AS f_caster_l_max,
+        
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Продольный наклон шкворня: правый' THEN v.before_value END) AS f_caster_r_before,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Продольный наклон шкворня: правый' THEN v.after_value END) AS f_caster_r_after,
+        
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Поперечный наклон шкворня: левый' THEN v.before_value END) AS f_kpi_l_before,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Поперечный наклон шкворня: левый' THEN v.after_value END) AS f_kpi_l_after,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Поперечный наклон шкворня: левый' THEN v.spec_min END) AS f_kpi_l_min,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Поперечный наклон шкворня: левый' THEN v.spec_max END) AS f_kpi_l_max,
+        
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Поперечный наклон шкворня: правый' THEN v.before_value END) AS f_kpi_r_before,
+        MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Поперечный наклон шкворня: правый' THEN v.after_value END) AS f_kpi_r_after,
+
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: левый' THEN v.before_value END) AS r_camber_l_before,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: левый' THEN v.after_value END) AS r_camber_l_after,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: левый' THEN v.spec_min END) AS r_camber_l_min,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: левый' THEN v.spec_max END) AS r_camber_l_max,
+        
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: правый' THEN v.before_value END) AS r_camber_r_before,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: правый' THEN v.after_value END) AS r_camber_r_after,
+
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: левое' THEN v.before_value END) AS r_toe_l_before,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: левое' THEN v.after_value END) AS r_toe_l_after,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: левое' THEN v.spec_min END) AS r_toe_l_min,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: левое' THEN v.spec_max END) AS r_toe_l_max,
+        
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: правое' THEN v.before_value END) AS r_toe_r_before,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: правое' THEN v.after_value END) AS r_toe_r_after,
+        
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: суммарное' THEN v.before_value END) AS r_toe_total_before,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: суммарное' THEN v.after_value END) AS r_toe_total_after,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: суммарное' THEN v.spec_min END) AS r_toe_total_min,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: суммарное' THEN v.spec_max END) AS r_toe_total_max,
+        
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Угол движения' THEN v.before_value END) AS r_thrust_angle_before,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Угол движения' THEN v.after_value END) AS r_thrust_angle_after
+
+      FROM reports r
+      JOIN report_axles ax ON ax.report_id = r.id
+      JOIN report_axle_values v ON v.axle_id = ax.id
+      WHERE r.vin IS NOT NULL 
+        AND TRIM(r.vin) != '' 
+        AND TRIM(r.vin) != 'N/A'
+        AND (
+          r.vin LIKE CONCAT('%', ?, '%') 
+          OR ? LIKE CONCAT('%', r.vin, '%')
+        )
+      GROUP BY r.id
+      ORDER BY r.begin_date DESC
+    `, [hunterQueryVin, hunterQueryVin]);
+
+    if (rows.length === 0) return res.json([]);
+
+    // 3. Ищем ПОЛНЫЙ VIN для каждого короткого VIN Hunter
+    const shortVins = [...new Set(rows.map(r => r.vin).filter(v => v && v.trim() !== ''))];
+    const vinMap = {};
+
+    if (shortVins.length > 0) {
+      shortVins.forEach(v => vinMap[v] = v); // по умолчанию — короткий
+
+      try {
+        for (const sv of shortVins) {
+          // a) MES
+          const [mesVins] = await mesPool.query(
+            `SELECT DISTINCT vin FROM ti_mes_movement
+              WHERE vin IS NOT NULL AND TRIM(vin) != ''
+                AND vin LIKE CONCAT('%', ?, '%')
+              LIMIT 1`,
+            [sv]
+          );
+          if (mesVins.length > 0) {
+            vinMap[sv] = mesVins[0].vin;
+            continue;
+          }
+
+          // b) IoT work_order
+          const [iotVins] = await pool.query(
+            `SELECT DISTINCT vin FROM work_order
+              WHERE vin IS NOT NULL AND TRIM(vin) != ''
+                AND vin LIKE CONCAT('%', ?, '%')
+              LIMIT 1`,
+            [sv]
+          );
+          if (iotVins.length > 0) {
+            vinMap[sv] = iotVins[0].vin;
+            continue;
+          }
+
+          // c) IoT at_im_execute_result (там, где лежат NCATable_*)
+          const [ncaVins] = await pool.query(
+            `SELECT DISTINCT vin FROM at_im_execute_result
+              WHERE vin IS NOT NULL AND TRIM(vin) != ''
+                AND vin LIKE CONCAT('%', ?, '%')
+              LIMIT 1`,
+            [sv]
+          );
+          if (ncaVins.length > 0) {
+            vinMap[sv] = ncaVins[0].vin;
+          }
+        }
+      } catch (e) {
+        console.error('[ALIGNMENT API] Ошибка поиска полного VIN:', e);
+      }
+    }
+
+    // 4. Собираем ответ: Hunter-поля + iot = { NCATable_*: value }
+    const responseData = await Promise.all(rows.map(async r => {
+      const shortVin = r.vin ? r.vin.trim() : '';
+      const fullVin  = vinMap[shortVin] || shortVin || vin;
+
+      // ─── IoT ───
+      const iot = await fetchIotNcaValues(fullVin);
+
+      return {
+        ...r,                 // ─── Hunter ───
+        requestedVin: fullVin,
+        iot,                  // ─── IoT ───
+      };
+    }));
+
+    res.json(responseData);
+
+  } catch (error) {
+    console.error('[ALIGNMENT API] Ошибка:', error);
+    res.status(500).json({ error: 'Ошибка при получении данных' });
+  }
+});
+
+
 /* ====================================================================== */
 /* ================== IOT DEFECT WORKSHOP SERVICE ======================= */
 /* ====================================================================== */

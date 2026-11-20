@@ -41,6 +41,7 @@ import RepelecReportPage from './RepelecReportPage';
 import DrrElectronicsDashboardPage from './DrrElectronicsDashboardPage';
 import WorkshopUpdate from './WorkshopUpdate';
 import ECToolReportPage from './ECToolReportPage';
+import AlignmentReport from './AlignmentReport';
 
 
 import InspectionPage from './InspectionPage';
@@ -89,6 +90,7 @@ export default function App() {
         <Route path="/drr-electronics-dashboard" element={<DrrElectronicsDashboardPage />} />
         <Route path="/workshop-update" element={<WorkshopUpdate />} />
         <Route path="/ec-tool-report" element={<ECToolReportPage />} />
+        <Route path="/alignment-report" element={<AlignmentReport />} />
 
 
 

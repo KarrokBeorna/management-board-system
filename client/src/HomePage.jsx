@@ -37,7 +37,8 @@ import voltageSpcPreview from './assets/volt.png';
 import repelecPreview from './assets/repelec.png'; 
 import drrElectronicsPreview from './assets/dshelec.png';
 import ecToolPreview from './assets/ectool.png';
-import workshopPreview from './assets/123.png';//поменять надо
+import workshopPreview from './assets/srchbd.png';
+import alignmentPreview from './assets/hunter.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -372,6 +373,7 @@ export default function HomePage() {
     { to: "/voltage-spc", imgSrc: voltageSpcPreview, caption: "Voltage SPC Report", accentColor: "#0bf52a" },
     { to: "/repelec-report", imgSrc: repelecPreview, caption: "REPELEC Report", accentColor: "#F59E0B" },
     { to: "/ec-tool-report", imgSrc: ecToolPreview, caption: "EC Tool Report", accentColor: "#2e0bf5" },
+    //{ to: "/alignment-report", imgSrc: alignmentPreview, caption: "Hunter Развал", accentColor: "#F59E0B" },
   ];
 
   const allServiceCards = [
