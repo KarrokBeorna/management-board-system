@@ -19442,7 +19442,7 @@ app.get('/api/ec-tool-report', async (req, res) => {
 // ================== РАЗВАЛ-СХОЖДЕНИЕ (HUNTER WA) ==================
 // ================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==================
 
-// 1. Поиск полного VIN по короткому (единая функция, без дублей)
+// 1. Поиск полного VIN по короткому (единая функция)
 async function getFullVin(shortVin) {
   if (!shortVin) return '';
   try {
@@ -19469,50 +19469,140 @@ async function getFullVin(shortVin) {
   return shortVin;
 }
 
-// 2. Запрос AGM-данных
-//    ВАЖНО: выбираем последний замер, в котором ГАРАНТИРОВАННО есть NCATable%,
-//    иначе для VIN с последним не-AGM замером будем возвращать {}.
-async function fetchAgmData(fullVin, hunterVin) {
+// 1b. Батч-поиск полных VIN по списку коротких (для графиков по моделям)
+//     Делает 2 запроса вместо 3×N.
+async function getFullVinsBatch(shortVins) {
+  const result = new Map();
+  if (!shortVins || shortVins.length === 0) return result;
+  const uniq = [...new Set(shortVins.filter(Boolean))];
+
+  // MES
+  try {
+    const clauses = uniq.map(() => `vin LIKE CONCAT('%', ?)`).join(' OR ');
+    const [rows] = await mesPool.query(
+      `SELECT DISTINCT vin FROM ti_mes_movement WHERE ${clauses}`,
+      uniq
+    );
+    for (const r of rows) {
+      const v = r.vin;
+      const sv = uniq.find(s => v && v.endsWith(s));
+      if (sv && !result.has(sv)) result.set(sv, v);
+    }
+  } catch (e) {
+    console.error('[getFullVinsBatch MES]', e.message);
+  }
+
+  // work_order (IoT)
+  const rem1 = uniq.filter(sv => !result.has(sv));
+  if (rem1.length > 0) {
+    try {
+      const clauses = rem1.map(() => `vin LIKE CONCAT('%', ?)`).join(' OR ');
+      const [rows] = await pool.query(
+        `SELECT DISTINCT vin FROM work_order WHERE ${clauses}`,
+        rem1
+      );
+      for (const r of rows) {
+        const v = r.vin;
+        const sv = rem1.find(s => v && v.endsWith(s));
+        if (sv && !result.has(sv)) result.set(sv, v);
+      }
+    } catch (e) {
+      console.error('[getFullVinsBatch work_order]', e.message);
+    }
+  }
+
+  // at_im_execute_result (IoT)
+  const rem2 = uniq.filter(sv => !result.has(sv));
+  if (rem2.length > 0) {
+    try {
+      const clauses = rem2.map(() => `vin LIKE CONCAT('%', ?)`).join(' OR ');
+      const [rows] = await pool.query(
+        `SELECT DISTINCT vin FROM higoplat_lingxi.at_im_execute_result WHERE ${clauses}`,
+        rem2
+      );
+      for (const r of rows) {
+        const v = r.vin;
+        const sv = rem2.find(s => v && v.endsWith(s));
+        if (sv && !result.has(sv)) result.set(sv, v);
+      }
+    } catch (e) {
+      console.error('[getFullVinsBatch at_im_execute_result]', e.message);
+    }
+  }
+
+  // Fallback — короткий VIN сам по себе
+  for (const sv of uniq) {
+    if (!result.has(sv)) result.set(sv, sv);
+  }
+
+  return result;
+}
+
+// 2. Все AGM-замеры по VIN (массив), с опциональным фильтром по датам.
+//    Возвращает [{ measurement_id, creation_time, date, time, values }]
+async function fetchAgmMeasurements(fullVin, hunterVin, dateFrom = null, dateTo = null) {
   const exactVin = (fullVin || hunterVin || '').trim();
   const sourceVin = (hunterVin || fullVin || '').trim();
   const suffix = sourceVin.length > 8 ? sourceVin.slice(-8) : sourceVin;
 
-  if (!exactVin && !suffix) return {};
+  if (!exactVin && !suffix) return [];
 
   try {
-    const [items] = await pool.execute(
-      `SELECT info.item_name, info.item_value
-         FROM higoplat_lingxi.at_im_execute_result_info info
-        WHERE info.ier_id = (
-            SELECT er.id
-              FROM higoplat_lingxi.at_im_execute_result er
-             WHERE (TRIM(er.vin) = TRIM(?) OR TRIM(er.vin) LIKE CONCAT('%', ?))
-               AND EXISTS (
-                   SELECT 1
-                     FROM higoplat_lingxi.at_im_execute_result_info i2
-                    WHERE i2.ier_id = er.id
-                      AND i2.item_name LIKE 'NCATable%'
-               )
-             ORDER BY er.creation_time DESC
-             LIMIT 1
-        )
-        AND info.item_name LIKE 'NCATable%'`,
-      [exactVin, suffix]
-    );
-
-    if (items.length === 0) {
-      console.log(`[IoT AGM] Нет NCATable для VIN: ${exactVin}, хвост: ${suffix}`);
-      return {};
+    const params = [exactVin, suffix];
+    let dateFilter = '';
+    if (dateFrom && dateTo) {
+      dateFilter = 'AND er.creation_time >= ? AND er.creation_time <= ?';
+      params.push(dateFrom, dateTo);
     }
 
-    return mapAgmValues(items);
+    const [measurements] = await pool.execute(
+      `SELECT 
+         er.id AS measurement_id,
+         DATE_FORMAT(er.creation_time, '%Y-%m-%d %H:%i:%s') AS creation_time,
+         DATE_FORMAT(er.creation_time, '%Y-%m-%d') AS date,
+         DATE_FORMAT(er.creation_time, '%H:%i') AS time
+       FROM higoplat_lingxi.at_im_execute_result er
+       WHERE (TRIM(er.vin) = TRIM(?) OR TRIM(er.vin) LIKE CONCAT('%', ?))
+         AND EXISTS (
+           SELECT 1 FROM higoplat_lingxi.at_im_execute_result_info i2
+           WHERE i2.ier_id = er.id AND i2.item_name LIKE 'NCATable%'
+         )
+         ${dateFilter}
+       ORDER BY er.creation_time DESC`,
+      params
+    );
+
+    if (measurements.length === 0) return [];
+
+    const ids = measurements.map(m => m.measurement_id);
+    const placeholders = ids.map(() => '?').join(',');
+    const [items] = await pool.execute(
+      `SELECT ier_id, item_name, item_value
+       FROM higoplat_lingxi.at_im_execute_result_info
+       WHERE ier_id IN (${placeholders}) AND item_name LIKE 'NCATable%'`,
+      ids
+    );
+
+    const byId = new Map();
+    for (const it of items) {
+      if (!byId.has(it.ier_id)) byId.set(it.ier_id, []);
+      byId.get(it.ier_id).push(it);
+    }
+
+    return measurements.map(m => ({
+      measurement_id: m.measurement_id,
+      creation_time: m.creation_time,
+      date: m.date,
+      time: m.time,
+      values: mapAgmValues(byId.get(m.measurement_id) || [])
+    }));
   } catch (e) {
-    console.error('[IoT AGM] ОШИБКА SQL:', e.message);
-    return {};
+    console.error('[IoT AGM measurements] ОШИБКА SQL:', e.message);
+    return [];
   }
 }
 
-// 3. Маппинг полей
+// 3. Маппинг полей (без изменений)
 function mapAgmValues(items) {
   const map = {};
   for (const it of items) {
@@ -19521,7 +19611,6 @@ function mapAgmValues(items) {
   }
 
   return {
-    // Развал (Camber)
     f_camber_l: map['NCATable_NCA_Camber_LF'],
     f_camber_l_result: map['NCATable_NCA_Camber_LF_Result'],
     f_camber_r: map['NCATable_NCA_Camber_RF'],
@@ -19529,7 +19618,6 @@ function mapAgmValues(items) {
     f_camber_diff: map['NCATable_NCA_Camber_FCross'] || map['NCATable_NCA_Camber_Fcross'],
     f_camber_diff_result: map['NCATable_NCA_Camber_FCross_Result'] || map['NCATable_NCA_Camber_Fcross_Result'],
 
-    // Схождение (Toe)
     f_toe_l: map['NCATable_NCA_Toe_LF'],
     f_toe_l_result: map['NCATable_NCA_Toe_LF_Result'],
     f_toe_r: map['NCATable_NCA_Toe_RF'],
@@ -19537,7 +19625,6 @@ function mapAgmValues(items) {
     f_toe_total: map['NCATable_NCA_Toe_FTotal'] || map['NCATable_NCA_Toe_FCross'],
     f_toe_total_result: map['NCATable_NCA_Toe_FTotal_Result'] || map['NCATable_NCA_Toe_FCross_Result'],
 
-    // Продольный наклон (Caster)
     f_caster_l: map['NCATable_NCA_Caster_LF'],
     f_caster_l_result: map['NCATable_NCA_Caster_LF_Result'],
     f_caster_r: map['NCATable_NCA_Caster_RF'],
@@ -19545,7 +19632,6 @@ function mapAgmValues(items) {
     f_caster_diff: map['NCATable_NCA_Caster_FCross'] || map['NCATable_NCA_Caster_Fcross'],
     f_caster_diff_result: map['NCATable_NCA_Caster_FCross_Result'] || map['NCATable_NCA_Caster_Fcross_Result'],
 
-    // Поперечный наклон (SAI / KPI)
     f_kpi_l: map['NCATable_NCA_SAI_LF'],
     f_kpi_l_result: map['NCATable_NCA_SAI_LF_Result'],
     f_kpi_r: map['NCATable_NCA_SAI_RF'],
@@ -19553,7 +19639,6 @@ function mapAgmValues(items) {
     f_kpi_diff: map['NCATable_NCA_SAI_FCross'] || map['NCATable_NCA_SAI_Fcross'],
     f_kpi_diff_result: map['NCATable_NCA_SAI_FCross_Result'] || map['NCATable_NCA_SAI_Fcross_Result'],
 
-    // Задний мост: Развал
     r_camber_l: map['NCATable_NCA_Camber_LR'],
     r_camber_l_result: map['NCATable_NCA_Camber_LR_Result'],
     r_camber_r: map['NCATable_NCA_Camber_RR'],
@@ -19561,7 +19646,6 @@ function mapAgmValues(items) {
     r_camber_diff: map['NCATable_NCA_Camber_RCross'] || map['NCATable_NCA_Camber_Rcross'],
     r_camber_diff_result: map['NCATable_NCA_Camber_RCross_Result'] || map['NCATable_NCA_Camber_Rcross_Result'],
 
-    // Задний мост: Схождение
     r_toe_l: map['NCATable_NCA_Toe_LR'],
     r_toe_l_result: map['NCATable_NCA_Toe_LR_Result'],
     r_toe_r: map['NCATable_NCA_Toe_RR'],
@@ -19569,7 +19653,6 @@ function mapAgmValues(items) {
     r_toe_total: map['NCATable_NCA_Toe_RTotal'] || map['NCATable_NCA_Toe_RCross'],
     r_toe_total_result: map['NCATable_NCA_Toe_RTotal_Result'] || map['NCATable_NCA_Toe_RCross_Result'],
 
-    // Угол движения
     r_thrust: map['NCATable_NCA_SWA'],
     r_thrust_result: map['NCATable_NCA_SWA_Result']
   };
@@ -19578,7 +19661,7 @@ function mapAgmValues(items) {
 
 // ================== ЭНДПОИНТЫ ==================
 
-// 1. Список моделей
+// 1. Список моделей (без изменений)
 app.get('/api/alignment-models', async (req, res) => {
   try {
     const [rows] = await hunterwaPool.execute(`
@@ -19595,7 +19678,7 @@ app.get('/api/alignment-models', async (req, res) => {
   }
 });
 
-// 2. Данные для графиков
+// 2. Данные для графиков — Hunter + IoT агрегируются по дням раздельно
 app.get('/api/alignment-charts', async (req, res) => {
   const { model, startDate, endDate } = req.query;
 
@@ -19607,9 +19690,7 @@ app.get('/api/alignment-charts', async (req, res) => {
     const startDateTime = `${startDate} 00:00:00`;
     const endDateTime = `${endDate} 23:59:59`;
 
-    // ВАЖНО: порядок параметров = порядок плейсхолдеров в SQL
     const queryParams = [startDateTime, endDateTime];
-
     let whereModel = '';
     if (model && model !== 'ALL') {
       whereModel = 'AND r.full_model_name = ?';
@@ -19652,12 +19733,22 @@ app.get('/api/alignment-charts', async (req, res) => {
 
     if (rows.length === 0) return res.json([]);
 
-    const prepared = await Promise.all(rows.map(async (r) => {
-      const shortVin = r.short_vin ? r.short_vin.trim() : '';
-      const fullVin = await getFullVin(shortVin);
-      // ВАЖНО: передаём и полный, и исходный короткий VIN
-      const agm = await fetchAgmData(fullVin, shortVin);
+    // Уникальные короткие VIN
+    const uniqueShortVins = [...new Set(
+      rows.map(r => r.short_vin ? r.short_vin.trim() : '').filter(Boolean)
+    )];
 
+    // Батч-поиск полных VIN + все AGM-замеры (в диапазоне дат)
+    const fullVinMap = await getFullVinsBatch(uniqueShortVins);
+    const agmByVin = new Map();
+    await Promise.all(uniqueShortVins.map(async (sv) => {
+      const fv = fullVinMap.get(sv) || sv;
+      const ms = await fetchAgmMeasurements(fv, sv, startDateTime, endDateTime);
+      agmByVin.set(sv, ms);
+    }));
+
+    // Ряды Hunter
+    const hunterRows = rows.map(r => {
       const f_camber_diff = (r.hunter_f_camber_l != null && r.hunter_f_camber_r != null)
         ? r.hunter_f_camber_l - r.hunter_f_camber_r : null;
       const f_caster_diff = (r.hunter_f_caster_l != null && r.hunter_f_caster_r != null)
@@ -19668,56 +19759,135 @@ app.get('/api/alignment-charts', async (req, res) => {
         ? r.hunter_r_camber_l - r.hunter_r_camber_r : null;
 
       return {
-        report_id: r.report_id,
-        vin: fullVin,
-        short_vin: shortVin,
+        source: 'hunter',
         date: r.date,
         time: r.time,
-
-        hunter_f_camber_l: r.hunter_f_camber_l, hunter_f_camber_r: r.hunter_f_camber_r, hunter_f_camber_diff: f_camber_diff,
-        hunter_f_toe_l: r.hunter_f_toe_l, hunter_f_toe_r: r.hunter_f_toe_r, hunter_f_toe_total: r.hunter_f_toe_total,
-        hunter_f_caster_l: r.hunter_f_caster_l, hunter_f_caster_r: r.hunter_f_caster_r, hunter_f_caster_diff: f_caster_diff,
-        hunter_f_kpi_l: r.hunter_f_kpi_l, hunter_f_kpi_r: r.hunter_f_kpi_r, hunter_f_kpi_diff: f_kpi_diff,
-        hunter_r_camber_l: r.hunter_r_camber_l, hunter_r_camber_r: r.hunter_r_camber_r, hunter_r_camber_diff: r_camber_diff,
-        hunter_r_toe_l: r.hunter_r_toe_l, hunter_r_toe_r: r.hunter_r_toe_r, hunter_r_toe_total: r.hunter_r_toe_total,
-        hunter_r_thrust: r.hunter_r_thrust,
-
-        agm_f_camber_l: agm.f_camber_l, agm_f_camber_l_result: agm.f_camber_l_result,
-        agm_f_camber_r: agm.f_camber_r, agm_f_camber_r_result: agm.f_camber_r_result,
-        agm_f_camber_diff: agm.f_camber_diff, agm_f_camber_diff_result: agm.f_camber_diff_result,
-
-        agm_f_toe_l: agm.f_toe_l, agm_f_toe_l_result: agm.f_toe_l_result,
-        agm_f_toe_r: agm.f_toe_r, agm_f_toe_r_result: agm.f_toe_r_result,
-        agm_f_toe_total: agm.f_toe_total, agm_f_toe_total_result: agm.f_toe_total_result,
-
-        agm_f_caster_l: agm.f_caster_l, agm_f_caster_l_result: agm.f_caster_l_result,
-        agm_f_caster_r: agm.f_caster_r, agm_f_caster_r_result: agm.f_caster_r_result,
-        agm_f_caster_diff: agm.f_caster_diff, agm_f_caster_diff_result: agm.f_caster_diff_result,
-
-        agm_f_kpi_l: agm.f_kpi_l, agm_f_kpi_l_result: agm.f_kpi_l_result,
-        agm_f_kpi_r: agm.f_kpi_r, agm_f_kpi_r_result: agm.f_kpi_r_result,
-        agm_f_kpi_diff: agm.f_kpi_diff, agm_f_kpi_diff_result: agm.f_kpi_diff_result,
-
-        agm_r_camber_l: agm.r_camber_l, agm_r_camber_l_result: agm.r_camber_l_result,
-        agm_r_camber_r: agm.r_camber_r, agm_r_camber_r_result: agm.r_camber_r_result,
-        agm_r_camber_diff: agm.r_camber_diff, agm_r_camber_diff_result: agm.r_camber_diff_result,
-
-        agm_r_toe_l: agm.r_toe_l, agm_r_toe_l_result: agm.r_toe_l_result,
-        agm_r_toe_r: agm.r_toe_r, agm_r_toe_r_result: agm.r_toe_r_result,
-        agm_r_toe_total: agm.r_toe_total, agm_r_toe_total_result: agm.r_toe_total_result,
-
-        agm_r_thrust: agm.r_thrust, agm_r_thrust_result: agm.r_thrust_result
+        hunter_f_camber_l: r.hunter_f_camber_l,
+        hunter_f_camber_r: r.hunter_f_camber_r,
+        hunter_f_camber_diff: f_camber_diff,
+        hunter_f_toe_l: r.hunter_f_toe_l,
+        hunter_f_toe_r: r.hunter_f_toe_r,
+        hunter_f_toe_total: r.hunter_f_toe_total,
+        hunter_f_caster_l: r.hunter_f_caster_l,
+        hunter_f_caster_r: r.hunter_f_caster_r,
+        hunter_f_caster_diff: f_caster_diff,
+        hunter_f_kpi_l: r.hunter_f_kpi_l,
+        hunter_f_kpi_r: r.hunter_f_kpi_r,
+        hunter_f_kpi_diff: f_kpi_diff,
+        hunter_r_camber_l: r.hunter_r_camber_l,
+        hunter_r_camber_r: r.hunter_r_camber_r,
+        hunter_r_camber_diff: r_camber_diff,
+        hunter_r_toe_l: r.hunter_r_toe_l,
+        hunter_r_toe_r: r.hunter_r_toe_r,
+        hunter_r_toe_total: r.hunter_r_toe_total,
+        hunter_r_thrust: r.hunter_r_thrust
       };
-    }));
+    });
 
-    res.json(prepared);
+    // Ряды AGM (по своим датам)
+    const agmRows = [];
+    for (const [, measurements] of agmByVin.entries()) {
+      for (const m of measurements) {
+        const v = m.values || {};
+        const num = (x) => (x != null && x !== '' && !isNaN(Number(x))) ? Number(x) : null;
+        const fl = num(v.f_camber_l);
+        const fr = num(v.f_camber_r);
+        const cl = num(v.f_caster_l);
+        const cr = num(v.f_caster_r);
+        const kl = num(v.f_kpi_l);
+        const kr = num(v.f_kpi_r);
+        const rl = num(v.r_camber_l);
+        const rr = num(v.r_camber_r);
+
+        agmRows.push({
+          source: 'agm',
+          date: m.date,
+          time: m.time,
+          measurement_id: m.measurement_id,
+          agm_f_camber_l: fl,
+          agm_f_camber_r: fr,
+          agm_f_camber_diff: (fl != null && fr != null) ? fl - fr : null,
+          agm_f_toe_l: num(v.f_toe_l),
+          agm_f_toe_r: num(v.f_toe_r),
+          agm_f_toe_total: num(v.f_toe_total),
+          agm_f_caster_l: cl,
+          agm_f_caster_r: cr,
+          agm_f_caster_diff: (cl != null && cr != null) ? cl - cr : null,
+          agm_f_kpi_l: kl,
+          agm_f_kpi_r: kr,
+          agm_f_kpi_diff: (kl != null && kr != null) ? kl - kr : null,
+          agm_r_camber_l: rl,
+          agm_r_camber_r: rr,
+          agm_r_camber_diff: (rl != null && rr != null) ? rl - rr : null,
+          agm_r_toe_l: num(v.r_toe_l),
+          agm_r_toe_r: num(v.r_toe_r),
+          agm_r_toe_total: num(v.r_toe_total),
+          agm_r_thrust: num(v.r_thrust)
+        });
+      }
+    }
+
+    // Группировка по дате
+    const byDate = new Map();
+    for (const h of hunterRows) {
+      if (!byDate.has(h.date)) byDate.set(h.date, { hunter: [], agm: [] });
+      byDate.get(h.date).hunter.push(h);
+    }
+    for (const a of agmRows) {
+      if (!byDate.has(a.date)) byDate.set(a.date, { hunter: [], agm: [] });
+      byDate.get(a.date).agm.push(a);
+    }
+
+    const avgOf = (arr, key) => {
+      const vals = arr.map(x => {
+        const v = x[key];
+        if (v === null || v === undefined || v === '') return null;
+        const n = typeof v === 'string' ? parseFloat(v) : v;
+        return isNaN(n) ? null : n;
+      }).filter(v => v !== null);
+      return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+    };
+
+    const hunterFields = [
+      'hunter_f_camber_l', 'hunter_f_camber_r', 'hunter_f_camber_diff',
+      'hunter_f_toe_l', 'hunter_f_toe_r', 'hunter_f_toe_total',
+      'hunter_f_caster_l', 'hunter_f_caster_r', 'hunter_f_caster_diff',
+      'hunter_f_kpi_l', 'hunter_f_kpi_r', 'hunter_f_kpi_diff',
+      'hunter_r_camber_l', 'hunter_r_camber_r', 'hunter_r_camber_diff',
+      'hunter_r_toe_l', 'hunter_r_toe_r', 'hunter_r_toe_total', 'hunter_r_thrust'
+    ];
+    const agmFields = [
+      'agm_f_camber_l', 'agm_f_camber_r', 'agm_f_camber_diff',
+      'agm_f_toe_l', 'agm_f_toe_r', 'agm_f_toe_total',
+      'agm_f_caster_l', 'agm_f_caster_r', 'agm_f_caster_diff',
+      'agm_f_kpi_l', 'agm_f_kpi_r', 'agm_f_kpi_diff',
+      'agm_r_camber_l', 'agm_r_camber_r', 'agm_r_camber_diff',
+      'agm_r_toe_l', 'agm_r_toe_r', 'agm_r_toe_total', 'agm_r_thrust'
+    ];
+
+    const merged = [...byDate.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, { hunter, agm }]) => {
+        const row = {
+          date: `${date.substring(8, 10)}.${date.substring(5, 7)}`,
+          fullDate: `${date.substring(8, 10)}.${date.substring(5, 7)}.${date.substring(0, 4)}`,
+          hunter_cars: hunter.length,
+          agm_cars: agm.length,
+          cars: hunter.length // для графика объёма (Hunter)
+        };
+        for (const f of hunterFields) row[f] = avgOf(hunter, f);
+        for (const f of agmFields) row[f] = avgOf(agm, f);
+        return row;
+      });
+
+    res.json(merged);
   } catch (error) {
     console.error('[ALIGNMENT CHARTS API] Ошибка:', error);
     res.status(500).json({ error: 'Ошибка при получении данных для графиков' });
   }
 });
 
-// 3. Табличный отчёт по VIN
+// 3. Табличный отчёт по VIN — с историей замеров IoT
 app.get('/api/alignment-report', async (req, res) => {
   let { vin } = req.query;
   if (!vin) return res.status(400).json({ error: 'VIN parameter is required' });
@@ -19726,10 +19896,10 @@ app.get('/api/alignment-report', async (req, res) => {
   try {
     const hunterQueryVin = vin.length > 10 ? vin.slice(-8) : vin;
 
-    // 1. Полный VIN + AGM (один раз — VIN один и тот же для всех отчётов Hunter)
+    // 1. Полный VIN + все AGM-замеры
     const fullVin = await getFullVin(hunterQueryVin);
-    const agm = await fetchAgmData(fullVin, hunterQueryVin);
-    const iotFound = agm && Object.keys(agm).length > 0;
+    const agmMeasurements = await fetchAgmMeasurements(fullVin, hunterQueryVin);
+    const iotFound = agmMeasurements.length > 0;
 
     // 2. Hunter
     const [rows] = await hunterwaPool.execute(`
@@ -19800,7 +19970,8 @@ app.get('/api/alignment-report', async (req, res) => {
         hunterFound: false,
         iotFound: false,
         message: 'Нет данных в IoT и Hunter',
-        reports: []
+        reports: [],
+        agmMeasurements: []
       });
     }
 
@@ -19818,9 +19989,9 @@ app.get('/api/alignment-report', async (req, res) => {
           full_model_name: null,
           requestedVin: fullVin,
           hunterAvailable: false,
-          iotAvailable: true,
-          agm
-        }]
+          iotAvailable: true
+        }],
+        agmMeasurements
       });
     }
 
@@ -19830,15 +20001,15 @@ app.get('/api/alignment-report', async (req, res) => {
       requestedVin: fullVin,
       shortVin: r.vin ? r.vin.trim() : '',
       hunterAvailable: true,
-      iotAvailable: iotFound,
-      agm
+      iotAvailable: iotFound
     }));
 
     return res.json({
       hunterFound: true,
       iotFound,
       message: iotFound ? null : 'Нет данных в IoT. Показаны только данные Hunter.',
-      reports: prepared
+      reports: prepared,
+      agmMeasurements
     });
 
   } catch (error) {

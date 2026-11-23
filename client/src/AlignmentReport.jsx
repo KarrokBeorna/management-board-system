@@ -226,7 +226,8 @@ function AlignmentCharts({ chartData, showVolume = false, isModelView = false })
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                 <YAxis width={40} />
                 <Tooltip />
-                <Area type="monotone" dataKey="cars" name="Кол-во машин" stroke="#10b981" fill="#d1fae5" strokeWidth={2} />
+                <Area type="monotone" dataKey="cars" name="Кол-во машин (Hunter)" stroke="#10b981" fill="#d1fae5" strokeWidth={2} />
+                <Area type="monotone" dataKey="agm_cars" name="Кол-во машин (IoT)" stroke="#3b82f6" fill="#dbeafe" strokeWidth={2} />
               </AreaChart>
             )}
           </div>
@@ -267,35 +268,47 @@ function ChartsViewModels() {
     try {
       const res = await fetch(`${API_BASE}/api/alignment-charts?model=${selectedModel}&startDate=${startDate}&endDate=${endDate}`);
       const json = await res.json();
-      
-      const grouped = {};
-      json.forEach(item => {
-        const dateStr = item.date; 
-        if (!grouped[dateStr]) grouped[dateStr] = { count: 0, sum: {} };
-        const g = grouped[dateStr];
-        g.count++;
-        Object.keys(item).forEach(key => {
-          if (key !== 'date' && key !== 'time' && key !== 'vin' && typeof item[key] === 'number') {
-            if (!g.sum[key]) g.sum[key] = 0;
-            g.sum[key] += item[key];
-          }
-        });
-      });
 
-      const prepared = Object.keys(grouped).sort().map(dateStr => {
-        const g = grouped[dateStr];
-        const avg = { 
-          date: `${dateStr.substring(8, 10)}.${dateStr.substring(5, 7)}`, 
-          fullDate: `${dateStr.substring(8, 10)}.${dateStr.substring(5, 7)}.${dateStr.substring(0, 4)}`,
-          cars: g.count 
-        };
-        Object.keys(g.sum).forEach(key => {
-          avg[key] = g.sum[key] / g.count;
-        });
-        return avg;
-      });
+      if (!Array.isArray(json) || json.length === 0) {
+        setChartData([]);
+        return;
+      }
 
-      setChartData(prepared);
+      // Бэкенд нового формата возвращает уже агрегированные ряды (по датам)
+      const isPreAggregated = json[0].hunter_cars !== undefined || json[0].agm_cars !== undefined;
+
+      if (isPreAggregated) {
+        setChartData(json.map(item => ({
+          ...item,
+          cars: item.hunter_cars != null ? item.hunter_cars : 0
+        })));
+      } else {
+        // Fallback для старого формата — группируем на фронте
+        const grouped = {};
+        json.forEach(item => {
+          const dateStr = item.date;
+          if (!grouped[dateStr]) grouped[dateStr] = { count: 0, sum: {} };
+          const g = grouped[dateStr];
+          g.count++;
+          Object.keys(item).forEach(key => {
+            if (key !== 'date' && key !== 'time' && key !== 'vin' && typeof item[key] === 'number') {
+              if (!g.sum[key]) g.sum[key] = 0;
+              g.sum[key] += item[key];
+            }
+          });
+        });
+        const prepared = Object.keys(grouped).sort().map(dateStr => {
+          const g = grouped[dateStr];
+          const avg = {
+            date: `${dateStr.substring(8, 10)}.${dateStr.substring(5, 7)}`,
+            fullDate: `${dateStr.substring(8, 10)}.${dateStr.substring(5, 7)}.${dateStr.substring(0, 4)}`,
+            cars: g.count
+          };
+          Object.keys(g.sum).forEach(key => { avg[key] = g.sum[key] / g.count; });
+          return avg;
+        });
+        setChartData(prepared);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -356,95 +369,109 @@ function ChartsViewVIN() {
       if (!res.ok) throw new Error('Ошибка загрузки');
       const json = await res.json();
 
-      // Поддержка нового формата { hunterFound, iotFound, message, reports } и старого массива
       const reports = Array.isArray(json) ? json : (json.reports || []);
+      const measurements = Array.isArray(json) ? [] : (json.agmMeasurements || []);
       const message = Array.isArray(json) ? null : (json.message || null);
 
-      if (reports.length === 0) {
+      if (reports.length === 0 && measurements.length === 0) {
         setError(message || 'Отчеты не найдены (проверьте VIN)');
         return;
       }
 
-      setSearchedVin(reports[0].requestedVin || reports[0].vin || vin);
+      setSearchedVin(reports[0]?.requestedVin || reports[0]?.vin || vin);
       if (message) setPartialMessage(message);
 
-      const prepared = reports.map(item => {
-        const hasHunter = item.hunterAvailable !== false && !!item.begin_date;
-        const fl = hasHunter ? getSmartVal(item.f_camber_l_after, item.f_camber_l_before) : null;
-        const fr = hasHunter ? getSmartVal(item.f_camber_r_after, item.f_camber_r_before) : null;
-        const rl = hasHunter ? getSmartVal(item.r_camber_l_after, item.r_camber_l_before) : null;
-        const rr = hasHunter ? getSmartVal(item.r_camber_r_after, item.r_camber_r_before) : null;
-        const agm = item.agm || {};
+      // Hunter rows
+      const hunterRows = reports
+        .filter(r => r.hunterAvailable !== false && !!r.begin_date)
+        .map(item => {
+          const fl = getSmartVal(item.f_camber_l_after, item.f_camber_l_before);
+          const fr = getSmartVal(item.f_camber_r_after, item.f_camber_r_before);
+          const rl = getSmartVal(item.r_camber_l_after, item.r_camber_l_before);
+          const rr = getSmartVal(item.r_camber_r_after, item.r_camber_r_before);
+          return {
+            date: item.begin_date.substring(5, 16),
+            fullDate: item.begin_date,
+            vin: item.vin,
+            hunter_f_camber_l: fl,
+            hunter_f_camber_r: fr,
+            hunter_f_camber_diff: (fl != null && fr != null) ? fl - fr : null,
+            hunter_f_toe_l: getSmartVal(item.f_toe_l_after, item.f_toe_l_before),
+            hunter_f_toe_r: getSmartVal(item.f_toe_r_after, item.f_toe_r_before),
+            hunter_f_toe_total: getSmartVal(item.f_toe_total_after, item.f_toe_total_before),
+            hunter_f_caster_l: getSmartVal(item.f_caster_l_after, item.f_caster_l_before),
+            hunter_f_caster_r: getSmartVal(item.f_caster_r_after, item.f_caster_r_before),
+            hunter_f_caster_diff: getDiff(item.f_caster_l_after, item.f_caster_r_after),
+            hunter_f_kpi_l: getSmartVal(item.f_kpi_l_after, item.f_kpi_l_before),
+            hunter_f_kpi_r: getSmartVal(item.f_kpi_r_after, item.f_kpi_r_before),
+            hunter_f_kpi_diff: getDiff(item.f_kpi_l_after, item.f_kpi_r_after),
+            hunter_r_camber_l: rl,
+            hunter_r_camber_r: rr,
+            hunter_r_camber_diff: (rl != null && rr != null) ? rl - rr : null,
+            hunter_r_toe_l: getSmartVal(item.r_toe_l_after, item.r_toe_l_before),
+            hunter_r_toe_r: getSmartVal(item.r_toe_r_after, item.r_toe_r_before),
+            hunter_r_toe_total: getSmartVal(item.r_toe_total_after, item.r_toe_total_before),
+            hunter_r_thrust: getSmartVal(item.r_thrust_after, item.r_thrust_before)
+          };
+        });
 
+      // AGM rows (с собственными датами)
+      const agmRows = measurements.map(m => {
+        const v = m.values || {};
+        const ct = m.creation_time || '';
         return {
-          date: item.begin_date
-            ? `${item.begin_date.substring(5, 10)} ${item.begin_date.substring(11, 16)}`
-            : 'IoT-only',
-          fullDate: item.begin_date || '-',
-          vin: item.vin,
-          hunter_f_camber_l: fl,
-          hunter_f_camber_r: fr,
-          hunter_f_camber_diff: (fl != null && fr != null) ? fl - fr : null,
-          hunter_f_toe_l: hasHunter ? getSmartVal(item.f_toe_l_after, item.f_toe_l_before) : null,
-          hunter_f_toe_r: hasHunter ? getSmartVal(item.f_toe_r_after, item.f_toe_r_before) : null,
-          hunter_f_toe_total: hasHunter ? getSmartVal(item.f_toe_total_after, item.f_toe_total_before) : null,
-          hunter_f_caster_l: hasHunter ? getSmartVal(item.f_caster_l_after, item.f_caster_l_before) : null,
-          hunter_f_caster_r: hasHunter ? getSmartVal(item.f_caster_r_after, item.f_caster_r_before) : null,
-          hunter_f_caster_diff: hasHunter ? getDiff(item.f_caster_l_after, item.f_caster_r_after) : null,
-          hunter_f_kpi_l: hasHunter ? getSmartVal(item.f_kpi_l_after, item.f_kpi_l_before) : null,
-          hunter_f_kpi_r: hasHunter ? getSmartVal(item.f_kpi_r_after, item.f_kpi_r_before) : null,
-          hunter_f_kpi_diff: hasHunter ? getDiff(item.f_kpi_l_after, item.f_kpi_r_after) : null,
-          hunter_r_camber_l: rl,
-          hunter_r_camber_r: rr,
-          hunter_r_camber_diff: (rl != null && rr != null) ? rl - rr : null,
-          hunter_r_toe_l: hasHunter ? getSmartVal(item.r_toe_l_after, item.r_toe_l_before) : null,
-          hunter_r_toe_r: hasHunter ? getSmartVal(item.r_toe_r_after, item.r_toe_r_before) : null,
-          hunter_r_toe_total: hasHunter ? getSmartVal(item.r_toe_total_after, item.r_toe_total_before) : null,
-          hunter_r_thrust: hasHunter ? getSmartVal(item.r_thrust_after, item.r_thrust_before) : null,
-
-          agm_f_camber_l: agm.f_camber_l,
-          agm_f_camber_r: agm.f_camber_r,
-          agm_f_camber_diff: getDiff(agm.f_camber_l, agm.f_camber_r),
-          agm_f_toe_l: agm.f_toe_l,
-          agm_f_toe_r: agm.f_toe_r,
-          agm_f_toe_total: agm.f_toe_total,
-          agm_f_caster_l: agm.f_caster_l,
-          agm_f_caster_r: agm.f_caster_r,
-          agm_f_caster_diff: getDiff(agm.f_caster_l, agm.f_caster_r),
-          agm_f_kpi_l: agm.f_kpi_l,
-          agm_f_kpi_r: agm.f_kpi_r,
-          agm_f_kpi_diff: getDiff(agm.f_kpi_l, agm.f_kpi_r),
-          agm_r_camber_l: agm.r_camber_l,
-          agm_r_camber_r: agm.r_camber_r,
-          agm_r_camber_diff: getDiff(agm.r_camber_l, agm.r_camber_r),
-          agm_r_toe_l: agm.r_toe_l,
-          agm_r_toe_r: agm.r_toe_r,
-          agm_r_toe_total: agm.r_toe_total,
-          agm_r_thrust: agm.r_thrust,
-
-          agm_f_camber_l_result: agm.f_camber_l_result,
-          agm_f_camber_r_result: agm.f_camber_r_result,
-          agm_f_camber_diff_result: agm.f_camber_diff_result,
-          agm_f_toe_l_result: agm.f_toe_l_result,
-          agm_f_toe_r_result: agm.f_toe_r_result,
-          agm_f_toe_total_result: agm.f_toe_total_result,
-          agm_f_caster_l_result: agm.f_caster_l_result,
-          agm_f_caster_r_result: agm.f_caster_r_result,
-          agm_f_caster_diff_result: agm.f_caster_diff_result,
-          agm_f_kpi_l_result: agm.f_kpi_l_result,
-          agm_f_kpi_r_result: agm.f_kpi_r_result,
-          agm_f_kpi_diff_result: agm.f_kpi_diff_result,
-          agm_r_camber_l_result: agm.r_camber_l_result,
-          agm_r_camber_r_result: agm.r_camber_r_result,
-          agm_r_camber_diff_result: agm.r_camber_diff_result,
-          agm_r_toe_l_result: agm.r_toe_l_result,
-          agm_r_toe_r_result: agm.r_toe_r_result,
-          agm_r_toe_total_result: agm.r_toe_total_result,
-          agm_r_thrust_result: agm.r_thrust_result
+          date: ct ? ct.substring(5, 16) : 'IoT',
+          fullDate: ct || '-',
+          vin: reports[0]?.requestedVin || reports[0]?.vin || vin,
+          measurement_id: m.measurement_id,
+          agm_f_camber_l: parseVal(v.f_camber_l),
+          agm_f_camber_r: parseVal(v.f_camber_r),
+          agm_f_camber_diff: getDiff(v.f_camber_l, v.f_camber_r),
+          agm_f_toe_l: parseVal(v.f_toe_l),
+          agm_f_toe_r: parseVal(v.f_toe_r),
+          agm_f_toe_total: parseVal(v.f_toe_total),
+          agm_f_caster_l: parseVal(v.f_caster_l),
+          agm_f_caster_r: parseVal(v.f_caster_r),
+          agm_f_caster_diff: getDiff(v.f_caster_l, v.f_caster_r),
+          agm_f_kpi_l: parseVal(v.f_kpi_l),
+          agm_f_kpi_r: parseVal(v.f_kpi_r),
+          agm_f_kpi_diff: getDiff(v.f_kpi_l, v.f_kpi_r),
+          agm_r_camber_l: parseVal(v.r_camber_l),
+          agm_r_camber_r: parseVal(v.r_camber_r),
+          agm_r_camber_diff: getDiff(v.r_camber_l, v.r_camber_r),
+          agm_r_toe_l: parseVal(v.r_toe_l),
+          agm_r_toe_r: parseVal(v.r_toe_r),
+          agm_r_toe_total: parseVal(v.r_toe_total),
+          agm_r_thrust: parseVal(v.r_thrust),
+          agm_f_camber_l_result: v.f_camber_l_result,
+          agm_f_camber_r_result: v.f_camber_r_result,
+          agm_f_camber_diff_result: v.f_camber_diff_result,
+          agm_f_toe_l_result: v.f_toe_l_result,
+          agm_f_toe_r_result: v.f_toe_r_result,
+          agm_f_toe_total_result: v.f_toe_total_result,
+          agm_f_caster_l_result: v.f_caster_l_result,
+          agm_f_caster_r_result: v.f_caster_r_result,
+          agm_f_caster_diff_result: v.f_caster_diff_result,
+          agm_f_kpi_l_result: v.f_kpi_l_result,
+          agm_f_kpi_r_result: v.f_kpi_r_result,
+          agm_f_kpi_diff_result: v.f_kpi_diff_result,
+          agm_r_camber_l_result: v.r_camber_l_result,
+          agm_r_camber_r_result: v.r_camber_r_result,
+          agm_r_camber_diff_result: v.r_camber_diff_result,
+          agm_r_toe_l_result: v.r_toe_l_result,
+          agm_r_toe_r_result: v.r_toe_r_result,
+          agm_r_toe_total_result: v.r_toe_total_result,
+          agm_r_thrust_result: v.r_thrust_result
         };
-      }).reverse();
+      });
 
-      setChartData(prepared);
+      const combined = [...hunterRows, ...agmRows].sort((a, b) => {
+        if (!a.fullDate || a.fullDate === '-') return 1;
+        if (!b.fullDate || b.fullDate === '-') return -1;
+        return a.fullDate.localeCompare(b.fullDate);
+      });
+
+      setChartData(combined);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -501,6 +528,8 @@ function TableView() {
   const [vin, setVin] = useState('');
   const [reportsList, setReportsList] = useState([]);
   const [reportIndex, setReportIndex] = useState(0);
+  const [agmMeasurements, setAgmMeasurements] = useState([]);
+  const [agmIndex, setAgmIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [partialMessage, setPartialMessage] = useState(null);
@@ -508,6 +537,27 @@ function TableView() {
   const [isDms, setIsDms] = useState(true);
 
   const data = reportsList[reportIndex];
+  const agm = agmMeasurements[agmIndex]?.values || {};
+
+  // Авто-выбор ближайшего AGM-замера при смене Hunter-отчёта
+  useEffect(() => {
+    if (agmMeasurements.length === 0) return;
+    const hunterDate = reportsList[reportIndex]?.begin_date;
+    if (!hunterDate) { setAgmIndex(0); return; }
+    const hunterTs = new Date(hunterDate.replace(' ', 'T')).getTime();
+    if (isNaN(hunterTs)) { setAgmIndex(0); return; }
+
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    agmMeasurements.forEach((m, i) => {
+      if (!m.creation_time) return;
+      const agmTs = new Date(m.creation_time.replace(' ', 'T')).getTime();
+      if (isNaN(agmTs)) return;
+      const diff = Math.abs(agmTs - hunterTs);
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    });
+    setAgmIndex(bestIdx);
+  }, [reportIndex, reportsList, agmMeasurements]);
 
   const loadData = async () => {
     if (!vin.trim()) return;
@@ -519,17 +569,20 @@ function TableView() {
       if (!res.ok) throw new Error('Ошибка загрузки');
       const json = await res.json();
 
-      // Поддержка нового формата { hunterFound, iotFound, message, reports } и старого массива
       const reports = Array.isArray(json) ? json : (json.reports || []);
+      const measurements = Array.isArray(json) ? [] : (json.agmMeasurements || []);
       const msg = Array.isArray(json) ? null : (json.message || null);
 
-      if (reports.length === 0) {
+      if (reports.length === 0 && measurements.length === 0) {
         setError(msg || 'Отчеты не найдены (проверьте VIN)');
         setReportsList([]);
+        setAgmMeasurements([]);
         setPartialMessage(null);
       } else {
         setReportsList(reports);
-        setReportIndex(0); 
+        setAgmMeasurements(measurements);
+        setReportIndex(0);
+        setAgmIndex(0);
         setPartialMessage(msg);
       }
     } catch (err) {
@@ -543,30 +596,30 @@ function TableView() {
     if (!data) return;
     
     const fmt = (val) => isDms ? formatDMS(val) : formatDecimal(val);
-    const agm = data.agm || {};
+    const currentAgm = agmMeasurements[agmIndex]?.values || {};
 
     const exportData = [
       { 'Наименование': 'Передний мост', 'Мин': '', 'Макс': '', 'Начальное': '', 'Конечное': '', 'Значение IoT': '', 'Наименование IoT': '', 'ОК/НОК AGMWA01': '' },
-      { 'Наименование': 'Развал: левый', 'Мин': fmt(data.f_camber_l_min), 'Макс': fmt(data.f_camber_l_max), 'Начальное': fmt(data.f_camber_l_before), 'Конечное': fmt(data.f_camber_l_after), 'Значение IoT': fmt(agm.f_camber_l), 'Наименование IoT': IoT.f_camber_l, 'ОК/НОК AGMWA01': agm.f_camber_l_result },
-      { 'Наименование': 'Развал: правый', 'Мин': fmt(data.f_camber_l_min), 'Макс': fmt(data.f_camber_l_max), 'Начальное': fmt(data.f_camber_r_before), 'Конечное': fmt(data.f_camber_r_after), 'Значение IoT': fmt(agm.f_camber_r), 'Наименование IoT': IoT.f_camber_r, 'ОК/НОК AGMWA01': agm.f_camber_r_result },
-      { 'Наименование': 'Развал: разница', 'Мин': '-0°30\'', 'Макс': '+0°30\'', 'Начальное': fmt(getDiff(data.f_camber_l_before, data.f_camber_r_before)), 'Конечное': fmt(getDiff(data.f_camber_l_after, data.f_camber_r_after)), 'Значение IoT': fmt(agm.f_camber_diff), 'Наименование IoT': IoT.f_camber_diff, 'ОК/НОК AGMWA01': agm.f_camber_diff_result },
-      { 'Наименование': 'Схождение: левое', 'Мин': fmt(data.f_toe_l_min), 'Макс': fmt(data.f_toe_l_max), 'Начальное': fmt(data.f_toe_l_before), 'Конечное': fmt(data.f_toe_l_after), 'Значение IoT': fmt(agm.f_toe_l), 'Наименование IoT': IoT.f_toe_l, 'ОК/НОК AGMWA01': agm.f_toe_l_result },
-      { 'Наименование': 'Схождение: правое', 'Мин': fmt(data.f_toe_l_min), 'Макс': fmt(data.f_toe_l_max), 'Начальное': fmt(data.f_toe_r_before), 'Конечное': fmt(data.f_toe_r_after), 'Значение IoT': fmt(agm.f_toe_r), 'Наименование IoT': IoT.f_toe_r, 'ОК/НОК AGMWA01': agm.f_toe_r_result },
-      { 'Наименование': 'Схождение: суммарное', 'Мин': fmt(data.f_toe_total_min), 'Макс': fmt(data.f_toe_total_max), 'Начальное': fmt(data.f_toe_total_before), 'Конечное': fmt(data.f_toe_total_after), 'Значение IoT': fmt(agm.f_toe_total), 'Наименование IoT': IoT.f_toe_total, 'ОК/НОК AGMWA01': agm.f_toe_total_result },
-      { 'Наименование': 'Продольный наклон шкворня: левый', 'Мин': fmt(data.f_caster_l_min), 'Макс': fmt(data.f_caster_l_max), 'Начальное': fmt(data.f_caster_l_before), 'Конечное': fmt(data.f_caster_l_after), 'Значение IoT': fmt(agm.f_caster_l), 'Наименование IoT': IoT.f_caster_l, 'ОК/НОК AGMWA01': agm.f_caster_l_result },
-      { 'Наименование': 'Продольный наклон шкворня: правый', 'Мин': fmt(data.f_caster_l_min), 'Макс': fmt(data.f_caster_l_max), 'Начальное': fmt(data.f_caster_r_before), 'Конечное': fmt(data.f_caster_r_after), 'Значение IoT': fmt(agm.f_caster_r), 'Наименование IoT': IoT.f_caster_r, 'ОК/НОК AGMWA01': agm.f_caster_r_result },
-      { 'Наименование': 'Продольный наклон шкворня: разница', 'Мин': '- - -', 'Макс': '- - -', 'Начальное': fmt(getDiff(data.f_caster_l_before, data.f_caster_r_before)), 'Конечное': fmt(getDiff(data.f_caster_l_after, data.f_caster_r_after)), 'Значение IoT': fmt(agm.f_caster_diff), 'Наименование IoT': IoT.f_caster_diff, 'ОК/НОК AGMWA01': agm.f_caster_diff_result },
-      { 'Наименование': 'Поперечный наклон шкворня: левый', 'Мин': fmt(data.f_kpi_l_min), 'Макс': fmt(data.f_kpi_l_max), 'Начальное': fmt(data.f_kpi_l_before), 'Конечное': fmt(data.f_kpi_l_after), 'Значение IoT': fmt(agm.f_kpi_l), 'Наименование IoT': IoT.f_kpi_l, 'ОК/НОК AGMWA01': agm.f_kpi_l_result },
-      { 'Наименование': 'Поперечный наклон шкворня: правый', 'Мин': fmt(data.f_kpi_l_min), 'Макс': fmt(data.f_kpi_l_max), 'Начальное': fmt(data.f_kpi_r_before), 'Конечное': fmt(data.f_kpi_r_after), 'Значение IoT': fmt(agm.f_kpi_r), 'Наименование IoT': IoT.f_kpi_r, 'ОК/НОК AGMWA01': agm.f_kpi_r_result },
-      { 'Наименование': 'Поперечный наклон шкворня: разница', 'Мин': '- - -', 'Макс': '- - -', 'Начальное': fmt(getDiff(data.f_kpi_l_before, data.f_kpi_r_before)), 'Конечное': fmt(getDiff(data.f_kpi_l_after, data.f_kpi_r_after)), 'Значение IoT': fmt(agm.f_kpi_diff), 'Наименование IoT': IoT.f_kpi_diff, 'ОК/НОК AGMWA01': agm.f_kpi_diff_result },
+      { 'Наименование': 'Развал: левый', 'Мин': fmt(data.f_camber_l_min), 'Макс': fmt(data.f_camber_l_max), 'Начальное': fmt(data.f_camber_l_before), 'Конечное': fmt(data.f_camber_l_after), 'Значение IoT': fmt(currentAgm.f_camber_l), 'Наименование IoT': IoT.f_camber_l, 'ОК/НОК AGMWA01': currentAgm.f_camber_l_result },
+      { 'Наименование': 'Развал: правый', 'Мин': fmt(data.f_camber_l_min), 'Макс': fmt(data.f_camber_l_max), 'Начальное': fmt(data.f_camber_r_before), 'Конечное': fmt(data.f_camber_r_after), 'Значение IoT': fmt(currentAgm.f_camber_r), 'Наименование IoT': IoT.f_camber_r, 'ОК/НОК AGMWA01': currentAgm.f_camber_r_result },
+      { 'Наименование': 'Развал: разница', 'Мин': '-0°30\'', 'Макс': '+0°30\'', 'Начальное': fmt(getDiff(data.f_camber_l_before, data.f_camber_r_before)), 'Конечное': fmt(getDiff(data.f_camber_l_after, data.f_camber_r_after)), 'Значение IoT': fmt(getDiff(currentAgm.f_camber_l, currentAgm.f_camber_r)), 'Наименование IoT': IoT.f_camber_diff, 'ОК/НОК AGMWA01': currentAgm.f_camber_diff_result },
+      { 'Наименование': 'Схождение: левое', 'Мин': fmt(data.f_toe_l_min), 'Макс': fmt(data.f_toe_l_max), 'Начальное': fmt(data.f_toe_l_before), 'Конечное': fmt(data.f_toe_l_after), 'Значение IoT': fmt(currentAgm.f_toe_l), 'Наименование IoT': IoT.f_toe_l, 'ОК/НОК AGMWA01': currentAgm.f_toe_l_result },
+      { 'Наименование': 'Схождение: правое', 'Мин': fmt(data.f_toe_l_min), 'Макс': fmt(data.f_toe_l_max), 'Начальное': fmt(data.f_toe_r_before), 'Конечное': fmt(data.f_toe_r_after), 'Значение IoT': fmt(currentAgm.f_toe_r), 'Наименование IoT': IoT.f_toe_r, 'ОК/НОК AGMWA01': currentAgm.f_toe_r_result },
+      { 'Наименование': 'Схождение: суммарное', 'Мин': fmt(data.f_toe_total_min), 'Макс': fmt(data.f_toe_total_max), 'Начальное': fmt(data.f_toe_total_before), 'Конечное': fmt(data.f_toe_total_after), 'Значение IoT': fmt(currentAgm.f_toe_total), 'Наименование IoT': IoT.f_toe_total, 'ОК/НОК AGMWA01': currentAgm.f_toe_total_result },
+      { 'Наименование': 'Продольный наклон шкворня: левый', 'Мин': fmt(data.f_caster_l_min), 'Макс': fmt(data.f_caster_l_max), 'Начальное': fmt(data.f_caster_l_before), 'Конечное': fmt(data.f_caster_l_after), 'Значение IoT': fmt(currentAgm.f_caster_l), 'Наименование IoT': IoT.f_caster_l, 'ОК/НОК AGMWA01': currentAgm.f_caster_l_result },
+      { 'Наименование': 'Продольный наклон шкворня: правый', 'Мин': fmt(data.f_caster_l_min), 'Макс': fmt(data.f_caster_l_max), 'Начальное': fmt(data.f_caster_r_before), 'Конечное': fmt(data.f_caster_r_after), 'Значение IoT': fmt(currentAgm.f_caster_r), 'Наименование IoT': IoT.f_caster_r, 'ОК/НОК AGMWA01': currentAgm.f_caster_r_result },
+      { 'Наименование': 'Продольный наклон шкворня: разница', 'Мин': '- - -', 'Макс': '- - -', 'Начальное': fmt(getDiff(data.f_caster_l_before, data.f_caster_r_before)), 'Конечное': fmt(getDiff(data.f_caster_l_after, data.f_caster_r_after)), 'Значение IoT': fmt(getDiff(currentAgm.f_caster_l, currentAgm.f_caster_r)), 'Наименование IoT': IoT.f_caster_diff, 'ОК/НОК AGMWA01': currentAgm.f_caster_diff_result },
+      { 'Наименование': 'Поперечный наклон шкворня: левый', 'Мин': fmt(data.f_kpi_l_min), 'Макс': fmt(data.f_kpi_l_max), 'Начальное': fmt(data.f_kpi_l_before), 'Конечное': fmt(data.f_kpi_l_after), 'Значение IoT': fmt(currentAgm.f_kpi_l), 'Наименование IoT': IoT.f_kpi_l, 'ОК/НОК AGMWA01': currentAgm.f_kpi_l_result },
+      { 'Наименование': 'Поперечный наклон шкворня: правый', 'Мин': fmt(data.f_kpi_l_min), 'Макс': fmt(data.f_kpi_l_max), 'Начальное': fmt(data.f_kpi_r_before), 'Конечное': fmt(data.f_kpi_r_after), 'Значение IoT': fmt(currentAgm.f_kpi_r), 'Наименование IoT': IoT.f_kpi_r, 'ОК/НОК AGMWA01': currentAgm.f_kpi_r_result },
+      { 'Наименование': 'Поперечный наклон шкворня: разница', 'Мин': '- - -', 'Макс': '- - -', 'Начальное': fmt(getDiff(data.f_kpi_l_before, data.f_kpi_r_before)), 'Конечное': fmt(getDiff(data.f_kpi_l_after, data.f_kpi_r_after)), 'Значение IoT': fmt(getDiff(currentAgm.f_kpi_l, currentAgm.f_kpi_r)), 'Наименование IoT': IoT.f_kpi_diff, 'ОК/НОК AGMWA01': currentAgm.f_kpi_diff_result },
       { 'Наименование': 'Задний мост', 'Мин': '', 'Макс': '', 'Начальное': '', 'Конечное': '', 'Значение IoT': '', 'Наименование IoT': '', 'ОК/НОК AGMWA01': '' },
-      { 'Наименование': 'Развал: левый', 'Мин': fmt(data.r_camber_l_min), 'Макс': fmt(data.r_camber_l_max), 'Начальное': fmt(data.r_camber_l_before), 'Конечное': fmt(data.r_camber_l_after), 'Значение IoT': fmt(agm.r_camber_l), 'Наименование IoT': IoT.r_camber_l, 'ОК/НОК AGMWA01': agm.r_camber_l_result },
-      { 'Наименование': 'Развал: правый', 'Мин': fmt(data.r_camber_l_min), 'Макс': fmt(data.r_camber_l_max), 'Начальное': fmt(data.r_camber_r_before), 'Конечное': fmt(data.r_camber_r_after), 'Значение IoT': fmt(agm.r_camber_r), 'Наименование IoT': IoT.r_camber_r, 'ОК/НОК AGMWA01': agm.r_camber_r_result },
-      { 'Наименование': 'Развал: разница', 'Мин': '-0°30\'', 'Макс': '+0°30\'', 'Начальное': fmt(getDiff(data.r_camber_l_before, data.r_camber_r_before)), 'Конечное': fmt(getDiff(data.r_camber_l_after, data.r_camber_r_after)), 'Значение IoT': fmt(agm.r_camber_diff), 'Наименование IoT': IoT.r_camber_diff, 'ОК/НОК AGMWA01': agm.r_camber_diff_result },
-      { 'Наименование': 'Схождение: левое', 'Мин': fmt(data.r_toe_l_min), 'Макс': fmt(data.r_toe_l_max), 'Начальное': fmt(data.r_toe_l_before), 'Конечное': fmt(data.r_toe_l_after), 'Значение IoT': fmt(agm.r_toe_l), 'Наименование IoT': IoT.r_toe_l, 'ОК/НОК AGMWA01': agm.r_toe_l_result },
-      { 'Наименование': 'Схождение: правое', 'Мин': fmt(data.r_toe_l_min), 'Макс': fmt(data.r_toe_l_max), 'Начальное': fmt(data.r_toe_r_before), 'Конечное': fmt(data.r_toe_r_after), 'Значение IoT': fmt(agm.r_toe_r), 'Наименование IoT': IoT.r_toe_r, 'ОК/НОК AGMWA01': agm.r_toe_r_result },
-      { 'Наименование': 'Схождение: суммарное', 'Мин': fmt(data.r_toe_total_min), 'Макс': fmt(data.r_toe_total_max), 'Начальное': fmt(data.r_toe_total_before), 'Конечное': fmt(data.r_toe_total_after), 'Значение IoT': fmt(agm.r_toe_total), 'Наименование IoT': IoT.r_toe_total, 'ОК/НОК AGMWA01': agm.r_toe_total_result },
-      { 'Наименование': 'Угол движения', 'Мин': '- - -', 'Макс': '- - -', 'Начальное': fmt(data.r_thrust_before), 'Конечное': fmt(data.r_thrust_after), 'Значение IoT': fmt(agm.r_thrust), 'Наименование IoT': IoT.r_thrust, 'ОК/НОК AGMWA01': agm.r_thrust_result },
+      { 'Наименование': 'Развал: левый', 'Мин': fmt(data.r_camber_l_min), 'Макс': fmt(data.r_camber_l_max), 'Начальное': fmt(data.r_camber_l_before), 'Конечное': fmt(data.r_camber_l_after), 'Значение IoT': fmt(currentAgm.r_camber_l), 'Наименование IoT': IoT.r_camber_l, 'ОК/НОК AGMWA01': currentAgm.r_camber_l_result },
+      { 'Наименование': 'Развал: правый', 'Мин': fmt(data.r_camber_l_min), 'Макс': fmt(data.r_camber_l_max), 'Начальное': fmt(data.r_camber_r_before), 'Конечное': fmt(data.r_camber_r_after), 'Значение IoT': fmt(currentAgm.r_camber_r), 'Наименование IoT': IoT.r_camber_r, 'ОК/НОК AGMWA01': currentAgm.r_camber_r_result },
+      { 'Наименование': 'Развал: разница', 'Мин': '-0°30\'', 'Макс': '+0°30\'', 'Начальное': fmt(getDiff(data.r_camber_l_before, data.r_camber_r_before)), 'Конечное': fmt(getDiff(data.r_camber_l_after, data.r_camber_r_after)), 'Значение IoT': fmt(getDiff(currentAgm.r_camber_l, currentAgm.r_camber_r)), 'Наименование IoT': IoT.r_camber_diff, 'ОК/НОК AGMWA01': currentAgm.r_camber_diff_result },
+      { 'Наименование': 'Схождение: левое', 'Мин': fmt(data.r_toe_l_min), 'Макс': fmt(data.r_toe_l_max), 'Начальное': fmt(data.r_toe_l_before), 'Конечное': fmt(data.r_toe_l_after), 'Значение IoT': fmt(currentAgm.r_toe_l), 'Наименование IoT': IoT.r_toe_l, 'ОК/НОК AGMWA01': currentAgm.r_toe_l_result },
+      { 'Наименование': 'Схождение: правое', 'Мин': fmt(data.r_toe_l_min), 'Макс': fmt(data.r_toe_l_max), 'Начальное': fmt(data.r_toe_r_before), 'Конечное': fmt(data.r_toe_r_after), 'Значение IoT': fmt(currentAgm.r_toe_r), 'Наименование IoT': IoT.r_toe_r, 'ОК/НОК AGMWA01': currentAgm.r_toe_r_result },
+      { 'Наименование': 'Схождение: суммарное', 'Мин': fmt(data.r_toe_total_min), 'Макс': fmt(data.r_toe_total_max), 'Начальное': fmt(data.r_toe_total_before), 'Конечное': fmt(data.r_toe_total_after), 'Значение IoT': fmt(currentAgm.r_toe_total), 'Наименование IoT': IoT.r_toe_total, 'ОК/НОК AGMWA01': currentAgm.r_toe_total_result },
+      { 'Наименование': 'Угол движения', 'Мин': '- - -', 'Макс': '- - -', 'Начальное': fmt(data.r_thrust_before), 'Конечное': fmt(data.r_thrust_after), 'Значение IoT': fmt(currentAgm.r_thrust), 'Наименование IoT': IoT.r_thrust, 'ОК/НОК AGMWA01': currentAgm.r_thrust_result },
     ];
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -616,11 +669,9 @@ function TableView() {
     );
   };
 
-  const agm = data?.agm || {};
-
   return (
     <div>
-      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <label style={labelStyle}>🔍 VIN:
           <input 
             type="text" value={vin} onChange={(e) => setVin(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === 'Enter') loadData(); }} 
@@ -631,20 +682,44 @@ function TableView() {
           {loading ? '⏳ Загрузка...' : '🔍 Найти'}
         </button>
         {error && <span style={{ color: '#DC2626', fontSize: 14 }}>❌ {error}</span>}
-        
-        {reportsList.length > 1 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-            <span style={{ fontSize: 14, color: '#4B5563', fontWeight: 500 }}>Выберите замер:</span>
-            <select value={reportIndex} onChange={(e) => setReportIndex(Number(e.target.value))} style={selectStyle}>
-              {reportsList.map((r, i) => (
-                <option key={r.report_id || i} value={i}>
-                  {r.begin_date || 'IoT-only'} {r.report_id ? `(ID: ${r.report_id})` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
       </div>
+
+      {/* Селекторы замеров */}
+      {(reportsList.length > 1 || agmMeasurements.length > 1) && (
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center', backgroundColor: '#F9FAFB', padding: 12, borderRadius: 8 }}>
+          {reportsList.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 14, color: '#4B5563', fontWeight: 500 }}>Замер Hunter:</span>
+              <select value={reportIndex} onChange={(e) => setReportIndex(Number(e.target.value))} style={selectStyle}>
+                {reportsList.map((r, i) => (
+                  <option key={r.report_id || i} value={i}>
+                    {r.begin_date || 'IoT-only'} {r.report_id ? `(ID: ${r.report_id})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {agmMeasurements.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 14, color: '#4B5563', fontWeight: 500 }}>Замер IoT:</span>
+              <select value={agmIndex} onChange={(e) => setAgmIndex(Number(e.target.value))} style={selectStyle}>
+                {agmMeasurements.map((m, i) => (
+                  <option key={m.measurement_id || i} value={i}>
+                    {m.creation_time || 'IoT'} {m.measurement_id ? `(ID: ${m.measurement_id})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {agmMeasurements.length === 1 && agmMeasurements[0].creation_time && (
+            <span style={{ fontSize: 13, color: '#6B7280' }}>
+              📅 Замер IoT: {agmMeasurements[0].creation_time}
+            </span>
+          )}
+        </div>
+      )}
 
       {partialMessage && (
         <div style={{
@@ -669,7 +744,8 @@ function TableView() {
 
           <div id="print-section" style={{ border: '2px solid #000', maxWidth: '1200px', margin: '0 auto', padding: 20 }}>
             <div style={{ textAlign: 'center', fontSize: '20px', fontWeight: 'bold', marginBottom: 15, fontFamily: '"Times New Roman", Times, serif' }}>
-              VIN: {data.requestedVin || data.vin} | Модель: {data.full_model_name ? data.full_model_name.replace('AGM>', '').trim() : '-'} | Дата: {data.begin_date || '-'}
+              VIN: {data.requestedVin || data.vin} | Модель: {data.full_model_name ? data.full_model_name.replace('AGM>', '').trim() : '-'} | Дата Hunter: {data.begin_date || '-'}
+              {agmMeasurements[agmIndex]?.creation_time && ` | Замер IoT: ${agmMeasurements[agmIndex].creation_time}`}
             </div>
             
             <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
