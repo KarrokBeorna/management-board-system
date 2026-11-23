@@ -373,7 +373,7 @@ export default function HomePage() {
     { to: "/voltage-spc", imgSrc: voltageSpcPreview, caption: "Voltage SPC Report", accentColor: "#0bf52a" },
     { to: "/repelec-report", imgSrc: repelecPreview, caption: "REPELEC Report", accentColor: "#F59E0B" },
     { to: "/ec-tool-report", imgSrc: ecToolPreview, caption: "EC Tool Report", accentColor: "#2e0bf5" },
-    { to: "/alignment-report", imgSrc: alignmentPreview, caption: "Hunter Развал", accentColor: "#F59E0B" },
+    //{ to: "/alignment-report", imgSrc: alignmentPreview, caption: "Hunter Развал", accentColor: "#F59E0B" },
   ];
 
   const allServiceCards = [

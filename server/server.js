@@ -19679,6 +19679,7 @@ app.get('/api/alignment-models', async (req, res) => {
 });
 
 // 2. Данные для графиков — Hunter + IoT агрегируются по дням раздельно
+//    ±90° — сенсорное «нет данных»: в avg не участвует, считается отдельно.
 app.get('/api/alignment-charts', async (req, res) => {
   const { model, startDate, endDate } = req.query;
 
@@ -19697,6 +19698,7 @@ app.get('/api/alignment-charts', async (req, res) => {
       queryParams.push(`AGM>${model}`);
     }
 
+    // --- Hunter: один ряд на отчёт (с short_vin) ---
     const [rows] = await hunterwaPool.execute(`
       SELECT 
         r.id AS report_id,
@@ -19747,7 +19749,7 @@ app.get('/api/alignment-charts', async (req, res) => {
       agmByVin.set(sv, ms);
     }));
 
-    // Ряды Hunter
+    // ---- Hunter rows (с vin для модалки) ----
     const hunterRows = rows.map(r => {
       const f_camber_diff = (r.hunter_f_camber_l != null && r.hunter_f_camber_r != null)
         ? r.hunter_f_camber_l - r.hunter_f_camber_r : null;
@@ -19760,6 +19762,7 @@ app.get('/api/alignment-charts', async (req, res) => {
 
       return {
         source: 'hunter',
+        vin: r.short_vin ? r.short_vin.trim() : '',
         date: r.date,
         time: r.time,
         hunter_f_camber_l: r.hunter_f_camber_l,
@@ -19784,9 +19787,9 @@ app.get('/api/alignment-charts', async (req, res) => {
       };
     });
 
-    // Ряды AGM (по своим датам)
+    // ---- AGM rows (с vin из ключа мапы) ----
     const agmRows = [];
-    for (const [, measurements] of agmByVin.entries()) {
+    for (const [sv, measurements] of agmByVin.entries()) {
       for (const m of measurements) {
         const v = m.values || {};
         const num = (x) => (x != null && x !== '' && !isNaN(Number(x))) ? Number(x) : null;
@@ -19801,6 +19804,7 @@ app.get('/api/alignment-charts', async (req, res) => {
 
         agmRows.push({
           source: 'agm',
+          vin: sv,
           date: m.date,
           time: m.time,
           measurement_id: m.measurement_id,
@@ -19838,31 +19842,48 @@ app.get('/api/alignment-charts', async (req, res) => {
       byDate.get(a.date).agm.push(a);
     }
 
+    // --- Сенсорное значение: ровно ±90 — «нет данных», в расчёт не берём ---
+    const SENTINEL = 90;
+
     const avgOf = (arr, key) => {
-      const vals = arr.map(x => {
+      const vals = [];
+      for (const x of arr) {
         const v = x[key];
-        if (v === null || v === undefined || v === '') return null;
+        if (v === null || v === undefined || v === '') continue;
         const n = typeof v === 'string' ? parseFloat(v) : v;
-        return isNaN(n) ? null : n;
-      }).filter(v => v !== null);
+        if (isNaN(n)) continue;
+        if (Math.abs(n) === SENTINEL) continue; // 90 — не учитываем
+        vals.push(n);
+      }
       return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
     };
 
+    const countSentinel = (arr, key) => {
+      let n = 0;
+      for (const x of arr) {
+        const v = x[key];
+        if (v === null || v === undefined || v === '') continue;
+        const num = typeof v === 'string' ? parseFloat(v) : v;
+        if (!isNaN(num) && Math.abs(num) === SENTINEL) n++;
+      }
+      return n;
+    };
+
     const hunterFields = [
-      'hunter_f_camber_l', 'hunter_f_camber_r', 'hunter_f_camber_diff',
-      'hunter_f_toe_l', 'hunter_f_toe_r', 'hunter_f_toe_total',
-      'hunter_f_caster_l', 'hunter_f_caster_r', 'hunter_f_caster_diff',
-      'hunter_f_kpi_l', 'hunter_f_kpi_r', 'hunter_f_kpi_diff',
-      'hunter_r_camber_l', 'hunter_r_camber_r', 'hunter_r_camber_diff',
-      'hunter_r_toe_l', 'hunter_r_toe_r', 'hunter_r_toe_total', 'hunter_r_thrust'
+      'hunter_f_camber_l','hunter_f_camber_r','hunter_f_camber_diff',
+      'hunter_f_toe_l','hunter_f_toe_r','hunter_f_toe_total',
+      'hunter_f_caster_l','hunter_f_caster_r','hunter_f_caster_diff',
+      'hunter_f_kpi_l','hunter_f_kpi_r','hunter_f_kpi_diff',
+      'hunter_r_camber_l','hunter_r_camber_r','hunter_r_camber_diff',
+      'hunter_r_toe_l','hunter_r_toe_r','hunter_r_toe_total','hunter_r_thrust'
     ];
     const agmFields = [
-      'agm_f_camber_l', 'agm_f_camber_r', 'agm_f_camber_diff',
-      'agm_f_toe_l', 'agm_f_toe_r', 'agm_f_toe_total',
-      'agm_f_caster_l', 'agm_f_caster_r', 'agm_f_caster_diff',
-      'agm_f_kpi_l', 'agm_f_kpi_r', 'agm_f_kpi_diff',
-      'agm_r_camber_l', 'agm_r_camber_r', 'agm_r_camber_diff',
-      'agm_r_toe_l', 'agm_r_toe_r', 'agm_r_toe_total', 'agm_r_thrust'
+      'agm_f_camber_l','agm_f_camber_r','agm_f_camber_diff',
+      'agm_f_toe_l','agm_f_toe_r','agm_f_toe_total',
+      'agm_f_caster_l','agm_f_caster_r','agm_f_caster_diff',
+      'agm_f_kpi_l','agm_f_kpi_r','agm_f_kpi_diff',
+      'agm_r_camber_l','agm_r_camber_r','agm_r_camber_diff',
+      'agm_r_toe_l','agm_r_toe_r','agm_r_toe_total','agm_r_thrust'
     ];
 
     const merged = [...byDate.entries()]
@@ -19873,10 +19894,20 @@ app.get('/api/alignment-charts', async (req, res) => {
           fullDate: `${date.substring(8, 10)}.${date.substring(5, 7)}.${date.substring(0, 4)}`,
           hunter_cars: hunter.length,
           agm_cars: agm.length,
-          cars: hunter.length // для графика объёма (Hunter)
+          cars: hunter.length,
+          hunter_vins: [...new Set(hunter.map(h => h.vin).filter(Boolean))],
+          agm_vins: [...new Set(agm.map(a => a.vin).filter(Boolean))],
+          hunter_sentinel_count: 0,
+          agm_sentinel_count: 0
         };
-        for (const f of hunterFields) row[f] = avgOf(hunter, f);
-        for (const f of agmFields) row[f] = avgOf(agm, f);
+        for (const f of hunterFields) {
+          row[f] = avgOf(hunter, f);
+          row.hunter_sentinel_count += countSentinel(hunter, f);
+        }
+        for (const f of agmFields) {
+          row[f] = avgOf(agm, f);
+          row.agm_sentinel_count += countSentinel(agm, f);
+        }
         return row;
       });
 

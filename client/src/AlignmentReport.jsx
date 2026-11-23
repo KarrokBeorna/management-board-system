@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer,
   LineChart, Line, Legend, AreaChart, Area
@@ -78,6 +78,14 @@ const getSmartVal = (after, before) => {
   return 0;
 };
 
+// Сенсорное значение: ровно ±90 — «нет данных», в график не ставим
+const SENTINEL_VALUE = 90;
+const isSentinelValue = (v) => {
+  if (v === null || v === undefined || v === '') return false;
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return !isNaN(n) && Math.abs(n) === SENTINEL_VALUE;
+};
+
 const IoT = {
   f_camber_l: 'NCATable_NCA_Camber_LF', f_camber_r: 'NCATable_NCA_Camber_RF', f_camber_diff: 'NCATable_NCA_Camber_Fcross',
   f_toe_l: 'NCATable_NCA_Toe_LF', f_toe_r: 'NCATable_NCA_Toe_RF', f_toe_total: 'NCATable_NCA_Toe_Fcross',
@@ -132,40 +140,219 @@ export default function AlignmentReport() {
   );
 }
 
-// ======================= ТУЛТИП =======================
-const CustomTooltip = ({ active, payload, isModelView }) => {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    return (
-      <div style={{ backgroundColor: '#fff', padding: '12px', border: '1px solid #E5E7EB', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', fontSize: 13 }}>
-        {!isModelView && <p style={{ margin: 0, fontWeight: 700, color: '#1F2937' }}>VIN: {data.vin || '-'}</p>}
-        <p style={{ margin: isModelView ? 0 : '4px 0', color: '#6B7280', fontWeight: isModelView ? 700 : 400 }}>Дата: {data.fullDate || data.date}</p>
-        <hr style={{ margin: '8px 0', borderColor: '#E5E7EB' }} />
-        {payload.map((entry, index) => {
-          const isAgm = entry.dataKey.startsWith('agm_');
-          const baseKey = isAgm ? entry.dataKey.replace('agm_', '') : entry.dataKey.replace('hunter_', '');
-          const result = data[`agm_${baseKey}_result`];
-          
-          return (
-            <p key={index} style={{ margin: '2px 0', color: entry.color, fontWeight: 500 }}>
-              {entry.name}: {formatAngle(entry.value)} 
-              {!isModelView && isAgm && result && (
-                <span style={{ marginLeft: 6, fontSize: 11, padding: '2px 4px', borderRadius: 4, backgroundColor: result === 'Y' ? '#D1FAE5' : '#FEE2E2', color: result === 'Y' ? '#065F46' : '#991B1B' }}>
-                  {result === 'Y' ? 'OK' : 'NOK'}
-                </span>
-              )}
-            </p>
-          );
-        })}
+// ======================= VINS MODAL =======================
+function VinsModal({ open, vins, label, onClose }) {
+  const [copied, setCopied] = useState(false);
+
+  // Блокируем скролл фона, когда окно открыто
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [open]);
+
+  useEffect(() => { if (open) setCopied(false); }, [open]);
+
+  // Закрытие по клику на темный фон
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e) => {
+      if (e.target.classList.contains('vins-modal-overlay')) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const handleCopy = async () => {
+    const text = vins.join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (_) {}
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div
+      className="vins-modal-overlay"
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+        zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '20px'
+      }}
+    >
+      <div style={{
+        background: 'white', borderRadius: 16, padding: 24, width: '100%', maxWidth: 520,
+        maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 18, color: '#111827' }}>VIN за {label}</h3>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: 24, cursor: 'pointer', color: '#6B7280' }}>×</button>
+        </div>
+        <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 12 }}>Всего: {vins.length}</div>
+        <div style={{ flex: 1, overflowY: 'auto', background: '#F9FAFB', borderRadius: 8, padding: 12, fontFamily: 'monospace', fontSize: 13, border: '1px solid #E5E7EB', minHeight: 100 }}>
+          {vins.map((v, i) => (
+            <div key={i} style={{ padding: '4px 0', borderBottom: i < vins.length - 1 ? '1px solid #F0F0F5' : 'none' }}>{v}</div>
+          ))}
+        </div>
+        <button onClick={handleCopy} style={{ marginTop: 16, padding: '10px 20px', borderRadius: 8, border: 'none', background: copied ? '#059669' : '#2563EB', color: 'white', fontWeight: 600, fontSize: 14, cursor: 'pointer', transition: 'background 0.2s' }}>
+          {copied ? '✓ Скопировано' : '📋 Копировать список'}
+        </button>
       </div>
-    );
-  }
-  return null;
+    </div>
+  );
+}
+
+// ======================= ТУЛТИП =======================
+const CustomTooltip = ({ active, payload, isModelView, onShowVins }) => {
+  if (!active || !payload || !payload.length) return null;
+  const data = payload[0].payload;
+
+  const allVins = (Array.isArray(data.hunter_vins) || Array.isArray(data.agm_vins))
+    ? [...new Set([...(data.hunter_vins || []), ...(data.agm_vins || [])])]
+    : (data.vin ? [data.vin] : []);
+
+  const sentinelTotal = (data.hunter_sentinel_count || 0) + (data.agm_sentinel_count || 0);
+
+  return (
+    <div style={{ backgroundColor: '#fff', padding: '12px', border: '1px solid #E5E7EB', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', fontSize: 13, userSelect: 'text', pointerEvents: 'auto' }}>
+      {!isModelView && <p style={{ margin: 0, fontWeight: 700, color: '#1F2937' }}>VIN: {data.vin || '-'}</p>}
+      <p style={{ margin: isModelView ? 0 : '4px 0', color: '#6B7280', fontWeight: isModelView ? 700 : 400 }}>
+        Дата: {data.fullDate || data.date}
+      </p>
+
+      {sentinelTotal > 0 && (
+        <p style={{ margin: '2px 0', color: '#B45309', fontSize: 11 }}>
+          ⚠️ Исключено 90°: {data.hunter_sentinel_count || 0} Hunter + {data.agm_sentinel_count || 0} AGM
+        </p>
+      )}
+
+      <hr style={{ margin: '8px 0', borderColor: '#E5E7EB' }} />
+
+      {payload.map((entry, index) => {
+        const isAgm = entry.dataKey.startsWith('agm_');
+        const baseKey = isAgm ? entry.dataKey.replace('agm_', '') : entry.dataKey.replace('hunter_', '');
+        const result = data[`agm_${baseKey}_result`];
+        const raw = data[`${isAgm ? 'agm_' : 'hunter_'}${baseKey}_raw`];
+
+        const showVal = entry.value !== null && entry.value !== undefined;
+        if (!showVal && raw === undefined) return null;
+
+        return (
+          <p key={index} style={{ margin: '2px 0', color: entry.color, fontWeight: 500 }}>
+            {entry.name}: {showVal ? formatAngle(entry.value) : '—'}
+            {raw !== undefined && (
+              <span style={{ color: '#DC2626', marginLeft: 4, fontSize: 10 }} title="Значение 90°, исключено из линии">
+                ⚠️ {formatAngle(raw)}
+              </span>
+            )}
+            {!isModelView && isAgm && result && (
+              <span style={{ marginLeft: 6, fontSize: 11, padding: '2px 4px', borderRadius: 4, backgroundColor: result === 'Y' ? '#D1FAE5' : '#FEE2E2', color: result === 'Y' ? '#065F46' : '#991B1B' }}>
+                {result === 'Y' ? 'OK' : 'NOK'}
+              </span>
+            )}
+          </p>
+        );
+      })}
+
+      {allVins.length > 0 && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #E5E7EB' }}>
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowVins(allVins, data.fullDate || data.date);
+            }}
+            style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #2563EB', background: '#EFF6FF', color: '#1D4ED8', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
+          >
+            🔍 VINs ({allVins.length}) — открыть список
+          </button>
+        </div>
+      )}
+    </div>
+  );
 };
 
 // ======================= ГРАФИКИ =======================
 function AlignmentCharts({ chartData, showVolume = false, isModelView = false }) {
   const [groupFilter, setGroupFilter] = useState('all');
+  const [vinModal, setVinModal] = useState({ open: false, vins: [], label: '' });
+  const [activeChartId, setActiveChartId] = useState(null);
+
+  // Закрываем тултипы при клике вне графиков и вне модалки
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (!e.target.closest('.recharts-wrapper') && !e.target.closest('.vins-modal-overlay')) {
+        setActiveChartId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const safeData = useMemo(() => {
+    if (!Array.isArray(chartData)) return [];
+    return chartData.map(row => {
+      const clean = { ...row };
+      for (const key of Object.keys(clean)) {
+        if (!key.startsWith('hunter_') && !key.startsWith('agm_')) continue;
+        if (key === 'hunter_cars' || key === 'agm_cars' ||
+            key === 'hunter_sentinel_count' || key === 'agm_sentinel_count' ||
+            key === 'hunter_vins' || key === 'agm_vins' ||
+            key.endsWith('_raw') || key.endsWith('_result')) continue;
+        if (isSentinelValue(clean[key])) {
+          clean[`${key}_raw`] = clean[key];
+          clean[key] = null;
+        }
+      }
+      return clean;
+    });
+  }, [chartData]);
+
+  const sentinelCount = useMemo(() => {
+    let n = 0;
+    if (!Array.isArray(chartData)) return n;
+    const hasBackend = chartData.some(r =>
+      r.hunter_sentinel_count !== undefined || r.agm_sentinel_count !== undefined
+    );
+    if (hasBackend) {
+      for (const row of chartData) {
+        n += (row.hunter_sentinel_count || 0) + (row.agm_sentinel_count || 0);
+      }
+    } else {
+      for (const row of chartData) {
+        for (const key of Object.keys(row)) {
+          if (!key.startsWith('hunter_') && !key.startsWith('agm_')) continue;
+          if (key === 'hunter_cars' || key === 'agm_cars' ||
+              key === 'hunter_sentinel_count' || key === 'agm_sentinel_count' ||
+              key === 'hunter_vins' || key === 'agm_vins' ||
+              key.endsWith('_raw') || key.endsWith('_result')) continue;
+          if (isSentinelValue(row[key])) n++;
+        }
+      }
+    }
+    return n;
+  }, [chartData]);
+
+  const openVins = (vins, label) => setVinModal({ open: true, vins, label });
+  const closeVins = () => setVinModal({ open: false, vins: [], label: '' });
 
   const filteredConfig = groupFilter === 'all' 
     ? CHARTS_CONFIG 
@@ -183,6 +370,12 @@ function AlignmentCharts({ chartData, showVolume = false, isModelView = false })
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       
+      {sentinelCount > 0 && (
+        <div style={{ background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 10, padding: '10px 14px', fontSize: 13, color: '#92400E' }}>
+          ⚠️ Значений <b>90°</b> исключено из линий: <b>{sentinelCount}</b>. Реальные значения видны в тултипе при клике на точку.
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', backgroundColor: '#F9FAFB', padding: 12, borderRadius: 8 }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: '#4B5563' }}>Выберите группу:</span>
         <button onClick={() => setGroupFilter('all')} style={{ ...buttonStyle, background: groupFilter === 'all' ? '#2563EB' : '#D1D5DB', color: groupFilter === 'all' ? '#FFF' : '#374151' }}>Все графики</button>
@@ -194,11 +387,24 @@ function AlignmentCharts({ chartData, showVolume = false, isModelView = false })
         {filteredConfig.map(param => (
           <React.Fragment key={param.key}>
             {renderChartCard(param.name, param.domain, param.key, param.norm,
-              <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+              <LineChart 
+                data={safeData} 
+                onClick={() => setActiveChartId(param.key)}
+                margin={{ top: 10, right: 20, left: 10, bottom: 0 }} 
+                style={{ userSelect: 'none' }}
+              >
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={20} />
                 <YAxis domain={param.domain} tickFormatter={(val) => formatAngle(val)} width={60} />
-                <Tooltip content={<CustomTooltip isModelView={isModelView} />} />
+                
+                <Tooltip 
+                  content={<CustomTooltip isModelView={isModelView} onShowVins={openVins} />} 
+                  trigger="click"
+                  active={activeChartId === param.key ? undefined : false}
+                  wrapperStyle={{ pointerEvents: 'auto', zIndex: 1000, outline: 'none' }}
+                  isAnimationActive={false}
+                />
+                
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 
                 {param.norm && (
@@ -221,11 +427,21 @@ function AlignmentCharts({ chartData, showVolume = false, isModelView = false })
           <h3 style={{ fontSize: 18, color: '#1F2937', marginBottom: 16, borderBottom: '2px solid #E5E7EB', paddingBottom: 8 }}>Объем прошедших авто</h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 20 }}>
             {renderChartCard('Количество машин по дням', [0, 'auto'], 'cars', null,
-              <AreaChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+              <AreaChart 
+                data={chartData} 
+                onClick={() => setActiveChartId('volume')}
+                margin={{ top: 10, right: 20, left: 10, bottom: 0 }} 
+                style={{ userSelect: 'none' }}
+              >
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                 <YAxis width={40} />
-                <Tooltip />
+                <Tooltip 
+                  trigger="click"
+                  active={activeChartId === 'volume' ? undefined : false}
+                  isAnimationActive={false} 
+                  wrapperStyle={{ pointerEvents: 'auto', zIndex: 1000, outline: 'none' }}
+                />
                 <Area type="monotone" dataKey="cars" name="Кол-во машин (Hunter)" stroke="#10b981" fill="#d1fae5" strokeWidth={2} />
                 <Area type="monotone" dataKey="agm_cars" name="Кол-во машин (IoT)" stroke="#3b82f6" fill="#dbeafe" strokeWidth={2} />
               </AreaChart>
@@ -233,6 +449,8 @@ function AlignmentCharts({ chartData, showVolume = false, isModelView = false })
           </div>
         </div>
       )}
+
+      <VinsModal open={vinModal.open} vins={vinModal.vins} label={vinModal.label} onClose={closeVins} />
     </div>
   );
 }
@@ -274,7 +492,6 @@ function ChartsViewModels() {
         return;
       }
 
-      // Бэкенд нового формата возвращает уже агрегированные ряды (по датам)
       const isPreAggregated = json[0].hunter_cars !== undefined || json[0].agm_cars !== undefined;
 
       if (isPreAggregated) {
@@ -283,7 +500,6 @@ function ChartsViewModels() {
           cars: item.hunter_cars != null ? item.hunter_cars : 0
         })));
       } else {
-        // Fallback для старого формата — группируем на фронте
         const grouped = {};
         json.forEach(item => {
           const dateStr = item.date;
@@ -378,10 +594,10 @@ function ChartsViewVIN() {
         return;
       }
 
-      setSearchedVin(reports[0]?.requestedVin || reports[0]?.vin || vin);
+      const resolvedVin = reports[0]?.requestedVin || reports[0]?.vin || vin;
+      setSearchedVin(resolvedVin);
       if (message) setPartialMessage(message);
 
-      // Hunter rows
       const hunterRows = reports
         .filter(r => r.hunterAvailable !== false && !!r.begin_date)
         .map(item => {
@@ -393,6 +609,8 @@ function ChartsViewVIN() {
             date: item.begin_date.substring(5, 16),
             fullDate: item.begin_date,
             vin: item.vin,
+            hunter_vins: item.vin ? [item.vin] : [],
+            agm_vins: [],
             hunter_f_camber_l: fl,
             hunter_f_camber_r: fr,
             hunter_f_camber_diff: (fl != null && fr != null) ? fl - fr : null,
@@ -415,14 +633,15 @@ function ChartsViewVIN() {
           };
         });
 
-      // AGM rows (с собственными датами)
       const agmRows = measurements.map(m => {
         const v = m.values || {};
         const ct = m.creation_time || '';
         return {
           date: ct ? ct.substring(5, 16) : 'IoT',
           fullDate: ct || '-',
-          vin: reports[0]?.requestedVin || reports[0]?.vin || vin,
+          vin: resolvedVin,
+          hunter_vins: [],
+          agm_vins: resolvedVin ? [resolvedVin] : [],
           measurement_id: m.measurement_id,
           agm_f_camber_l: parseVal(v.f_camber_l),
           agm_f_camber_r: parseVal(v.f_camber_r),
@@ -642,7 +861,6 @@ function TableView() {
       <tr style={{ borderBottom: '1px solid #000', textAlign: 'center', fontSize: '14px', fontFamily: '"Times New Roman", Times, serif' }}>
         <td style={{ padding: '6px', textAlign: 'right', borderRight: '1px solid #000', paddingRight: 15 }}>{label}</td>
         
-        {/* Hunter */}
         <td style={{ padding: '6px', borderRight: '1px solid #000' }}>{fmt(min)}</td>
         <td style={{ padding: '6px', borderRight: '1px solid #000' }}>{fmt(max)}</td>
         <td style={{ padding: '6px', borderRight: '1px solid #000', position: 'relative' }}>
@@ -657,7 +875,6 @@ function TableView() {
         </td>
         <td style={{ padding: '6px', borderRight: '1px solid #000' }}>{fmt(after)}</td>
 
-        {/* IoT */}
         <td style={{ padding: '6px', borderRight: '1px solid #000' }}>{fmt(iotValue)}</td>
         <td style={{ padding: '6px', borderRight: '1px solid #000' }}>
           {iotName || '- - -'}
@@ -684,7 +901,6 @@ function TableView() {
         {error && <span style={{ color: '#DC2626', fontSize: 14 }}>❌ {error}</span>}
       </div>
 
-      {/* Селекторы замеров */}
       {(reportsList.length > 1 || agmMeasurements.length > 1) && (
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center', backgroundColor: '#F9FAFB', padding: 12, borderRadius: 8 }}>
           {reportsList.length > 1 && (
