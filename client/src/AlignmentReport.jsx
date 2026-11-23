@@ -141,7 +141,7 @@ export default function AlignmentReport() {
 }
 
 // ======================= VINS MODAL =======================
-function VinsModal({ open, vins, label, onClose }) {
+function VinsModal({ open, hunterVins = [], agmVins = [], hunterCars = 0, agmCars = 0, label, onClose }) {
   const [copied, setCopied] = useState(false);
 
   // Блокируем скролл фона, когда окно открыто
@@ -172,8 +172,16 @@ function VinsModal({ open, vins, label, onClose }) {
 
   if (!open) return null;
 
+  const allVins = Array.from(new Set([...hunterVins, ...agmVins])).sort();
+
   const handleCopy = async () => {
-    const text = vins.join('\n');
+    const text = allVins.map(v => {
+      const inH = hunterVins.includes(v);
+      const inA = agmVins.includes(v);
+      if (inH && inA) return `${v} (Hunter + IoT)`;
+      if (inH) return `${v} (Hunter)`;
+      return `${v} (IoT)`;
+    }).join('\n');
     try {
       await navigator.clipboard.writeText(text);
     } catch (e) {
@@ -206,28 +214,61 @@ function VinsModal({ open, vins, label, onClose }) {
           <h3 style={{ margin: 0, fontSize: 18, color: '#111827' }}>VIN за {label}</h3>
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: 24, cursor: 'pointer', color: '#6B7280' }}>×</button>
         </div>
-        <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 12 }}>Всего: {vins.length}</div>
-        <div style={{ flex: 1, overflowY: 'auto', background: '#F9FAFB', borderRadius: 8, padding: 12, fontFamily: 'monospace', fontSize: 13, border: '1px solid #E5E7EB', minHeight: 100 }}>
-          {vins.map((v, i) => (
-            <div key={i} style={{ padding: '4px 0', borderBottom: i < vins.length - 1 ? '1px solid #F0F0F5' : 'none' }}>{v}</div>
-          ))}
+        
+        <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 12, lineHeight: 1.5 }}>
+          Уникальных VIN: <b>{allVins.length}</b><br/>
+          Всего замеров: <b>{hunterCars}</b> Hunter, <b>{agmCars}</b> IoT
         </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', background: '#F9FAFB', borderRadius: 8, padding: 12, border: '1px solid #E5E7EB', minHeight: 100 }}>
+          {allVins.map((v, i) => {
+            const inH = hunterVins.includes(v);
+            const inA = agmVins.includes(v);
+            let sourceLabel = '';
+            let sourceColor = '';
+            let bgColor = '';
+            
+            if (inH && inA) { 
+              sourceLabel = 'Hunter + IoT'; 
+              sourceColor = '#8B5CF6'; 
+              bgColor = '#F3E8FF'; 
+            } else if (inH) { 
+              sourceLabel = 'Hunter'; 
+              sourceColor = '#2563EB'; 
+              bgColor = '#DBEAFE'; 
+            } else { 
+              sourceLabel = 'IoT'; 
+              sourceColor = '#059669'; 
+              bgColor = '#D1FAE5'; 
+            }
+
+            return (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: i < allVins.length - 1 ? '1px solid #F0F0F5' : 'none' }}>
+                <span style={{ fontFamily: 'monospace', fontSize: 13, color: '#374151' }}>{v}</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: sourceColor, backgroundColor: bgColor, padding: '2px 8px', borderRadius: 12 }}>
+                  {sourceLabel}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        
         <button onClick={handleCopy} style={{ marginTop: 16, padding: '10px 20px', borderRadius: 8, border: 'none', background: copied ? '#059669' : '#2563EB', color: 'white', fontWeight: 600, fontSize: 14, cursor: 'pointer', transition: 'background 0.2s' }}>
-          {copied ? '✓ Скопировано' : '📋 Копировать список'}
+          {copied ? '✓ Скопировано' : '📋 Копировать список VIN'}
         </button>
       </div>
     </div>
   );
 }
 
-// ======================= ТУЛТИП =======================
+// ======================= ТУЛТИПЫ =======================
 const CustomTooltip = ({ active, payload, isModelView, onShowVins }) => {
   if (!active || !payload || !payload.length) return null;
   const data = payload[0].payload;
 
-  const allVins = (Array.isArray(data.hunter_vins) || Array.isArray(data.agm_vins))
-    ? [...new Set([...(data.hunter_vins || []), ...(data.agm_vins || [])])]
-    : (data.vin ? [data.vin] : []);
+  const hunterVins = data.hunter_vins || [];
+  const agmVins = data.agm_vins || [];
+  const uniqueVinsCount = new Set([...hunterVins, ...agmVins]).size;
 
   const sentinelTotal = (data.hunter_sentinel_count || 0) + (data.agm_sentinel_count || 0);
 
@@ -272,17 +313,58 @@ const CustomTooltip = ({ active, payload, isModelView, onShowVins }) => {
         );
       })}
 
-      {allVins.length > 0 && (
+      {uniqueVinsCount > 0 && (
         <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #E5E7EB' }}>
           <button
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();
-              onShowVins(allVins, data.fullDate || data.date);
+              onShowVins(hunterVins, agmVins, data.fullDate || data.date, data.hunter_cars || hunterVins.length, data.agm_cars || agmVins.length);
             }}
             style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #2563EB', background: '#EFF6FF', color: '#1D4ED8', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
           >
-            🔍 VINs ({allVins.length}) — открыть список
+            🔍 Список VIN ({uniqueVinsCount})
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const CustomVolumeTooltip = ({ active, payload, label, onShowVins }) => {
+  if (!active || !payload || !payload.length) return null;
+  const data = payload[0].payload;
+  
+  const hunterVins = data.hunter_vins || [];
+  const agmVins = data.agm_vins || [];
+  const uniqueVinsCount = new Set([...hunterVins, ...agmVins]).size;
+
+  return (
+    <div style={{ backgroundColor: '#fff', padding: '12px', border: '1px solid #E5E7EB', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', fontSize: 13, userSelect: 'text', pointerEvents: 'auto' }}>
+      <p style={{ margin: '0 0 4px 0', fontWeight: 700, color: '#1F2937' }}>Дата: {data.fullDate || data.date}</p>
+      
+      <p style={{ margin: '2px 0', color: '#10b981', fontWeight: 500 }}>
+        Hunter (замеров): {data.cars ?? 0}
+      </p>
+      <p style={{ margin: '2px 0', color: '#3b82f6', fontWeight: 500 }}>
+        AGM (IoT): {data.agm_cars ?? 0}
+      </p>
+      
+      <p style={{ margin: '4px 0 2px 0', color: '#6B7280', fontSize: 11 }}>
+        Уникальных VIN: {uniqueVinsCount}
+      </p>
+
+      {uniqueVinsCount > 0 && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #E5E7EB' }}>
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowVins(hunterVins, agmVins, data.fullDate || data.date, data.cars || 0, data.agm_cars || 0);
+            }}
+            style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #2563EB', background: '#EFF6FF', color: '#1D4ED8', fontWeight: 600, fontSize: 11, cursor: 'pointer' }}
+          >
+            🔍 Список VIN ({uniqueVinsCount})
           </button>
         </div>
       )}
@@ -293,7 +375,7 @@ const CustomTooltip = ({ active, payload, isModelView, onShowVins }) => {
 // ======================= ГРАФИКИ =======================
 function AlignmentCharts({ chartData, showVolume = false, isModelView = false }) {
   const [groupFilter, setGroupFilter] = useState('all');
-  const [vinModal, setVinModal] = useState({ open: false, vins: [], label: '' });
+  const [vinModal, setVinModal] = useState({ open: false, hunterVins: [], agmVins: [], hunterCars: 0, agmCars: 0, label: '' });
   const [activeChartId, setActiveChartId] = useState(null);
 
   // Закрываем тултипы при клике вне графиков и вне модалки
@@ -351,8 +433,9 @@ function AlignmentCharts({ chartData, showVolume = false, isModelView = false })
     return n;
   }, [chartData]);
 
-  const openVins = (vins, label) => setVinModal({ open: true, vins, label });
-  const closeVins = () => setVinModal({ open: false, vins: [], label: '' });
+  const openVins = (hunterVins, agmVins, label, hunterCars = 0, agmCars = 0) => 
+    setVinModal({ open: true, hunterVins, agmVins, label, hunterCars, agmCars });
+  const closeVins = () => setVinModal({ open: false, hunterVins: [], agmVins: [], hunterCars: 0, agmCars: 0, label: '' });
 
   const filteredConfig = groupFilter === 'all' 
     ? CHARTS_CONFIG 
@@ -384,42 +467,56 @@ function AlignmentCharts({ chartData, showVolume = false, isModelView = false })
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: 20 }}>
-        {filteredConfig.map(param => (
-          <React.Fragment key={param.key}>
-            {renderChartCard(param.name, param.domain, param.key, param.norm,
-              <LineChart 
-                data={safeData} 
-                onClick={() => setActiveChartId(param.key)}
-                margin={{ top: 10, right: 20, left: 10, bottom: 0 }} 
-                style={{ userSelect: 'none' }}
-              >
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={20} />
-                <YAxis domain={param.domain} tickFormatter={(val) => formatAngle(val)} width={60} />
-                
-                <Tooltip 
-                  content={<CustomTooltip isModelView={isModelView} onShowVins={openVins} />} 
-                  trigger="click"
-                  active={activeChartId === param.key ? undefined : false}
-                  wrapperStyle={{ pointerEvents: 'auto', zIndex: 1000, outline: 'none' }}
-                  isAnimationActive={false}
-                />
-                
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                
-                {param.norm && (
-                  <>
-                    <ReferenceLine y={param.norm[0]} stroke="#ef4444" strokeDasharray="3 3" />
-                    {param.norm[1] !== param.norm[0] && <ReferenceLine y={param.norm[1]} stroke="#ef4444" strokeDasharray="3 3" />}
-                  </>
-                )}
+        {filteredConfig.map((param, index) => {
+          const isFirstOfGroup = index === 0 || filteredConfig[index - 1].group !== param.group;
+          
+          return (
+            <React.Fragment key={param.key}>
+              {isFirstOfGroup && groupFilter === 'all' && (
+                <div style={{ gridColumn: '1 / -1', marginTop: index === 0 ? 0 : 24, marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, color: '#1F2937', margin: 0 }}>
+                      {param.group === 'Передний мост' ? '📊 Передний мост' : '📊 Задний мост'}
+                    </h3>
+                    <div style={{ flex: 1, height: 2, background: '#F3F4F6', borderRadius: 1 }} />
+                  </div>
+                </div>
+              )}
+              {renderChartCard(param.name, param.domain, param.key, param.norm,
+                <LineChart 
+                  data={safeData} 
+                  onClick={() => setActiveChartId(param.key)}
+                  margin={{ top: 10, right: 20, left: 10, bottom: 0 }} 
+                  style={{ userSelect: 'none' }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={20} />
+                  <YAxis domain={param.domain} tickFormatter={(val) => formatAngle(val)} width={60} />
+                  
+                  <Tooltip 
+                    content={<CustomTooltip isModelView={isModelView} onShowVins={openVins} />} 
+                    trigger="click"
+                    active={activeChartId === param.key ? undefined : false}
+                    wrapperStyle={{ pointerEvents: 'auto', zIndex: 1000, outline: 'none' }}
+                    isAnimationActive={false}
+                  />
+                  
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  
+                  {param.norm && (
+                    <>
+                      <ReferenceLine y={param.norm[0]} stroke="#ef4444" strokeDasharray="3 3" />
+                      {param.norm[1] !== param.norm[0] && <ReferenceLine y={param.norm[1]} stroke="#ef4444" strokeDasharray="3 3" />}
+                    </>
+                  )}
 
-                <Line type="monotone" dataKey={`hunter_${param.key}`} name="Hunter" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                <Line type="monotone" dataKey={`agm_${param.key}`} name="AGM (Серийный)" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-              </LineChart>
-            )}
-          </React.Fragment>
-        ))}
+                  <Line type="monotone" dataKey={`hunter_${param.key}`} name="Hunter" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  <Line type="monotone" dataKey={`agm_${param.key}`} name="AGM (Серийный)" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                </LineChart>
+              )}
+            </React.Fragment>
+          );
+        })}
       </div>
 
       {showVolume && (
@@ -437,6 +534,7 @@ function AlignmentCharts({ chartData, showVolume = false, isModelView = false })
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                 <YAxis width={40} />
                 <Tooltip 
+                  content={<CustomVolumeTooltip onShowVins={openVins} />}
                   trigger="click"
                   active={activeChartId === 'volume' ? undefined : false}
                   isAnimationActive={false} 
@@ -450,7 +548,15 @@ function AlignmentCharts({ chartData, showVolume = false, isModelView = false })
         </div>
       )}
 
-      <VinsModal open={vinModal.open} vins={vinModal.vins} label={vinModal.label} onClose={closeVins} />
+      <VinsModal 
+        open={vinModal.open} 
+        hunterVins={vinModal.hunterVins} 
+        agmVins={vinModal.agmVins} 
+        hunterCars={vinModal.hunterCars}
+        agmCars={vinModal.agmCars}
+        label={vinModal.label} 
+        onClose={closeVins} 
+      />
     </div>
   );
 }
