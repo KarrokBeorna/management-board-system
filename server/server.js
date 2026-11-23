@@ -19440,151 +19440,145 @@ app.get('/api/ec-tool-report', async (req, res) => {
 
 
 // ================== РАЗВАЛ-СХОЖДЕНИЕ (HUNTER WA) ==================
+// ================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==================
 
-// ================== IoT / AGM: NCATable_* по полному VIN ==================
-// Забирает как значения, так и статусы (Y/N) из at_im_execute_result_info
-async function fetchAgmData(fullVin) {
-  if (!fullVin || fullVin.length < 10) return {};
-  try {
-    // Предполагается, что пул pool подключен к нужной БД, либо используйте dbName.at_im_execute_result
-    const [ers] = await pool.execute(
-      `SELECT id FROM higoplat_lingxi.at_im_execute_result
-        WHERE vin = ?
-        ORDER BY creation_time DESC
-        LIMIT 1`,
-      [fullVin]
-    );
-    if (ers.length === 0) return {};
-
-    const [items] = await pool.execute(
-      `SELECT item_name, item_value
-         FROM higoplat_lingxi.at_im_execute_result_info
-        WHERE ier_id = ? AND item_name LIKE 'NCATable%'`,
-      [ers[0].id]
-    );
-
-    const map = {};
-    for (const it of items) {
-      if (!it.item_name) continue;
-      // Сохраняем сырое имя для поиска (например, NCATable_NCA_Camber_LF)
-      map[it.item_name] = it.item_value;
-    }
-    
-    // Собираем объект в формате, который ждет фронтенд
-    const agm = {
-      f_camber_l: map['NCATable_NCA_Camber_LF'],
-      f_camber_l_result: map['NCATable_NCA_Camber_LF_Result'],
-      f_camber_r: map['NCATable_NCA_Camber_RF'],
-      f_camber_r_result: map['NCATable_NCA_Camber_RF_Result'],
-      f_camber_diff: map['NCATable_NCA_Camber_FCross'] || map['NCATable_NCA_Camber_Fcross'],
-      f_camber_diff_result: map['NCATable_NCA_Camber_FCross_Result'] || map['NCATable_NCA_Camber_Fcross_Result'],
-
-      f_toe_l: map['NCATable_NCA_Toe_LF'],
-      f_toe_l_result: map['NCATable_NCA_Toe_LF_Result'],
-      f_toe_r: map['NCATable_NCA_Toe_RF'],
-      f_toe_r_result: map['NCATable_NCA_Toe_RF_Result'],
-      f_toe_total: map['NCATable_NCA_Toe_FTotal'] || map['NCATable_NCA_Toe_FCross'],
-      f_toe_total_result: map['NCATable_NCA_Toe_FTotal_Result'] || map['NCATable_NCA_Toe_FCross_Result'],
-
-      f_caster_l: map['NCATable_NCA_Caster_LF'],
-      f_caster_l_result: map['NCATable_NCA_Caster_LF_Result'],
-      f_caster_r: map['NCATable_NCA_Caster_RF'],
-      f_caster_r_result: map['NCATable_NCA_Caster_RF_Result'],
-      f_caster_diff: map['NCATable_NCA_Caster_FCross'] || map['NCATable_NCA_Caster_Fcross'],
-      f_caster_diff_result: map['NCATable_NCA_Caster_FCross_Result'] || map['NCATable_NCA_Caster_Fcross_Result'],
-
-      f_kpi_l: map['NCATable_NCA_SAI_LF'],
-      f_kpi_l_result: map['NCATable_NCA_SAI_LF_Result'],
-      f_kpi_r: map['NCATable_NCA_SAI_RF'],
-      f_kpi_r_result: map['NCATable_NCA_SAI_RF_Result'],
-      f_kpi_diff: map['NCATable_NCA_SAI_FCross'] || map['NCATable_NCA_SAI_Fcross'],
-      f_kpi_diff_result: map['NCATable_NCA_SAI_FCross_Result'] || map['NCATable_NCA_SAI_Fcross_Result'],
-
-      r_camber_l: map['NCATable_NCA_Camber_LR'],
-      r_camber_l_result: map['NCATable_NCA_Camber_LR_Result'],
-      r_camber_r: map['NCATable_NCA_Camber_RR'],
-      r_camber_r_result: map['NCATable_NCA_Camber_RR_Result'],
-      r_camber_diff: map['NCATable_NCA_Camber_RCross'] || map['NCATable_NCA_Camber_Rcross'],
-      r_camber_diff_result: map['NCATable_NCA_Camber_RCross_Result'] || map['NCATable_NCA_Camber_Rcross_Result'],
-
-      r_toe_l: map['NCATable_NCA_Toe_LR'],
-      r_toe_l_result: map['NCATable_NCA_Toe_LR_Result'],
-      r_toe_r: map['NCATable_NCA_Toe_RR'],
-      r_toe_r_result: map['NCATable_NCA_Toe_RR_Result'],
-      r_toe_total: map['NCATable_NCA_Toe_RTotal'] || map['NCATable_NCA_Toe_RCross'],
-      r_toe_total_result: map['NCATable_NCA_Toe_RTotal_Result'] || map['NCATable_NCA_Toe_RCross_Result'],
-
-      r_thrust: map['NCATable_NCA_SWA'],
-      r_thrust_result: map['NCATable_NCA_SWA_Result']
-    };
-
-    return agm;
-  } catch (e) {
-    console.error('[IoT AGM] error for VIN', fullVin, e.message);
-    return {};
-  }
-}
-
-// Поиск полного VIN по короткому
+// 1. Поиск полного VIN по короткому (единая функция, без дублей)
 async function getFullVin(shortVin) {
+  if (!shortVin) return '';
   try {
     const [mesVins] = await mesPool.query(
-      `SELECT DISTINCT vin FROM ti_mes_movement WHERE vin LIKE CONCAT('%', ?, '%') LIMIT 1`, [shortVin]
+      `SELECT DISTINCT vin FROM ti_mes_movement WHERE vin LIKE CONCAT('%', ?, '%') LIMIT 1`,
+      [shortVin]
     );
     if (mesVins.length > 0) return mesVins[0].vin;
-    
+
     const [iotVins] = await pool.query(
-      `SELECT DISTINCT vin FROM work_order WHERE vin LIKE CONCAT('%', ?, '%') LIMIT 1`, [shortVin]
+      `SELECT DISTINCT vin FROM work_order WHERE vin LIKE CONCAT('%', ?, '%') LIMIT 1`,
+      [shortVin]
     );
     if (iotVins.length > 0) return iotVins[0].vin;
 
     const [ncaVins] = await pool.query(
-      `SELECT DISTINCT vin FROM higoplat_lingxi.at_im_execute_result WHERE vin LIKE CONCAT('%', ?, '%') LIMIT 1`, [shortVin]
+      `SELECT DISTINCT vin FROM higoplat_lingxi.at_im_execute_result WHERE vin LIKE CONCAT('%', ?, '%') LIMIT 1`,
+      [shortVin]
     );
     if (ncaVins.length > 0) return ncaVins[0].vin;
-    
   } catch (e) {
-    console.error('[getFullVin] error', e);
+    console.error('[getFullVin] Ошибка:', e.message);
   }
   return shortVin;
 }
-// ================== IoT: NCATable_* по VIN ==================
 
+// 2. Запрос AGM-данных
+//    ВАЖНО: выбираем последний замер, в котором ГАРАНТИРОВАННО есть NCATable%,
+//    иначе для VIN с последним не-AGM замером будем возвращать {}.
+async function fetchAgmData(fullVin, hunterVin) {
+  const exactVin = (fullVin || hunterVin || '').trim();
+  const sourceVin = (hunterVin || fullVin || '').trim();
+  const suffix = sourceVin.length > 8 ? sourceVin.slice(-8) : sourceVin;
 
-// Источник: at_im_execute_result (VIN, creation_time) → at_im_execute_result_info (ITEM_NAME/ITEM_VALUE)
-// Берём ПОСЛЕДНИЙ скан по creation_time (как в Excel).
-async function fetchIotNcaValues(fullVin) {
-  if (!fullVin || fullVin.length < 10) return {};
+  if (!exactVin && !suffix) return {};
+
   try {
-    const [ers] = await pool.execute(
-      `SELECT id FROM at_im_execute_result
-        WHERE vin = ?
-        ORDER BY creation_time DESC
-        LIMIT 1`,
-      [fullVin]
-    );
-    if (ers.length === 0) return {};
-
     const [items] = await pool.execute(
-      `SELECT item_name, item_value
-         FROM at_im_execute_result_info
-        WHERE ier_id = ? AND item_name LIKE 'NCATable%'`,
-      [ers[0].id]
+      `SELECT info.item_name, info.item_value
+         FROM higoplat_lingxi.at_im_execute_result_info info
+        WHERE info.ier_id = (
+            SELECT er.id
+              FROM higoplat_lingxi.at_im_execute_result er
+             WHERE (TRIM(er.vin) = TRIM(?) OR TRIM(er.vin) LIKE CONCAT('%', ?))
+               AND EXISTS (
+                   SELECT 1
+                     FROM higoplat_lingxi.at_im_execute_result_info i2
+                    WHERE i2.ier_id = er.id
+                      AND i2.item_name LIKE 'NCATable%'
+               )
+             ORDER BY er.creation_time DESC
+             LIMIT 1
+        )
+        AND info.item_name LIKE 'NCATable%'`,
+      [exactVin, suffix]
     );
 
-    const map = {};
-    for (const it of items) {
-      if (!it.item_name) continue;
-      if (it.item_name.endsWith('_Result')) continue; // маркеры Y/Z — пропускаем
-      map[it.item_name] = it.item_value;
+    if (items.length === 0) {
+      console.log(`[IoT AGM] Нет NCATable для VIN: ${exactVin}, хвост: ${suffix}`);
+      return {};
     }
-    return map;
+
+    return mapAgmValues(items);
   } catch (e) {
-    console.error('[IoT NCA] error for VIN', fullVin, e.message);
+    console.error('[IoT AGM] ОШИБКА SQL:', e.message);
     return {};
   }
 }
-// 1. Получение списка моделей (без префикса AGM>)
+
+// 3. Маппинг полей
+function mapAgmValues(items) {
+  const map = {};
+  for (const it of items) {
+    if (!it.item_name) continue;
+    map[it.item_name] = it.item_value;
+  }
+
+  return {
+    // Развал (Camber)
+    f_camber_l: map['NCATable_NCA_Camber_LF'],
+    f_camber_l_result: map['NCATable_NCA_Camber_LF_Result'],
+    f_camber_r: map['NCATable_NCA_Camber_RF'],
+    f_camber_r_result: map['NCATable_NCA_Camber_RF_Result'],
+    f_camber_diff: map['NCATable_NCA_Camber_FCross'] || map['NCATable_NCA_Camber_Fcross'],
+    f_camber_diff_result: map['NCATable_NCA_Camber_FCross_Result'] || map['NCATable_NCA_Camber_Fcross_Result'],
+
+    // Схождение (Toe)
+    f_toe_l: map['NCATable_NCA_Toe_LF'],
+    f_toe_l_result: map['NCATable_NCA_Toe_LF_Result'],
+    f_toe_r: map['NCATable_NCA_Toe_RF'],
+    f_toe_r_result: map['NCATable_NCA_Toe_RF_Result'],
+    f_toe_total: map['NCATable_NCA_Toe_FTotal'] || map['NCATable_NCA_Toe_FCross'],
+    f_toe_total_result: map['NCATable_NCA_Toe_FTotal_Result'] || map['NCATable_NCA_Toe_FCross_Result'],
+
+    // Продольный наклон (Caster)
+    f_caster_l: map['NCATable_NCA_Caster_LF'],
+    f_caster_l_result: map['NCATable_NCA_Caster_LF_Result'],
+    f_caster_r: map['NCATable_NCA_Caster_RF'],
+    f_caster_r_result: map['NCATable_NCA_Caster_RF_Result'],
+    f_caster_diff: map['NCATable_NCA_Caster_FCross'] || map['NCATable_NCA_Caster_Fcross'],
+    f_caster_diff_result: map['NCATable_NCA_Caster_FCross_Result'] || map['NCATable_NCA_Caster_Fcross_Result'],
+
+    // Поперечный наклон (SAI / KPI)
+    f_kpi_l: map['NCATable_NCA_SAI_LF'],
+    f_kpi_l_result: map['NCATable_NCA_SAI_LF_Result'],
+    f_kpi_r: map['NCATable_NCA_SAI_RF'],
+    f_kpi_r_result: map['NCATable_NCA_SAI_RF_Result'],
+    f_kpi_diff: map['NCATable_NCA_SAI_FCross'] || map['NCATable_NCA_SAI_Fcross'],
+    f_kpi_diff_result: map['NCATable_NCA_SAI_FCross_Result'] || map['NCATable_NCA_SAI_Fcross_Result'],
+
+    // Задний мост: Развал
+    r_camber_l: map['NCATable_NCA_Camber_LR'],
+    r_camber_l_result: map['NCATable_NCA_Camber_LR_Result'],
+    r_camber_r: map['NCATable_NCA_Camber_RR'],
+    r_camber_r_result: map['NCATable_NCA_Camber_RR_Result'],
+    r_camber_diff: map['NCATable_NCA_Camber_RCross'] || map['NCATable_NCA_Camber_Rcross'],
+    r_camber_diff_result: map['NCATable_NCA_Camber_RCross_Result'] || map['NCATable_NCA_Camber_Rcross_Result'],
+
+    // Задний мост: Схождение
+    r_toe_l: map['NCATable_NCA_Toe_LR'],
+    r_toe_l_result: map['NCATable_NCA_Toe_LR_Result'],
+    r_toe_r: map['NCATable_NCA_Toe_RR'],
+    r_toe_r_result: map['NCATable_NCA_Toe_RR_Result'],
+    r_toe_total: map['NCATable_NCA_Toe_RTotal'] || map['NCATable_NCA_Toe_RCross'],
+    r_toe_total_result: map['NCATable_NCA_Toe_RTotal_Result'] || map['NCATable_NCA_Toe_RCross_Result'],
+
+    // Угол движения
+    r_thrust: map['NCATable_NCA_SWA'],
+    r_thrust_result: map['NCATable_NCA_SWA_Result']
+  };
+}
+
+
+// ================== ЭНДПОИНТЫ ==================
+
+// 1. Список моделей
 app.get('/api/alignment-models', async (req, res) => {
   try {
     const [rows] = await hunterwaPool.execute(`
@@ -19593,36 +19587,42 @@ app.get('/api/alignment-models', async (req, res) => {
       WHERE full_model_name LIKE 'AGM>%' 
       ORDER BY full_model_name
     `);
-    // Убираем AGM> на бэкенде, чтобы фронт не страдал
     const models = rows.map(r => r.full_model_name.replace('AGM>', '').trim());
     res.json(models);
   } catch (error) {
-    console.error(error);
+    console.error('[ALIGNMENT MODELS]', error);
     res.status(500).json({ error: 'Ошибка получения моделей' });
   }
 });
 
-// 2. Получение агрегированных данных для графиков (по множеству VIN)
+// 2. Данные для графиков
 app.get('/api/alignment-charts', async (req, res) => {
   const { model, startDate, endDate } = req.query;
-  
-  if (!model || !startDate || !endDate) {
-    return res.status(400).json({ error: 'Необходимы параметры: model, startDate, endDate' });
+
+  if (!startDate || !endDate) {
+    return res.status(400).json({ error: 'Необходимы параметры: startDate, endDate' });
   }
 
   try {
-    const dbModelName = `AGM>${model}`;
     const startDateTime = `${startDate} 00:00:00`;
     const endDateTime = `${endDate} 23:59:59`;
 
-    // 1. Получаем список ВСЕХ замеров (без усреднения, без группировки по дням)
+    // ВАЖНО: порядок параметров = порядок плейсхолдеров в SQL
+    const queryParams = [startDateTime, endDateTime];
+
+    let whereModel = '';
+    if (model && model !== 'ALL') {
+      whereModel = 'AND r.full_model_name = ?';
+      queryParams.push(`AGM>${model}`);
+    }
+
     const [rows] = await hunterwaPool.execute(`
       SELECT 
         r.id AS report_id,
         r.vin AS short_vin,
         DATE_FORMAT(r.begin_date, '%Y-%m-%d') as date,
         DATE_FORMAT(r.begin_date, '%H:%i') as time,
-        
+
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: левый' THEN COALESCE(v.after_value, v.before_value) END) AS hunter_f_camber_l,
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: правый' THEN COALESCE(v.after_value, v.before_value) END) AS hunter_f_camber_r,
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Схождение: левое' THEN COALESCE(v.after_value, v.before_value) END) AS hunter_f_toe_l,
@@ -19632,7 +19632,7 @@ app.get('/api/alignment-charts', async (req, res) => {
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Продольный наклон шкворня: правый' THEN COALESCE(v.after_value, v.before_value) END) AS hunter_f_caster_r,
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Поперечный наклон шкворня: левый' THEN COALESCE(v.after_value, v.before_value) END) AS hunter_f_kpi_l,
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Поперечный наклон шкворня: правый' THEN COALESCE(v.after_value, v.before_value) END) AS hunter_f_kpi_r,
-        
+
         MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: левый' THEN COALESCE(v.after_value, v.before_value) END) AS hunter_r_camber_l,
         MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: правый' THEN COALESCE(v.after_value, v.before_value) END) AS hunter_r_camber_r,
         MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: левое' THEN COALESCE(v.after_value, v.before_value) END) AS hunter_r_toe_l,
@@ -19643,100 +19643,70 @@ app.get('/api/alignment-charts', async (req, res) => {
       FROM reports r
       JOIN report_axles ax ON ax.report_id = r.id
       JOIN report_axle_values v ON v.axle_id = ax.id
-      WHERE r.full_model_name = ? 
-        AND r.begin_date >= ? 
+      WHERE r.begin_date >= ? 
         AND r.begin_date <= ?
+        ${whereModel}
       GROUP BY r.id
       ORDER BY r.begin_date ASC
-    `, [dbModelName, startDateTime, endDateTime]);
+    `, queryParams);
 
     if (rows.length === 0) return res.json([]);
 
-    // 2. Подтягиваем AGM-данные для каждого VIN
     const prepared = await Promise.all(rows.map(async (r) => {
       const shortVin = r.short_vin ? r.short_vin.trim() : '';
       const fullVin = await getFullVin(shortVin);
-      const agm = await fetchAgmData(fullVin);
+      // ВАЖНО: передаём и полный, и исходный короткий VIN
+      const agm = await fetchAgmData(fullVin, shortVin);
 
-      // Вычисляем разницы для Hunter
-      const f_camber_diff = (r.hunter_f_camber_l != null && r.hunter_f_camber_r != null) ? r.hunter_f_camber_l - r.hunter_f_camber_r : null;
-      const f_caster_diff = (r.hunter_f_caster_l != null && r.hunter_f_caster_r != null) ? r.hunter_f_caster_l - r.hunter_f_caster_r : null;
-      const f_kpi_diff = (r.hunter_f_kpi_l != null && r.hunter_f_kpi_r != null) ? r.hunter_f_kpi_l - r.hunter_f_kpi_r : null;
-      const r_camber_diff = (r.hunter_r_camber_l != null && r.hunter_r_camber_r != null) ? r.hunter_r_camber_l - r.hunter_r_camber_r : null;
+      const f_camber_diff = (r.hunter_f_camber_l != null && r.hunter_f_camber_r != null)
+        ? r.hunter_f_camber_l - r.hunter_f_camber_r : null;
+      const f_caster_diff = (r.hunter_f_caster_l != null && r.hunter_f_caster_r != null)
+        ? r.hunter_f_caster_l - r.hunter_f_caster_r : null;
+      const f_kpi_diff = (r.hunter_f_kpi_l != null && r.hunter_f_kpi_r != null)
+        ? r.hunter_f_kpi_l - r.hunter_f_kpi_r : null;
+      const r_camber_diff = (r.hunter_r_camber_l != null && r.hunter_r_camber_r != null)
+        ? r.hunter_r_camber_l - r.hunter_r_camber_r : null;
 
       return {
         report_id: r.report_id,
         vin: fullVin,
+        short_vin: shortVin,
         date: r.date,
         time: r.time,
-        
-        // Hunter поля
-        hunter_f_camber_l: r.hunter_f_camber_l,
-        hunter_f_camber_r: r.hunter_f_camber_r,
-        hunter_f_camber_diff: f_camber_diff,
-        hunter_f_toe_l: r.hunter_f_toe_l,
-        hunter_f_toe_r: r.hunter_f_toe_r,
-        hunter_f_toe_total: r.hunter_f_toe_total,
-        hunter_f_caster_l: r.hunter_f_caster_l,
-        hunter_f_caster_r: r.hunter_f_caster_r,
-        hunter_f_caster_diff: f_caster_diff,
-        hunter_f_kpi_l: r.hunter_f_kpi_l,
-        hunter_f_kpi_r: r.hunter_f_kpi_r,
-        hunter_f_kpi_diff: f_kpi_diff,
-        
-        hunter_r_camber_l: r.hunter_r_camber_l,
-        hunter_r_camber_r: r.hunter_r_camber_r,
-        hunter_r_camber_diff: r_camber_diff,
-        hunter_r_toe_l: r.hunter_r_toe_l,
-        hunter_r_toe_r: r.hunter_r_toe_r,
-        hunter_r_toe_total: r.hunter_r_toe_total,
+
+        hunter_f_camber_l: r.hunter_f_camber_l, hunter_f_camber_r: r.hunter_f_camber_r, hunter_f_camber_diff: f_camber_diff,
+        hunter_f_toe_l: r.hunter_f_toe_l, hunter_f_toe_r: r.hunter_f_toe_r, hunter_f_toe_total: r.hunter_f_toe_total,
+        hunter_f_caster_l: r.hunter_f_caster_l, hunter_f_caster_r: r.hunter_f_caster_r, hunter_f_caster_diff: f_caster_diff,
+        hunter_f_kpi_l: r.hunter_f_kpi_l, hunter_f_kpi_r: r.hunter_f_kpi_r, hunter_f_kpi_diff: f_kpi_diff,
+        hunter_r_camber_l: r.hunter_r_camber_l, hunter_r_camber_r: r.hunter_r_camber_r, hunter_r_camber_diff: r_camber_diff,
+        hunter_r_toe_l: r.hunter_r_toe_l, hunter_r_toe_r: r.hunter_r_toe_r, hunter_r_toe_total: r.hunter_r_toe_total,
         hunter_r_thrust: r.hunter_r_thrust,
 
-        // AGM поля (добавляем префикс agm_)
-        agm_f_camber_l: agm.f_camber_l,
-        agm_f_camber_l_result: agm.f_camber_l_result,
-        agm_f_camber_r: agm.f_camber_r,
-        agm_f_camber_r_result: agm.f_camber_r_result,
-        agm_f_camber_diff: agm.f_camber_diff,
-        agm_f_camber_diff_result: agm.f_camber_diff_result,
+        agm_f_camber_l: agm.f_camber_l, agm_f_camber_l_result: agm.f_camber_l_result,
+        agm_f_camber_r: agm.f_camber_r, agm_f_camber_r_result: agm.f_camber_r_result,
+        agm_f_camber_diff: agm.f_camber_diff, agm_f_camber_diff_result: agm.f_camber_diff_result,
 
-        agm_f_toe_l: agm.f_toe_l,
-        agm_f_toe_l_result: agm.f_toe_l_result,
-        agm_f_toe_r: agm.f_toe_r,
-        agm_f_toe_r_result: agm.f_toe_r_result,
-        agm_f_toe_total: agm.f_toe_total,
-        agm_f_toe_total_result: agm.f_toe_total_result,
+        agm_f_toe_l: agm.f_toe_l, agm_f_toe_l_result: agm.f_toe_l_result,
+        agm_f_toe_r: agm.f_toe_r, agm_f_toe_r_result: agm.f_toe_r_result,
+        agm_f_toe_total: agm.f_toe_total, agm_f_toe_total_result: agm.f_toe_total_result,
 
-        agm_f_caster_l: agm.f_caster_l,
-        agm_f_caster_l_result: agm.f_caster_l_result,
-        agm_f_caster_r: agm.f_caster_r,
-        agm_f_caster_r_result: agm.f_caster_r_result,
-        agm_f_caster_diff: agm.f_caster_diff,
-        agm_f_caster_diff_result: agm.f_caster_diff_result,
+        agm_f_caster_l: agm.f_caster_l, agm_f_caster_l_result: agm.f_caster_l_result,
+        agm_f_caster_r: agm.f_caster_r, agm_f_caster_r_result: agm.f_caster_r_result,
+        agm_f_caster_diff: agm.f_caster_diff, agm_f_caster_diff_result: agm.f_caster_diff_result,
 
-        agm_f_kpi_l: agm.f_kpi_l,
-        agm_f_kpi_l_result: agm.f_kpi_l_result,
-        agm_f_kpi_r: agm.f_kpi_r,
-        agm_f_kpi_r_result: agm.f_kpi_r_result,
-        agm_f_kpi_diff: agm.f_kpi_diff,
-        agm_f_kpi_diff_result: agm.f_kpi_diff_result,
+        agm_f_kpi_l: agm.f_kpi_l, agm_f_kpi_l_result: agm.f_kpi_l_result,
+        agm_f_kpi_r: agm.f_kpi_r, agm_f_kpi_r_result: agm.f_kpi_r_result,
+        agm_f_kpi_diff: agm.f_kpi_diff, agm_f_kpi_diff_result: agm.f_kpi_diff_result,
 
-        agm_r_camber_l: agm.r_camber_l,
-        agm_r_camber_l_result: agm.r_camber_l_result,
-        agm_r_camber_r: agm.r_camber_r,
-        agm_r_camber_r_result: agm.r_camber_r_result,
-        agm_r_camber_diff: agm.r_camber_diff,
-        agm_r_camber_diff_result: agm.r_camber_diff_result,
+        agm_r_camber_l: agm.r_camber_l, agm_r_camber_l_result: agm.r_camber_l_result,
+        agm_r_camber_r: agm.r_camber_r, agm_r_camber_r_result: agm.r_camber_r_result,
+        agm_r_camber_diff: agm.r_camber_diff, agm_r_camber_diff_result: agm.r_camber_diff_result,
 
-        agm_r_toe_l: agm.r_toe_l,
-        agm_r_toe_l_result: agm.r_toe_l_result,
-        agm_r_toe_r: agm.r_toe_r,
-        agm_r_toe_r_result: agm.r_toe_r_result,
-        agm_r_toe_total: agm.r_toe_total,
-        agm_r_toe_total_result: agm.r_toe_total_result,
+        agm_r_toe_l: agm.r_toe_l, agm_r_toe_l_result: agm.r_toe_l_result,
+        agm_r_toe_r: agm.r_toe_r, agm_r_toe_r_result: agm.r_toe_r_result,
+        agm_r_toe_total: agm.r_toe_total, agm_r_toe_total_result: agm.r_toe_total_result,
 
-        agm_r_thrust: agm.r_thrust,
-        agm_r_thrust_result: agm.r_thrust_result
+        agm_r_thrust: agm.r_thrust, agm_r_thrust_result: agm.r_thrust_result
       };
     }));
 
@@ -19747,18 +19717,25 @@ app.get('/api/alignment-charts', async (req, res) => {
   }
 });
 
+// 3. Табличный отчёт по VIN
 app.get('/api/alignment-report', async (req, res) => {
   let { vin } = req.query;
   if (!vin) return res.status(400).json({ error: 'VIN parameter is required' });
   vin = vin.trim();
 
   try {
-    let hunterQueryVin = vin.length > 10 ? vin.slice(-8) : vin;
+    const hunterQueryVin = vin.length > 10 ? vin.slice(-8) : vin;
 
-    // 1. Получаем данные Hunter
+    // 1. Полный VIN + AGM (один раз — VIN один и тот же для всех отчётов Hunter)
+    const fullVin = await getFullVin(hunterQueryVin);
+    const agm = await fetchAgmData(fullVin, hunterQueryVin);
+    const iotFound = agm && Object.keys(agm).length > 0;
+
+    // 2. Hunter
     const [rows] = await hunterwaPool.execute(`
       SELECT 
         r.id AS report_id, r.vin, r.begin_date, r.full_model_name,
+
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: левый' THEN v.before_value END) AS f_camber_l_before,
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: левый' THEN v.after_value END) AS f_camber_l_after,
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Развал: левый' THEN v.spec_min END) AS f_camber_l_min,
@@ -19787,6 +19764,7 @@ app.get('/api/alignment-report', async (req, res) => {
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Поперечный наклон шкворня: левый' THEN v.spec_max END) AS f_kpi_l_max,
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Поперечный наклон шкворня: правый' THEN v.before_value END) AS f_kpi_r_before,
         MAX(CASE WHEN ax.axle_index = 0 AND v.name = 'Поперечный наклон шкворня: правый' THEN v.after_value END) AS f_kpi_r_after,
+
         MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: левый' THEN v.before_value END) AS r_camber_l_before,
         MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: левый' THEN v.after_value END) AS r_camber_l_after,
         MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Развал: левый' THEN v.spec_min END) AS r_camber_l_min,
@@ -19803,42 +19781,69 @@ app.get('/api/alignment-report', async (req, res) => {
         MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: суммарное' THEN v.after_value END) AS r_toe_total_after,
         MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: суммарное' THEN v.spec_min END) AS r_toe_total_min,
         MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Схождение: суммарное' THEN v.spec_max END) AS r_toe_total_max,
-        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Угол движения' THEN v.before_value END) AS r_thrust_angle_before,
-        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Угол движения' THEN v.after_value END) AS r_thrust_angle_after
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Угол движения' THEN v.before_value END) AS r_thrust_before,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Угол движения' THEN v.after_value END) AS r_thrust_after,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Угол движения' THEN v.spec_min END) AS r_thrust_min,
+        MAX(CASE WHEN ax.axle_index = 1 AND v.name = 'Угол движения' THEN v.spec_max END) AS r_thrust_max
+
       FROM reports r
       JOIN report_axles ax ON ax.report_id = r.id
       JOIN report_axle_values v ON v.axle_id = ax.id
-      WHERE r.vin IS NOT NULL AND TRIM(r.vin) != '' AND TRIM(r.vin) != 'N/A'
-        AND (r.vin LIKE CONCAT('%', ?, '%') OR ? LIKE CONCAT('%', r.vin, '%'))
+      WHERE r.vin LIKE CONCAT('%', ?)
       GROUP BY r.id
       ORDER BY r.begin_date DESC
-    `, [hunterQueryVin, hunterQueryVin]);
+    `, [hunterQueryVin]);
 
-    if (rows.length === 0) return res.json([]);
+    // 3. Оба источника пусты
+    if (rows.length === 0 && !iotFound) {
+      return res.json({
+        hunterFound: false,
+        iotFound: false,
+        message: 'Нет данных в IoT и Hunter',
+        reports: []
+      });
+    }
 
-    // 2. Обогащаем данные IoT и AGM
-    const responseData = await Promise.all(rows.map(async r => {
-      const shortVin = r.vin ? r.vin.trim() : '';
-      const fullVin = await getFullVin(shortVin);
-      
-      // Забираем данные AGM (и IoT, если нужно)
-      const agm = await fetchAgmData(fullVin);
-      
-      // Для колонок IoT (ранее реализованных) можно сделать простой маппинг из agm
-      const iot = { ...agm };
+    // 4. Только IoT (Hunter пуст)
+    if (rows.length === 0 && iotFound) {
+      return res.json({
+        hunterFound: false,
+        iotFound: true,
+        message: 'Нет данных в Hunter. Показаны только данные IoT.',
+        reports: [{
+          report_id: null,
+          vin: fullVin,
+          shortVin: hunterQueryVin,
+          begin_date: null,
+          full_model_name: null,
+          requestedVin: fullVin,
+          hunterAvailable: false,
+          iotAvailable: true,
+          agm
+        }]
+      });
+    }
 
-      return {
-        ...r,
-        requestedVin: fullVin,
-        iot,
-        agm
-      };
+    // 5. Hunter есть
+    const prepared = rows.map((r) => ({
+      ...r,
+      requestedVin: fullVin,
+      shortVin: r.vin ? r.vin.trim() : '',
+      hunterAvailable: true,
+      iotAvailable: iotFound,
+      agm
     }));
 
-    res.json(responseData);
+    return res.json({
+      hunterFound: true,
+      iotFound,
+      message: iotFound ? null : 'Нет данных в IoT. Показаны только данные Hunter.',
+      reports: prepared
+    });
+
   } catch (error) {
-    console.error('[ALIGNMENT API] Ошибка:', error);
-    res.status(500).json({ error: 'Ошибка при получении данных' });
+    console.error('[ALIGNMENT REPORT API] Ошибка:', error);
+    res.status(500).json({ error: 'Ошибка при получении отчёта' });
   }
 });
 

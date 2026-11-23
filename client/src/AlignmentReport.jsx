@@ -140,10 +140,7 @@ const CustomTooltip = ({ active, payload, isModelView }) => {
       <div style={{ backgroundColor: '#fff', padding: '12px', border: '1px solid #E5E7EB', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', fontSize: 13 }}>
         {!isModelView && <p style={{ margin: 0, fontWeight: 700, color: '#1F2937' }}>VIN: {data.vin || '-'}</p>}
         <p style={{ margin: isModelView ? 0 : '4px 0', color: '#6B7280', fontWeight: isModelView ? 700 : 400 }}>Дата: {data.fullDate || data.date}</p>
-        
-        {!isModelView && <hr style={{ margin: '8px 0', borderColor: '#E5E7EB' }} />}
-        {isModelView && <hr style={{ margin: '8px 0', borderColor: '#E5E7EB' }} />}
-
+        <hr style={{ margin: '8px 0', borderColor: '#E5E7EB' }} />
         {payload.map((entry, index) => {
           const isAgm = entry.dataKey.startsWith('agm_');
           const baseKey = isAgm ? entry.dataKey.replace('agm_', '') : entry.dataKey.replace('hunter_', '');
@@ -256,9 +253,7 @@ function ChartsViewModels() {
   useEffect(() => {
     fetch(`${API_BASE}/api/alignment-models`)
       .then(r => r.json())
-      .then(data => {
-        setModels(data);
-      })
+      .then(data => setModels(data))
       .catch(console.error);
   }, []);
 
@@ -273,16 +268,12 @@ function ChartsViewModels() {
       const res = await fetch(`${API_BASE}/api/alignment-charts?model=${selectedModel}&startDate=${startDate}&endDate=${endDate}`);
       const json = await res.json();
       
-      // Группировка по дням и вычисление среднего
       const grouped = {};
       json.forEach(item => {
-        const dateStr = item.date; // "YYYY-MM-DD"
-        if (!grouped[dateStr]) {
-          grouped[dateStr] = { count: 0, sum: {} };
-        }
+        const dateStr = item.date; 
+        if (!grouped[dateStr]) grouped[dateStr] = { count: 0, sum: {} };
         const g = grouped[dateStr];
         g.count++;
-        
         Object.keys(item).forEach(key => {
           if (key !== 'date' && key !== 'time' && key !== 'vin' && typeof item[key] === 'number') {
             if (!g.sum[key]) g.sum[key] = 0;
@@ -298,12 +289,9 @@ function ChartsViewModels() {
           fullDate: `${dateStr.substring(8, 10)}.${dateStr.substring(5, 7)}.${dateStr.substring(0, 4)}`,
           cars: g.count 
         };
-        
-        // Вычисляем среднее для всех параметров
         Object.keys(g.sum).forEach(key => {
           avg[key] = g.sum[key] / g.count;
         });
-
         return avg;
       });
 
@@ -353,11 +341,13 @@ function ChartsViewVIN() {
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [partialMessage, setPartialMessage] = useState(null);
 
   const loadVINData = async () => {
     if (!vin.trim()) return;
     setLoading(true);
     setError(null);
+    setPartialMessage(null);
     setChartData([]);
     setSearchedVin('');
 
@@ -365,59 +355,96 @@ function ChartsViewVIN() {
       const res = await fetch(`${API_BASE}/api/alignment-report?vin=${vin.trim()}`);
       if (!res.ok) throw new Error('Ошибка загрузки');
       const json = await res.json();
-      
-      if (json.length === 0) {
-        setError('Отчеты не найдены (проверьте VIN)');
-      } else {
-        setSearchedVin(json[0].requestedVin || json[0].vin || vin);
 
-        const prepared = json.map(item => {
-          const fl = getSmartVal(item.f_camber_l_after, item.f_camber_l_before);
-          const fr = getSmartVal(item.f_camber_r_after, item.f_camber_r_before);
-          const rl = getSmartVal(item.r_camber_l_after, item.r_camber_l_before);
-          const rr = getSmartVal(item.r_camber_r_after, item.r_camber_r_before);
-          const agm = item.agm || {}; 
+      // Поддержка нового формата { hunterFound, iotFound, message, reports } и старого массива
+      const reports = Array.isArray(json) ? json : (json.reports || []);
+      const message = Array.isArray(json) ? null : (json.message || null);
 
-          return {
-            date: `${item.begin_date.substring(5, 10)} ${item.begin_date.substring(11, 16)}`,
-            fullDate: item.begin_date,
-            vin: item.vin,
-            hunter_f_camber_l: fl, hunter_f_camber_r: fr, hunter_f_camber_diff: fl - fr,
-            hunter_f_toe_l: getSmartVal(item.f_toe_l_after, item.f_toe_l_before),
-            hunter_f_toe_r: getSmartVal(item.f_toe_r_after, item.f_toe_r_before),
-            hunter_f_toe_total: getSmartVal(item.f_toe_total_after, item.f_toe_total_before),
-            hunter_f_caster_l: getSmartVal(item.f_caster_l_after, item.f_caster_l_before),
-            hunter_f_caster_r: getSmartVal(item.f_caster_r_after, item.f_caster_r_before),
-            hunter_f_caster_diff: getDiff(item.f_caster_l_after, item.f_caster_r_after),
-            hunter_f_kpi_l: getSmartVal(item.f_kpi_l_after, item.f_kpi_l_before),
-            hunter_f_kpi_r: getSmartVal(item.f_kpi_r_after, item.f_kpi_r_before),
-            hunter_f_kpi_diff: getDiff(item.f_kpi_l_after, item.f_kpi_r_after),
-            hunter_r_camber_l: rl, hunter_r_camber_r: rr, hunter_r_camber_diff: rl - rr,
-            hunter_r_toe_l: getSmartVal(item.r_toe_l_after, item.r_toe_l_before),
-            hunter_r_toe_r: getSmartVal(item.r_toe_r_after, item.r_toe_r_before),
-            hunter_r_toe_total: getSmartVal(item.r_toe_total_after, item.r_toe_total_before),
-            hunter_r_thrust: getSmartVal(item.r_thrust_angle_after, item.r_thrust_angle_before),
-            
-            agm_f_camber_l: agm.f_camber_l, agm_f_camber_r: agm.f_camber_r, agm_f_camber_diff: getDiff(agm.f_camber_l, agm.f_camber_r),
-            agm_f_toe_l: agm.f_toe_l, agm_f_toe_r: agm.f_toe_r, agm_f_toe_total: agm.f_toe_total,
-            agm_f_caster_l: agm.f_caster_l, agm_f_caster_r: agm.f_caster_r, agm_f_caster_diff: getDiff(agm.f_caster_l, agm.f_caster_r),
-            agm_f_kpi_l: agm.f_kpi_l, agm_f_kpi_r: agm.f_kpi_r, agm_f_kpi_diff: getDiff(agm.f_kpi_l, agm.f_kpi_r),
-            agm_r_camber_l: agm.r_camber_l, agm_r_camber_r: agm.r_camber_r, agm_r_camber_diff: getDiff(agm.r_camber_l, agm.r_camber_r),
-            agm_r_toe_l: agm.r_toe_l, agm_r_toe_r: agm.r_toe_r, agm_r_toe_total: agm.r_toe_total,
-            agm_r_thrust: agm.r_thrust,
-
-            agm_f_camber_l_result: agm.f_camber_l_result, agm_f_camber_r_result: agm.f_camber_r_result, agm_f_camber_diff_result: agm.f_camber_diff_result,
-            agm_f_toe_l_result: agm.f_toe_l_result, agm_f_toe_r_result: agm.f_toe_r_result, agm_f_toe_total_result: agm.f_toe_total_result,
-            agm_f_caster_l_result: agm.f_caster_l_result, agm_f_caster_r_result: agm.f_caster_r_result, agm_f_caster_diff_result: agm.f_caster_diff_result,
-            agm_f_kpi_l_result: agm.f_kpi_l_result, agm_f_kpi_r_result: agm.f_kpi_r_result, agm_f_kpi_diff_result: agm.f_kpi_diff_result,
-            agm_r_camber_l_result: agm.r_camber_l_result, agm_r_camber_r_result: agm.r_camber_r_result, agm_r_camber_diff_result: agm.r_camber_diff_result,
-            agm_r_toe_l_result: agm.r_toe_l_result, agm_r_toe_r_result: agm.r_toe_r_result, agm_r_toe_total_result: agm.r_toe_total_result,
-            agm_r_thrust_result: agm.r_thrust_result
-          };
-        }).reverse();
-
-        setChartData(prepared);
+      if (reports.length === 0) {
+        setError(message || 'Отчеты не найдены (проверьте VIN)');
+        return;
       }
+
+      setSearchedVin(reports[0].requestedVin || reports[0].vin || vin);
+      if (message) setPartialMessage(message);
+
+      const prepared = reports.map(item => {
+        const hasHunter = item.hunterAvailable !== false && !!item.begin_date;
+        const fl = hasHunter ? getSmartVal(item.f_camber_l_after, item.f_camber_l_before) : null;
+        const fr = hasHunter ? getSmartVal(item.f_camber_r_after, item.f_camber_r_before) : null;
+        const rl = hasHunter ? getSmartVal(item.r_camber_l_after, item.r_camber_l_before) : null;
+        const rr = hasHunter ? getSmartVal(item.r_camber_r_after, item.r_camber_r_before) : null;
+        const agm = item.agm || {};
+
+        return {
+          date: item.begin_date
+            ? `${item.begin_date.substring(5, 10)} ${item.begin_date.substring(11, 16)}`
+            : 'IoT-only',
+          fullDate: item.begin_date || '-',
+          vin: item.vin,
+          hunter_f_camber_l: fl,
+          hunter_f_camber_r: fr,
+          hunter_f_camber_diff: (fl != null && fr != null) ? fl - fr : null,
+          hunter_f_toe_l: hasHunter ? getSmartVal(item.f_toe_l_after, item.f_toe_l_before) : null,
+          hunter_f_toe_r: hasHunter ? getSmartVal(item.f_toe_r_after, item.f_toe_r_before) : null,
+          hunter_f_toe_total: hasHunter ? getSmartVal(item.f_toe_total_after, item.f_toe_total_before) : null,
+          hunter_f_caster_l: hasHunter ? getSmartVal(item.f_caster_l_after, item.f_caster_l_before) : null,
+          hunter_f_caster_r: hasHunter ? getSmartVal(item.f_caster_r_after, item.f_caster_r_before) : null,
+          hunter_f_caster_diff: hasHunter ? getDiff(item.f_caster_l_after, item.f_caster_r_after) : null,
+          hunter_f_kpi_l: hasHunter ? getSmartVal(item.f_kpi_l_after, item.f_kpi_l_before) : null,
+          hunter_f_kpi_r: hasHunter ? getSmartVal(item.f_kpi_r_after, item.f_kpi_r_before) : null,
+          hunter_f_kpi_diff: hasHunter ? getDiff(item.f_kpi_l_after, item.f_kpi_r_after) : null,
+          hunter_r_camber_l: rl,
+          hunter_r_camber_r: rr,
+          hunter_r_camber_diff: (rl != null && rr != null) ? rl - rr : null,
+          hunter_r_toe_l: hasHunter ? getSmartVal(item.r_toe_l_after, item.r_toe_l_before) : null,
+          hunter_r_toe_r: hasHunter ? getSmartVal(item.r_toe_r_after, item.r_toe_r_before) : null,
+          hunter_r_toe_total: hasHunter ? getSmartVal(item.r_toe_total_after, item.r_toe_total_before) : null,
+          hunter_r_thrust: hasHunter ? getSmartVal(item.r_thrust_after, item.r_thrust_before) : null,
+
+          agm_f_camber_l: agm.f_camber_l,
+          agm_f_camber_r: agm.f_camber_r,
+          agm_f_camber_diff: getDiff(agm.f_camber_l, agm.f_camber_r),
+          agm_f_toe_l: agm.f_toe_l,
+          agm_f_toe_r: agm.f_toe_r,
+          agm_f_toe_total: agm.f_toe_total,
+          agm_f_caster_l: agm.f_caster_l,
+          agm_f_caster_r: agm.f_caster_r,
+          agm_f_caster_diff: getDiff(agm.f_caster_l, agm.f_caster_r),
+          agm_f_kpi_l: agm.f_kpi_l,
+          agm_f_kpi_r: agm.f_kpi_r,
+          agm_f_kpi_diff: getDiff(agm.f_kpi_l, agm.f_kpi_r),
+          agm_r_camber_l: agm.r_camber_l,
+          agm_r_camber_r: agm.r_camber_r,
+          agm_r_camber_diff: getDiff(agm.r_camber_l, agm.r_camber_r),
+          agm_r_toe_l: agm.r_toe_l,
+          agm_r_toe_r: agm.r_toe_r,
+          agm_r_toe_total: agm.r_toe_total,
+          agm_r_thrust: agm.r_thrust,
+
+          agm_f_camber_l_result: agm.f_camber_l_result,
+          agm_f_camber_r_result: agm.f_camber_r_result,
+          agm_f_camber_diff_result: agm.f_camber_diff_result,
+          agm_f_toe_l_result: agm.f_toe_l_result,
+          agm_f_toe_r_result: agm.f_toe_r_result,
+          agm_f_toe_total_result: agm.f_toe_total_result,
+          agm_f_caster_l_result: agm.f_caster_l_result,
+          agm_f_caster_r_result: agm.f_caster_r_result,
+          agm_f_caster_diff_result: agm.f_caster_diff_result,
+          agm_f_kpi_l_result: agm.f_kpi_l_result,
+          agm_f_kpi_r_result: agm.f_kpi_r_result,
+          agm_f_kpi_diff_result: agm.f_kpi_diff_result,
+          agm_r_camber_l_result: agm.r_camber_l_result,
+          agm_r_camber_r_result: agm.r_camber_r_result,
+          agm_r_camber_diff_result: agm.r_camber_diff_result,
+          agm_r_toe_l_result: agm.r_toe_l_result,
+          agm_r_toe_r_result: agm.r_toe_r_result,
+          agm_r_toe_total_result: agm.r_toe_total_result,
+          agm_r_thrust_result: agm.r_thrust_result
+        };
+      }).reverse();
+
+      setChartData(prepared);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -440,6 +467,16 @@ function ChartsViewVIN() {
         {error && <span style={{ color: '#DC2626', fontSize: 14 }}>❌ {error}</span>}
       </div>
 
+      {partialMessage && (
+        <div style={{
+          padding: '12px 16px', margin: '0 0 20px 0',
+          background: '#fff7e6', border: '1px solid #ffd591',
+          borderRadius: 8, color: '#874d00', fontSize: 14, fontWeight: 500
+        }}>
+          ⚠️ {partialMessage}
+        </div>
+      )}
+
       {searchedVin && (
         <div style={{ marginBottom: 20, fontSize: 18, fontWeight: 600, color: '#1F2937', backgroundColor: '#EFF6FF', padding: '10px 16px', borderRadius: 8, borderLeft: '4px solid #2563EB' }}>
           📊 Данные по VIN: {searchedVin}
@@ -449,9 +486,11 @@ function ChartsViewVIN() {
       {chartData.length > 0 ? (
         <AlignmentCharts chartData={chartData} showVolume={false} />
       ) : (
-        <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
-          {loading ? 'Загрузка...' : 'Введите VIN и нажмите "Построить графики"'}
-        </div>
+        !error && (
+          <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>
+            {loading ? 'Загрузка...' : 'Введите VIN и нажмите "Построить графики"'}
+          </div>
+        )
       )}
     </div>
   );
@@ -464,6 +503,7 @@ function TableView() {
   const [reportIndex, setReportIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [partialMessage, setPartialMessage] = useState(null);
   
   const [isDms, setIsDms] = useState(true);
 
@@ -473,17 +513,24 @@ function TableView() {
     if (!vin.trim()) return;
     setLoading(true);
     setError(null);
+    setPartialMessage(null);
     try {
       const res = await fetch(`${API_BASE}/api/alignment-report?vin=${vin.trim()}`);
       if (!res.ok) throw new Error('Ошибка загрузки');
       const json = await res.json();
-      
-      if (json.length === 0) {
-        setError('Отчеты не найдены (проверьте VIN)');
+
+      // Поддержка нового формата { hunterFound, iotFound, message, reports } и старого массива
+      const reports = Array.isArray(json) ? json : (json.reports || []);
+      const msg = Array.isArray(json) ? null : (json.message || null);
+
+      if (reports.length === 0) {
+        setError(msg || 'Отчеты не найдены (проверьте VIN)');
         setReportsList([]);
+        setPartialMessage(null);
       } else {
-        setReportsList(json);
+        setReportsList(reports);
         setReportIndex(0); 
+        setPartialMessage(msg);
       }
     } catch (err) {
       setError(err.message);
@@ -519,7 +566,7 @@ function TableView() {
       { 'Наименование': 'Схождение: левое', 'Мин': fmt(data.r_toe_l_min), 'Макс': fmt(data.r_toe_l_max), 'Начальное': fmt(data.r_toe_l_before), 'Конечное': fmt(data.r_toe_l_after), 'Значение IoT': fmt(agm.r_toe_l), 'Наименование IoT': IoT.r_toe_l, 'ОК/НОК AGMWA01': agm.r_toe_l_result },
       { 'Наименование': 'Схождение: правое', 'Мин': fmt(data.r_toe_l_min), 'Макс': fmt(data.r_toe_l_max), 'Начальное': fmt(data.r_toe_r_before), 'Конечное': fmt(data.r_toe_r_after), 'Значение IoT': fmt(agm.r_toe_r), 'Наименование IoT': IoT.r_toe_r, 'ОК/НОК AGMWA01': agm.r_toe_r_result },
       { 'Наименование': 'Схождение: суммарное', 'Мин': fmt(data.r_toe_total_min), 'Макс': fmt(data.r_toe_total_max), 'Начальное': fmt(data.r_toe_total_before), 'Конечное': fmt(data.r_toe_total_after), 'Значение IoT': fmt(agm.r_toe_total), 'Наименование IoT': IoT.r_toe_total, 'ОК/НОК AGMWA01': agm.r_toe_total_result },
-      { 'Наименование': 'Угол движения', 'Мин': '- - -', 'Макс': '- - -', 'Начальное': fmt(data.r_thrust_angle_before), 'Конечное': fmt(data.r_thrust_angle_after), 'Значение IoT': fmt(agm.r_thrust), 'Наименование IoT': IoT.r_thrust, 'ОК/НОК AGMWA01': agm.r_thrust_result },
+      { 'Наименование': 'Угол движения', 'Мин': '- - -', 'Макс': '- - -', 'Начальное': fmt(data.r_thrust_before), 'Конечное': fmt(data.r_thrust_after), 'Значение IoT': fmt(agm.r_thrust), 'Наименование IoT': IoT.r_thrust, 'ОК/НОК AGMWA01': agm.r_thrust_result },
     ];
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -542,6 +589,7 @@ function TableView() {
       <tr style={{ borderBottom: '1px solid #000', textAlign: 'center', fontSize: '14px', fontFamily: '"Times New Roman", Times, serif' }}>
         <td style={{ padding: '6px', textAlign: 'right', borderRight: '1px solid #000', paddingRight: 15 }}>{label}</td>
         
+        {/* Hunter */}
         <td style={{ padding: '6px', borderRight: '1px solid #000' }}>{fmt(min)}</td>
         <td style={{ padding: '6px', borderRight: '1px solid #000' }}>{fmt(max)}</td>
         <td style={{ padding: '6px', borderRight: '1px solid #000', position: 'relative' }}>
@@ -556,6 +604,7 @@ function TableView() {
         </td>
         <td style={{ padding: '6px', borderRight: '1px solid #000' }}>{fmt(after)}</td>
 
+        {/* IoT */}
         <td style={{ padding: '6px', borderRight: '1px solid #000' }}>{fmt(iotValue)}</td>
         <td style={{ padding: '6px', borderRight: '1px solid #000' }}>
           {iotName || '- - -'}
@@ -588,14 +637,24 @@ function TableView() {
             <span style={{ fontSize: 14, color: '#4B5563', fontWeight: 500 }}>Выберите замер:</span>
             <select value={reportIndex} onChange={(e) => setReportIndex(Number(e.target.value))} style={selectStyle}>
               {reportsList.map((r, i) => (
-                <option key={r.report_id} value={i}>
-                  {r.begin_date} (ID: {r.report_id})
+                <option key={r.report_id || i} value={i}>
+                  {r.begin_date || 'IoT-only'} {r.report_id ? `(ID: ${r.report_id})` : ''}
                 </option>
               ))}
             </select>
           </div>
         )}
       </div>
+
+      {partialMessage && (
+        <div style={{
+          padding: '12px 16px', margin: '0 0 16px 0',
+          background: '#fff7e6', border: '1px solid #ffd591',
+          borderRadius: 8, color: '#874d00', fontSize: 14, fontWeight: 500
+        }}>
+          ⚠️ {partialMessage}
+        </div>
+      )}
 
       {data && (
         <>
@@ -610,7 +669,7 @@ function TableView() {
 
           <div id="print-section" style={{ border: '2px solid #000', maxWidth: '1200px', margin: '0 auto', padding: 20 }}>
             <div style={{ textAlign: 'center', fontSize: '20px', fontWeight: 'bold', marginBottom: 15, fontFamily: '"Times New Roman", Times, serif' }}>
-              VIN: {data.requestedVin || data.vin} | Модель: {data.full_model_name ? data.full_model_name.replace('AGM>', '').trim() : '-'} | Дата: {data.begin_date}
+              VIN: {data.requestedVin || data.vin} | Модель: {data.full_model_name ? data.full_model_name.replace('AGM>', '').trim() : '-'} | Дата: {data.begin_date || '-'}
             </div>
             
             <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
@@ -663,7 +722,7 @@ function TableView() {
                 <TableRow label="Схождение: правое" before={data.r_toe_r_before} after={data.r_toe_r_after} min={data.r_toe_l_min} max={data.r_toe_l_max} iotName={IoT.r_toe_r} iotValue={agm.r_toe_r} agmResult={agm.r_toe_r_result} />
                 <TableRow label="Схождение: суммарное" before={data.r_toe_total_before} after={data.r_toe_total_after} min={data.r_toe_total_min} max={data.r_toe_total_max} iotName={IoT.r_toe_total} iotValue={agm.r_toe_total} agmResult={agm.r_toe_total_result} />
                 
-                <TableRow label="Угол движения" before={data.r_thrust_angle_before} after={data.r_thrust_angle_after} min={null} max={null} iotName={IoT.r_thrust} iotValue={agm.r_thrust} agmResult={agm.r_thrust_result} />
+                <TableRow label="Угол движения" before={data.r_thrust_before} after={data.r_thrust_after} min={null} max={null} iotName={IoT.r_thrust} iotValue={agm.r_thrust} agmResult={agm.r_thrust_result} />
               </tbody>
             </table>
           </div>
