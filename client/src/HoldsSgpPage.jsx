@@ -85,7 +85,6 @@ const DailyChangeChart = ({ dates, values, baseline }) => {
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-      {/* Сетка */}
       {gridLines.map((r, i) => {
         const y = padding.top + chartHeight * r;
         const val = Math.round(maxVal - (maxVal - minVal) * r);
@@ -100,21 +99,17 @@ const DailyChangeChart = ({ dates, values, baseline }) => {
       <line x1={padding.left} y1={yScale(60)} x2={width - padding.right} y2={yScale(60)} stroke="#FCA5A5" strokeDasharray="4,4" strokeWidth="1.5" />
       <text x={width - padding.right + 5} y={yScale(60) + 4} textAnchor="start" fontSize="10" fontWeight="700" fill="#EF4444">60</text>
 
-      {/* Стартовая плашка */}
       <line x1={startX - barWidth / 2} y1={startY} x2={startX + barWidth / 2} y2={startY} stroke="#111827" strokeWidth="4" strokeLinecap="round" />
       <text x={startX} y={startY - 8} textAnchor="middle" fontSize="11" fontWeight="800" fill="#111827">{baseline}</text>
 
-      {/* Линия тренда */}
       {points.length > 0 && <line x1={startX} y1={startY} x2={endX} y2={endY} stroke="#60A5FA" strokeWidth="2" opacity={0.6} />}
 
-      {/* Соединители */}
       {points.slice(0, -1).map((p, i) => {
         const x1 = padding.left + (i + 1) * slotWidth + (slotWidth + barWidth) / 2;
         const x2 = padding.left + (i + 2) * slotWidth + (slotWidth - barWidth) / 2;
         return <line key={`c-${i}`} x1={x1} y1={yScale(p.end)} x2={x2} y2={yScale(p.end)} stroke="#D1D5DB" strokeDasharray="3,3" strokeWidth="1" />;
       })}
 
-      {/* Столбцы и последняя плашка */}
       {points.map((p, i) => {
         const x = padding.left + (i + 1) * slotWidth + (slotWidth - barWidth) / 2;
         const y1 = yScale(p.start);
@@ -125,7 +120,6 @@ const DailyChangeChart = ({ dates, values, baseline }) => {
         const isZero = p.delta === 0;
         const color = p.delta > 0 ? '#F87171' : p.delta < 0 ? '#34D399' : '#E5E7EB';
 
-        // Если это последний день и изменений нет, рисуем ТОЛЬКО черную плашку
         if (isLast && isZero) {
           return (
             <g key={i}>
@@ -136,7 +130,6 @@ const DailyChangeChart = ({ dates, values, baseline }) => {
           );
         }
 
-        // В остальных случаях рисуем цветной столбец
         return (
           <g key={i}>
             <rect x={x} y={top} width={barWidth} height={barH} fill={color} rx={3} />
@@ -189,11 +182,28 @@ export default function HoldsSgpPage() {
   const [summaryData, setSummaryData] = useState(null);
   const [summaryError, setSummaryError] = useState(null);
 
-  // Модалка VIN
+  // Модалка VIN (Ретроспектива)
   const [showVinModal, setShowVinModal] = useState(false);
   const [vinModalTitle, setVinModalTitle] = useState('');
   const [vinList, setVinList] = useState([]);
   const [vinLoading, setVinLoading] = useState(false);
+
+  // Новая Модалка VIN (Холды по моделям)
+  const [showModelVinsModal, setShowModelVinsModal] = useState(false);
+  const [modelVinsTitle, setModelVinsTitle] = useState('');
+  const [modelVinsList, setModelVinsList] = useState([]);
+  const [modelVinsLoading, setModelVinsLoading] = useState(false);
+  const [modelVinsSort, setModelVinsSort] = useState({ field: null, direction: 'desc' }); // Стейт сортировки
+
+  // Блокировка скролла при открытых модалках
+  useEffect(() => {
+    if (showVinModal || showModelVinsModal) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'auto';
+    }
+    return () => { document.body.style.overflow = 'auto'; };
+  }, [showVinModal, showModelVinsModal]);
 
   const allModels = useMemo(() => {
     const models = [...new Set(rawData.map(d => d.model))].filter(Boolean);
@@ -315,7 +325,7 @@ export default function HoldsSgpPage() {
   useEffect(() => { if (activeTab === 'analytics') { loadRetrospective(); } }, [activeTab]);
   useEffect(() => { if (activeTab === 'analytics') { loadTrends(); } }, [chartPeriod, chartCount, chartFromDate, chartToDate, chartModel, activeTab]);
 
-  // ====== ИСПРАВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ VIN ======
+  // Обработчик для ретроспективы (ячейки с цифрами)
   const handleVinClick = async (model, label, date, opts = {}) => {
     const { reason } = opts;
     setVinLoading(true);
@@ -327,7 +337,6 @@ export default function HoldsSgpPage() {
       
       if (reason) {
         const rReason = reason.trim();
-        // Ищем точные совпадения с учетом пробелов
         const matchingDescs = [
           ...new Set(
             retroData
@@ -339,7 +348,6 @@ export default function HoldsSgpPage() {
         if (matchingDescs.length > 0) {
           params.set('issue_descs', JSON.stringify(matchingDescs));
         } else {
-          // Страховка: если массив пуст, передаем саму причину для поиска по LIKE на бэке
           params.set('reason', rReason);
         }
       } else {
@@ -354,6 +362,75 @@ export default function HoldsSgpPage() {
     } finally {
       setVinLoading(false);
     }
+  };
+
+  // Обработчик для "Холды по моделям"
+  const fetchModelVins = async (model, reason = null) => {
+    setModelVinsTitle(reason ? `${model} — ${reason}` : `Все VIN для модели ${model}`);
+    setShowModelVinsModal(true);
+    setModelVinsLoading(true);
+    setModelVinsList([]);
+    setModelVinsSort({ field: null, direction: 'desc' }); // Сброс сортировки
+
+    try {
+      const params = new URLSearchParams({
+        model,
+        isAggregated: analyticsView === 'aggregated' ? 'true' : 'false'
+      });
+      if (reason) params.append('reason', reason);
+
+      const res = await fetch(`${API_BASE}/api/holds-sgp-current-vins?${params.toString()}`);
+      if (!res.ok) throw new Error('Ошибка загрузки VIN');
+      setModelVinsList(await res.json());
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setModelVinsLoading(false);
+    }
+  };
+
+  // Обработчик сортировки в модалке
+  const handleSortModelVins = (field) => {
+    setModelVinsSort(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'desc' ? 'asc' : 'desc'
+    }));
+  };
+
+  // Вычисляемый отсортированный список
+  const sortedModelVins = useMemo(() => {
+    if (!modelVinsSort.field) return modelVinsList;
+    return [...modelVinsList].sort((a, b) => {
+      const valA = a[modelVinsSort.field] ?? -1;
+      const valB = b[modelVinsSort.field] ?? -1;
+      if (valA < valB) return modelVinsSort.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return modelVinsSort.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [modelVinsList, modelVinsSort]);
+
+  // Экспорт в Excel из модалки
+  const exportModelVinsToExcel = () => {
+    if (!sortedModelVins.length) return;
+    const exportData = sortedModelVins.map((item, idx) => ({
+      '№': idx + 1,
+      'VIN': item.vin,
+      'Модель': item.model,
+      'Причина холда': item.reasons,
+      'Дата CP8': formatDate(item.cp8_date),
+      'Дата Холда': formatDate(item.hold_date),
+      'Адрес на СГП': item.location,
+      'Дней от CP8': item.days_to_cp8,
+      'Дней в холде': item.days_to_hold
+    }));
+    
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'VIN по модели');
+    ws['!cols'] = [{ wch: 6 }, { wch: 22 }, { wch: 14 }, { wch: 40 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 12 }];
+    
+    const safeTitle = modelVinsTitle.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_');
+    XLSX.writeFile(wb, `VIN_${safeTitle}.xlsx`);
   };
 
   const filteredData = useMemo(() => {
@@ -833,7 +910,13 @@ export default function HoldsSgpPage() {
                   <div key={modelFilter} style={{ backgroundColor: '#FAFBFC', borderRadius: 12, padding: 16, border: '1px solid #E5E7EB', boxShadow: '0 2px 6px rgba(0,0,0,0.02)' }}>
                     <h3 style={{ margin: '0 0 12px 0', fontSize: 16, fontWeight: 700, color: '#1F2937', borderBottom: '2px solid #2563EB', paddingBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <span style={{ background: '#2563EB', color: 'white', borderRadius: 8, padding: '2px 12px', fontSize: 14 }}>{modelFilter}</span>
-                      <span style={{ fontSize: 14, fontWeight: 800, color: '#2563EB' }}>{totalCount}</span>
+                      <span 
+                        style={{ fontSize: 14, fontWeight: 800, color: '#2563EB', cursor: 'pointer', textDecoration: 'underline' }}
+                        onClick={() => fetchModelVins(modelFilter, null)}
+                        title="Нажмите, чтобы посмотреть все VIN по модели"
+                      >
+                        {totalCount}
+                      </span>
                     </h3>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
@@ -844,7 +927,14 @@ export default function HoldsSgpPage() {
                       </thead>
                       <tbody>
                         {filtered.map((row, idx) => (
-                          <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                          <tr 
+                            key={idx} 
+                            style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB', cursor: 'pointer', transition: 'background-color 0.2s' }}
+                            onClick={() => fetchModelVins(modelFilter, row.issue_desc)}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F3F4F6'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB'}
+                            title="Нажмите, чтобы посмотреть VIN"
+                          >
                             <td style={{ padding: '6px', borderBottom: '1px solid #E5E7EB' }}>{row.issue_desc}</td>
                             <td style={{ padding: '6px', textAlign: 'center', borderBottom: '1px solid #E5E7EB', fontWeight: 700 }}>{row.quantity}</td>
                           </tr>
@@ -859,6 +949,7 @@ export default function HoldsSgpPage() {
         </>
       )}
 
+      {/* МОДАЛКА VIN (Ретроспектива) */}
       {showVinModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
           <div style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, maxWidth: 600, width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
@@ -883,6 +974,77 @@ export default function HoldsSgpPage() {
                       <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
                         <td style={{ ...tdStyle, textAlign: 'center', width: 50 }}>{idx + 1}</td>
                         <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, letterSpacing: '0.5px' }}>{vin}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Нет данных</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* НОВАЯ МОДАЛКА VIN (Холды по моделям) */}
+      {showModelVinsModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, maxWidth: 1000, width: '95%', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#1F2937' }}>VIN номера</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button onClick={exportModelVinsToExcel} style={{ ...buttonStyle, background: '#10B981', padding: '6px 16px', fontSize: 13 }}>
+                  📥 Экспорт в Excel
+                </button>
+                <button onClick={() => setShowModelVinsModal(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280', padding: '0 4px' }}>×</button>
+              </div>
+            </div>
+            <div style={{ fontSize: 14, color: '#4B5563', marginBottom: 16, wordBreak: 'break-word' }}>{modelVinsTitle}</div>
+            
+            {modelVinsLoading ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Загрузка VIN...</div>
+            ) : sortedModelVins.length > 0 ? (
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...thStyle, textAlign: 'left' }}>VIN</th>
+                      <th style={{ ...thStyle, textAlign: 'left' }}>Модель</th>
+                      <th style={{ ...thStyle, textAlign: 'left' }}>Причина холда</th>
+                      <th style={{ ...thStyle, textAlign: 'left' }}>Дата CP8</th>
+                      <th style={{ ...thStyle, textAlign: 'left' }}>Дата Холда</th>
+                      <th style={{ ...thStyle, textAlign: 'left' }}>Адрес на СГП</th>
+                      
+                      <th 
+                        style={{ ...thStyle, textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}
+                        onClick={() => handleSortModelVins('days_to_cp8')}
+                      >
+                        Дней от CP8 {modelVinsSort.field === 'days_to_cp8' ? (modelVinsSort.direction === 'asc' ? '⬆️' : '⬇️') : '↕️'}
+                      </th>
+                      
+                      <th 
+                        style={{ ...thStyle, textAlign: 'center', cursor: 'pointer', userSelect: 'none' }}
+                        onClick={() => handleSortModelVins('days_to_hold')}
+                      >
+                        Дней в холде {modelVinsSort.field === 'days_to_hold' ? (modelVinsSort.direction === 'asc' ? '⬆️' : '⬇️') : '↕️'}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedModelVins.map((item, idx) => (
+                      <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                        <td style={{ ...tdStyle, fontWeight: 600, letterSpacing: '0.5px' }}>{item.vin}</td>
+                        <td style={tdStyle}>{item.model}</td>
+                        <td style={{ ...tdStyle, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.reasons}>
+                          {item.reasons}
+                        </td>
+                        <td style={tdStyle}>{formatDate(item.cp8_date)}</td>
+                        <td style={tdStyle}>{formatDate(item.hold_date)}</td>
+                        <td style={tdStyle}>{item.location}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600 }}>{item.days_to_cp8 ?? '-'}</td>
+                        <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: item.days_to_hold > 30 ? '#DC2626' : '#374151' }}>
+                          {item.days_to_hold ?? '-'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

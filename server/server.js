@@ -5633,6 +5633,188 @@ app.get('/api/holds-sgp-history', async (req, res) => {
 });
 
 
+app.get('/api/holds-sgp-current-vins', async (req, res) => {
+  try {
+    const { model, reason, isAggregated } = req.query;
+    if (!model) return res.status(400).json({ error: 'model обязателен' });
+
+    let sql = `
+      SELECT
+        qid.vin,
+        qid.model,
+        qid.issue_desc,
+        qid.gmt_create AS hold_date
+      FROM higoplat_fusion_les.tv_quality_issue_detail qid
+      WHERE qid.is_deleted = 0
+        AND qid.status = 0
+        AND qid.clear_time IS NULL
+        AND qid.model = ?
+    `;
+    const params = [model];
+
+    if (reason) {
+      if (isAggregated === 'true') {
+        sql += ` AND (
+          qid.issue_desc = ?
+          OR qid.issue_desc LIKE CONCAT(?, ' - по%')
+          OR qid.issue_desc LIKE CONCAT(?, ' по%')
+          OR qid.issue_desc LIKE CONCAT(?, '- по%')
+          OR qid.issue_desc LIKE CONCAT(?, '-по%')
+        ) `;
+        params.push(reason, reason, reason, reason, reason);
+      } else {
+        sql += ` AND qid.issue_desc = ? `;
+        params.push(reason);
+      }
+    }
+
+    const [rows] = await lesPool.query(sql, params);
+    if (!rows.length) return res.json([]);
+
+    // Группируем по VIN, чтобы собрать все причины, если их несколько
+    const vinsMap = new Map();
+    rows.forEach(r => {
+      if (!vinsMap.has(r.vin)) {
+        vinsMap.set(r.vin, {
+          vin: r.vin,
+          model: r.model,
+          hold_date: r.hold_date,
+          reasons: new Set()
+        });
+      }
+      vinsMap.get(r.vin).reasons.add(r.issue_desc);
+    });
+
+    const vinList = [...vinsMap.keys()];
+    const placeholders = vinList.map(() => '?').join(',');
+
+    // 1. Получаем CP8 из MES
+    const [mesRows] = await mesPool.query(
+      `SELECT vin, MAX(scan_time) AS CP8
+       FROM ti_mes_movement
+       WHERE vin IN (${placeholders}) AND uloc_no = 'AGMAS01004' AND is_deleted = 0
+       GROUP BY vin`,
+      vinList
+    );
+    const mesMap = new Map(mesRows.map(r => [r.vin, r.CP8]));
+
+    // 2. Получаем данные для вычисления локации
+    const [mesAllRows] = await mesPool.query(
+      `SELECT vin,
+              MAX(IF(uloc_no = 'AGMBS01002', scan_time, NULL)) AS CP5,
+              MAX(IF(uloc_no = 'AGMPS01002', scan_time, NULL)) AS CP6,
+              MAX(IF(uloc_no = 'AGMAS01001', scan_time, NULL)) AS TRIMIN,
+              MAX(IF(uloc_no = 'AGMAS01003', scan_time, NULL)) AS CP7,
+              MAX(IF(uloc_no = 'CP72', scan_time, NULL)) AS CP72,
+              MAX(IF(uloc_no = 'CPFINAL', scan_time, NULL)) AS CPFINAL,
+              MAX(IF(uloc_no = 'AGMAS01004', scan_time, NULL)) AS CP8
+       FROM ti_mes_movement
+       WHERE vin IN (${placeholders}) AND is_deleted = 0
+       GROUP BY vin`,
+      vinList
+    );
+
+    const [iotRows] = await pool.query(
+      `SELECT wo.vin,
+              MAX(IF(aow.WC_NAME = 'TLWA', aow.CREATION_TIME, NULL)) AS TLWA,
+              MAX(IF(aow.WC_NAME = 'TLRT', aow.CREATION_TIME, NULL)) AS TLRT,
+              MAX(IF(aow.WC_NAME = 'TLADAS', aow.CREATION_TIME, NULL)) AS TLADAS,
+              MAX(IF(aow.WC_NAME = 'TLTT', aow.CREATION_TIME, NULL)) AS TLTT
+       FROM work_order wo
+       LEFT JOIN at_om_wiptrackinghistory aow ON wo.vin = aow.vin
+       WHERE wo.vin IN (${placeholders})
+       GROUP BY wo.vin`,
+      vinList
+    );
+
+    const [storageRows] = await lesPool.query(
+      `SELECT vin, ck_no, kq_no, kw_no, out_storage_time, in_storage_status
+       FROM tv_biz_storage_car
+       WHERE vin IN (${placeholders})`,
+      vinList
+    );
+
+    const mesAllMap = new Map(mesAllRows.map(r => [r.vin, r]));
+    const iotMap = new Map(iotRows.map(r => [r.vin, r]));
+    const storageMap = new Map(storageRows.map(r => [r.vin, r]));
+
+    const checkpoints = ['CP5','CP6','TRIMIN','CP7','CP72','TLWA','TLRT','TLADAS','TLTT','CPFINAL','CP8'];
+    const today = new Date();
+    today.setHours(0,0,0,0);
+
+    const result = [];
+    for (const [vin, data] of vinsMap.entries()) {
+      const m = mesAllMap.get(vin) || {};
+      const i = iotMap.get(vin) || {};
+      const s = storageMap.get(vin);
+      const cp8Date = mesMap.get(vin);
+
+      const times = {
+        CP5: m.CP5, CP6: m.CP6, TRIMIN: m.TRIMIN, CP7: m.CP7, CP72: m.CP72,
+        TLWA: i.TLWA, TLRT: i.TLRT, TLADAS: i.TLADAS, TLTT: i.TLTT,
+        CPFINAL: m.CPFINAL, CP8: m.CP8,
+      };
+
+      let latestCheckpoint = '';
+      let latestTime = null;
+      for (const cp of checkpoints) {
+        if (times[cp]) {
+          const t = new Date(times[cp]);
+          if (!latestTime || t > latestTime) {
+            latestTime = t;
+            latestCheckpoint = cp;
+          }
+        }
+      }
+
+      const isSold = s && s.in_storage_status === 'Key_Car_In_Storage_Status_3';
+      const hasStorageData = s && s.ck_no && s.kq_no && s.kw_no && s.ck_no !== 'N/A' && s.kq_no !== 'N/A' && s.kw_no !== 'N/A';
+      const isInStorage = !isSold && hasStorageData;
+
+      let location = '';
+      if (isSold) location = 'Продан';
+      else if (isInStorage) location = `${s.ck_no}-${s.kq_no}-${s.kw_no}`;
+      else if (latestCheckpoint) location = latestCheckpoint;
+
+      let daysToCp8 = null;
+      if (cp8Date) {
+        const d = new Date(cp8Date);
+        d.setHours(0,0,0,0);
+        daysToCp8 = Math.floor((today - d) / (1000 * 60 * 60 * 24));
+      }
+
+      let daysToHold = null;
+      if (data.hold_date) {
+        const d = new Date(data.hold_date);
+        d.setHours(0,0,0,0);
+        daysToHold = Math.floor((today - d) / (1000 * 60 * 60 * 24));
+      }
+
+      result.push({
+        vin: data.vin,
+        model: data.model,
+        hold_date: data.hold_date,
+        cp8_date: cp8Date,
+        location: location,
+        days_to_cp8: daysToCp8,
+        days_to_hold: daysToHold,
+        reasons: Array.from(data.reasons).join('; ')
+      });
+    }
+
+    // Сортировка по дате холда от большего к меньшему (сначала новые)
+    result.sort((a, b) => {
+      const d1 = a.hold_date ? new Date(a.hold_date).getTime() : 0;
+      const d2 = b.hold_date ? new Date(b.hold_date).getTime() : 0;
+      return d2 - d1;
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('Ошибка holds-sgp-current-vins:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 
