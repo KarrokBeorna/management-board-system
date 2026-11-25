@@ -3499,11 +3499,42 @@ app.get('/api/vin-defect-search', async (req, res) => {
   }
 });
 
-app.get('/api/drr-retrospective', async (req, res) => {
-  try {
-    const { period = 'all', count, fromDate, toDate } = req.query;
 
-    // Функция получения DRR для одного периода
+
+
+// === Простой in-memory кэш на 5 минут (для ретро-отчётов это безопасно) ===
+const CACHE_TTL = 5 * 60 * 1000;
+const CACHE_MAX = 60;
+
+const drrRetroCache      = new Map();
+const dpuOffRetroCache   = new Map();
+const drrByShopCache     = new Map();
+const shopTopCache       = new Map();
+
+function getCache(map, key) {
+  const entry = map.get(key);
+  if (entry && Date.now() - entry.ts < CACHE_TTL) return entry.data;
+  if (entry) map.delete(key);
+  return null;
+}
+
+function setCache(map, key, data) {
+  if (map.size >= CACHE_MAX) {
+    // удаляем самую старую запись
+    const firstKey = map.keys().next().value;
+    if (firstKey !== undefined) map.delete(firstKey);
+  }
+  map.set(key, { ts: Date.now(), data });
+}
+
+app.get('/api/drr-retrospective', async (req, res) => {
+  const { period = 'all', count, fromDate, toDate } = req.query;
+
+  const cacheKey = `${period}|${count || ''}|${fromDate || ''}|${toDate || ''}`;
+  const cached = getCache(drrRetroCache, cacheKey);
+  if (cached) return res.json(cached);
+
+  try {
     const getDrr = async (startDate, endDate, label, type) => {
       const sql = `
         SELECT
@@ -3551,258 +3582,6 @@ app.get('/api/drr-retrospective', async (req, res) => {
       return result;
     };
 
-    // Вспомогательные функции
-    const formatDate = (date) => {
-      const y = date.getFullYear();
-      const m = String(date.getMonth() + 1).padStart(2, '0');
-      const d = String(date.getDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
-    };
-
-    const getISOWeek = (date) => {
-      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-      const dayNum = d.getUTCDay() || 7;
-      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-      return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-    };
-
-    const pad = (num) => String(num).padStart(2, '0');
-
-    const now = new Date();
-    const periods = [];
-
-    const typeOrder = { year: 0, month: 1, week: 2, day: 3 };
-
-    if (period === 'all') {
-      // существующая логика для всех периодов
-      for (let i = 1; i >= 0; i--) {
-        const y = now.getFullYear() - i;
-        periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
-      }
-      for (let i = 2; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
-        const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
-        periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${String(lastDay).padStart(2, '0')}`, type: 'month' });
-      }
-      const dayOfWeek = now.getDay();
-      const monday = new Date(now);
-      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-      for (let i = 3; i >= 0; i--) {
-        const start = new Date(monday);
-        start.setDate(monday.getDate() - i * 7);
-        const end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        const weekNum = getISOWeek(start);
-        periods.push({ label: `W${weekNum} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
-      }
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(now.getDate() - i);
-        periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
-      }
-    } else {
-      if (fromDate && toDate) {
-        // Генерация периодов на основе заданного диапазона
-        let from = new Date(fromDate + 'T00:00:00');
-        let to = new Date(toDate + 'T00:00:00');
-        if (from > to) [from, to] = [to, from];
-
-        if (period === 'day') {
-          for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
-            const dateStr = formatDate(d);
-            periods.push({
-              label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`,
-              startDate: dateStr,
-              endDate: dateStr,
-              type: 'day'
-            });
-          }
-        } else if (period === 'month') {
-          let d = new Date(from.getFullYear(), from.getMonth(), 1);
-          while (d <= to) {
-            const y = d.getFullYear();
-            const m = d.getMonth() + 1;
-            const lastDay = new Date(y, m, 0).getDate();
-            const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
-            periods.push({
-              label: `${monthName} ${y}`,
-              startDate: `${y}-${pad(m)}-01`,
-              endDate: `${y}-${pad(m)}-${lastDay}`,
-              type: 'month'
-            });
-            d.setMonth(d.getMonth() + 1);
-          }
-        } else if (period === 'week') {
-          const day = from.getDay();
-          const monday = new Date(from);
-          monday.setDate(from.getDate() - (day === 0 ? 6 : day - 1));
-          for (let start = new Date(monday); start <= to; start.setDate(start.getDate() + 7)) {
-            const end = new Date(start);
-            end.setDate(start.getDate() + 6);
-            periods.push({
-              label: `W${getISOWeek(start)} ${start.getFullYear()}`,
-              startDate: formatDate(start),
-              endDate: formatDate(end),
-              type: 'week'
-            });
-          }
-        } else if (period === 'year') {
-          for (let y = from.getFullYear(); y <= to.getFullYear(); y++) {
-            periods.push({
-              label: String(y),
-              startDate: `${y}-01-01`,
-              endDate: `${y}-12-31`,
-              type: 'year'
-            });
-          }
-        }
-      } else {
-        // Существующая логика на основе count
-        const defaultCount = { year: 2, month: 3, week: 4, day: 14 }[period] || 7;
-        const limit = parseInt(count, 10) || defaultCount;
-
-        if (period === 'year') {
-          for (let i = limit - 1; i >= 0; i--) {
-            const y = now.getFullYear() - i;
-            periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
-          }
-        } else if (period === 'month') {
-          for (let i = limit - 1; i >= 0; i--) {
-            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, '0');
-            const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
-            const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
-            periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${String(lastDay).padStart(2, '0')}`, type: 'month' });
-          }
-        } else if (period === 'week') {
-          const dayOfWeek = now.getDay();
-          const monday = new Date(now);
-          monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-          for (let i = limit - 1; i >= 0; i--) {
-            const start = new Date(monday);
-            start.setDate(monday.getDate() - i * 7);
-            const end = new Date(start);
-            end.setDate(start.getDate() + 6);
-            const weekNum = getISOWeek(start);
-            periods.push({ label: `W${weekNum} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
-          }
-        } else if (period === 'day') {
-          for (let i = limit - 1; i >= 0; i--) {
-            const d = new Date(now);
-            d.setDate(now.getDate() - i);
-            periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
-          }
-        }
-      }
-    }
-
-    periods.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || a.startDate.localeCompare(b.startDate));
-
-    const result = [];
-    for (const p of periods) {
-      result.push(await getDrr(p.startDate, p.endDate, p.label, p.type));
-    }
-
-    res.json({ dataPoints: result });
-  } catch (err) {
-    console.error('Ошибка drr-retrospective:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/problem-grades', async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
-      SELECT DISTINCT PROBLEM_GRADE
-      FROM (
-        SELECT PROBLEM_GRADE FROM at_biw_qm_defect_info
-        UNION ALL
-        SELECT PROBLEM_GRADE FROM at_paint_qm_defect_info
-        UNION ALL
-        SELECT PROBLEM_GRADE FROM at_qm_defect_info
-      ) t
-      WHERE PROBLEM_GRADE IS NOT NULL AND TRIM(PROBLEM_GRADE) <> ''
-      ORDER BY PROBLEM_GRADE
-    `);
-    const grades = rows.map(r => r.PROBLEM_GRADE).filter(Boolean);
-    res.json(grades);
-  } catch (err) {
-    console.error('Ошибка получения классов дефектов:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
-// ================== DPU OFF РЕТРОСПЕКТИВА ==================
-app.get('/api/dpu-off-retrospective', async (req, res) => {
-  try {
-    const { period = 'all', count, fromDate, toDate } = req.query;
-
-    // ===== Расчёт DPU OFF для одного периода =====
-    const getDpuOff = async (startDate, endDate, label, type) => {
-      // 1. Получаем VIN'ы, прошедшие CPFINAL за период, с их моделями
-      const [carsRows] = await mesPool.query(`
-        SELECT DISTINCT tvv.VIN, too.product AS MODEL
-        FROM tm_vhc_vehicle tvv
-        JOIN tm_ofm_order too ON too.VIN = tvv.VIN
-        JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
-        WHERE tvvm.node_nature = 'Key_Uloc_Type_CPFINAL'
-          AND DATE(DATE_SUB(tvvm.scan_time, INTERVAL 470 MINUTE)) BETWEEN ? AND ?
-      `, [startDate, endDate]);
-
-      // 2. Группируем VIN'ы по моделям
-      const modelVins = {};
-      carsRows.forEach(r => {
-        if (!modelVins[r.MODEL]) modelVins[r.MODEL] = [];
-        modelVins[r.MODEL].push(r.VIN);
-      });
-
-      const result = { label, type };
-      const modelValues = []; // для простого среднего
-
-      // 3. Для каждой модели считаем офлайн-дефекты её VIN'ов
-      for (const model of Object.keys(modelVins)) {
-        const vins = modelVins[model];
-        if (vins.length === 0) continue;
-
-        const ph = vins.map(() => '?').join(',');
-        const [defRows] = await pool.query(`
-          SELECT COUNT(*) AS DEFECTS
-          FROM (
-            SELECT VIN FROM at_biw_qm_defect_info
-              WHERE VIN IN (${ph})
-                AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
-            UNION ALL
-            SELECT VIN FROM at_paint_qm_defect_info
-              WHERE VIN IN (${ph})
-                AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
-            UNION ALL
-            SELECT VIN FROM at_qm_defect_info
-              WHERE VIN IN (${ph})
-                AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
-          ) t
-        `, [...vins, ...vins, ...vins]);
-
-        const defects = Number(defRows[0]?.DEFECTS) || 0;
-        const dpu = +(defects / vins.length).toFixed(2);
-        result[model] = dpu;
-        modelValues.push(dpu);
-      }
-
-      // Total = простое среднее по моделям (как в DRR-ретро)
-      result.total = modelValues.length > 0
-        ? +(modelValues.reduce((a, b) => a + b, 0) / modelValues.length).toFixed(2)
-        : 0;
-
-      return result;
-    };
-
-    // ===== Генерация периодов — идентична DRR =====
     const formatDate = (date) => {
       const y = date.getFullYear();
       const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -3929,12 +3708,246 @@ app.get('/api/dpu-off-retrospective', async (req, res) => {
 
     periods.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || a.startDate.localeCompare(b.startDate));
 
-    const result = [];
-    for (const p of periods) {
-      result.push(await getDpuOff(p.startDate, p.endDate, p.label, p.type));
+    // ⬇⬇⬇ ГЛАВНОЕ: параллельно, не последовательно
+    const result = await Promise.all(
+      periods.map(p => getDrr(p.startDate, p.endDate, p.label, p.type))
+    );
+
+    const responseData = { dataPoints: result };
+    setCache(drrRetroCache, cacheKey, responseData);
+    res.json(responseData);
+  } catch (err) {
+    console.error('Ошибка drr-retrospective:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/problem-grades', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT DISTINCT PROBLEM_GRADE
+      FROM (
+        SELECT PROBLEM_GRADE FROM at_biw_qm_defect_info
+        UNION ALL
+        SELECT PROBLEM_GRADE FROM at_paint_qm_defect_info
+        UNION ALL
+        SELECT PROBLEM_GRADE FROM at_qm_defect_info
+      ) t
+      WHERE PROBLEM_GRADE IS NOT NULL AND TRIM(PROBLEM_GRADE) <> ''
+      ORDER BY PROBLEM_GRADE
+    `);
+    const grades = rows.map(r => r.PROBLEM_GRADE).filter(Boolean);
+    res.json(grades);
+  } catch (err) {
+    console.error('Ошибка получения классов дефектов:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ================== DPU OFF РЕТРОСПЕКТИВА ==================
+app.get('/api/dpu-off-retrospective', async (req, res) => {
+  const { period = 'all', count, fromDate, toDate } = req.query;
+
+  const cacheKey = `${period}|${count || ''}|${fromDate || ''}|${toDate || ''}`;
+  const cached = getCache(dpuOffRetroCache, cacheKey);
+  if (cached) return res.json(cached);
+
+  try {
+    const getDpuOff = async (startDate, endDate, label, type) => {
+      // 1. Все VIN'ы периода + их модели
+      const [carsRows] = await mesPool.query(`
+        SELECT DISTINCT tvv.VIN, too.product AS MODEL
+        FROM tm_vhc_vehicle tvv
+        JOIN tm_ofm_order too ON too.VIN = tvv.VIN
+        JOIN tm_vhc_vehicle_movement tvvm ON tvv.id = tvvm.tm_vhc_vehicle_id
+        WHERE tvvm.node_nature = 'Key_Uloc_Type_CPFINAL'
+          AND DATE(DATE_SUB(tvvm.scan_time, INTERVAL 470 MINUTE)) BETWEEN ? AND ?
+      `, [startDate, endDate]);
+
+      const modelVins = {};
+      carsRows.forEach(r => {
+        if (!modelVins[r.MODEL]) modelVins[r.MODEL] = [];
+        modelVins[r.MODEL].push(r.VIN);
+      });
+
+      const result = { label, type };
+      const modelValues = [];
+
+      // 2. ⬇⬇⬇ Параллельно по моделям (не for-await)
+      const modelResults = await Promise.all(
+        Object.entries(modelVins).map(async ([model, vins]) => {
+          if (!vins.length) return { model, dpu: null };
+          const ph = vins.map(() => '?').join(',');
+          const [defRows] = await pool.query(`
+            SELECT COUNT(*) AS DEFECTS
+            FROM (
+              SELECT VIN FROM at_biw_qm_defect_info
+                WHERE VIN IN (${ph})
+                  AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+              UNION ALL
+              SELECT VIN FROM at_paint_qm_defect_info
+                WHERE VIN IN (${ph})
+                  AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+              UNION ALL
+              SELECT VIN FROM at_qm_defect_info
+                WHERE VIN IN (${ph})
+                  AND ((OFFLINE OR OFFLINE1 OR OFFLINE2) = 1 OR PROBLEM_TYPE = 'Отсутствие')
+            ) t
+          `, [...vins, ...vins, ...vins]);
+          const defects = Number(defRows[0]?.DEFECTS) || 0;
+          const dpu = +(defects / vins.length).toFixed(2);
+          return { model, dpu };
+        })
+      );
+
+      modelResults.forEach(({ model, dpu }) => {
+        if (dpu === null) return;
+        result[model] = dpu;
+        modelValues.push(dpu);
+      });
+
+      result.total = modelValues.length > 0
+        ? +(modelValues.reduce((a, b) => a + b, 0) / modelValues.length).toFixed(2)
+        : 0;
+
+      return result;
+    };
+
+    const formatDate = (date) => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
+
+    const getISOWeek = (date) => {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    };
+
+    const pad = (num) => String(num).padStart(2, '0');
+    const now = new Date();
+    const periods = [];
+    const typeOrder = { year: 0, month: 1, week: 2, day: 3 };
+
+    if (period === 'all') {
+      for (let i = 1; i >= 0; i--) {
+        const y = now.getFullYear() - i;
+        periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+      }
+      for (let i = 2; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+        const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+        periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${String(lastDay).padStart(2, '0')}`, type: 'month' });
+      }
+      const dayOfWeek = now.getDay();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      for (let i = 3; i >= 0; i--) {
+        const start = new Date(monday);
+        start.setDate(monday.getDate() - i * 7);
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        const weekNum = getISOWeek(start);
+        periods.push({ label: `W${weekNum} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
+      }
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
+      }
+    } else {
+      if (fromDate && toDate) {
+        let from = new Date(fromDate + 'T00:00:00');
+        let to = new Date(toDate + 'T00:00:00');
+        if (from > to) [from, to] = [to, from];
+
+        if (period === 'day') {
+          for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+            const dateStr = formatDate(d);
+            periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: dateStr, endDate: dateStr, type: 'day' });
+          }
+        } else if (period === 'month') {
+          let d = new Date(from.getFullYear(), from.getMonth(), 1);
+          while (d <= to) {
+            const y = d.getFullYear();
+            const m = d.getMonth() + 1;
+            const lastDay = new Date(y, m, 0).getDate();
+            const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+            periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${pad(m)}-01`, endDate: `${y}-${pad(m)}-${lastDay}`, type: 'month' });
+            d.setMonth(d.getMonth() + 1);
+          }
+        } else if (period === 'week') {
+          const day = from.getDay();
+          const monday = new Date(from);
+          monday.setDate(from.getDate() - (day === 0 ? 6 : day - 1));
+          for (let start = new Date(monday); start <= to; start.setDate(start.getDate() + 7)) {
+            const end = new Date(start);
+            end.setDate(start.getDate() + 6);
+            periods.push({ label: `W${getISOWeek(start)} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
+          }
+        } else if (period === 'year') {
+          for (let y = from.getFullYear(); y <= to.getFullYear(); y++) {
+            periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+          }
+        }
+      } else {
+        const defaultCount = { year: 2, month: 3, week: 4, day: 14 }[period] || 7;
+        const limit = parseInt(count, 10) || defaultCount;
+
+        if (period === 'year') {
+          for (let i = limit - 1; i >= 0; i--) {
+            const y = now.getFullYear() - i;
+            periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+          }
+        } else if (period === 'month') {
+          for (let i = limit - 1; i >= 0; i--) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const monthName = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+            const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+            periods.push({ label: `${monthName} ${y}`, startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${String(lastDay).padStart(2, '0')}`, type: 'month' });
+          }
+        } else if (period === 'week') {
+          const dayOfWeek = now.getDay();
+          const monday = new Date(now);
+          monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+          for (let i = limit - 1; i >= 0; i--) {
+            const start = new Date(monday);
+            start.setDate(monday.getDate() - i * 7);
+            const end = new Date(start);
+            end.setDate(start.getDate() + 6);
+            const weekNum = getISOWeek(start);
+            periods.push({ label: `W${weekNum} ${start.getFullYear()}`, startDate: formatDate(start), endDate: formatDate(end), type: 'week' });
+          }
+        } else if (period === 'day') {
+          for (let i = limit - 1; i >= 0; i--) {
+            const d = new Date(now);
+            d.setDate(now.getDate() - i);
+            periods.push({ label: `${pad(d.getDate())}.${pad(d.getMonth()+1)}`, startDate: formatDate(d), endDate: formatDate(d), type: 'day' });
+          }
+        }
+      }
     }
 
-    res.json({ dataPoints: result });
+    periods.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || a.startDate.localeCompare(b.startDate));
+
+    // ⬇⬇⬇ Параллельно по периодам
+    const result = await Promise.all(
+      periods.map(p => getDpuOff(p.startDate, p.endDate, p.label, p.type))
+    );
+
+    const responseData = { dataPoints: result };
+    setCache(dpuOffRetroCache, cacheKey, responseData);
+    res.json(responseData);
   } catch (err) {
     console.error('Ошибка dpu-off-retrospective:', err.message);
     res.status(500).json({ error: err.message });
@@ -5855,13 +5868,19 @@ app.post('/api/part-defect-shop-mapping', async (req, res) => {
 });
 
 // DRR по цехам
-// DRR по цехам
 app.get('/api/drr-by-shop', async (req, res) => {
-  try {
-    const { weeks = 10 } = req.query;
+  const { weeks = 10 } = req.query;
 
+  const cacheKey = `weeks=${weeks}`;
+  const cached = getCache(drrByShopCache, cacheKey);
+  if (cached) return res.json(cached);
+
+  try {
     const [mappingRows] = await notesPool.query('SELECT * FROM part_defect_shop_mapping');
-    if (!mappingRows.length) return res.json({ weeks: [], AS: [], BS: [], PS: [], LS: [], hasMapping: false });
+    if (!mappingRows.length) {
+      const empty = { weeks: [], AS: [], BS: [], PS: [], LS: [], hasMapping: false };
+      return res.json(empty);
+    }
 
     const shopMapping = { AS: [], BS: [], PS: [], LS: [] };
     mappingRows.forEach(m => {
@@ -5873,91 +5892,106 @@ app.get('/api/drr-by-shop', async (req, res) => {
       }
     });
 
+    const hasMappingFor = {
+      AS: shopMapping.AS.length > 0,
+      BS: shopMapping.BS.length > 0,
+      PS: shopMapping.PS.length > 0,
+      LS: shopMapping.LS.length > 0,
+    };
+
     const today = new Date();
     const currentMonday = new Date(today);
     const dayOfWeek = today.getDay();
     currentMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
 
-    const result = { weeks: [], AS: [], BS: [], PS: [], LS: [], hasMapping: true };
-
+    const weekList = [];
     for (let i = 0; i < weeks; i++) {
       const monday = new Date(currentMonday);
       monday.setDate(currentMonday.getDate() - i * 7);
       const sunday = new Date(monday);
       sunday.setDate(monday.getDate() + 6);
-
-      const weekStart = formatLocalDate(monday);
-      const weekEnd = formatLocalDate(sunday);
-      const weekNum = getISOWeek(monday);
-
-      result.weeks.unshift(`CW${weekNum}`);
-
-      // LS добавлен в цикл наравне с AS/BS/PS
-      for (const shop of ['AS', 'BS', 'PS', 'LS']) {
-        const parts = shopMapping[shop];
-
-        if (!parts.length) {
-          result[shop].unshift(0);
-          continue;
-        }
-
-        const [carsRows] = await pool.query(`
-          SELECT COUNT(DISTINCT VIN) AS TOTAL
-          FROM at_om_wiptrackinghistory
-          WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
-        `, [weekStart, weekEnd]);
-        const totalCars = carsRows[0]?.TOTAL || 0;
-
-        const conditions = [];
-        const params = [];
-        parts.forEach(p => {
-          conditions.push('(TRIM(PART_NAME) = ? AND TRIM(PROBLEM_TYPE) = ?)');
-          params.push(p.part_name, p.defect_type);
-        });
-        const whereClause = conditions.join(' OR ');
-
-        // УМНЫЙ КОСТЫЛЬ ПО ЦЕХАМ
-        // AS, PS, LS — все дефекты (операторы путают онлайн/оффлайн)
-        // BS — оффлайн + только серьёзные онлайн (A/B/A1/B1 или есть replenish)
-        let offlineCondition = '';
-        if (shop === 'AS' || shop === 'PS' || shop === 'LS') {
-          offlineCondition = '1 = 1';
-        } else {
-          offlineCondition = `
-            IS_OFF = 1 
-            OR (IS_OFF = 0 AND (PROBLEM_GRADE IN ('A', 'B', 'A1', 'B1') OR (PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> '')))
-          `;
-        }
-
-        const [defectRows] = await pool.query(`
-          SELECT COUNT(DISTINCT VIN) AS DEFECT_VINS
-          FROM (
-            SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
-                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
-            FROM at_biw_qm_defect_info
-            WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
-            UNION ALL
-            SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
-                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
-            FROM at_paint_qm_defect_info
-            WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
-            UNION ALL
-            SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
-                   (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
-            FROM at_qm_defect_info
-            WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
-          ) QM_DEF
-          WHERE (${whereClause})
-            AND (${offlineCondition})
-        `, [weekStart, weekEnd, weekStart, weekEnd, weekStart, weekEnd, ...params]);
-
-        const defectVins = defectRows[0]?.DEFECT_VINS || 0;
-        let drr = 0;
-        if (totalCars > 0) drr = (1 - (defectVins / totalCars)) * 100;
-
-        result[shop].unshift(parseFloat(drr.toFixed(2)));
-      }
+      weekList.unshift({
+        weekStart: formatLocalDate(monday),
+        weekEnd: formatLocalDate(sunday),
+        weekNum: getISOWeek(monday),
+      });
     }
+
+    // Параллельно по неделям
+    const weekResults = await Promise.all(weekList.map(async (w) => {
+      // 1) Машины за неделю — ОДИН раз (раньше считались 4 раза)
+      const [carsRows] = await pool.query(`
+        SELECT COUNT(DISTINCT VIN) AS TOTAL
+        FROM at_om_wiptrackinghistory
+        WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
+      `, [w.weekStart, w.weekEnd]);
+      const totalCars = carsRows[0]?.TOTAL || 0;
+
+      // 2) Параллельно по 4 цехам — OR-условия, без JOIN
+      const shopResults = await Promise.all(
+        ['AS', 'BS', 'PS', 'LS'].map(async (shop) => {
+          const parts = shopMapping[shop];
+
+          if (!parts.length) return { shop, drr: 0 };
+
+          const conditions = parts.map(() => '(TRIM(PART_NAME) = ? AND TRIM(PROBLEM_TYPE) = ?)');
+          const whereClause = conditions.join(' OR ');
+          const mappingParams = parts.flatMap(p => [p.part_name, p.defect_type]);
+
+          const offlineCondition = (shop === 'AS' || shop === 'PS' || shop === 'LS')
+            ? '1 = 1'
+            : `IS_OFF = 1 OR (IS_OFF = 0 AND (PROBLEM_GRADE IN ('A', 'B', 'A1', 'B1') OR (PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> '')))`;
+
+          const [defectRows] = await pool.query(`
+            SELECT COUNT(DISTINCT VIN) AS DEFECT_VINS
+            FROM (
+              SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
+                     (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
+              FROM at_biw_qm_defect_info
+              WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
+              UNION ALL
+              SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
+                     (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
+              FROM at_paint_qm_defect_info
+              WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
+              UNION ALL
+              SELECT VIN, PART_NAME, PROBLEM_TYPE, PROBLEM_GRADE, PROBLEM_REPLENISH,
+                     (OFFLINE OR OFFLINE1 OR OFFLINE2) AS IS_OFF
+              FROM at_qm_defect_info
+              WHERE DATE(CREATION_TIME) BETWEEN ? AND ?
+            ) QM_DEF
+            WHERE (${whereClause})
+              AND (${offlineCondition})
+          `, [
+            w.weekStart, w.weekEnd,
+            w.weekStart, w.weekEnd,
+            w.weekStart, w.weekEnd,
+            ...mappingParams,
+          ]);
+
+          const defectVins = Number(defectRows[0]?.DEFECT_VINS) || 0;
+          const drr = totalCars > 0
+            ? parseFloat(((1 - defectVins / totalCars) * 100).toFixed(2))
+            : 0;
+          return { shop, drr };
+        })
+      );
+
+      return { weekNum: w.weekNum, shopResults };
+    }));
+
+    // Собираем результат
+    const result = { weeks: [], AS: [], BS: [], PS: [], LS: [], hasMapping: true };
+    weekResults.forEach(wr => {
+      result.weeks.push(`CW${wr.weekNum}`);
+      const byShop = {};
+      wr.shopResults.forEach(s => { byShop[s.shop] = s.drr; });
+      for (const shop of ['AS', 'BS', 'PS', 'LS']) {
+        result[shop].push(byShop[shop] ?? 0);
+      }
+    });
+
+    setCache(drrByShopCache, cacheKey, result);
     res.json(result);
   } catch (err) {
     console.error('Ошибка DRR по цехам:', err.message);
@@ -5967,35 +6001,23 @@ app.get('/api/drr-by-shop', async (req, res) => {
 
 // ================== ТОП ДЕФЕКТОВ ПО ЦЕХУ ==================
 app.get('/api/shop-top-defects', async (req, res) => {
+  const { shop, model } = req.query;
+  if (!shop) return res.status(400).json({ error: 'shop обязателен' });
+
+  const cacheKey = `shop=${shop}|model=${model || 'ALL'}`;
+  const cached = getCache(shopTopCache, cacheKey);
+  if (cached) return res.json(cached);
+
   try {
-    const { shop, model } = req.query;
-    if (!shop) return res.status(400).json({ error: 'shop обязателен' });
-    
     const [mappingRows] = await notesPool.query(
       'SELECT part_name, defect_type FROM part_defect_shop_mapping WHERE shop = ?',
       [shop]
     );
-    
-    if (!mappingRows.length) return res.json({ weeks: [], data: [], hasMapping: false });
-    
-    const today = new Date();
-    const currentMonday = new Date(today);
-    const dayOfWeek = today.getDay();
-    currentMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-    
-    const weeks = [];
-    for (let i = 4; i >= 0; i--) {
-      const monday = new Date(currentMonday);
-      monday.setDate(currentMonday.getDate() - i * 7);
-      const sunday = new Date(monday);
-      sunday.setDate(monday.getDate() + 6);
-      weeks.push({
-        weekNum: getISOWeek(monday),
-        start: formatLocalDate(monday),
-        end: formatLocalDate(sunday),
-      });
+
+    if (!mappingRows.length) {
+      return res.json({ weeks: [], data: [], hasMapping: false });
     }
-    
+
     const conditions = [];
     const mappingParams = [];
     mappingRows.forEach(m => {
@@ -6003,28 +6025,44 @@ app.get('/api/shop-top-defects', async (req, res) => {
       mappingParams.push(String(m.part_name).trim(), String(m.defect_type).trim());
     });
     const whereClause = conditions.join(' OR ');
-    
-    const allResults = {};
-    
-    for (const week of weeks) {
+
+    const today = new Date();
+    const currentMonday = new Date(today);
+    const dayOfWeek = today.getDay();
+    currentMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+
+    const weeksData = [];
+    for (let i = 4; i >= 0; i--) {
+      const monday = new Date(currentMonday);
+      monday.setDate(currentMonday.getDate() - i * 7);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      weeksData.push({
+        weekNum: getISOWeek(monday),
+        start: formatLocalDate(monday),
+        end: formatLocalDate(sunday),
+      });
+    }
+
+    // Параллельно по неделям
+    const weekResults = await Promise.all(weeksData.map(async (week) => {
+      let joinClause = '';
+      let modelCondition = '';
       const params = [
         week.start, week.end,
         week.start, week.end,
         week.start, week.end,
         ...mappingParams,
       ];
-      
-      let joinClause = '';
-      let modelCondition = '';
+
       if (model && model !== 'ALL') {
         joinClause = 'JOIN work_order wo ON wo.VIN = QM_DEF.VIN';
         modelCondition = ' AND wo.MODEL = ?';
         params.push(model);
       }
-      
-      // ТОТ ЖЕ УМНЫЙ КОСТЫЛЬ
+
       const sql = `
-        SELECT 
+        SELECT
           CONCAT(QM_DEF.PART_NAME, '_', QM_DEF.PROBLEM_TYPE) AS defect_name,
           COUNT(DISTINCT QM_DEF.VIN) AS defect_count
         FROM (
@@ -6046,34 +6084,46 @@ app.get('/api/shop-top-defects', async (req, res) => {
         ${joinClause}
         WHERE (${whereClause})
           AND (
-            IS_OFF = 1 
-            OR 
-            (IS_OFF = 0 AND (PROBLEM_GRADE IN ('A', 'B', 'A1', 'B1') OR (PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> '')))
+            IS_OFF = 1
+            OR
+            (IS_OFF = 0 AND (
+              PROBLEM_GRADE IN ('A', 'B', 'A1', 'B1')
+              OR (PROBLEM_REPLENISH IS NOT NULL AND TRIM(PROBLEM_REPLENISH) <> '')
+            ))
           )
           ${modelCondition}
         GROUP BY defect_name
         ORDER BY defect_count DESC
       `;
-      
+
       const [rows] = await pool.query(sql, params);
-      
+      return { weekNum: week.weekNum, rows };
+    }));
+
+    const allResults = {};
+    weekResults.forEach(({ weekNum, rows }) => {
       rows.forEach(row => {
-        if (!allResults[row.defect_name]) {
-          allResults[row.defect_name] = {};
-        }
-        allResults[row.defect_name][`CW${week.weekNum}`] = row.defect_count;
+        if (!allResults[row.defect_name]) allResults[row.defect_name] = {};
+        allResults[row.defect_name][`CW${weekNum}`] = row.defect_count;
       });
-    }
-    
+    });
+
     const data = Object.entries(allResults).map(([name, counts]) => ({
       name,
       ...counts,
     }));
-    
-    const lastWeekKey = `CW${weeks[weeks.length - 1].weekNum}`;
+
+    const lastWeekKey = `CW${weeksData[weeksData.length - 1].weekNum}`;
     data.sort((a, b) => (b[lastWeekKey] || 0) - (a[lastWeekKey] || 0));
-    
-    res.json({ weeks: weeks.map(w => `CW${w.weekNum}`), data, hasMapping: true });
+
+    const responseData = {
+      weeks: weeksData.map(w => `CW${w.weekNum}`),
+      data,
+      hasMapping: true,
+    };
+
+    setCache(shopTopCache, cacheKey, responseData);
+    res.json(responseData);
   } catch (err) {
     console.error('Ошибка shop-top-defects:', err.message);
     res.status(500).json({ error: err.message });

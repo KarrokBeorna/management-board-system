@@ -100,6 +100,39 @@ const shopColors = {
   LS: '#8B5CF6',
 };
 
+// === Анимация загрузки ===
+const loadingAnimation = `
+  @keyframes loadingDotBlink {
+    0%, 20% { opacity: 0.2; }
+    50% { opacity: 1; }
+    100% { opacity: 0.2; }
+  }
+  .loading-dots {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 2px;
+  }
+  .loading-dots span {
+    animation: loadingDotBlink 1.4s infinite both;
+    font-weight: 600;
+    color: #6B7280;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+  .loading-dots span:nth-child(4) { animation-delay: 0.6s; }
+`;
+
+const LoadingDots = ({ label = 'Загрузка', padding = 40 }) => (
+  <div style={{ textAlign: 'center', padding }}>
+    <style>{loadingAnimation}</style>
+    <div className="loading-dots">
+      <span>{label}</span><span>.</span><span>.</span><span>.</span>
+    </div>
+  </div>
+);
+
 export default function DrrReportPage() {
   const [activeTab, setActiveTab] = useState('factory');
   const [selectedModel, setSelectedModel] = useState('ALL');
@@ -726,7 +759,7 @@ export default function DrrReportPage() {
             </div>
 
             {loading ? (
-              <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Загрузка данных...</p>
+              <LoadingDots label="Загрузка данных" padding={20} />
             ) : (
               <>
                 <ResponsiveContainer width="100%" height={350}>
@@ -800,7 +833,7 @@ export default function DrrReportPage() {
               <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1F2937' }}>DPU OFF - Ретроспектива</h2>
             </div>
             {dpuOffLoading ? (
-              <p style={{ textAlign: 'center', color: '#6B7280', padding: 20 }}>Загрузка данных...</p>
+              <LoadingDots label="Загрузка данных" padding={20} />
             ) : (
               <>
                 <ResponsiveContainer width="100%" height={350}>
@@ -887,7 +920,7 @@ export default function DrrReportPage() {
                   <input type="date" value={top3DateTo} onChange={e => setTop3DateTo(e.target.value)} style={inputStyle} />
                 </div>
               )}
-              {top3Loading ? <p style={{ color: '#6B7280', textAlign: 'center', padding: 10 }}>Загрузка...</p> : (
+              {top3Loading ? <LoadingDots padding={10} /> : (
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                   <thead>
                     <tr>
@@ -943,7 +976,7 @@ export default function DrrReportPage() {
                   ))}
                 </div>
               )}
-              {top5Loading ? <p style={{ color: '#6B7280', textAlign: 'center', padding: 10 }}>Загрузка...</p> : (
+              {top5Loading ? <LoadingDots padding={10} /> : (
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                   <thead>
                     <tr>
@@ -986,7 +1019,7 @@ export default function DrrReportPage() {
                 </select>
               </div>
             </div>
-            {weekTop3Loading ? <p style={{ color: '#6B7280', textAlign: 'center', padding: 10 }}>Загрузка...</p> : (
+            {weekTop3Loading ? <LoadingDots padding={10} /> : (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                 <thead>
                   <tr>
@@ -1078,7 +1111,7 @@ export default function DrrReportPage() {
           {shopTab === 'graphs' && (
             <>
               {drrLoading ? (
-                <p style={{ textAlign: 'center', padding: 40 }}>Загрузка...</p>
+                <LoadingDots />
               ) : shopChartData.length > 0 ? (
                 <>
                   <div style={cardStyle}>
@@ -1125,6 +1158,23 @@ export default function DrrReportPage() {
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
+
+                  {/* НОВЫЙ ГРАФИК ЛОГИСТИКИ */}
+                  <div style={cardStyle}>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, color: '#8B5CF6', marginBottom: 20 }}>🚚 Логистика (LS) — DRR %</h2>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={shopChartData} margin={{ top: 20, right: 20, left: 20, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F5" />
+                        <XAxis dataKey="week" />
+                        <YAxis domain={['dataMin - 3', 'dataMax + 3']} />
+                        <Tooltip formatter={(v) => `${v}%`} />
+                        <Bar dataKey="LS" fill="#8B5CF6" barSize={40} radius={[8, 8, 0, 0]}>
+                          <LabelList dataKey="LS" position="top" formatter={(v) => `${parseFloat(v).toFixed(2)}%`} style={{ fill: '#1F2937', fontSize: 11, fontWeight: 600 }} />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
                 </>
               ) : (
                 <p style={{ textAlign: 'center', padding: 40, color: '#6B7280' }}>Нет данных. Загрузите справочник.</p>
@@ -1152,7 +1202,7 @@ export default function DrrReportPage() {
               </div>
 
               {shopLoading ? (
-                <p style={{ textAlign: 'center', padding: 40 }}>Загрузка...</p>
+                <LoadingDots />
               ) : shopData && shopData.data.length > 0 ? (
                 <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
                   <div style={{ flex: '0 0 40%', maxWidth: '40%' }}>
