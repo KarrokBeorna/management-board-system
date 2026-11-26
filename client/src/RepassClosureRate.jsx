@@ -5,8 +5,33 @@ import {
 } from 'recharts';
 
 const API_BASE = '';
-const COLOR_REP = '#EF4444';   // Ремонтники (красный)
-const COLOR_OTHER = '#10B981'; // Качество (зелёный)
+// ЦВЕТА: Ремонтники - зеленые, Качество - красные
+const COLOR_REP = '#10B981';   // Ремонтники (зеленый)
+const COLOR_OTHER = '#EF4444'; // Качество (красный)
+
+// Анимация загрузки (как в DRR Логистика)
+const loadingAnimation = `
+  @keyframes loadingDotBlink {
+    0%, 20% { opacity: 0.2; }
+    50% { opacity: 1; }
+    100% { opacity: 0.2; }
+  }
+  .loading-dots {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 2px;
+  }
+  .loading-dots span {
+    animation: loadingDotBlink 1.4s infinite both;
+    font-weight: 600;
+    color: #6B7280;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+  .loading-dots span:nth-child(4) { animation-delay: 0.6s; }
+`;
 
 // Стили из REPELEC Report
 const cardStyle = { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, marginBottom: 20, boxShadow: '0 4px 12px rgba(0,0,0,0.04)', border: '1px solid #F0F0F5' };
@@ -24,6 +49,7 @@ const tableWrapStyle = { marginTop: 4, border: '1px solid #E5E7EB', borderRadius
 const dashDividerStyle = { borderTop: '2px dashed #CBD5E1', marginTop: 12, marginBottom: 8 };
 const reppsTypeBgColors = { year: '#F3E8FF', month: '#E0F2FE', week: '#CCFBF1', day: '#FEF3C7' };
 const H_CHART_2 = 260;
+const modalRowsPerPage = 50;
 
 // Сокращение подписей
 const shortenLabel = (label, type) => {
@@ -45,12 +71,22 @@ export default function RepassClosureRate() {
   const [modalLoading, setModalLoading] = useState(false);
   const [modalVins, setModalVins] = useState([]);
   const [modalMeta, setModalMeta] = useState({ period: '', category: '', shift: '' });
+  const [modalPage, setModalPage] = useState(1);
 
   const handlePeriodChange = (p) => {
     setPeriod(p);
     if (p === 'all') { setFromDate(''); setToDate(''); }
     else { const d = { year: 2, month: 3, week: 4, day: 14 }; setCount(d[p] || 3); }
   };
+
+  // Блокировка скролла страницы при открытой модалке
+  useEffect(() => {
+    if (modalOpen) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [modalOpen]);
 
   useEffect(() => {
     setLoading(true);
@@ -87,6 +123,7 @@ export default function RepassClosureRate() {
     setModalLoading(true);
     setModalVins([]);
     setModalMeta({ period: p.label, category, shift });
+    setModalPage(1); // Сброс страницы при открытии
     
     const params = new URLSearchParams({
       startDate: p.startDate,
@@ -131,12 +168,12 @@ export default function RepassClosureRate() {
     );
   };
 
-  // Отрисовка графика по сменам (4 блока: A-Q, A-R, White, B-Q, B-R)
+  // Отрисовка графика по сменам
   const renderShiftChart = (points) => {
     if (!points.length) return <p style={{ padding: 16, color: '#6B7280', textAlign: 'center', fontSize: 13 }}>Нет данных</p>;
     
     const maxTotal = Math.max(...points.map(p => (p.shiftA_rep||0) + (p.shiftA_other||0) + (p.shiftB_rep||0) + (p.shiftB_other||0)), 1);
-    const separatorValue = maxTotal * 0.02; // 2% для визуального разделителя
+    const separatorValue = maxTotal * 0.02;
 
     const displayData = points.map(p => {
       const aRep = Number(p.shiftA_rep) || 0;
@@ -166,20 +203,15 @@ export default function RepassClosureRate() {
           <Tooltip 
             labelFormatter={(val, payload) => payload?.[0]?.payload?.label || val}
             formatter={(value, name) => {
-              if (name === 'separator') return null; // Скрываем разделитель в тултипе
+              if (name === 'separator') return null;
               return [Math.round(value), name];
             }}
           />
-          {/* Смена А - светлые тона */}
-          <Bar dataKey="shiftA_other" stackId="s" fill="#6EE7B7" barSize={22} name="Качество (A)" radius={[4, 4, 0, 0]} />
-          <Bar dataKey="shiftA_rep" stackId="s" fill="#FCA5A5" barSize={22} name="Ремонтники (A)" radius={[4, 4, 0, 0]} />
-          
-          {/* Белый разделитель */}
+          <Bar dataKey="shiftA_other" stackId="s" fill="#FCA5A5" barSize={22} name="Качество (A)" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="shiftA_rep" stackId="s" fill="#6EE7B7" barSize={22} name="Ремонтники (A)" radius={[4, 4, 0, 0]} />
           <Bar dataKey="separator" stackId="s" fill="#FFFFFF" barSize={22} name="separator" radius={[4, 4, 0, 0]} />
-          
-          {/* Смена Б - темные тона */}
-          <Bar dataKey="shiftB_other" stackId="s" fill="#10B981" barSize={22} name="Качество (B)" radius={[4, 4, 0, 0]} />
-          <Bar dataKey="shiftB_rep" stackId="s" fill="#EF4444" barSize={22} name="Ремонтники (B)" radius={[4, 4, 0, 0]}>
+          <Bar dataKey="shiftB_other" stackId="s" fill="#EF4444" barSize={22} name="Качество (B)" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="shiftB_rep" stackId="s" fill="#10B981" barSize={22} name="Ремонтники (B)" radius={[4, 4, 0, 0]}>
             <LabelList dataKey="displayTotal" position="top" style={{ fontSize: 10, fontWeight: 700, fill: '#111827' }} formatter={v => v > 0.001 ? Math.round(v) : ''} />
           </Bar>
         </BarChart>
@@ -187,7 +219,6 @@ export default function RepassClosureRate() {
     );
   };
 
-  // Таблица категорий (Качество / Ремонтники)
   const renderCategoryTable = (points) => {
     if (!points.length) return null;
     const displayLabels = points.map(p => shortenLabel(p.label, p.type));
@@ -236,7 +267,6 @@ export default function RepassClosureRate() {
     );
   };
 
-  // Таблица смен (числа друг под другом)
   const renderShiftTable = (points) => {
     if (!points.length) return null;
     const displayLabels = points.map(p => shortenLabel(p.label, p.type));
@@ -275,7 +305,6 @@ export default function RepassClosureRate() {
                           onMouseEnter={(e) => { if (totalVal > 0) e.currentTarget.style.backgroundColor = '#BFDBFE'; }}
                           onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = reppsTypeBgColors[point.type]; }}
                           title={totalVal > 0 ? 'Клик — показать VIN' : ''}>
-                        {/* Цифры друг под другом */}
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}>
                           <span style={{ color: COLOR_REP, fontWeight: 700 }}>{repVal}</span>
                           <span style={{ color: COLOR_OTHER, fontWeight: 700 }}>{otherVal}</span>
@@ -300,7 +329,6 @@ export default function RepassClosureRate() {
     );
   };
 
-  // Секция с графиком и таблицами
   const renderSection = (title, points, accent) => (
     <div key={title} style={sectionCardStyle}>
       <h3 style={{ ...sectionTitleStyle, color: accent }}>{title}</h3>
@@ -311,7 +339,6 @@ export default function RepassClosureRate() {
     </div>
   );
 
-  // Секция только с графиком смен (для второго ряда)
   const renderShiftChartSection = (title, points, accent) => (
     <div key={title} style={sectionCardStyle}>
       <h3 style={{ ...sectionTitleStyle, color: accent }}>{title}</h3>
@@ -319,10 +346,22 @@ export default function RepassClosureRate() {
     </div>
   );
 
+  // --- СТАТИСТИКА ДЛЯ МОДАЛКИ ---
+  const totalDefects = modalVins.length;
+  const uniqueVins = new Set(modalVins.map(v => v.vin)).size;
+  const repDefects = modalVins.filter(v => v.isRep).length;
+  const otherDefects = totalDefects - repDefects;
+
+  const totalModalPages = Math.ceil(totalDefects / modalRowsPerPage);
+  const paginatedModalVins = useMemo(() => {
+    const start = (modalPage - 1) * modalRowsPerPage;
+    return modalVins.slice(start, start + modalRowsPerPage);
+  }, [modalVins, modalPage]);
+
   return (
     <div style={{ padding: '20px 30px 20px 16px', fontFamily: 'Inter, Segoe UI, Arial, sans-serif', maxWidth: 1500, margin: '0 auto' }}>
       <h1 style={{ color: '#111827', fontSize: 28, fontWeight: 800, marginBottom: 20 }}>
-        Несвоевременное закрытие ремонтов (позже CP72 + 15 мин)
+        Закрытие ремонтов Health Process
       </h1>
 
       {/* ФИЛЬТРЫ */}
@@ -363,20 +402,21 @@ export default function RepassClosureRate() {
       {/* ОСНОВНОЙ БЛОК ДАННЫХ */}
       {loading ? (
         <div style={cardStyle}>
-          <div style={{ textAlign: 'center', padding: 40, color: '#6B7280', fontWeight: 600 }}>Загрузка данных...</div>
+          <style>{loadingAnimation}</style>
+          <div className="loading-dots" style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+            <span>Загрузка данных</span><span>.</span><span>.</span><span>.</span>
+          </div>
         </div>
       ) : period === 'all' ? (
         <div style={cardStyle}>
           <h2 style={reportHeaderStyle}>Динамика по категориям и сменам</h2>
           
-          {/* Первый ряд: графики и таблицы */}
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 2.3fr)', gap: 16, alignItems: 'stretch' }}>
             {renderSection('📅 3 месяца', groupedByType.months, '#0EA5E9')}
             {renderSection('📆 4 недели',  groupedByType.weeks,  '#14B8A6')}
             {renderSection('📊 14 дней',   groupedByType.days,   '#F59E0B')}
           </div>
 
-          {/* Второй ряд: графики по сменам */}
           <h2 style={{ ...reportHeaderStyle, marginTop: 30 }}>Динамика по сменам (A и B)</h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 2.3fr)', gap: 16, alignItems: 'stretch' }}>
             {renderShiftChartSection('📅 3 месяца', groupedByType.months, '#0EA5E9')}
@@ -403,46 +443,103 @@ export default function RepassClosureRate() {
       {modalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '10px' }} onClick={() => setModalOpen(false)}>
           <div style={{ backgroundColor: '#FFFFFF', borderRadius: 14, padding: 20, width: '100%', maxWidth: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px rgba(0,0,0,0.25)' }} onClick={(e) => e.stopPropagation()}>
+            
+            {/* Шапка модалки со статистикой */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#111827' }}>
                   Детализация: {modalMeta.period} · {modalMeta.category === 'rep' ? 'Ремонтники' : modalMeta.category === 'other' ? 'Качество' : 'Всего'} {modalMeta.shift !== 'all' ? `· Смена ${modalMeta.shift}` : ''}
                 </h3>
-                <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>Всего записей: {modalVins.length}</p>
+                <div style={{ margin: '6px 0 0', fontSize: 13, color: '#4B5563', display: 'flex', gap: 16 }}>
+                  <span>Всего дефектов: <b>{totalDefects}</b></span>
+                  <span>Уник. VIN: <b>{uniqueVins}</b></span>
+                  <span style={{ color: COLOR_REP }}>Ремонтники: <b>{repDefects}</b></span>
+                  <span style={{ color: COLOR_OTHER }}>Качество: <b>{otherDefects}</b></span>
+                </div>
               </div>
               <button onClick={() => setModalOpen(false)} style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: '#6B7280', lineHeight: 1 }}>×</button>
             </div>
 
             {modalLoading ? (
-              <p style={{ padding: 40, textAlign: 'center', fontWeight: 600 }}>Загрузка...</p>
+              <div style={{ padding: 40, display: 'flex', justifyContent: 'center' }}>
+                <style>{loadingAnimation}</style>
+                <div className="loading-dots">
+                  <span>Загрузка</span><span>.</span><span>.</span><span>.</span>
+                </div>
+              </div>
             ) : modalVins.length === 0 ? (
               <p style={{ padding: 40, textAlign: 'center', color: '#6B7280' }}>Нет данных</p>
             ) : (
-              <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #E5E7EB', borderRadius: 8 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr>
-                      <th style={{ padding: '10px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0 }}>VIN</th>
-                      <th style={{ padding: '10px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0 }}>Модель</th>
-                      <th style={{ padding: '10px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0 }}>Время CPFinal</th>
-                      <th style={{ padding: '10px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0 }}>Время CP72</th>
-                      <th style={{ padding: '10px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0 }}>Время ремонта</th>
-                      <th style={{ padding: '10px', textAlign: 'left', background: '#F9FAFB', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0 }}>Смена</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {modalVins.map((v, i) => (
-                      <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
-                        <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5', fontFamily: 'monospace' }}>{v.vin}</td>
-                        <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5' }}>{v.model}</td>
-                        <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5' }}>{new Date(v.cpFinal).toLocaleString('ru-RU')}</td>
-                        <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5' }}>{new Date(v.cp72).toLocaleString('ru-RU')}</td>
-                        <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5', fontWeight: 600, color: '#DC2626' }}>{new Date(v.repairTime).toLocaleString('ru-RU')}</td>
-                        <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5' }}>{v.shift || 'Ночь'}</td>
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+                
+                {/* Таблица с данными */}
+                <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #E5E7EB', borderRadius: 8 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: '#F9FAFB' }}>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 1 }}>VIN</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 1 }}>Модель</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 1 }}>Дефект (Деталь / Проблема)</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 1 }}>Кто закрыл (Аккаунт)</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 1 }}>Время CPFinal</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 1 }}>Время CP72</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 1 }}>Время ремонта</th>
+                        <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #E5E7EB', position: 'sticky', top: 0, zIndex: 1 }}>Смена</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {paginatedModalVins.map((v, i) => (
+                        <tr key={i} style={{ backgroundColor: i % 2 === 0 ? '#FFFFFF' : '#F9FAFB' }}>
+                          <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5', fontFamily: 'monospace' }}>{v.vin}</td>
+                          <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5' }}>{v.model}</td>
+                          <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5' }}>
+                            <span style={{ fontWeight: 600 }}>{v.part}</span><br/>
+                            <span style={{ fontSize: 12, color: '#DC2626' }}>{v.problem}</span>
+                          </td>
+                          <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5', fontWeight: 700, color: v.isRep ? COLOR_REP : COLOR_OTHER }}>
+                            {v.repairAccount}
+                          </td>
+                          <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5' }}>{new Date(v.cpFinal).toLocaleString('ru-RU')}</td>
+                          <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5' }}>{new Date(v.cp72).toLocaleString('ru-RU')}</td>
+                          <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5', fontWeight: 600, color: '#DC2626' }}>{new Date(v.repairTime).toLocaleString('ru-RU')}</td>
+                          <td style={{ padding: '8px 10px', borderBottom: '1px solid #F0F0F5' }}>{v.shift || 'Ночь'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Пагинация (стилизованная как в SgpAuditPage) */}
+                {totalModalPages > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 12, borderTop: '1px solid #E5E7EB' }}>
+                    <span style={{ fontSize: 14, color: '#6B7280' }}>Всего: {modalVins.length} записей</span>
+                    <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                      <button 
+                        onClick={() => setModalPage(p => Math.max(1, p - 1))} 
+                        disabled={modalPage === 1} 
+                        style={{ 
+                          padding: '8px 20px', borderRadius: 8, border: 'none', 
+                          background: modalPage === 1 ? '#E5E7EB' : '#2563EB', color: 'white', 
+                          fontWeight: 600, fontSize: 14, cursor: modalPage === 1 ? 'not-allowed' : 'pointer' 
+                        }}
+                      >
+                        ← Назад
+                      </button>
+                      <span style={{ fontWeight: 600, color: '#374151' }}>{modalPage} / {totalModalPages}</span>
+                      <button 
+                        onClick={() => setModalPage(p => Math.min(totalModalPages, p + 1))} 
+                        disabled={modalPage === totalModalPages} 
+                        style={{ 
+                          padding: '8px 20px', borderRadius: 8, border: 'none', 
+                          background: modalPage === totalModalPages ? '#E5E7EB' : '#2563EB', color: 'white', 
+                          fontWeight: 600, fontSize: 14, cursor: modalPage === totalModalPages ? 'not-allowed' : 'pointer' 
+                        }}
+                      >
+                        Вперёд →
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

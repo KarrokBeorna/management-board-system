@@ -20535,6 +20535,11 @@ app.get('/api/alignment-report', async (req, res) => {
       const shift = cflrShiftLetter(new Date(row.REPAIR_TIME));
       const attachDate = cflrFormatDate(new Date(new Date(cpFinal).getTime()));
 
+      // Формируем читаемый аккаунт
+      let acc = row.REPAIR_ACCOUNT || '';
+      if (!acc && row.REPAIR_PERSON) acc = String(row.REPAIR_PERSON).split('|')[0].trim();
+      if (!acc) acc = '—';
+
       results.push({
         vin: row.VIN,
         model: row.MODEL || '—',
@@ -20544,9 +20549,9 @@ app.get('/api/alignment-report', async (req, res) => {
         isRep,
         shift,
         attachDate,
-        part: row.PART_NAME,
-        problem: row.PROBLEM_TYPE,
-        post: row.POST_NAME
+        part: row.PART_NAME || '—',
+        problem: row.PROBLEM_TYPE || '—',
+        repairAccount: acc
       });
     }
     return results;
