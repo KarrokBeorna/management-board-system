@@ -42,6 +42,7 @@ import DrrElectronicsDashboardPage from './DrrElectronicsDashboardPage';
 import WorkshopUpdate from './WorkshopUpdate';
 import ECToolReportPage from './ECToolReportPage';
 import AlignmentReport from './AlignmentReport';
+import RepassClosureRate from './RepassClosureRate';
 
 
 import InspectionPage from './InspectionPage';
@@ -91,6 +92,7 @@ export default function App() {
         <Route path="/workshop-update" element={<WorkshopUpdate />} />
         <Route path="/ec-tool-report" element={<ECToolReportPage />} />
         <Route path="/alignment-report" element={<AlignmentReport />} />
+        <Route path="/repass-closure-rate" element={<RepassClosureRate />} />
 
 
 

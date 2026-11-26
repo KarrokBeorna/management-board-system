@@ -20282,6 +20282,337 @@ app.get('/api/alignment-report', async (req, res) => {
 });
 
 
+
+
+// ================== CP FINAL → LATE REPAIR (CP72 + 15 мин) ==================
+(() => {
+  const LATE_REPAIR_MINUTES = 15;
+
+  const cflrFormatDate = (date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const cflrISOWeek = (date) => {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  };
+
+  const cflrPad = (n) => String(n).padStart(2, '0');
+  const CFLR_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  const cflrBuildPeriods = (period, count, fromDate, toDate) => {
+    const now = new Date();
+    const periods = [];
+    const typeOrder = { year: 0, month: 1, week: 2, day: 3 };
+
+    if (period === 'all') {
+      for (let i = 1; i >= 0; i--) {
+        const y = now.getFullYear() - i;
+        periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+      }
+      for (let i = 2; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+        periods.push({
+          label: `${CFLR_MONTHS[d.getMonth()]} ${y}`,
+          startDate: `${y}-${m}-01`,
+          endDate: `${y}-${m}-${cflrPad(lastDay)}`,
+          type: 'month',
+        });
+      }
+      const dayOfWeek = now.getDay();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      for (let i = 3; i >= 0; i--) {
+        const start = new Date(monday);
+        start.setDate(monday.getDate() - i * 7);
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        periods.push({
+          label: `W${cflrISOWeek(start)} ${start.getFullYear()}`,
+          startDate: cflrFormatDate(start),
+          endDate: cflrFormatDate(end),
+          type: 'week',
+        });
+      }
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        periods.push({
+          label: `${cflrPad(d.getDate())}.${cflrPad(d.getMonth() + 1)}`,
+          startDate: cflrFormatDate(d),
+          endDate: cflrFormatDate(d),
+          type: 'day',
+        });
+      }
+    } else if (fromDate && toDate) {
+      let from = new Date(fromDate + 'T00:00:00');
+      let to = new Date(toDate + 'T00:00:00');
+      if (from > to) [from, to] = [to, from];
+
+      if (period === 'day') {
+        for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+          const ds = cflrFormatDate(d);
+          periods.push({ label: `${cflrPad(d.getDate())}.${cflrPad(d.getMonth() + 1)}`, startDate: ds, endDate: ds, type: 'day' });
+        }
+      } else if (period === 'month') {
+        let d = new Date(from.getFullYear(), from.getMonth(), 1);
+        while (d <= to) {
+          const y = d.getFullYear();
+          const m = d.getMonth() + 1;
+          const lastDay = new Date(y, m, 0).getDate();
+          periods.push({
+            label: `${CFLR_MONTHS[d.getMonth()]} ${y}`,
+            startDate: `${y}-${cflrPad(m)}-01`,
+            endDate: `${y}-${cflrPad(m)}-${cflrPad(lastDay)}`,
+            type: 'month',
+          });
+          d.setMonth(d.getMonth() + 1);
+        }
+      } else if (period === 'week') {
+        const day = from.getDay();
+        const monday = new Date(from);
+        monday.setDate(from.getDate() - (day === 0 ? 6 : day - 1));
+        for (let start = new Date(monday); start <= to; start.setDate(start.getDate() + 7)) {
+          const end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          periods.push({
+            label: `W${cflrISOWeek(start)} ${start.getFullYear()}`,
+            startDate: cflrFormatDate(start),
+            endDate: cflrFormatDate(end),
+            type: 'week',
+          });
+        }
+      } else if (period === 'year') {
+        for (let y = from.getFullYear(); y <= to.getFullYear(); y++) {
+          periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+        }
+      }
+    } else {
+      const defaultCount = { year: 2, month: 3, week: 4, day: 14 }[period] || 7;
+      const limit = parseInt(count, 10) || defaultCount;
+
+      if (period === 'year') {
+        for (let i = limit - 1; i >= 0; i--) {
+          const y = now.getFullYear() - i;
+          periods.push({ label: String(y), startDate: `${y}-01-01`, endDate: `${y}-12-31`, type: 'year' });
+        }
+      } else if (period === 'month') {
+        for (let i = limit - 1; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+          periods.push({
+            label: `${CFLR_MONTHS[d.getMonth()]} ${y}`,
+            startDate: `${y}-${m}-01`,
+            endDate: `${y}-${m}-${cflrPad(lastDay)}`,
+            type: 'month',
+          });
+        }
+      } else if (period === 'week') {
+        const dayOfWeek = now.getDay();
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+        for (let i = limit - 1; i >= 0; i--) {
+          const start = new Date(monday);
+          start.setDate(monday.getDate() - i * 7);
+          const end = new Date(start);
+          end.setDate(start.getDate() + 6);
+          periods.push({
+            label: `W${cflrISOWeek(start)} ${start.getFullYear()}`,
+            startDate: cflrFormatDate(start),
+            endDate: cflrFormatDate(end),
+            type: 'week',
+          });
+        }
+      } else if (period === 'day') {
+        for (let i = limit - 1; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(now.getDate() - i);
+          periods.push({
+            label: `${cflrPad(d.getDate())}.${cflrPad(d.getMonth() + 1)}`,
+            startDate: cflrFormatDate(d),
+            endDate: cflrFormatDate(d),
+            type: 'day',
+          });
+        }
+      }
+    }
+
+    periods.sort((a, b) => typeOrder[a.type] - typeOrder[b.type] || a.startDate.localeCompare(b.startDate));
+    return periods;
+  };
+
+  const cflrShiftLetter = (repairDate) => {
+    const moscow = new Date(repairDate.getTime() + 3 * 60 * 60 * 1000);
+    const totalMinutes = moscow.getUTCHours() * 60 + moscow.getUTCMinutes();
+
+    let shiftDate = new Date(moscow);
+    let shiftType;
+
+    if (totalMinutes >= 7 * 60 + 50 && totalMinutes <= 16 * 60 + 40) {
+      shiftType = 'day';
+    } else if (totalMinutes >= 16 * 60 + 41 || totalMinutes <= 1 * 60 + 30) {
+      shiftType = 'evening';
+      if (totalMinutes <= 1 * 60 + 30) shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
+    } else {
+      shiftType = 'night';
+    }
+
+    if (shiftType === 'night') return null;
+
+    const weekNumber = cflrISOWeek(shiftDate);
+    const isEvenWeek = weekNumber % 2 === 0;
+    if (shiftType === 'day') return isEvenWeek ? 'B' : 'A';
+    if (shiftType === 'evening') return isEvenWeek ? 'A' : 'B';
+    return null;
+  };
+
+  const cflrIsRemzone = (repairAccount, repairPerson) => {
+    const acc = String(repairAccount || '').toUpperCase();
+    const personAcc = String(repairPerson || '').split('|')[0].trim().toUpperCase();
+    return acc.startsWith('REP') || personAcc.startsWith('REP');
+  };
+
+  // Общая функция сбора данных
+  const getLateRepairsRaw = async (startDate, endDate) => {
+    // 1. VIN + CPFINAL + CP72
+    const [movementRows] = await mesPool.query(`
+      SELECT
+        vin,
+        MAX(IF(uloc_no = 'CPFINAL', scan_time, NULL)) AS cp_final_time,
+        MAX(IF(uloc_no = 'CP72',    scan_time, NULL)) AS cp72_time
+      FROM ti_mes_movement
+      WHERE is_deleted = 0
+        AND uloc_no IN ('CPFINAL', 'CP72')
+        AND DATE(scan_time) BETWEEN ? AND ?
+      GROUP BY vin
+      HAVING cp_final_time IS NOT NULL
+    `, [startDate, endDate]);
+
+    if (!movementRows.length) return [];
+
+    const cpFinalMap = new Map();
+    const cp72Map = new Map();
+    movementRows.forEach(r => {
+      if (r.cp_final_time) cpFinalMap.set(r.vin, r.cp_final_time);
+      if (r.cp72_time) cp72Map.set(r.vin, r.cp72_time);
+    });
+
+    const vins = Array.from(cpFinalMap.keys());
+    const placeholders = vins.map(() => '?').join(',');
+
+    // 2. Дефекты по этим VIN
+    const [defectRows] = await pool.query(`
+      SELECT d.VIN, wo.MODEL, d.REPAIR_TIME, d.REPAIR_ACCOUNT, d.REPAIR_PERSON,
+             d.PART_NAME, d.PROBLEM_TYPE, d.POST_NAME
+      FROM at_qm_defect_info d
+      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      WHERE d.REPAIR_TIME IS NOT NULL
+        AND d.VIN IN (${placeholders})
+    `, [...vins]);
+
+    const results = [];
+    for (const row of defectRows) {
+      const cp72 = cp72Map.get(row.VIN);
+      const cpFinal = cpFinalMap.get(row.VIN);
+      if (!cp72 || !cpFinal) continue;
+
+      const repairMs = new Date(row.REPAIR_TIME).getTime();
+      const cp72Ms = new Date(cp72).getTime();
+      if (repairMs <= cp72Ms + LATE_REPAIR_MINUTES * 60 * 1000) continue;
+
+      const isRep = cflrIsRemzone(row.REPAIR_ACCOUNT, row.REPAIR_PERSON);
+      const shift = cflrShiftLetter(new Date(row.REPAIR_TIME));
+      const attachDate = cflrFormatDate(new Date(new Date(cpFinal).getTime()));
+
+      results.push({
+        vin: row.VIN,
+        model: row.MODEL || '—',
+        cpFinal,
+        cp72,
+        repairTime: row.REPAIR_TIME,
+        isRep,
+        shift,
+        attachDate,
+        part: row.PART_NAME,
+        problem: row.PROBLEM_TYPE,
+        post: row.POST_NAME
+      });
+    }
+    return results;
+  };
+
+  // Эндпоинт для графика
+  app.get('/api/cp-final-late-repair', async (req, res) => {
+    const { period = 'all', count, fromDate, toDate } = req.query;
+    try {
+      const periods = cflrBuildPeriods(period, count, fromDate, toDate);
+      if (!periods.length) return res.json({ dataPoints: [] });
+
+      const minStart = periods.reduce((m, p) => (p.startDate < m ? p.startDate : m), periods[0].startDate);
+      const maxEnd = periods.reduce((m, p) => (p.endDate > m ? p.endDate : m), periods[0].endDate);
+
+      const rawData = await getLateRepairsRaw(minStart, maxEnd);
+
+      const result = periods.map(p => ({
+        label: p.label, type: p.type, startDate: p.startDate, endDate: p.endDate,
+        rep: 0, other: 0, shiftA_rep: 0, shiftA_other: 0, shiftB_rep: 0, shiftB_other: 0,
+      }));
+
+      for (const row of rawData) {
+        // Записываем во ВСЕ периоды, в которые попадает дата CPFinal
+        for (const p of result) {
+          if (row.attachDate >= p.startDate && row.attachDate <= p.endDate) {
+            if (row.isRep) p.rep++; else p.other++;
+            if (row.shift === 'A') {
+              if (row.isRep) p.shiftA_rep++; else p.shiftA_other++;
+            } else if (row.shift === 'B') {
+              if (row.isRep) p.shiftB_rep++; else p.shiftB_other++;
+            }
+          }
+        }
+      }
+      res.json({ dataPoints: result });
+    } catch (err) {
+      console.error('Ошибка /api/cp-final-late-repair:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Эндпоинт для детализации (клик по таблице)
+  app.get('/api/cp-final-late-repair/details', async (req, res) => {
+    const { startDate, endDate, category, shift } = req.query;
+    try {
+      const rawData = await getLateRepairsRaw(startDate, endDate);
+      
+      let filtered = rawData.filter(r => r.attachDate >= startDate && r.attachDate <= endDate);
+      
+      if (category === 'rep') filtered = filtered.filter(r => r.isRep);
+      else if (category === 'other') filtered = filtered.filter(r => !r.isRep);
+      
+      if (shift === 'A') filtered = filtered.filter(r => r.shift === 'A');
+      else if (shift === 'B') filtered = filtered.filter(r => r.shift === 'B');
+      
+      res.json(filtered);
+    } catch (err) {
+      console.error('Ошибка details:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+})();
+
+
+
 /* ====================================================================== */
 /* ================== IOT DEFECT WORKSHOP SERVICE ======================= */
 /* ====================================================================== */

@@ -39,6 +39,7 @@ import drrElectronicsPreview from './assets/dshelec.png';
 import ecToolPreview from './assets/ectool.png';
 import workshopPreview from './assets/srchbd.png';
 import alignmentPreview from './assets/hunter.png';
+import repassPreview from './assets/closrate.png';
 
 // ====== СТИЛИ ======
 const sectionStyle = {
@@ -374,6 +375,7 @@ export default function HomePage() {
     { to: "/repelec-report", imgSrc: repelecPreview, caption: "REPELEC Report", accentColor: "#F59E0B" },
     { to: "/ec-tool-report", imgSrc: ecToolPreview, caption: "EC Tool Report", accentColor: "#2e0bf5" },
     { to: "/alignment-report", imgSrc: alignmentPreview, caption: "Hunter Развал", accentColor: "#F59E0B" },
+    { to: "/repass-closure-rate", imgSrc: repassPreview, caption: "Repass Closure Rate", accentColor: "#DC2626" },
   ];
 
   const allServiceCards = [
