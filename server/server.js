@@ -20283,7 +20283,6 @@ app.get('/api/alignment-report', async (req, res) => {
 
 
 
-
 // ================== CP FINAL → LATE REPAIR (CP72 + 15 мин) ==================
 (() => {
   const LATE_REPAIR_MINUTES = 15;
@@ -20343,7 +20342,9 @@ app.get('/api/alignment-report', async (req, res) => {
           type: 'week',
         });
       }
-      for (let i = 6; i >= 0; i--) {
+      
+      // ИСПРАВЛЕНИЕ: было i >= 0 (7 дней), стало 13 >= 0 (14 дней)
+      for (let i = 13; i >= 0; i--) {
         const d = new Date(now);
         d.setDate(now.getDate() - i);
         periods.push({
@@ -20488,14 +20489,20 @@ app.get('/api/alignment-report', async (req, res) => {
     // 1. VIN + CPFINAL + CP72
     const [movementRows] = await mesPool.query(`
       SELECT
-        vin,
-        MAX(IF(uloc_no = 'CPFINAL', scan_time, NULL)) AS cp_final_time,
-        MAX(IF(uloc_no = 'CP72',    scan_time, NULL)) AS cp72_time
-      FROM ti_mes_movement
-      WHERE is_deleted = 0
-        AND uloc_no IN ('CPFINAL', 'CP72')
-        AND DATE(scan_time) BETWEEN ? AND ?
-      GROUP BY vin
+        m.vin,
+        MAX(IF(m.uloc_no = 'CPFINAL', m.scan_time, NULL)) AS cp_final_time,
+        MAX(IF(m.uloc_no = 'CP72',    m.scan_time, NULL)) AS cp72_time
+      FROM ti_mes_movement m
+      INNER JOIN (
+        SELECT DISTINCT vin
+        FROM ti_mes_movement
+        WHERE is_deleted = 0
+          AND uloc_no = 'CPFINAL'
+          AND DATE(scan_time) BETWEEN ? AND ?
+      ) v ON v.vin = m.vin
+      WHERE m.is_deleted = 0
+        AND m.uloc_no IN ('CPFINAL', 'CP72')
+      GROUP BY m.vin
       HAVING cp_final_time IS NOT NULL
     `, [startDate, endDate]);
 
@@ -20516,7 +20523,11 @@ app.get('/api/alignment-report', async (req, res) => {
       SELECT d.VIN, wo.MODEL, d.REPAIR_TIME, d.REPAIR_ACCOUNT, d.REPAIR_PERSON,
              d.PART_NAME, d.PROBLEM_TYPE, d.POST_NAME
       FROM at_qm_defect_info d
-      LEFT JOIN work_order wo ON wo.VIN = d.VIN
+      LEFT JOIN (
+        SELECT VIN, MAX(MODEL) AS MODEL
+        FROM work_order
+        GROUP BY VIN
+      ) wo ON wo.VIN = d.VIN
       WHERE d.REPAIR_TIME IS NOT NULL
         AND d.VIN IN (${placeholders})
     `, [...vins]);
@@ -20599,15 +20610,15 @@ app.get('/api/alignment-report', async (req, res) => {
     const { startDate, endDate, category, shift } = req.query;
     try {
       const rawData = await getLateRepairsRaw(startDate, endDate);
-      
+
       let filtered = rawData.filter(r => r.attachDate >= startDate && r.attachDate <= endDate);
-      
+
       if (category === 'rep') filtered = filtered.filter(r => r.isRep);
       else if (category === 'other') filtered = filtered.filter(r => !r.isRep);
-      
+
       if (shift === 'A') filtered = filtered.filter(r => r.shift === 'A');
       else if (shift === 'B') filtered = filtered.filter(r => r.shift === 'B');
-      
+
       res.json(filtered);
     } catch (err) {
       console.error('Ошибка details:', err.message);
@@ -20615,7 +20626,6 @@ app.get('/api/alignment-report', async (req, res) => {
     }
   });
 })();
-
 
 
 /* ====================================================================== */
